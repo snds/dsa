@@ -1,0 +1,186 @@
+{
+  "$id": "https://github.com/snds/dsa/schema/suggestion-record.json",
+  "title": "dsa suggestion record",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{12}$",
+      "description": "Stable hash of the anatomy."
+    },
+    "name": {
+      "type": "string",
+      "description": "Candidate name by intent."
+    },
+    "anatomy": {
+      "type": "object",
+      "properties": {
+        "component": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "ds",
+            "local",
+            "html"
+          ]
+        },
+        "shapeProps": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "children": {
+          "$ref": "#/$defs/__schema0"
+        }
+      },
+      "required": [
+        "component",
+        "kind",
+        "shapeProps",
+        "children"
+      ],
+      "additionalProperties": false,
+      "description": "Slot tree: component, kind, shape props, children."
+    },
+    "occurrences": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "column": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "file",
+          "line",
+          "column"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "hosts": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Distinct hosts (files by default)."
+    },
+    "tier": {
+      "type": "string",
+      "enum": [
+        "pattern",
+        "compound-component",
+        "variant",
+        "snowflake"
+      ]
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "nearestExisting": {
+      "description": "Closest catalog pattern or already-named local component, when one is close.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "catalog",
+            "local"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "score",
+        "source"
+      ],
+      "additionalProperties": false
+    },
+    "reason": {
+      "type": "string",
+      "description": "One plain sentence."
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "anatomy",
+    "occurrences",
+    "hosts",
+    "tier",
+    "confidence",
+    "reason"
+  ],
+  "additionalProperties": false,
+  "description": "A pattern-candidate suggestion record. People decide; the tool suggests.",
+  "$defs": {
+    "__schema0": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "component": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "ds",
+              "local",
+              "html"
+            ]
+          },
+          "shapeProps": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "children": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "required": [
+          "component",
+          "kind",
+          "shapeProps",
+          "children"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}

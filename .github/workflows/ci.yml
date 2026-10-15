@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - name: Smoke-test the CLI on the fixture app
+        run: |
+          node dist/cli.js scan test/fixtures/app
+          node dist/cli.js patterns test/fixtures/app
+          node dist/cli.js ratchet test/fixtures/app --init
+          node dist/cli.js ratchet test/fixtures/app
+      - name: Schemas are up to date
+        run: |
+          node dist/schema/generate.js
+          git diff --exit-code -- schema

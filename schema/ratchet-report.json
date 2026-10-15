@@ -1,0 +1,349 @@
+{
+  "$id": "https://github.com/snds/dsa/schema/ratchet-report.json",
+  "title": "dsa ratchet report",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "meta": {
+      "type": "object",
+      "properties": {
+        "dsaVersion": {
+          "type": "string"
+        },
+        "generatedAt": {
+          "type": "string"
+        },
+        "config": {
+          "type": "object",
+          "properties": {
+            "$schema": {
+              "description": "JSON Schema URL for editor support.",
+              "type": "string"
+            },
+            "system": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "default": "design-system",
+                  "description": "Human name of the design system being measured.",
+                  "type": "string"
+                },
+                "packages": {
+                  "default": [],
+                  "description": "Import sources that count as design-system components (exact name or package prefix).",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "localAliases": {
+                  "default": [],
+                  "description": "In-repo import sources that are the design system (shadcn-style owned source), e.g. @/components/ui.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "name",
+                "packages",
+                "localAliases"
+              ],
+              "additionalProperties": false
+            },
+            "scan": {
+              "type": "object",
+              "properties": {
+                "include": {
+                  "default": [
+                    "**/*.tsx",
+                    "**/*.jsx"
+                  ],
+                  "description": "Glob patterns of files to scan, relative to the config root.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "exclude": {
+                  "default": [
+                    "**/node_modules/**",
+                    "**/dist/**",
+                    "**/*.test.tsx",
+                    "**/*.spec.tsx",
+                    "**/*.stories.tsx"
+                  ],
+                  "description": "Glob patterns to leave out.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "include",
+                "exclude"
+              ],
+              "additionalProperties": false
+            },
+            "hosts": {
+              "type": "object",
+              "properties": {
+                "by": {
+                  "default": "file",
+                  "description": "What counts as one host when counting pattern spread: a file or its directory.",
+                  "type": "string",
+                  "enum": [
+                    "file",
+                    "dir"
+                  ]
+                }
+              },
+              "required": [
+                "by"
+              ],
+              "additionalProperties": false
+            },
+            "patterns": {
+              "type": "object",
+              "properties": {
+                "minOccurrences": {
+                  "default": 3,
+                  "description": "Occurrences needed before a composition is more than a snowflake (rule of three).",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "minHosts": {
+                  "default": 2,
+                  "description": "Distinct hosts needed before a composition is more than a snowflake.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "minComponents": {
+                  "default": 2,
+                  "description": "Minimum design-system or local components in a composition for it to be considered.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "ignoreIgnoredTimes": {
+                  "default": 3,
+                  "description": "A candidate ignored this many times is parked and no longer raised.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "minOccurrences",
+                "minHosts",
+                "minComponents",
+                "ignoreIgnoredTimes"
+              ],
+              "additionalProperties": false
+            },
+            "ratchet": {
+              "type": "object",
+              "properties": {
+                "baseline": {
+                  "default": ".dsa/baseline.json",
+                  "description": "Path of the correct-use baseline, relative to the config root.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "baseline"
+              ],
+              "additionalProperties": false
+            },
+            "output": {
+              "type": "object",
+              "properties": {
+                "dir": {
+                  "default": ".dsa",
+                  "description": "Directory the CLI writes JSON reports to, relative to the config root.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "dir"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "system",
+            "scan",
+            "hosts",
+            "patterns",
+            "ratchet",
+            "output"
+          ],
+          "additionalProperties": false,
+          "description": "dsa.config.json — configuration for @snds/dsa."
+        },
+        "configPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "dsaVersion",
+        "generatedAt",
+        "config",
+        "configPath"
+      ],
+      "additionalProperties": false
+    },
+    "root": {
+      "type": "string"
+    },
+    "baselinePath": {
+      "type": "string"
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "compared",
+        "initialized",
+        "updated"
+      ]
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "baseline": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "classNameOverrides": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "styleOverrides": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "spreadProps": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "lookAlikes": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "classNameOverrides",
+            "styleOverrides",
+            "spreadProps",
+            "lookAlikes"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "current": {
+      "type": "object",
+      "properties": {
+        "classNameOverrides": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "styleOverrides": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "spreadProps": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "lookAlikes": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "classNameOverrides",
+        "styleOverrides",
+        "spreadProps",
+        "lookAlikes"
+      ],
+      "additionalProperties": false
+    },
+    "deltas": {
+      "type": "object",
+      "properties": {
+        "classNameOverrides": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "styleOverrides": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "spreadProps": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "lookAlikes": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "classNameOverrides",
+        "styleOverrides",
+        "spreadProps",
+        "lookAlikes"
+      ],
+      "additionalProperties": false
+    },
+    "grew": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "classNameOverrides",
+          "styleOverrides",
+          "spreadProps",
+          "lookAlikes"
+        ]
+      }
+    }
+  },
+  "required": [
+    "meta",
+    "root",
+    "baselinePath",
+    "action",
+    "ok",
+    "baseline",
+    "current",
+    "deltas",
+    "grew"
+  ],
+  "additionalProperties": false,
+  "description": "Output of `dsa ratchet`."
+}

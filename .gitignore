@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.dsa/
+!.dsa/baseline.json
+test/fixtures/app/.dsa/
+*.log
+.DS_Store
+coverage/

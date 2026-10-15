@@ -1,0 +1,68 @@
+{
+  "$comment": "The seven goal-driven patterns every product needs (framework 09 section 7). `families` is the family sequence of the typical composition, used for nearest-pattern matching; `components` are the canonical component names it is assembled from.",
+  "patterns": [
+    {
+      "id": "form",
+      "name": "Form / data entry",
+      "candidateName": "DataEntryForm",
+      "job": "Collect and validate values",
+      "composition": "Form -> Inputs/Selects/Checkboxes -> one primary Button -> inline Alert on error",
+      "components": ["Form", "Input", "Select", "Checkbox", "Textarea", "Label", "Button", "Alert"],
+      "families": ["Form", "Form", "Action", "Feedback"]
+    },
+    {
+      "id": "master-detail",
+      "name": "Master-detail",
+      "candidateName": "MasterDetail",
+      "job": "Browse a set, inspect one",
+      "composition": "List/Table (master) -> Sheet or panel (detail) -> contextual Toolbar",
+      "components": ["List", "Table", "Data Table", "Sheet", "Toolbar"],
+      "families": ["Data Display", "Overlay", "Action"]
+    },
+    {
+      "id": "dashboard",
+      "name": "Dashboard",
+      "candidateName": "Dashboard",
+      "job": "Show status at a glance",
+      "composition": "Card grid -> Badge/Meter/Progress -> Skeleton on load -> Empty state when no data",
+      "components": ["Card", "Badge", "Meter", "Progress", "Skeleton", "Empty State"],
+      "families": ["Layout", "Data Display", "Feedback", "Feedback"]
+    },
+    {
+      "id": "wizard",
+      "name": "Wizard / multi-step",
+      "candidateName": "Wizard",
+      "job": "Sequence a long task",
+      "composition": "Stepper (position) -> Form per step -> Progress (single task) -> Toast/Alert on completion",
+      "components": ["Stepper", "Form", "Progress", "Toast", "Alert", "Button"],
+      "families": ["Navigation", "Form", "Feedback", "Feedback"]
+    },
+    {
+      "id": "async-triad",
+      "name": "The async triad",
+      "candidateName": "AsyncView",
+      "job": "Survive every data condition",
+      "composition": "Skeleton/Spinner (loading) -> content -> Empty state (no data) -> Alert (error)",
+      "components": ["Skeleton", "Spinner", "Empty State", "Alert"],
+      "families": ["Feedback", "Feedback", "Feedback"]
+    },
+    {
+      "id": "confirmation",
+      "name": "Confirmation",
+      "candidateName": "ConfirmDialog",
+      "job": "Prevent costly mistakes",
+      "composition": "Action -> Alert Dialog (irreversible) or Toast + Undo (reversible)",
+      "components": ["Button", "Alert Dialog", "Dialog", "Toast"],
+      "families": ["Action", "Overlay", "Feedback"]
+    },
+    {
+      "id": "filtering",
+      "name": "Filtering",
+      "candidateName": "FilterBar",
+      "job": "Narrow a large set",
+      "composition": "Search/Combobox -> Chips (active filters, removable) -> Toolbar -> results Table",
+      "components": ["Search", "Combobox", "Chip", "Toolbar", "Button", "Table", "Data Table"],
+      "families": ["Form", "Data Display", "Action", "Data Display"]
+    }
+  ]
+}

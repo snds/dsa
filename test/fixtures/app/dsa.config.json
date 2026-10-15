@@ -1,0 +1,9 @@
+{
+  "$schema": "https://github.com/snds/dsa/schema/config.json",
+  "system": { "name": "fixture", "packages": ["@fixture/ui"], "localAliases": ["@/components/ui"] },
+  "scan": { "include": ["src/**/*.tsx"], "exclude": ["**/node_modules/**", "**/*.test.tsx", "**/*.stories.tsx"] },
+  "hosts": { "by": "file" },
+  "patterns": { "minOccurrences": 3, "minHosts": 2, "minComponents": 2, "ignoreIgnoredTimes": 3 },
+  "ratchet": { "baseline": ".dsa/baseline.json" },
+  "output": { "dir": ".dsa" }
+}
