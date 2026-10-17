@@ -1,0 +1,4 @@
+{
+  "system": { "name": "raw", "packages": ["@fixture/ui"] },
+  "scan": { "include": ["src/**/*.tsx"] }
+}

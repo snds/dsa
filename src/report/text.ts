@@ -55,6 +55,7 @@ export function formatScan(report: ScanReport): string {
         ["style overrides on DS", String(cu.styleOverrides)],
         ["spread props on DS", String(cu.spreadProps)],
         ["local look-alikes", String(cu.lookAlikes)],
+        ["raw HTML controls", String(cu.rawElements)],
       ],
       ["left", "right"],
     ),
@@ -118,17 +119,22 @@ export function formatRatchet(report: RatchetReport): string {
   const verb = report.action === "compared" ? (report.ok ? "OK" : "FAILED") : report.action.toUpperCase();
   out.push(`dsa ratchet — ${verb} — baseline ${report.baselinePath}`);
   out.push("");
-  const keys = ["classNameOverrides", "styleOverrides", "spreadProps", "lookAlikes"] as const;
+  const keys = ["classNameOverrides", "styleOverrides", "spreadProps", "lookAlikes", "rawElements"] as const;
+  const tracked = (k: (typeof keys)[number]) => report.baseline !== null && typeof report.baseline[k] === "number";
   out.push(
     table(
       ["metric", "baseline", "current", "delta"],
-      keys.map((k) => [k, report.baseline ? String(report.baseline[k]) : "-", String(report.current[k]), report.baseline ? signed(report.deltas[k]) : "-"]),
+      keys.map((k) => [k, tracked(k) ? String(report.baseline![k]) : "-", String(report.current[k]), tracked(k) ? signed(report.deltas[k]) : "-"]),
       ["left", "right", "right", "right"],
     ),
   );
   if (!report.ok) {
     out.push("");
     out.push(`Grew: ${report.grew.join(", ")}. Fix the new findings or run "dsa ratchet --update" if the growth was accepted in review.`);
+  }
+  if (report.untracked.length > 0) {
+    out.push("");
+    out.push(`Not in the baseline yet: ${report.untracked.join(", ")} (new in this dsa). Run "dsa ratchet --update" to start ratcheting them.`);
   }
   return out.join("\n");
 }

@@ -13,7 +13,7 @@ export { buildGraph, listSourceFiles, type CompositionGraph, type FileGraph, typ
 export { detectPatterns as detectPatternsInGraph, type SuggestionRecord, type Tier, type NearestExisting, type ParkedRecord, type PatternsSummary, type DetectPatternsInput, type DetectPatternsOutput } from "./detect/patterns.js";
 export { toAnatomy, anatomyId, serializeAnatomy, renderAnatomy, type AnatomyNode, type AnatomyKind } from "./detect/anatomy.js";
 export { loadDecisions, saveDecisions, ignoreCandidate, type DecisionsFile, type Decision, type DecisionStatus } from "./detect/decisions.js";
-export { computeAdoption, findLookAlikes, type AdoptionMetrics, type Adoption, type Counts, type Inventory, type ComponentUsage, type CorrectUse, type OverrideFinding, type SpreadFinding, type LookAlikeFinding, type ViolationCounts } from "./metrics/adoption.js";
+export { computeAdoption, findLookAlikes, type AdoptionMetrics, type Adoption, type Counts, type Inventory, type ComponentUsage, type CorrectUse, type OverrideFinding, type SpreadFinding, type LookAlikeFinding, type RawElementFinding, type AdoptionOptions, type ViolationCounts } from "./metrics/adoption.js";
 export { componentFamilies, patternCatalog, canonicalComponent, familyOf, catalogComponentNames, type Family, type CatalogPattern } from "./data/index.js";
 export { formatScan, formatPatterns, formatRatchet, table } from "./report/text.js";
 export { createProgram, type CliIo } from "./cli.js";

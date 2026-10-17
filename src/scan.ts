@@ -9,7 +9,7 @@ export interface ScanReport extends AdoptionMetrics {
 }
 
 export function scanFromContext(ctx: RunContext): ScanReport {
-  const metrics = computeAdoption(ctx.graph);
+  const metrics = computeAdoption(ctx.graph, { rawElements: ctx.loaded.config.correctUse.rawElements });
   return { meta: ctx.meta, root: ctx.root, system: ctx.loaded.config.system.name, ...metrics };
 }
 

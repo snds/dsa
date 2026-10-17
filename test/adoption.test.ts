@@ -61,7 +61,7 @@ describe("correct use", () => {
   });
 
   it("summarizes the counts the ratchet uses", () => {
-    expect(report.correctUse.counts).toEqual({ classNameOverrides: 1, styleOverrides: 1, spreadProps: 2, lookAlikes: 2 });
+    expect(report.correctUse.counts).toEqual({ classNameOverrides: 1, styleOverrides: 1, spreadProps: 2, lookAlikes: 2, rawElements: 0 });
   });
 
   it("matches the published schema", () => {

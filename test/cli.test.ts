@@ -37,7 +37,9 @@ describe("cli", () => {
     await run("--json", "patterns", ".");
     expect(fs.existsSync(path.join(dir, ".dsa/patterns.json"))).toBe(false);
     const json = JSON.parse(out.join("\n")) as { candidates: { name: string }[]; meta: { dsaVersion: string } };
-    expect(json.meta.dsaVersion).toBe("0.1.0");
+    // The report carries the package's own version, whatever it is today.
+    const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
+    expect(json.meta.dsaVersion).toBe(pkg.version);
     expect(json.candidates.map((c) => c.name)).toEqual(["FilterBar", "ActionToolbar", "CardRecipe"]);
   });
 

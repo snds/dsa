@@ -133,6 +133,7 @@ className overrides on DS      1
 style overrides on DS          1
 spread props on DS             2
 local look-alikes              2
+raw HTML controls              0
 
 look-alike     resembles  score  uses
 -------------  ---------  -----  ----
@@ -155,11 +156,22 @@ such a name, or a known synonym (`Modal` when the DS has `Dialog`).
 Compositions that merely use a DS component (`RenameDialog`, `StatCard`) are
 not look-alikes.
 
+It also counts **raw elements**: plain HTML controls written where a
+design-system control belongs, `<button>` by default
+(`correctUse.rawElements`). These bypass the system entirely, so none of the
+checks above can see them. An element handed to a component through a prop,
+such as `<Item render={<button />}>`, belongs to the component that renders it,
+and isn't counted. Some raw controls are right: a calendar's day cells, a card
+that is one big target. The ratchet only stops the number from growing, and
+each one is a candidate to look at.
+
 ### `dsa ratchet [dir] [--init | --update]`
 
-Compares the four correct-use counts against `ratchet.baseline` and exits 1 if
+Compares the five correct-use counts against `ratchet.baseline` and exits 1 if
 any grew. `--init` creates the baseline; `--update` rewrites it after growth
-was accepted in review.
+was accepted in review. A metric the baseline doesn't have yet (one added by a
+newer dsa, like `rawElements`) is shown and not compared, so upgrading dsa
+never fails CI by itself; `--update` starts ratcheting it.
 
 ```text
 dsa ratchet — OK — baseline <repo>/test/fixtures/app/.dsa/baseline.json
@@ -170,6 +182,7 @@ classNameOverrides         1        1      0
 styleOverrides             1        1      0
 spreadProps                2        2      0
 lookAlikes                 2        2      0
+rawElements                0        0      0
 
 wrote <repo>/test/fixtures/app/.dsa/ratchet.json
 ```
@@ -186,6 +199,7 @@ defaults for a shadcn-style system called `unicron`:
   "scan": { "include": ["apps/**/src/**/*.tsx", "packages/**/src/**/*.tsx"], "exclude": ["**/node_modules/**", "**/*.test.tsx", "**/*.stories.tsx"] },
   "hosts": { "by": "file" },
   "patterns": { "minOccurrences": 3, "minHosts": 2, "minComponents": 2, "ignoreIgnoredTimes": 3 },
+  "correctUse": { "rawElements": ["button"] },
   "ratchet": { "baseline": ".dsa/baseline.json" },
   "output": { "dir": ".dsa" }
 }
@@ -202,6 +216,7 @@ defaults for a shadcn-style system called `unicron`:
 | `patterns.minHosts` | Distinct hosts needed. Default 2. |
 | `patterns.minComponents` | Minimum DS + local components in a composition for it to be considered. Default 2. |
 | `patterns.ignoreIgnoredTimes` | Ignores before a candidate is parked. Default 3. |
+| `correctUse.rawElements` | Plain HTML tags counted as raw elements (bypasses of the system). Default `["button"]`; add `"a"`, `"input"`, or `"select"` if your system covers them, or `[]` to turn the check off. |
 | `ratchet.baseline` | Baseline path, relative to the config root. |
 | `output.dir` | Where reports go. Gitignore it except `baseline.json` (and `decisions.json` if you keep review decisions). |
 

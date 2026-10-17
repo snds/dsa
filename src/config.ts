@@ -44,6 +44,16 @@ export const ConfigSchema = z
         ignoreIgnoredTimes: nonNegativeInt(3).describe("A candidate ignored this many times is parked and no longer raised."),
       })
       .prefault({}),
+    correctUse: z
+      .object({
+        rawElements: z
+          .array(z.string())
+          .default(["button"])
+          .describe(
+            "Plain HTML tags that bypass the design system when written in a consumer (counted as rawElements). An element handed to a component through a prop, e.g. render={<button />}, is the system's element and isn't counted.",
+          ),
+      })
+      .prefault({}),
     ratchet: z
       .object({
         baseline: z.string().default(".dsa/baseline.json").describe("Path of the correct-use baseline, relative to the config root."),
