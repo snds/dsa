@@ -68,6 +68,7 @@ export const ViolationCountsSchema = z.object({
   styleOverrides: z.number().int(),
   spreadProps: z.number().int(),
   lookAlikes: z.number().int(),
+  rawElements: z.number().int(),
 });
 
 export const ScanReportSchema = z
@@ -101,6 +102,7 @@ export const ScanReportSchema = z
           usages: z.number().int().min(0),
         }),
       ),
+      rawElements: z.array(LocationSchema.extend({ element: z.string() })),
       counts: ViolationCountsSchema,
     }),
   })
@@ -140,10 +142,13 @@ export const RatchetReportSchema = z
     baselinePath: z.string(),
     action: z.enum(["compared", "initialized", "updated"]),
     ok: z.boolean(),
-    baseline: ViolationCountsSchema.nullable(),
+    baseline: ViolationCountsSchema.partial().nullable(),
     current: ViolationCountsSchema,
     deltas: ViolationCountsSchema,
-    grew: z.array(z.enum(["classNameOverrides", "styleOverrides", "spreadProps", "lookAlikes"])),
+    grew: z.array(z.enum(["classNameOverrides", "styleOverrides", "spreadProps", "lookAlikes", "rawElements"])),
+    untracked: z
+      .array(z.enum(["classNameOverrides", "styleOverrides", "spreadProps", "lookAlikes", "rawElements"]))
+      .describe("Metrics the baseline doesn't have yet (added in a later dsa): reported, not compared, until --update."),
   })
   .describe("Output of `dsa ratchet`.");
 

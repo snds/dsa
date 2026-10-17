@@ -4,6 +4,21 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-10-17
+
+### Added
+
+- `rawElements`, a fifth correct-use count: plain HTML controls written in a
+  consumer where a design-system control belongs (`<button>` by default;
+  `correctUse.rawElements` in the config lists the tags). An element handed to
+  a component through a prop (`render={<button />}`) isn't counted. The scan
+  report lists each one with its location, and the ratchet fails when the
+  count grows. Raised from Mailbird's raw-button sweep (its ADR-0057), where
+  44 plain `<button>`s were invisible to the other checks.
+- The ratchet report's `untracked`: metrics the baseline doesn't have yet
+  (added by a newer dsa). They're shown and not compared, so upgrading dsa
+  never fails CI on its own; `--update` starts ratcheting them.
+
 ## [0.1.0] - 2026-10-15
 
 ### Added

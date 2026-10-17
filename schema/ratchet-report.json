@@ -145,6 +145,25 @@
               ],
               "additionalProperties": false
             },
+            "correctUse": {
+              "type": "object",
+              "properties": {
+                "rawElements": {
+                  "default": [
+                    "button"
+                  ],
+                  "description": "Plain HTML tags that bypass the design system when written in a consumer (counted as rawElements). An element handed to a component through a prop, e.g. render={<button />}, is the system's element and isn't counted.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "rawElements"
+              ],
+              "additionalProperties": false
+            },
             "ratchet": {
               "type": "object",
               "properties": {
@@ -179,6 +198,7 @@
             "scan",
             "hosts",
             "patterns",
+            "correctUse",
             "ratchet",
             "output"
           ],
@@ -241,14 +261,13 @@
               "type": "integer",
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
+            },
+            "rawElements": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
             }
           },
-          "required": [
-            "classNameOverrides",
-            "styleOverrides",
-            "spreadProps",
-            "lookAlikes"
-          ],
           "additionalProperties": false
         },
         {
@@ -278,13 +297,19 @@
           "type": "integer",
           "minimum": -9007199254740991,
           "maximum": 9007199254740991
+        },
+        "rawElements": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
         }
       },
       "required": [
         "classNameOverrides",
         "styleOverrides",
         "spreadProps",
-        "lookAlikes"
+        "lookAlikes",
+        "rawElements"
       ],
       "additionalProperties": false
     },
@@ -310,13 +335,19 @@
           "type": "integer",
           "minimum": -9007199254740991,
           "maximum": 9007199254740991
+        },
+        "rawElements": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
         }
       },
       "required": [
         "classNameOverrides",
         "styleOverrides",
         "spreadProps",
-        "lookAlikes"
+        "lookAlikes",
+        "rawElements"
       ],
       "additionalProperties": false
     },
@@ -328,9 +359,24 @@
           "classNameOverrides",
           "styleOverrides",
           "spreadProps",
-          "lookAlikes"
+          "lookAlikes",
+          "rawElements"
         ]
       }
+    },
+    "untracked": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "classNameOverrides",
+          "styleOverrides",
+          "spreadProps",
+          "lookAlikes",
+          "rawElements"
+        ]
+      },
+      "description": "Metrics the baseline doesn't have yet (added in a later dsa): reported, not compared, until --update."
     }
   },
   "required": [
@@ -342,7 +388,8 @@
     "baseline",
     "current",
     "deltas",
-    "grew"
+    "grew",
+    "untracked"
   ],
   "additionalProperties": false,
   "description": "Output of `dsa ratchet`."

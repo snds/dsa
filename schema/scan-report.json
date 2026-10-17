@@ -145,6 +145,25 @@
               ],
               "additionalProperties": false
             },
+            "correctUse": {
+              "type": "object",
+              "properties": {
+                "rawElements": {
+                  "default": [
+                    "button"
+                  ],
+                  "description": "Plain HTML tags that bypass the design system when written in a consumer (counted as rawElements). An element handed to a component through a prop, e.g. render={<button />}, is the system's element and isn't counted.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "rawElements"
+              ],
+              "additionalProperties": false
+            },
             "ratchet": {
               "type": "object",
               "properties": {
@@ -179,6 +198,7 @@
             "scan",
             "hosts",
             "patterns",
+            "correctUse",
             "ratchet",
             "output"
           ],
@@ -631,6 +651,37 @@
             "additionalProperties": false
           }
         },
+        "rawElements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "file": {
+                "type": "string"
+              },
+              "line": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "column": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "element": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "file",
+              "line",
+              "column",
+              "element"
+            ],
+            "additionalProperties": false
+          }
+        },
         "counts": {
           "type": "object",
           "properties": {
@@ -653,13 +704,19 @@
               "type": "integer",
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
+            },
+            "rawElements": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
             }
           },
           "required": [
             "classNameOverrides",
             "styleOverrides",
             "spreadProps",
-            "lookAlikes"
+            "lookAlikes",
+            "rawElements"
           ],
           "additionalProperties": false
         }
@@ -668,6 +725,7 @@
         "overrides",
         "spreadProps",
         "lookAlikes",
+        "rawElements",
         "counts"
       ],
       "additionalProperties": false

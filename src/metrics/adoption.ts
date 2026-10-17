@@ -51,12 +51,25 @@ export interface ViolationCounts {
   styleOverrides: number;
   spreadProps: number;
   lookAlikes: number;
+  /** Plain HTML controls (correctUse.rawElements) written where a design-system control belongs. */
+  rawElements: number;
+}
+
+export interface RawElementFinding extends Location {
+  /** The tag, e.g. `button`. */
+  element: string;
+}
+
+export interface AdoptionOptions {
+  /** Tags counted as raw elements (default: `["button"]`). */
+  rawElements?: string[];
 }
 
 export interface CorrectUse {
   overrides: OverrideFinding[];
   spreadProps: SpreadFinding[];
   lookAlikes: LookAlikeFinding[];
+  rawElements: RawElementFinding[];
   counts: ViolationCounts;
 }
 
@@ -92,7 +105,9 @@ function finalize(c: Counts): Counts {
   return c;
 }
 
-export function computeAdoption(graph: CompositionGraph): AdoptionMetrics {
+export function computeAdoption(graph: CompositionGraph, options: AdoptionOptions = {}): AdoptionMetrics {
+  const rawTags = new Set(options.rawElements ?? ["button"]);
+  const rawElements: RawElementFinding[] = [];
   const total = emptyCounts();
   const byFile: Record<string, Counts> = {};
   const byDir: Record<string, Counts> = {};
@@ -119,6 +134,9 @@ export function computeAdoption(graph: CompositionGraph): AdoptionMetrics {
         bump(total, node.kind);
         bump(fc, node.kind);
         bump(dc, node.kind);
+        // Only elements written as JSX children are walked: one passed in a prop
+        // (render={<button />}) belongs to the component that renders it.
+        if (node.kind === "html" && rawTags.has(node.component)) rawElements.push({ ...node.loc, element: node.component });
         if (node.kind === "html") inventory.html[node.component] = (inventory.html[node.component] ?? 0) + 1;
         else record(inventory[node.kind], node);
         if (node.kind === "local") localUsage.set(node.component, (localUsage.get(node.component) ?? 0) + 1);
@@ -140,6 +158,7 @@ export function computeAdoption(graph: CompositionGraph): AdoptionMetrics {
     styleOverrides: overrides.filter((o) => o.prop === "style").length,
     spreadProps: spreadProps.length,
     lookAlikes: lookAlikes.length,
+    rawElements: rawElements.length,
   };
 
   return {
@@ -147,7 +166,7 @@ export function computeAdoption(graph: CompositionGraph): AdoptionMetrics {
     dsSourceFiles: graph.files.filter((f) => f.role === "ds-source").map((f) => f.file),
     adoption: { definition: "imports", total, byFile, byDir },
     inventory,
-    correctUse: { overrides, spreadProps, lookAlikes, counts },
+    correctUse: { overrides, spreadProps, lookAlikes, rawElements, counts },
   };
 }
 

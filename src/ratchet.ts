@@ -6,7 +6,8 @@ import { createRunContext, writeJson, type ReportMeta, type RunContext, type Run
 export interface Baseline {
   dsaVersion: string;
   updatedAt: string;
-  counts: ViolationCounts;
+  /** A baseline from an older dsa may lack metrics added since; those aren't compared until --update. */
+  counts: Partial<ViolationCounts>;
 }
 
 export interface RatchetOptions extends RunOptions {
@@ -25,15 +26,17 @@ export interface RatchetReport {
   action: RatchetAction;
   /** False when any count grew past the baseline. */
   ok: boolean;
-  baseline: ViolationCounts | null;
+  baseline: Partial<ViolationCounts> | null;
   current: ViolationCounts;
   /** current - baseline per metric (0 when there was no baseline). */
   deltas: ViolationCounts;
   /** Metrics that grew. */
   grew: (keyof ViolationCounts)[];
+  /** Metrics the baseline doesn't have yet (added in a later dsa): reported, not compared. */
+  untracked: (keyof ViolationCounts)[];
 }
 
-export const VIOLATION_KEYS: (keyof ViolationCounts)[] = ["classNameOverrides", "styleOverrides", "spreadProps", "lookAlikes"];
+export const VIOLATION_KEYS: (keyof ViolationCounts)[] = ["classNameOverrides", "styleOverrides", "spreadProps", "lookAlikes", "rawElements"];
 
 export function readBaseline(file: string): Baseline | null {
   if (!fs.existsSync(file)) return null;
@@ -44,7 +47,7 @@ export function readBaseline(file: string): Baseline | null {
 
 export function ratchetFromContext(ctx: RunContext, options: Pick<RatchetOptions, "init" | "update"> = {}): RatchetReport {
   const baselinePath = path.resolve(ctx.root, ctx.loaded.config.ratchet.baseline);
-  const current = computeAdoption(ctx.graph).correctUse.counts;
+  const current = computeAdoption(ctx.graph, { rawElements: ctx.loaded.config.correctUse.rawElements }).correctUse.counts;
   const existing = readBaseline(baselinePath);
 
   if (options.init && existing && !options.update) {
@@ -54,11 +57,17 @@ export function ratchetFromContext(ctx: RunContext, options: Pick<RatchetOptions
     throw new Error(`No baseline at ${baselinePath}. Run "dsa ratchet --init" to freeze today's counts.`);
   }
 
-  const deltas = { classNameOverrides: 0, styleOverrides: 0, spreadProps: 0, lookAlikes: 0 };
+  const deltas: ViolationCounts = { classNameOverrides: 0, styleOverrides: 0, spreadProps: 0, lookAlikes: 0, rawElements: 0 };
   const grew: (keyof ViolationCounts)[] = [];
+  const untracked: (keyof ViolationCounts)[] = [];
   if (existing) {
     for (const key of VIOLATION_KEYS) {
-      deltas[key] = current[key] - existing.counts[key];
+      const was = existing.counts[key];
+      if (typeof was !== "number") {
+        untracked.push(key);
+        continue;
+      }
+      deltas[key] = current[key] - was;
       if (deltas[key] > 0) grew.push(key);
     }
   }
@@ -82,6 +91,8 @@ export function ratchetFromContext(ctx: RunContext, options: Pick<RatchetOptions
     current,
     deltas,
     grew,
+    // After an update or init the baseline has every metric.
+    untracked: action === "compared" ? untracked : [],
   };
 }
 

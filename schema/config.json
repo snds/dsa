@@ -133,6 +133,25 @@
       ],
       "additionalProperties": false
     },
+    "correctUse": {
+      "type": "object",
+      "properties": {
+        "rawElements": {
+          "default": [
+            "button"
+          ],
+          "description": "Plain HTML tags that bypass the design system when written in a consumer (counted as rawElements). An element handed to a component through a prop, e.g. render={<button />}, is the system's element and isn't counted.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "rawElements"
+      ],
+      "additionalProperties": false
+    },
     "ratchet": {
       "type": "object",
       "properties": {
@@ -167,6 +186,7 @@
     "scan",
     "hosts",
     "patterns",
+    "correctUse",
     "ratchet",
     "output"
   ],
