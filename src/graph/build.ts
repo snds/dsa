@@ -2,6 +2,7 @@ import path from "node:path";
 import fg from "fast-glob";
 import { Node, Project, SyntaxKind, ts, type JsxAttribute, type SourceFile } from "ts-morph";
 import type { DsaConfig } from "../config.js";
+import { adapterFor, type FileReader, type ReaderContext, type SourceAdapter } from "./adapter.js";
 import { collectImports, createResolver, dsSourceDirs, isUnder, localPrefixes, type Resolver } from "./resolve.js";
 import type { CompositionGraph, ElementNode, FileGraph, LocalComponentDecl, Location } from "./types.js";
 
@@ -15,6 +16,8 @@ export interface BuildGraphOptions {
   within?: string;
   /** Explicit file list (absolute); skips globbing. */
   files?: string[];
+  /** Readers for other markup languages (Vue, Angular). React is built in and reads everything unclaimed. */
+  adapters?: SourceAdapter[];
 }
 
 export function listSourceFiles(root: string, config: DsaConfig, within?: string): string[] {
@@ -31,32 +34,58 @@ export function listSourceFiles(root: string, config: DsaConfig, within?: string
     .sort();
 }
 
-/** Parse every matching file and return its JSX composition trees. */
+/** Parse every matching file and return its composition trees. */
 export function buildGraph(options: BuildGraphOptions): CompositionGraph {
   const root = path.resolve(options.root);
   const files = options.files ?? listSourceFiles(root, options.config, options.within);
-  const project = new Project({
-    skipAddingFilesFromTsConfig: true,
-    skipFileDependencyResolution: true,
-    compilerOptions: {
-      jsx: ts.JsxEmit.Preserve,
-      allowJs: true,
-      target: ts.ScriptTarget.ESNext,
-      module: ts.ModuleKind.ESNext,
-    },
-  });
-  const prefixes = localPrefixes(root);
+  const ctx: ReaderContext = { root, config: options.config, prefixes: localPrefixes(root) };
+  const adapters = options.adapters ?? [];
+  const readers = new Map<SourceAdapter, FileReader>();
   const dsDirs = dsSourceDirs(root, options.config);
   const graphs: FileGraph[] = [];
-  for (const file of files) {
-    const sf = project.addSourceFileAtPath(file);
-    const graph = buildFileGraph(sf, root, options.config, prefixes);
-    if (isUnder(path.resolve(file), dsDirs)) graph.role = "ds-source";
-    graphs.push(graph);
-    project.removeSourceFile(sf);
+  try {
+    for (const file of files) {
+      const adapter = adapterFor(file, adapters, reactAdapter);
+      let reader = readers.get(adapter);
+      if (!reader) {
+        reader = adapter.createReader(ctx);
+        readers.set(adapter, reader);
+      }
+      const graph = reader.read(file);
+      if (isUnder(path.resolve(file), dsDirs)) graph.role = "ds-source";
+      graphs.push(graph);
+    }
+  } finally {
+    for (const reader of readers.values()) reader.dispose?.();
   }
   return { root, files: graphs };
 }
+
+/** The built-in reader: TSX / JSX (and plain TS / JS) through ts-morph. */
+export const reactAdapter: SourceAdapter = {
+  framework: "react",
+  extensions: [".tsx", ".jsx", ".ts", ".js", ".mts", ".mjs", ".cts", ".cjs"],
+  createReader(ctx) {
+    const project = new Project({
+      skipAddingFilesFromTsConfig: true,
+      skipFileDependencyResolution: true,
+      compilerOptions: {
+        jsx: ts.JsxEmit.Preserve,
+        allowJs: true,
+        target: ts.ScriptTarget.ESNext,
+        module: ts.ModuleKind.ESNext,
+      },
+    });
+    return {
+      read(file) {
+        const sf = project.addSourceFileAtPath(file);
+        const graph = buildFileGraph(sf, ctx.root, ctx.config, ctx.prefixes);
+        project.removeSourceFile(sf);
+        return graph;
+      },
+    };
+  },
+};
 
 export function buildFileGraph(sf: SourceFile, root: string, config: DsaConfig, prefixes: string[]): FileGraph {
   const rel = toRel(root, sf.getFilePath());
@@ -100,7 +129,7 @@ export function buildFileGraph(sf: SourceFile, root: string, config: DsaConfig, 
   }
   for (const r of roots) stripInternal(r);
 
-  return { file: rel, role: "consumer", roots, declared: declared.map((d) => d.decl), imports };
+  return { file: rel, framework: "react", role: "consumer", roots, declared: declared.map((d) => d.decl), imports };
 }
 
 function stripInternal(node: ElementNode): void {

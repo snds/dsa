@@ -1,0 +1,4 @@
+# The repo root is @snds/dsa itself (git installs and the published schema URLs need it there).
+# Optional add-ons live under packages/ and depend on it with workspace:*.
+packages:
+  - "packages/*"
