@@ -437,16 +437,22 @@ the graph or validate reports.
 
 ## Scope and provenance
 
-`@snds/dsa` is a clean-room personal implementation by Sean Sands, built from
-public, vendor-neutral practice: the Atomic Design reuse gradient
+`@snds/dsa` is written and owned by Sean Sands. It draws on public,
+vendor-neutral practice: the Atomic Design reuse gradient
 (components / recipes / snowflakes), the open component taxonomies behind the
 62-component family map, and the published measurement work of design-system
-teams (import counts, correct-use measures, lint ratchets). It contains no
-design-system data of its own and no data from any employer or client. It is
-designed so that **any** design system, including employer or client systems,
-can consume it as a dependency: the tool reads the repository it is pointed at
-and writes reports into that repository; nothing about that system ever lives
-in this package.
+teams (import counts, correct-use measures, lint ratchets). It also absorbs
+Sean's earlier design-system analytics suite (findings, element review,
+dashboards), which he wrote and holds the rights to, contributed here under the
+same license.
+
+It contains no design-system data of its own and no data from any employer or
+client. It is designed so that **any** design system, including employer or
+client systems, can consume it as a dependency: the tool reads the repository
+it is pointed at and writes reports into that repository. Anything specific to
+one system (its component names, file conventions, agent tools) lives in that
+system's own repo as a profile (see [docs/architecture.md](docs/architecture.md));
+nothing about that system ever lives in this package.
 
 Licensed under Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 

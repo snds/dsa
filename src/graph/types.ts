@@ -42,8 +42,12 @@ export interface ImportBinding {
   kind: ElementKind;
 }
 
+/** The language a file's markup is written in; each has its own reader (see adapter.ts). */
+export type Framework = "react" | "vue" | "angular";
+
 export interface FileGraph {
   file: string;
+  framework: Framework;
   /** DS source files are parsed for names but left out of adoption and pattern counts. */
   role: "consumer" | "ds-source";
   roots: ElementNode[];

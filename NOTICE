@@ -1,8 +1,9 @@
 @snds/dsa
 Copyright 2026 Sean Sands
 
-This product is a clean-room implementation built from public, vendor-neutral
-design-system practice. It depends on ts-morph (MIT), commander (MIT),
-fast-glob (MIT), zod (MIT) and picocolors (ISC). It contains no design-system
-data of its own; everything it reports is read from the repository it is
-pointed at.
+This product is written and owned by Sean Sands. It draws on public,
+vendor-neutral design-system practice, and includes code from the author's
+earlier design-system analytics suite, which he wrote and holds the rights to.
+It depends on ts-morph (MIT), commander (MIT), fast-glob (MIT), zod (MIT) and
+picocolors (ISC). It contains no design-system data of its own; everything it
+reports is read from the repository it is pointed at.

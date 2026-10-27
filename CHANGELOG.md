@@ -4,6 +4,26 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Profiles: `defineProfile`, `loadProfile` and `resolveProfile`. A profile holds
+  what one design system knows that config can't say (component list, role
+  offers, its own tooling files, lab pages, an agent-readiness provider, its name
+  in report wording). It lives in that system's repo; dsa ships a neutral
+  default. Not yet read by any command; the config gains `profile` next.
+- Source adapters: `buildGraph` takes `adapters`, readers for other markup
+  languages that claim file extensions. React is the built-in `reactAdapter` and
+  still reads every file no adapter claims. `FileGraph` gains `framework`.
+- A pnpm workspace for optional add-ons under `packages/`, and
+  `docs/architecture.md`.
+
+### Changed
+
+- README provenance and NOTICE: dsa now absorbs the author's earlier analytics
+  suite, which he owns.
+
 ## [0.2.0] - 2026-10-17
 
 ### Added
