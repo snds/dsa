@@ -7,7 +7,11 @@
 export { scan, type ScanReport } from "./scan.js";
 export { patterns, patterns as detectPatterns, type PatternsOptions, type PatternsReport } from "./patterns.js";
 export { ratchet, type RatchetOptions, type RatchetReport, type Baseline, type RatchetAction } from "./ratchet.js";
-export { createRunContext, type RunOptions, type RunContext, type ReportMeta } from "./run.js";
+export { createRunContext, loadRunContext, type RunOptions, type RunContext, type ReportMeta } from "./run.js";
+export { scanFromContext } from "./scan.js";
+export { patternsFromContext } from "./patterns.js";
+export { ratchetFromContext } from "./ratchet.js";
+export { migrateSuiteConfig, isSuiteConfig, CONFIG_SCHEMA_URL, type MigrateResult, type MigrateOptions } from "./migrate.js";
 export { ConfigSchema, loadConfig, findConfigFile, parseConfig, CONFIG_FILENAME, type DsaConfig, type DsaConfigInput, type LoadedConfig } from "./config.js";
 export { buildGraph, listSourceFiles, reactAdapter, adapterFor, type CompositionGraph, type FileGraph, type Framework, type ElementNode, type ElementKind, type Location, type LocalComponentDecl, type ImportBinding, type SourceAdapter, type ReaderContext, type FileReader } from "./graph/index.js";
 export { defineProfile, resolveProfile, loadProfile, isProfileSource, NEUTRAL_PROFILE, type DsaProfile, type ResolvedProfile, type ComponentEntry, type RoleOffer, type ProfileFiles, type ReadinessProvider, type ReadinessRow } from "./profile.js";

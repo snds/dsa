@@ -1,0 +1,49 @@
+{
+  "designSystem": {
+    "core": {
+      "name": "Acme",
+      "packages": ["@acme/ui", "@acme/tokens"],
+      "tagPrefixes": ["ds-"],
+      "repo": "acme/design-system",
+      "mainRef": "origin/main"
+    },
+    "children": [
+      {
+        "name": "Prototype",
+        "packages": [],
+        "path": "../prototype",
+        "git": { "url": "https://github.com/acme/prototype.git", "ref": "main" },
+        "exclude": ["vendor", "dist"],
+        "pin": { "file": "ds.pin" }
+      }
+    ]
+  },
+  "consumers": [{ "name": "Checkout", "path": "apps/checkout", "owner": "team-checkout", "repo": "acme/checkout" }],
+  "extraRepos": [{ "name": "Legacy admin", "path": "../legacy-admin" }],
+  "internalConsumers": ["@acme/docs", "@acme/storybook"],
+  "lookalikes": { "select": "Select", "input[checkbox]": "Checkbox" },
+  "deprecated": { "OldModal": "Modal" },
+  "tokenPatterns": ["var\\(--ds-"],
+  "exclude": ["apps/storybook", "labs/"],
+  "rawElements": "packages/lint/raw-elements.json",
+  "rawElementExceptions": "docs/raw-elements.exceptions.json",
+  "rawElementDecisions": "docs/raw-elements.decisions.json",
+  "review": { "threshold": 0.85, "labPaths": ["**/labs/**"] },
+  "modules": { "figma": false },
+  "apps": {
+    "@acme/storybook": { "lookalikes": false, "tokenSkip": ["stories/review/*.tsx"] },
+    "Prototype": {
+      "extraRoutes": ["#/materials"],
+      "flows": [{ "name": "Comment", "route": "#/materials/1", "steps": [{ "click": "Comment" }, { "fill": { "label": "Comment", "text": "hi" } }, { "wait": 200 }] }]
+    }
+  },
+  "figma": { "libraries": [{ "name": "Core", "fileKey": "AbC123" }], "editedWithinDays": 90, "maxFiles": 200 },
+  "github": { "defaultRepo": "acme/design-system", "labels": ["ds"] },
+  "tailwind": { "tierLeakageSpec": "packages/lint/tier-leakage.json", "semanticCss": "packages/tokens/semantic.css" },
+  "shots": { "auto": true, "maxMinutes": 12, "maxTriggers": 5 },
+  "rendered": { "useStatic": true },
+  "agents": { "provider": "claude-code" },
+  "report": { "title": "Acme usage", "timeZone": "America/Los_Angeles" },
+  "settings": { "misuse_cluster_threshold": 3 },
+  "telemetry": true
+}

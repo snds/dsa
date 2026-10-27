@@ -8,6 +8,10 @@
       "description": "JSON Schema URL for editor support.",
       "type": "string"
     },
+    "profile": {
+      "description": "The design system's profile module: a path relative to this file, or a package name. See docs/architecture.md.",
+      "type": "string"
+    },
     "system": {
       "type": "object",
       "properties": {
@@ -31,6 +35,173 @@
           "items": {
             "type": "string"
           }
+        },
+        "tagPrefixes": {
+          "description": "Element tag prefixes it owns (\"ck-\" maps <ck-card> to Card): Angular selectors, global Vue components, web components.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "mainRef": {
+          "description": "Ref treated as the latest core for pin currency (default origin/main, then main).",
+          "type": "string"
+        },
+        "children": {
+          "description": "Child libraries built on the core (a product kit, a prototype). Scored on their own; they consume the core.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Library name."
+              },
+              "packages": {
+                "default": [],
+                "description": "Packages it publishes.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "localAliases": {
+                "description": "In-repo import sources that are this library.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "tagPrefixes": {
+                "description": "Element tag prefixes it owns (\"ck-\" maps <ck-card> to Card): Angular selectors, global Vue components, web components.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "path": {
+                "description": "Folder of its code, relative to the config root (another checkout may be outside it, e.g. ../prototype).",
+                "type": "string"
+              },
+              "git": {
+                "description": "Clone from here when `path` is missing (or when runs are told to use remotes). Only ever read.",
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string"
+                  },
+                  "ref": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "url"
+                ],
+                "additionalProperties": false
+              },
+              "aliases": {
+                "description": "Import aliases beyond tsconfig paths, e.g. { \"@/\": \"src/\" }, relative to this folder.",
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "exclude": {
+                "description": "Paths to skip inside this folder (vendored copies, generated code).",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "pin": {
+                "description": "A file holding the core commit SHA this code is pinned to; currency is then days and commits behind core's main.",
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "file"
+                ],
+                "additionalProperties": false
+              },
+              "owner": {
+                "description": "Team that owns it; findings about it are routed here.",
+                "type": "string"
+              },
+              "repo": {
+                "description": "GitHub repo \"owner/name\" that receives its issues.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "packages"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "path": {
+          "description": "Folder of its code, relative to the config root (another checkout may be outside it, e.g. ../prototype).",
+          "type": "string"
+        },
+        "git": {
+          "description": "Clone from here when `path` is missing (or when runs are told to use remotes). Only ever read.",
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string"
+            },
+            "ref": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "url"
+          ],
+          "additionalProperties": false
+        },
+        "aliases": {
+          "description": "Import aliases beyond tsconfig paths, e.g. { \"@/\": \"src/\" }, relative to this folder.",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "exclude": {
+          "description": "Paths to skip inside this folder (vendored copies, generated code).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "pin": {
+          "description": "A file holding the core commit SHA this code is pinned to; currency is then days and commits behind core's main.",
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "file"
+          ],
+          "additionalProperties": false
+        },
+        "owner": {
+          "description": "Team that owns it; findings about it are routed here.",
+          "type": "string"
+        },
+        "repo": {
+          "description": "GitHub repo \"owner/name\" that receives its issues.",
+          "type": "string"
         }
       },
       "required": [
@@ -39,6 +210,163 @@
         "localAliases"
       ],
       "additionalProperties": false
+    },
+    "consumers": {
+      "description": "Consumers, listed explicitly. When absent, workspaces that depend on a system package are found.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Consumer name (an app)."
+          },
+          "path": {
+            "description": "Folder of its code, relative to the config root (another checkout may be outside it, e.g. ../prototype).",
+            "type": "string"
+          },
+          "git": {
+            "description": "Clone from here when `path` is missing (or when runs are told to use remotes). Only ever read.",
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              },
+              "ref": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "url"
+            ],
+            "additionalProperties": false
+          },
+          "aliases": {
+            "description": "Import aliases beyond tsconfig paths, e.g. { \"@/\": \"src/\" }, relative to this folder.",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "exclude": {
+            "description": "Paths to skip inside this folder (vendored copies, generated code).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pin": {
+            "description": "A file holding the core commit SHA this code is pinned to; currency is then days and commits behind core's main.",
+            "type": "object",
+            "properties": {
+              "file": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "file"
+            ],
+            "additionalProperties": false
+          },
+          "owner": {
+            "description": "Team that owns it; findings about it are routed here.",
+            "type": "string"
+          },
+          "repo": {
+            "description": "GitHub repo \"owner/name\" that receives its issues.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "extraRepos": {
+      "description": "Consumers in other checkouts, added to the ones found.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Consumer name (an app)."
+          },
+          "path": {
+            "description": "Folder of its code, relative to the config root (another checkout may be outside it, e.g. ../prototype).",
+            "type": "string"
+          },
+          "git": {
+            "description": "Clone from here when `path` is missing (or when runs are told to use remotes). Only ever read.",
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              },
+              "ref": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "url"
+            ],
+            "additionalProperties": false
+          },
+          "aliases": {
+            "description": "Import aliases beyond tsconfig paths, e.g. { \"@/\": \"src/\" }, relative to this folder.",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "exclude": {
+            "description": "Paths to skip inside this folder (vendored copies, generated code).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pin": {
+            "description": "A file holding the core commit SHA this code is pinned to; currency is then days and commits behind core's main.",
+            "type": "object",
+            "properties": {
+              "file": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "file"
+            ],
+            "additionalProperties": false
+          },
+          "owner": {
+            "description": "Team that owns it; findings about it are routed here.",
+            "type": "string"
+          },
+          "repo": {
+            "description": "GitHub repo \"owner/name\" that receives its issues.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "internalConsumers": {
+      "description": "Consumers the system team owns (docs, Storybook): scored, but not counted toward cross-consumer clusters.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     },
     "scan": {
       "type": "object",
@@ -145,12 +473,608 @@
           "items": {
             "type": "string"
           }
+        },
+        "elementMap": {
+          "description": "The system's element map (which native elements it replaces, and with what), relative to the config root. Overrides the profile's.",
+          "type": "string"
+        },
+        "nativeLookalikes": {
+          "description": "Native elements that imitate a component: { \"select\": \"Select\" }. \"input[checkbox]\" keys set input types. Overrides entries from the element map.",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "exceptionsFile": {
+          "description": "Each app's element-map exceptions, relative to the app. Overrides the profile's.",
+          "type": "string"
+        },
+        "deprecated": {
+          "description": "Deprecated components and their replacements: { OldModal: Modal }.",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       },
       "required": [
         "rawElements"
       ],
       "additionalProperties": false
+    },
+    "tokens": {
+      "type": "object",
+      "properties": {
+        "patterns": {
+          "description": "Regex sources that count as a token reference in styles.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "tailwind": {
+      "description": "Tailwind / shadcn-style systems: read classes the way the repo's own lint does.",
+      "type": "object",
+      "properties": {
+        "tierLeakageSpec": {
+          "description": "Leak grammar shared with the repo's lint rule. Overrides the profile's.",
+          "type": "string"
+        },
+        "semanticCss": {
+          "description": "CSS declaring --color-<name> semantic utilities. Overrides the profile's.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "classNameOverrides": {
+          "description": "\"leaky\" (default): className counts as an override only when it carries drift.",
+          "type": "string",
+          "enum": [
+            "leaky",
+            "any"
+          ]
+        },
+        "arbitraryValues": {
+          "description": "Which arbitrary values count as drift (default color).",
+          "type": "string",
+          "enum": [
+            "color",
+            "all",
+            "none"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "apps": {
+      "description": "Per-app switches, keyed by app or workspace name. Anything not listed is fully measured.",
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "versions": {
+            "description": "Measure package versions and pin currency (default on).",
+            "type": "boolean"
+          },
+          "components": {
+            "description": "Measure component use and overrides (default on).",
+            "type": "boolean"
+          },
+          "lookalikes": {
+            "description": "Measure native look-alikes (default on). Usually off for Storybook.",
+            "type": "boolean"
+          },
+          "tokens": {
+            "description": "Measure token compliance (default on).",
+            "type": "boolean"
+          },
+          "tokenSkip": {
+            "description": "Files left out of token compliance, globs relative to the app.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "start": {
+            "description": "How to start the app for screenshots, e.g. \"npm run dev -- --port {port}\".",
+            "type": "string"
+          },
+          "url": {
+            "description": "URL once started; {port} is filled in.",
+            "type": "string"
+          },
+          "routes": {
+            "description": "Pages to visit; replaces the routes found in the source.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "extraRoutes": {
+            "description": "Pages visited first, added to the ones found in the source.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "flows": {
+            "description": "Written-down UI sequences that reveal elements only a filled field or an upload shows.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "route": {
+                  "type": "string"
+                },
+                "steps": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "click": {
+                            "type": "string"
+                          },
+                          "nth": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "within": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "click"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "dblclick": {
+                            "type": "string"
+                          },
+                          "nth": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "within": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "dblclick"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "hover": {
+                            "type": "string"
+                          },
+                          "nth": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "within": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "hover"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "check": {
+                            "type": "string"
+                          },
+                          "nth": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "within": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "check"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "fill": {
+                            "type": "object",
+                            "properties": {
+                              "label": {
+                                "type": "string"
+                              },
+                              "text": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "label",
+                              "text"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "nth": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "within": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "fill"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "press": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "press"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "upload": {
+                            "type": "string"
+                          },
+                          "nth": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "within": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "upload"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "wait": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "wait"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                },
+                "reveals": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "notes": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "route",
+                "steps"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "screenshots": {
+            "description": "false: never start this app for screenshots.",
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "review": {
+      "description": "Element review (the review add-on).",
+      "type": "object",
+      "properties": {
+        "threshold": {
+          "description": "Below this confidence a human decides (default 0.9).",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "labPaths": {
+          "description": "Specimen pages, globs relative to each app. Overrides the profile's.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "decisionsFile": {
+          "description": "Each app's review decisions, relative to the app. Overrides the profile's.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "rendered": {
+      "description": "Rendered signatures measured in the system's Storybook (the review add-on).",
+      "type": "object",
+      "properties": {
+        "autoStart": {
+          "type": "boolean"
+        },
+        "useStatic": {
+          "description": "Measure the static Storybook build instead of starting Storybook.",
+          "type": "boolean"
+        },
+        "storiesPerComponent": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "maxMinutes": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "shots": {
+      "description": "App screenshots for element review (the review add-on).",
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string"
+        },
+        "routes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "auto": {
+          "description": "Take screenshots on every run.",
+          "type": "boolean"
+        },
+        "reveal": {
+          "description": "Open menus, tabs and sheets to find hidden elements (default on).",
+          "type": "boolean"
+        },
+        "perGroup": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "maxPages": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "maxActions": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "maxDepth": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "maxMinutes": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maxAgeDays": {
+          "type": "number",
+          "minimum": 0
+        },
+        "waitMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "modules": {
+      "description": "Optional modules. Off modules keep their settings; they just don't run.",
+      "type": "object",
+      "properties": {
+        "figma": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "figma": {
+      "description": "Figma library usage (the figma add-on).",
+      "type": "object",
+      "properties": {
+        "teamIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "projectIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "fileKeys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "libraries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "fileKey": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "fileKey"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "url"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "editedWithinDays": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "maxFiles": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "github": {
+      "type": "object",
+      "properties": {
+        "defaultRepo": {
+          "description": "Repo that receives findings whose owner has none.",
+          "type": "string"
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "agents": {
+      "description": "Agent workbench (the agent add-on).",
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "claude-code",
+            "cursor"
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "cursorModel": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "advise",
+            "try"
+          ]
+        },
+        "timeoutMinutes": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "report": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "timeZone": {
+          "description": "IANA time zone for dates in the report, e.g. \"America/Los_Angeles\".",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "settings": {
+      "description": "Rule settings on top of the metric catalog's defaults.",
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {}
     },
     "ratchet": {
       "type": "object",
