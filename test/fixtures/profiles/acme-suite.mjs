@@ -90,4 +90,11 @@ export default {
     exceptions: "docs/raw-elements.exceptions.json",
     decisions: "docs/raw-elements.decisions.json",
   },
+  // The suite's catalog carried one system's usage-checker metric; here it is the profile's, by a neutral id.
+  metrics: [{
+    id: "usage_checker_errors", family: "fidelity",
+    question: "How many errors would the design-system checker tell an agent to fix?",
+    scope: ["child", "consumer"], source: "the system's usage checker over product .tsx files", grain: "repo x rule x run",
+    direction: "down", guardrail: "agent_readiness", tier: "measured", owner: "consumer", phase1: true,
+  }],
 };

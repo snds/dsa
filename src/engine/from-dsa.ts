@@ -80,6 +80,8 @@ export interface EngineContext {
   /** Where dsa.hints.json lives. */
   configDir: string;
   profile: ResolvedProfile;
+  /** The --profile given on the command line (a resolved path or a package name); unset when the config names it. */
+  profileSpec?: string | undefined;
   config: Config;
 }
 
@@ -93,7 +95,8 @@ export async function loadEngineContext(o: EngineContextOptions): Promise<Engine
   if (o.profile) profile = await loadProfile(o.profile, cwd);
   else if (loaded.config.profile) profile = await loadProfile(loaded.config.profile, loaded.root);
   const dataDir = o.dataDir ? path.resolve(cwd, o.dataDir) : path.resolve(loaded.root, loaded.config.output.dir);
-  return { loaded, root, dataDir, configDir: loaded.configPath ? path.dirname(loaded.configPath) : root, profile, config: engineConfig(loaded.config, profile) };
+  const profileSpec = o.profile ? (o.profile.startsWith('.') || path.isAbsolute(o.profile) ? path.resolve(cwd, o.profile) : o.profile) : undefined;
+  return { loaded, root, dataDir, configDir: loaded.configPath ? path.dirname(loaded.configPath) : root, profile, profileSpec, config: engineConfig(loaded.config, profile) };
 }
 
 /** Throw the suite's error when the config doesn't name the system's packages. */

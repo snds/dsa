@@ -3,7 +3,7 @@ import path from "node:path";
 import type { Command } from "commander";
 import pc from "picocolors";
 import type { CliIo } from "./cli.js";
-import { loadAddons, type DsaAddon } from "./addons.js";
+import { loadAddons, runAfterHooks, type DsaAddon } from "./addons.js";
 import { findConfigFile, CONFIG_FILENAME } from "./config.js";
 import { loadEngineContext, requirePackages, type EngineContext } from "./engine/from-dsa.js";
 import { APP_DIR, resolveHostRoot, targetRelative } from "./engine/paths.js";
@@ -46,6 +46,11 @@ export async function useAddons(cwd: string): Promise<{ addons: DsaAddon[]; note
 export function resetAddons(): void {
   addonsLoaded = null;
   registerStore(null);
+}
+
+/** Load config and profile from the CLI's global options, the way every engine command does. */
+export async function engineContext(cwd: string, g: EngineGlobals): Promise<EngineContext> {
+  return context({ cwd } as CliIo, g);
 }
 
 async function context(io: CliIo, g: EngineGlobals): Promise<EngineContext> {
@@ -158,6 +163,7 @@ export function addEngineCommands(program: Command, io: CliIo): void {
         configDir: ctx.configDir,
         store: (d) => openStore(d),
         stages,
+        stageOptions: o,
         registry: Boolean(o.registry),
         remote: Boolean(o.remote),
         git: o.git !== false,
@@ -168,6 +174,10 @@ export function addEngineCommands(program: Command, io: CliIo): void {
       const s = res.summary;
       io.out(`\nRun ${res.runId}: ${s.opened.length} opened, ${s.reopened.length} reopened, ${s.updated.length} still open, ${s.held.length} held (hysteresis), ${s.resolved.length} resolved.`);
       for (const n of res.notes) io.out(`note: ${n}`);
+      // Add-ons that act on a finished run: screenshots, the report.
+      const after: string[] = [];
+      await runAfterHooks(addons, { kind: "run", ctx, options: o, store: (d) => openStore(d), notes: after, log: (m) => io.out(m) });
+      for (const n of after) io.out(`note: ${n}`);
       if (o.drafts !== false) io.out(`Issue drafts: ${await draftIssues(ctx.dataDir)} in ${path.join(ctx.dataDir, "issues")}`);
     });
 
@@ -178,6 +188,10 @@ export function addEngineCommands(program: Command, io: CliIo): void {
       const ctx = await context(io, g(cmd));
       await storeFor(io, "reevaluate");
       await reevaluateElements({ root: ctx.root, dataDir: ctx.dataDir, config: ctx.config, profile: ctx.profile, configDir: ctx.configDir, store: (d) => openStore(d), log: (m) => io.out(m) });
+      const { addons } = await useAddons(io.cwd);
+      const notes: string[] = [];
+      await runAfterHooks(addons, { kind: "reevaluate", ctx, options: _o as Record<string, unknown>, store: (d) => openStore(d), notes, log: (m) => io.out(m) });
+      for (const n of notes) io.out(`note: ${n}`);
     });
 
   program
@@ -397,5 +411,13 @@ function shotIndex(dataDir: string): Map<string, string> {
 /** Let each installed add-on add its commands. */
 export async function addAddonCommands(program: Command, io: CliIo): Promise<void> {
   const { addons } = await useAddons(io.cwd);
-  for (const a of addons) a.commands?.(program, { cwd: io.cwd, out: io.out, err: io.err });
+  const api = {
+    cwd: io.cwd,
+    out: io.out,
+    err: io.err,
+    context: (cmd: Command) => context(io, cmd.optsWithGlobals<EngineGlobals>()),
+    addons: async () => (await useAddons(io.cwd)).addons,
+    requireStore: (command: string) => storeFor(io, command),
+  };
+  for (const a of addons) a.commands?.(program, api);
 }

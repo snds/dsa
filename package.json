@@ -27,6 +27,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./engine": {
+      "types": "./dist/engine/index.d.ts",
+      "import": "./dist/engine/index.js"
+    },
     "./schema/*": "./schema/*",
     "./package.json": "./package.json"
   },
@@ -48,7 +52,7 @@
   "packageManager": "pnpm@10.28.0",
   "scripts": {
     "build": "tsc -p tsconfig.build.json && pnpm -r --filter \"./packages/*\" build",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p packages/history/tsconfig.check.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && pnpm -r --filter \"./packages/*\" typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
     "schema": "node dist/schema/generate.js",
@@ -71,5 +75,10 @@
     "@types/semver": "7.8.0",
     "typescript": "~5.9.3",
     "vitest": "^3.2.7"
+  },
+  "pnpm": {
+    "overrides": {
+      "isexe@3": "3.1.1"
+    }
   }
 }

@@ -1,0 +1,33 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noUncheckedIndexedAccess": false,
+    "exactOptionalPropertyTypes": false,
+    "noEmit": true,
+    "paths": {
+      "@snds/dsa": [
+        "../../src/index.ts"
+      ],
+      "@snds/dsa/engine": [
+        "../../src/engine/index.ts"
+      ],
+      "@snds/dsa-dashboard": [
+        "../dashboard/src/index.ts"
+      ],
+      "@snds/dsa-figma": [
+        "../figma/src/index.ts"
+      ],
+      "@snds/dsa-agent": [
+        "../agent/src/index.ts"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}
