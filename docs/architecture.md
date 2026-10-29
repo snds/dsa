@@ -9,7 +9,9 @@ what exists today.
 
 1. **dsa knows no design system by name.** Nothing in this repo names a real
    system, its packages, or its files. Everything specific to one system lives in
-   that system's repo as a [profile](#profiles). CI enforces it (Phase 4).
+   that system's repo as a [profile](#profiles). CI enforces it: `scripts/name-check.mjs`
+   fails on any tracked file that matches the `DSA_NAME_DENYLIST` secret, so the
+   names themselves never land here either.
 2. **The core stays light.** `@snds/dsa` installs five small dependencies. Anything
    that needs a browser, a native database or a UI build ships as an
    [add-on](../packages/README.md).
@@ -179,8 +181,8 @@ lists them and maps the suite's side.
 | 1 | Extended config (tiers, other repos, per-app switches, `profile`) and `dsa config migrate` | done |
 | 2 | Core ports: repo discovery, Vue/Angular reading, versions, tokens, Tailwind drift, findings, issues, element review; run history (`@snds/dsa-history`); add-on API | done |
 | 3 | Add-ons: review (screenshots, Storybook measurement), dashboard (`serve`, `report`, `publish`), figma, agent (`mcp`, `agent brief`) | done |
-| 4 | Neutralize: every system-specific name behind the profile; CI name check; port the suite's tests | next |
-| 5 | A consuming system switches to dsa as a dependency, after a parity run | |
+| 4 | Neutralize: every system-specific name behind the profile; CI name check; port the suite's tests (132 of 133; the last one checks a system's own usage tool, so it lives with that system's profile) | done |
+| 5 | A consuming system switches to dsa as a dependency, after a parity run | next |
 
 Every phase keeps today's numbers: the fixture app's scan, patterns and ratchet
 reports don't change, and existing configs keep working.

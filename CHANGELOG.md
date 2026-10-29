@@ -8,6 +8,9 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- CI name check: `scripts/name-check.mjs` fails when a tracked file matches the
+  `DSA_NAME_DENYLIST` pattern. In CI the pattern is a repository secret; it is
+  required on pushes to `main` and skipped where secrets can't be read.
 - Profiles: `defineProfile`, `loadProfile` and `resolveProfile`. A profile holds
   what one design system knows that config can't say (component list, role
   offers, its own tooling files, lab pages, an agent-readiness provider, its name
