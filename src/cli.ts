@@ -12,6 +12,7 @@ import { loadRunContext, writeJson, type RunOptions } from "./run.js";
 import { isSuiteConfig, migrateSuiteConfig } from "./migrate.js";
 import { scanFromContext } from "./scan.js";
 import { dsaVersion } from "./version.js";
+import { addAddonCommands, addEngineCommands } from "./cli-engine.js";
 
 export interface CliIo {
   out: (text: string) => void;
@@ -47,10 +48,13 @@ export function createProgram(io: CliIo = { out: console.log, err: console.error
   const program = new Command();
   program
     .name("dsa")
-    .description("Design-system analytics: inventory, adoption, pattern candidates and a correct-use ratchet.")
+    .description("Design-system analytics: inventory, adoption, pattern candidates, a correct-use ratchet, findings and element review.")
     .version(dsaVersion())
     .option("--json", "print the JSON report to stdout instead of writing it to the output directory")
     .option("--config <path>", "path to dsa.config.json (default: discovered upward from the scanned directory)")
+    .option("--root <path>", "the repo to measure (run, findings, elements…); config paths resolve against it")
+    .option("--data <path>", "data folder for run history and reports (default: <output.dir>)")
+    .option("--profile <spec>", "the design system's profile, by path or package name; takes the place of the config's")
     .exitOverride()
     .configureOutput({ writeOut: (s) => io.out(s.trimEnd()), writeErr: (s) => io.err(s.trimEnd()) });
 
@@ -114,11 +118,13 @@ export function createProgram(io: CliIo = { out: console.log, err: console.error
     .option("--write <path>", "write the converted config here instead of printing it")
     .option("--force", "overwrite --write's file if it exists")
     .description("convert an analytics-suite config to this format; lists every key that moved or was left out")
-    .action((file: string, opts: { profile?: string; write?: string; force?: boolean }) => {
+    .action((file: string, opts: { profile?: string; write?: string; force?: boolean }, cmd: Command) => {
       const src = path.resolve(io.cwd, file);
       const raw = JSON.parse(fs.readFileSync(src, "utf8")) as unknown;
       if (!isSuiteConfig(raw)) throw new Error(`${file} has no "designSystem" section, so it isn't a suite config.`);
-      const result = migrateSuiteConfig(raw, opts.profile ? { profile: opts.profile } : {});
+      // --profile is also a global option; here it names the profile to write into the output.
+      const profile = opts.profile ?? cmd.optsWithGlobals<{ profile?: string }>().profile;
+      const result = migrateSuiteConfig(raw, profile ? { profile } : {});
       const json = JSON.stringify(result.config, null, 2) + "\n";
       const summary = [
         pc.bold(`dsa config migrate — ${result.moved.length} keys moved, ${result.dropped.length} left out`),
@@ -140,12 +146,15 @@ export function createProgram(io: CliIo = { out: console.log, err: console.error
       io.out(pc.dim(`wrote ${dest}`));
     });
 
+  addEngineCommands(program, io);
   return program;
 }
 
 export async function main(argv = process.argv): Promise<void> {
-  const program = createProgram();
+  const io: CliIo = { out: console.log, err: console.error, cwd: process.cwd() };
+  const program = createProgram(io);
   try {
+    await addAddonCommands(program, io);
     await program.parseAsync(argv);
   } catch (err) {
     // commander's exitOverride throws for --help / --version too; those are not failures.

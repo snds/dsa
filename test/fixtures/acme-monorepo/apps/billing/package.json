@@ -1,0 +1,8 @@
+{
+  "name": "billing",
+  "version": "1.0.0",
+  "dependencies": {
+    "@acme/ds-react": "^4.9.0",
+    "react": "^18.3.0"
+  }
+}

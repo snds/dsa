@@ -1,0 +1,12 @@
+:root {
+  --acme-control-h-xs: 1.5rem;
+  --acme-control-h-sm: 1.75rem;
+  --acme-control-h: 2rem;
+  --acme-control-h-lg: 2.25rem;
+  --button-height: var(--acme-control-h);
+  --button-height-xs: var(--acme-control-h-xs);
+  --button-height-sm: var(--acme-control-h-sm);
+  --button-height-lg: var(--acme-control-h-lg);
+  --button-px: 0.75rem;
+  --button-radius: 0.375rem;
+}

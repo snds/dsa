@@ -1,0 +1,46 @@
+{
+  "name": "@snds/dsa-history",
+  "version": "0.1.0",
+  "description": "Run history for @snds/dsa in a local DuckDB file: every run, metric, finding and finding event, so trends are queries.",
+  "license": "Apache-2.0",
+  "author": "Sean Sands",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/snds/dsa.git",
+    "directory": "packages/history"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "dsa": {
+    "addon": "./dist/index.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.check.json"
+  },
+  "peerDependencies": {
+    "@snds/dsa": "workspace:*"
+  },
+  "dependencies": {
+    "@duckdb/node-api": "1.5.6-r.1"
+  },
+  "devDependencies": {
+    "@snds/dsa": "workspace:*",
+    "@types/node": "^22.20.5",
+    "typescript": "~5.9.3"
+  }
+}

@@ -1,0 +1,93 @@
+// The analytics suite's built-in defaults, with Acme names: a profile that makes dsa read the
+// fixture monorepo exactly as the suite did with no profile at all. Used by the parity run and the
+// element-review tests.
+export default {
+  name: "acme-suite",
+  label: "Acme",
+  sources: ["@acme/ui", "@acme/data-table"],
+  components: () => [],
+  roles: {
+  button: { use: 'Button' },
+  // Today's API on main: Button with an icon-* size, an aria-label and the <Icon> as its only child.
+  // IconButton (label, expanded, pressed, badge) is only on unmerged branches; re-point here when it lands on main.
+  'icon-button': { use: 'Button', from: '@acme/ui/button', props: { variant: 'ghost' }, how: 'An icon-only Button: size icon-xs, icon-sm, icon or icon-lg, an aria-label, and the <Icon> as its only child.' },
+  'cell-icon-button': { use: 'CellIconButton', from: '@acme/ui' },
+  'link-button': { use: 'Button', props: { variant: 'link' } },
+  toggle: { use: 'Toggle', from: '@acme/ui/toggle' },
+  segmented: { use: 'ToggleGroupItem', from: '@acme/ui/toggle-group' },
+  'chip-toggle': { use: 'ToggleGroupItem', from: '@acme/ui/toggle-group', gap: 'No chip-shaped toggle yet: ToggleGroupItem is the closest home. FilterChip is an applied-filter chip, not a toggle.' },
+  disclosure: { use: 'CollapsibleTrigger', from: '@acme/ui/collapsible' },
+  'disclosure-icon': { use: 'Button', from: '@acme/ui/button', how: 'An icon-only Button with an aria-label and aria-expanded; the chevron <Icon> turns when open.' },
+  'sidebar-toggle': { use: 'SidebarTrigger', from: '@acme/ui/sidebar' },
+  'nav-item': { use: 'SidebarMenuButton', from: '@acme/ui/sidebar' },
+  'record-link': { use: 'ObjectName', from: '@acme/ui' },
+  // A crumb in a real "/" trail. Back controls ("← List") are breadcrumb-back.
+  'breadcrumb-link': { use: 'BreadcrumbLink', from: '@acme/ui/breadcrumb' },
+  'breadcrumb-back': { use: 'BreadcrumbBack', from: '@acme/ui/breadcrumb', how: 'BreadcrumbBack is the back control of a record trail ("← List"); it keeps the handler and draws the chevron.' },
+  tab: { use: 'TabsTrigger', from: '@acme/ui/tabs' },
+  'menu-item': { use: 'DropdownMenuItem' },
+  // role="option": a value picked from a list (a picker), not a menu command.
+  'combobox-item': { use: 'ComboboxItem', from: '@acme/ui/combobox', how: 'Each option is a ComboboxItem in a ComboboxList; the field around it is a Combobox.' },
+  switch: { use: 'Switch' },
+  'checkbox-role': { use: 'Checkbox' },
+  'radio-role': { use: 'RadioGroupItem', from: '@acme/ui/radio-group' },
+  // A list row or card that opens or picks something. Was a gap ("no clickable region"): Item renders as a button.
+  'clickable-region': { use: 'Item', from: '@acme/ui/item', props: { render: '<button type="button" />' }, how: 'Item renders as the button (render={<button />}); any actions inside it go in ItemActions.' },
+  'editable-cell': { use: 'DataTable', from: '@acme/data-table', how: 'Make the column editable (meta.editable: { type: "inline" }); DataTable draws the click-to-edit cell.' },
+  'choice-tile': { use: 'ToggleGroupItem', from: '@acme/ui/toggle-group', how: 'Wrap the set in ToggleGroup (single); each tile is a ToggleGroupItem with an aria-label.' },
+  'drop-target': { use: '', verdict: 'gap', gap: 'Acme has no file dropzone (drop files here, or click to browse). Propose one, starting from the app\'s version.' },
+  'selector-card': { use: '', verdict: 'gap', gap: 'Acme has no choice card (a card picked as one option of a set). Until then: RadioGroup with each RadioGroupItem inside a Label card.' },
+  'text-input': { use: 'Input' },
+  'search-input': { use: 'Input' },
+  checkbox: { use: 'Checkbox' },
+  radio: { use: 'RadioGroupItem', from: '@acme/ui/radio-group' },
+  range: { use: 'Slider' },
+  date: { use: 'DatePicker' },
+  'number-input': { use: 'AmountInput', from: '@acme/ui' },
+  'color-input': { use: '', verdict: 'gap', gap: 'Acme has no colour field (swatch, picker and value entry). Propose one, starting from the app\'s version.' },
+  'hidden-proxy': { use: '', verdict: 'keep' },
+  'data-table': { use: 'DataTable' },
+  'static-table': { use: 'Table' },
+  select: { use: 'Select' },
+  combobox: { use: 'Combobox' },
+  'multi-select': { use: 'ChipMultiSelect', from: '@acme/ui' },
+  textarea: { use: 'Textarea' },
+  dialog: { use: 'Dialog' },
+  'native-dialog': { use: 'NativeDialog', from: '@acme/ui/native-dialog' },
+  // Parts by kind (classify-parts.ts): each only works inside its container, which the review names with it.
+  'context-menu-item': { use: 'ContextMenuItem', from: '@acme/ui/context-menu' },
+  'menu-checkbox-item': { use: 'DropdownMenuCheckboxItem', from: '@acme/ui/dropdown-menu' },
+  'menu-radio-item': { use: 'DropdownMenuRadioItem', from: '@acme/ui/dropdown-menu' },
+  'menu-sub-trigger': { use: 'DropdownMenuSubTrigger', from: '@acme/ui/dropdown-menu' },
+  'row-expander': { use: 'GroupRow', from: '@acme/data-table/grouping', how: 'Group the rows in DataTable; GroupRow draws the expander. Outside a DataTable: Button ghost xs with aria-expanded.' },
+},
+  buttonTokens: {
+    variants: {
+      destructive: "^(bg-destructive|text-destructive|border-destructive)",
+      default: "^bg-primary(\\/|$)",
+      dark: "^bg-foreground(\\/|$)",
+      secondary: "^bg-(secondary|muted)(\\/|$)",
+      outline: "^border(-input|-border)?$",
+      ghost: "^hover:bg-",
+    },
+    sizes: {
+      xs: "^(h|size)-(6|\\(--acme-control-h-xs\\))$",
+      sm: "^(h|size)-(7|\\(--acme-control-h-sm\\))$",
+      lg: "^(h|size)-(9|10|\\(--acme-control-h-lg\\))$",
+      default: "^(h|size)-(8|\\(--acme-control-h\\))$",
+    },
+    iconSizes: { xs: "icon-xs", sm: "icon-sm", default: "icon", lg: "icon-lg" },
+  },
+  controlHeights: { "acme-control-h-xs": 24, "acme-control-h-sm": 28, "acme-control-h": 32, "acme-control-h-lg": 36 },
+  navTokens: ["--acme-sidebar-item"],
+  icons: ["@acme/ui/icon", "@acme/ui#Icon"],
+  containers: {
+    DropdownMenu: "@acme/ui/dropdown-menu", SidebarProvider: "@acme/ui/sidebar", ContextMenu: "@acme/ui/context-menu", ToggleGroup: "@acme/ui/toggle-group",
+    Tabs: "@acme/ui/tabs", Collapsible: "@acme/ui/collapsible", Combobox: "@acme/ui/combobox", RadioGroup: "@acme/ui/radio-group", DataTable: "@acme/data-table",
+  },
+  labPaths: ["**/features/*Lab/**"],
+  files: {
+    exceptions: "docs/raw-elements.exceptions.json",
+    decisions: "docs/raw-elements.decisions.json",
+  },
+};

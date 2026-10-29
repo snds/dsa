@@ -1,0 +1,8 @@
+{
+  "name": "admin",
+  "version": "1.0.0",
+  "dependencies": {
+    "@acme/ds-angular": "^5.4.0",
+    "@angular/core": "^19.0.0"
+  }
+}

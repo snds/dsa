@@ -1,0 +1,7 @@
+{
+  "name": "@acme/commerce-kit",
+  "version": "2.1.0",
+  "dependencies": {
+    "@acme/ds-react": "^4.0.0"
+  }
+}

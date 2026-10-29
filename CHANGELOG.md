@@ -34,9 +34,41 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   that moved or was left out. Library: `migrateSuiteConfig`, `isSuiteConfig`.
 - Exports `loadRunContext`, `scanFromContext`, `patternsFromContext`,
   `ratchetFromContext`.
+- `dsa run`: the earlier analytics suite's engine, ported. It reads the repo's
+  workspaces and other repos (a local folder, or a git URL it clones and only
+  reads), package versions and pins, component use (React, Vue single-file
+  components, Angular templates), native look-alikes, token compliance and
+  Tailwind drift. It computes the catalog's metrics (`data/metric-catalog.yaml`),
+  raises findings that open, update, hold and resolve across runs, and writes an
+  issue draft for each open one.
+- Element review: every native look-alike gets a recommendation, a confidence
+  and its evidence, read from its classes, children and context and matched
+  against the core's component signatures. Decisions are kept in each app's
+  decisions file and calibrate later runs.
+- Commands: `where`, `init`, `run`, `reevaluate`, `findings`, `issues draft`,
+  `issues sync`, `snooze`, `settings`, `settings set`, `elements`,
+  `signatures`, `explain`, `decide`, `plan`. Global options `--root`, `--data`,
+  `--profile`.
+- `@snds/dsa-history` (`packages/history`): run history in DuckDB. `dsa run` and
+  the history commands use it when it is installed, and say what to install
+  when it isn't.
+- Add-ons: `defineAddon({ name, store, stages, commands })`. The CLI finds
+  installed `@snds/dsa-*` packages and lets them add commands, `dsa run` stages
+  and the history store.
+- Profile fields for the element review: `icons`, `buttonTokens`,
+  `controlHeights`, `navTokens`, `containers`, `metrics`; a role offer's
+  `verdict`; and a readiness provider's `isSystemRepo`, `setupHint`,
+  `missingNote` and extra metric rows. Every system-specific value the suite
+  knew is behind these; dsa ships neutral defaults.
+- `scripts/parity/`: runs the suite and dsa on one repo and checks they store
+  the same data.
+- Dependencies: `@babel/parser`, `@vue/compiler-sfc`, `htmlparser2`, `semver`,
+  `yaml` (all plain JavaScript).
 
 ### Changed
 
+- A config written for the analytics suite is converted in memory when it is
+  loaded, instead of parsing as an empty dsa config.
 - README provenance and NOTICE: dsa now absorbs the author's earlier analytics
   suite, which he owns.
 
