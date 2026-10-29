@@ -1,7 +1,7 @@
 /**
  * @snds/dsa — design-system analytics.
  *
- * Public API: `scan`, `detectPatterns` (alias of `patterns`), `ratchet`, the
+Public API: `scan`, `detectPatterns` (alias of `patterns`), `ratchet`, the
  * graph builder, and the types every report is made of.
  */
 export { scan, type ScanReport } from "./scan.js";
@@ -24,3 +24,12 @@ export { formatScan, formatPatterns, formatRatchet, table } from "./report/text.
 export { createProgram, type CliIo } from "./cli.js";
 export { dsaVersion } from "./version.js";
 export * as schemas from "./schema/index.js";
+export { defineAddon, findAddons, loadAddons, type DsaAddon, type AddonApi, type FoundAddon } from "./addons.js";
+export { STORE_SCHEMA, STORE_MIGRATIONS, STORE_TABLES, registerStore, openStore, hasStore, MissingStoreError, type Store, type StoreFactory } from "./engine/store.js";
+export { runPipeline, reevaluateElements, type PipelineStage, type StageContext, type RunOptions as EngineRunOptions, type RunResult as EngineRunResult } from "./engine/pipeline.js";
+export { engineConfig, engineExcludes, loadEngineContext, type EngineContext, type EngineContextOptions } from "./engine/from-dsa.js";
+export { useSystem, system, type EngineSystem } from "./engine/system.js";
+export { resolveHostRoot } from "./engine/paths.js";
+export type { Config as EngineConfig } from "./engine/config.js";
+export type { Finding, Target, Instance, Lookalike, VersionRow, TokenRow } from "./engine/types.js";
+export type { ElementEval } from "./engine/elements.js";

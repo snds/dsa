@@ -1,0 +1,8 @@
+{
+  "name": "reporting",
+  "version": "1.0.0",
+  "dependencies": {
+    "@acme/ds-vue": "^3.8.0",
+    "vue": "^3.5.0"
+  }
+}

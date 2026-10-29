@@ -1,0 +1,242 @@
+# Design System Analytics Suite — metric catalog (v0.2, 2026-10-06)
+# The app reads this file at runtime. `phase1: true` marks metrics the Phase 1 build computes.
+# thresholds: for direction:down, values ABOVE watch/act breach; for direction:up, values BELOW breach.
+# A finding opens at `act` (serious) or `watch` (warning) and closes only when the value is back past `watch` (hysteresis).
+# One entry per metric. Every surface reads from this file so numbers agree everywhere.
+# scope: core | child | consumer | portfolio   tier: measured | sampled | modeled | benchmarked
+# guardrail: the paired metric that keeps this one from being gamed.
+
+families: [health, reliability, adoption, fidelity, flow, experience, value]
+
+metrics:
+  - id: a11y_conformance
+    family: health
+    question: Does each component meet WCAG AA in every variant and state?
+    scope: [core, child]
+    source: a11y scanner on stories, per PR
+    grain: component x release
+    direction: up
+    thresholds: { watch: 95, act: 90 }   # percent of variant/state combinations passing
+    guardrail: defect_escape_rate
+    tier: measured
+    owner: core
+    audience: [core-contributors, design-ops]
+
+  - id: defect_escape_rate
+    family: health
+    question: What share of defects are found by consumers instead of by us?
+    scope: [core, child]
+    source: issue tracker (reporter scope)
+    grain: library x month
+    direction: down
+    thresholds: { watch: 30, act: 50 }
+    tier: measured
+    owner: core
+
+  - id: attributed_error_rate
+    family: reliability
+    question: How often do DS components fail in real use, and whose fix is it?
+    scope: [core, child, consumer]
+    source: error monitoring (Sentry reference) filtered by DS tags library/package/version/component + attribution ladder
+    grain: component x consumer x week
+    direction: down
+    thresholds: { watch: 5, act: 20 }   # errors per 10k renders
+    guardrail: attribution_confidence
+    tier: measured
+    owner: attributed
+
+  - id: attribution_confidence
+    family: reliability
+    question: What share of failures resolve to a named owner?
+    scope: [portfolio]
+    source: attribution ladder output
+    grain: week
+    direction: up
+    thresholds: { watch: 85, act: 70 }
+    tier: measured
+    owner: design-ops
+
+  - id: version_currency
+    family: adoption
+    question: How far behind latest core is each consumer and child library?
+    scope: [child, consumer]
+    source: lockfiles / pin files
+    grain: repo x week
+    direction: down
+    thresholds: { watch: 1, act: 2 }    # majors behind
+    tier: measured
+    owner: consumer
+    phase1: true
+
+  - id: pin_currency_days
+    family: adoption
+    question: For SHA-pinned consumers, how many days does the pin trail core's main?
+    scope: [child, consumer]
+    source: pin file in the host + core git history
+    grain: repo x week
+    direction: down
+    thresholds: { watch: 14, act: 30 }  # days behind main
+    tier: measured
+    owner: consumer
+    phase1: true
+
+  - id: token_compliance_new_code
+    family: adoption
+    question: Do files touched in the last 90 days use tokens instead of raw values?
+    scope: [child, consumer]
+    source: stylelint / eslint token rules in CI (ratcheted baseline)
+    grain: repo x week
+    direction: up
+    thresholds: { watch: 95, act: 90, close: 97 }  # percent of style values that are tokens, new code only
+    guardrail: correct_use_rate
+    tier: measured
+    owner: consumer
+    phase1: true
+
+  - id: custom_ratio
+    family: adoption
+    question: How much UI is built from look-alikes instead of DS components?
+    scope: [child, consumer]
+    source: AST scan (look-alike detection)
+    grain: repo x week
+    direction: down
+    thresholds: { watch: 10, act: 25, close: 8 }  # percent of a component's usage that is a raw look-alike
+    guardrail: correct_use_rate
+    tier: measured
+    owner: consumer
+    phase1: true
+
+  - id: figma_instance_adoption
+    family: adoption
+    question: How many design-file instances come from core or child libraries?
+    scope: [core, child]
+    source: weekly Figma file crawler (standard file API, all plans)
+    grain: component x team x week
+    direction: up
+    tier: measured
+    owner: core
+    phase1: true
+
+  - id: correct_use_rate
+    family: fidelity
+    question: What share of DS instances are used without overrides or spread props?
+    scope: [child, consumer]
+    source: AST scan (className/style/spread on DS components)
+    grain: component x consumer x week
+    direction: up
+    thresholds: { watch: 90, act: 75, close: 92 }  # percent of instances with no overrides
+    misuse_cluster_threshold: setting  # see settings.misuse_cluster_threshold
+    tier: measured
+    owner: attributed
+    phase1: true
+
+  - id: figma_detach_rate
+    family: fidelity
+    question: Where do designers detach instead of using the component as built?
+    scope: [core, child]
+    source: Figma file crawler look-alike proxy + monthly manual read of in-app analytics (Organization plan; analytics API is Enterprise-only)
+    grain: component x team x week
+    direction: down
+    thresholds: { watch: 10, act: 25 }  # percent: frames named like a library component that are not instances
+    guardrail: detach_reason_sample
+    tier: sampled
+    owner: core
+    phase1: true
+
+  - id: time_to_adopt_release
+    family: flow
+    question: How long until a release reaches consumers (p50 / p90)?
+    scope: [core, child]
+    source: registry publish dates + lockfile history
+    grain: release
+    direction: down
+    guardrail: change_failure_rate
+    tier: measured
+    owner: core
+
+  - id: deprecation_burndown
+    family: flow
+    question: Are deprecated APIs actually leaving the codebases?
+    scope: [core]
+    source: AST scan for deprecated usages
+    grain: deprecation x week
+    direction: down
+    thresholds: { watch: 1, act: 25 }   # remaining deprecated usages per consumer
+    tier: measured
+    owner: core
+    phase1: true
+
+  - id: zero_result_searches
+    family: experience
+    question: What are people looking for in the docs and not finding?
+    scope: [core]
+    source: docs search logs
+    grain: query x month
+    direction: down
+    tier: measured
+    owner: core
+
+  - id: consumer_satisfaction
+    family: experience
+    question: How do consuming teams rate the system?
+    scope: [consumer]
+    source: quarterly pulse survey
+    grain: team x quarter
+    direction: up
+    tier: measured
+    owner: design-ops
+
+  - id: agent_readiness
+    family: experience
+    question: Can an agent build correctly with the system in each repo?
+    scope: [core, child, consumer]
+    source: the profile's readiness provider (the system's own audit tool, static, no model)
+    grain: repo x run
+    direction: up
+    thresholds: { watch: 70, act: 40 }   # the audit's tiers: AI-native >= 70, Invested >= 40
+    tier: measured
+    owner: attributed
+    phase1: true
+
+  - id: hours_returned
+    family: value
+    question: Roughly how many hours did the system return this quarter?
+    scope: [portfolio]
+    formula: instances_in_new_work * hours_saved_per_instance[low, high] + central_changes * hours_per_consumer_change - system_cost
+    assumptions: { hours_saved_per_instance: "benchmarked until a local time study exists" }
+    direction: up
+    tier: modeled
+    owner: design-ops
+    audience: [executives]
+
+ticketing:
+  now: github-issues          # filed in the owner's repo by a GitHub App (opt-in per repo)
+  later: [jira, linear]
+  external_key: finding_id    # e.g. F-123; dedupe, sync, auto-close key off it
+  labels: [ds-finding, "sev:*", "family:*", "scope:*"]
+
+settings:                      # app settings; every change is logged with a date so trends keep their context
+  misuse_cluster_threshold: 3      # consumers with the same misuse before a finding routes to core
+  misuse_cluster_overrides: {}     # per-asset, e.g. { DataTable: 4 }
+  weekly_queue_budget: 10          # findings pushed per week; the rest stay visible, not pushed
+  sample_floor_instances: 5        # minimum instances before a rate-based finding can open
+  new_code_days: 90                # window for "new code" (git history); all files count when git is absent
+  severity_weights: { reliability: 1.0, fidelity: 0.85, adoption: 0.7, flow: 0.6, experience: 0.5 }
+  discovery:
+    migrate_similarity: 0.85        # anatomy AND function
+    new_asset_max_similarity: 0.6
+    new_asset_min_feature_areas: 2
+    new_asset_min_occurrences: 3
+
+asset_kinds: [token, component, pattern, page_template, icon]
+
+beta:
+  owner_privacy_signoff: sean      # beta only; production re-opens the Phase 2 gate with an independent reviewer
+  scope: static analysis of code + design files, local/staging runs; no production runtime collection
+  job: drift + candidate components/variants during redesign with legacy feature matching
+  discovery_metrics:
+    - candidate_precision          # share of candidate findings accepted
+    - accepted_variants_and_assets
+    - legacy_parity_coverage       # covered by existing / by candidate / gap / dropped
+    - parity_map_time_vs_manual
+  time_study: planned (matched tasks, designers + engineers, reported as a range, quarterly)

@@ -23,6 +23,8 @@ dsa/                     @snds/dsa: core library + the `dsa` CLI
   src/graph/             file graph, per-language readers (adapters)
   src/detect/            pattern candidates
   src/metrics/           adoption and correct use
+  src/engine/            `dsa run`: repo discovery, scanners, findings, issues, element review
+  src/addons.ts          how add-ons plug in
   src/profile.ts         the profile interface
   schema/                published JSON Schemas for config and reports
   data/                  neutral reference data (component families, pattern catalog)
@@ -51,18 +53,24 @@ this graph and nothing else.
 
 A `SourceAdapter` claims file extensions and creates one `FileReader` per run, so a
 reader can keep a parser warm across files. React (TSX, JSX, TS, JS) is built in
-with ts-morph and reads any file no other adapter claims. Vue single-file
-components and Angular templates arrive as adapters in Phase 2, ported from the
-suite.
+with ts-morph and reads any file no other adapter claims.
+
+`dsa run` does not read through the graph yet. Its engine (`src/engine/`) is the
+suite's, ported as it was: it parses with Babel, reads Vue single-file components
+with `@vue/compiler-sfc` and Angular templates with `htmlparser2`. Fitting it into
+the graph would have changed its numbers, and the port had to store exactly what
+the suite stored. The two readers meet in a later phase.
 
 ### Element facts (Phase 2)
 
-Element review needs more about native elements than the graph carries today:
+Element review needs more about native elements than the graph carries:
 literal attributes, handlers and what they do, resolved classes (through shared
 constants, `cn`/`clsx` and conditionals), children (icon, label, badge, nested
 controls) and context (ancestors, table cell, list, `.map()`, nav, form, gates).
-These land as an optional `facts` field on `ElementNode`, filled only when the
-review add-on asks for them, so the core's scan stays as fast as it is.
+The engine reads these (`ElementFeatures`, `src/engine/scanners/features.ts`) for
+every look-alike in `dsa run`, and the rules that turn them into a
+recommendation (`classify*`, roles, signatures, host context) are core code. They
+are not a `facts` field on `ElementNode` yet; that waits for the readers to meet.
 
 ## Profiles
 
@@ -98,8 +106,42 @@ synchronous: it takes an already-loaded `options.profile`, and refuses a config
 that names one it can't import. A config value for the same thing (an element
 map path, a lab-page glob) wins over the profile's.
 
-Rules and metrics a system adds on top of the catalog join the profile in Phase 2,
-when the catalog and rules move into the core.
+The element review reads more from the profile: `icons` (its icon exports),
+`buttonTokens` (which classes show each Button variant and size), `controlHeights`
+(its control-height custom properties), `navTokens`, `containers` (where a part's
+container is imported from), and `metrics` the system adds to the catalog. The
+engine takes the profile once per run (`useSystem`) and every rule reads it from
+there, so no rule names a system. A system's own rules (beyond its metrics) are
+not in the profile yet.
+
+## Run history and add-ons
+
+The core defines the history tables and a small `Store` interface (`exec`, `all`,
+`insertMany`, `latestRunId`, `close`). `@snds/dsa-history` supplies the DuckDB
+store. `dsa run` uses whatever store an installed add-on offers, and says what to
+install when there is none.
+
+An add-on is a package named `@snds/dsa-<name>` whose `package.json` has
+`"dsa": { "addon": "<module>" }`. Its module's default export is
+`defineAddon({ name, store?, stages?, commands? })`:
+
+- `store` opens the run history.
+- `stages` add steps to `dsa run`: "scan" stages run before metrics (a Figma
+  crawl), "metrics" stages after, with the store open. A stage that fails costs
+  only itself.
+- `commands(program, api)` adds commands to the one CLI.
+
+The CLI finds add-ons in `node_modules/@snds` next to the repo it runs on and next
+to dsa, and in this checkout's `packages/`.
+
+## Parity with the suite
+
+`scripts/parity/run.mjs` runs the suite and dsa on one repo with git history,
+Figma and the registry off and fixed times, each side twice, each time as two
+runs a day apart. It dumps every table as sorted JSON (run ids renumbered,
+timestamps blanked) and compares. Phase 2 ended with no differences on the
+fixture monorepo (222 rows) and on the system the suite was built for (9,512
+rows, agent readiness included).
 
 ## Phases
 
@@ -107,10 +149,29 @@ when the catalog and rules move into the core.
 |---|---|---|
 | 0 | Workspace, provenance, profile interface, reader seam, this note | done |
 | 1 | Extended config (tiers, other repos, per-app switches, `profile`) and `dsa config migrate` | done |
-| 2 | Core ports: repo discovery, Vue/Angular readers, versions, tokens, Tailwind drift, findings, issues; element facts | next |
-| 3 | Add-ons: review, dashboard, history, figma, agent | |
+| 2 | Core ports: repo discovery, Vue/Angular reading, versions, tokens, Tailwind drift, findings, issues, element review; run history (`@snds/dsa-history`); add-on API | done |
+| 3 | Add-ons: review (screenshots, Storybook measurement), dashboard (`serve`, `report`, `publish`), figma, agent (`mcp`, `agent brief`) | next |
 | 4 | Neutralize: every system-specific name behind the profile; CI name check; port the suite's tests | |
 | 5 | A consuming system switches to dsa as a dependency, after a parity run | |
 
 Every phase keeps today's numbers: the fixture app's scan, patterns and ratchet
 reports don't change, and existing configs keep working.
+
+### Phase 2 notes
+
+- The engine was ported as it was rather than through the graph's readers (see
+  [Readers](#readers-adapters)). Element facts live in the engine, not on `ElementNode`.
+- Run history moved up from Phase 3: `dsa run` needs it, so `@snds/dsa-history`
+  exists now.
+- Moved to Phase 3, because they need a browser, a UI build or an agent CLI:
+  `serve`, `report`, `publish`, `shots`, `render`, `setup`, `mcp`, `agent brief`,
+  the screenshots and report that `run` used to add, the rendered evidence
+  `reevaluate` used to apply, and the Figma crawl.
+- Neutral defaults: no lab pages; exceptions and decisions in
+  `docs/raw-elements.exceptions.json` and `docs/raw-elements.decisions.json`; no
+  import paths in the role map. A profile sets its own.
+- `--root` names the repo for `dsa run`, and the config's paths resolve against
+  it (the suite's rule). Without it, the config's folder is the repo.
+- From `scan.exclude`, the engine skips the extra entries that name one folder
+  (`legacy/**`); other globs only shape the graph.
+

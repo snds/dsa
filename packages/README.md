@@ -1,6 +1,6 @@
 # Add-ons
 
-`@snds/dsa` (the repo root) is the core: scan, patterns, ratchet, and later findings and issues.
+`@snds/dsa` (the repo root) is the core: scan, patterns, ratchet, `dsa run` with findings and issues, and element review.
 It keeps light dependencies so a project that only wants the ratchet installs nothing heavy.
 
 Heavier features ship as optional packages in this folder. Each depends on the core with
@@ -14,5 +14,6 @@ Heavier features ship as optional packages in this folder. Each depends on the c
 | `@snds/dsa-figma` | Figma library usage | Figma API |
 | `@snds/dsa-agent` | Agent workbench, MCP server, readiness providers | Agent CLIs |
 
-None exist yet. They arrive in Phase 3 of the migration plan; see
-[docs/architecture.md](../docs/architecture.md).
+`@snds/dsa-history` exists (Phase 2): `dsa run` keeps its history with it. The
+others arrive in Phase 3. How an add-on plugs in is in
+[docs/architecture.md](../docs/architecture.md#run-history-and-add-ons).

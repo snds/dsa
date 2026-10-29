@@ -1,0 +1,36 @@
+{
+  "designSystem": {
+    "core": {
+      "name": "Core",
+      "packages": [
+        "@acme/ds-react",
+        "@acme/ds-vue",
+        "@acme/ds-angular",
+        "@acme/tokens"
+      ],
+      "tagPrefixes": [
+        "ds-"
+      ],
+      "repo": "acme/design-system"
+    },
+    "children": [
+      {
+        "name": "Commerce kit",
+        "packages": [
+          "@acme/commerce-kit"
+        ],
+        "tagPrefixes": [
+          "ck-"
+        ],
+        "owner": "team-commerce",
+        "repo": "acme/commerce-kit"
+      }
+    ]
+  },
+  "deprecated": {
+    "OldModal": "Modal"
+  },
+  "github": {
+    "defaultRepo": "acme/design-system"
+  }
+}

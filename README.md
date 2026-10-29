@@ -187,6 +187,49 @@ rawElements                0        0      0
 wrote <repo>/test/fixtures/app/.dsa/ratchet.json
 ```
 
+### `dsa run` and the run history
+
+`dsa run` measures a whole repo over time: package versions, component use and
+overrides, native look-alikes, token compliance, and an element-by-element
+review. It turns the numbers into findings that open, update, hold and resolve
+across runs, and writes an issue draft for each open one. It reads the same
+`dsa.config.json`; an analytics-suite config works too (it is converted in
+memory).
+
+Run history is kept in DuckDB, which is a native module, so it ships as an
+add-on. Install it next to dsa:
+
+```sh
+npm install --save-dev @snds/dsa-history
+dsa run --profile ./dsa.profile.mjs
+```
+
+Without it, `dsa run` and the history commands stop and say what to install.
+
+| Command | What it does |
+|---|---|
+| `dsa where` | The repo, config, profile, data folder and add-ons a run would use. |
+| `dsa init` | Writes a first `dsa.config.json`, guessing the system's packages from the workspaces. |
+| `dsa run [--registry] [--remote] [--no-git] [--no-readiness] [--no-drafts] [--now <iso>]` | Scan, metrics, findings, issue drafts. `--remote` scans repos that declare a git URL from fresh clones. |
+| `dsa reevaluate` | Re-scores the latest run's element review with the current rules (no new run). |
+| `dsa findings [--all]` | Open findings, by score (`--all` adds resolved ones). |
+| `dsa issues draft` | Issue markdown for each open finding, in `<data>/issues`. |
+| `dsa issues sync [--apply] [--only <id>]` | Plans (or makes) GitHub issue changes. Needs `GITHUB_TOKEN`. |
+| `dsa snooze <id> --reason "…" [--days 30]` | Snoozes a finding. A reason is required. |
+| `dsa settings`, `dsa settings set <key> <value> [--note]` | The rule settings in force; a change is logged. |
+| `dsa elements [--target] [--list] [--needs-human] [--patterns]` | Element review, grouped, with confidence. |
+| `dsa signatures [component]` | Component signatures read from the core source. |
+| `dsa explain <id>` | The evidence behind one element's recommendation. |
+| `dsa decide <id> --accept \| --keep \| --gap \| --use <C> [--props k=v]` | Records a decision in the app's decisions file (also `--pattern`, `--file`). |
+| `dsa plan [--target] [--out]` | A migration plan: ready items, questions for a person, gaps. |
+
+Global options: `--root <repo>` (config paths resolve against it), `--data <dir>`
+(default `<output.dir>`), `--profile <spec>` (takes the place of the config's),
+`--config <file>`, `--json`.
+
+The dashboard, screenshots, Storybook measurement, Figma and the agent
+workbench are add-ons that land in Phase 3.
+
 ## Configuration
 
 `dsa.config.json` at the repository root. Every key is optional; these are the
@@ -221,12 +264,12 @@ defaults for a shadcn-style system called `unicron`:
 | `output.dir` | Where reports go. Gitignore it except `baseline.json` (and `decisions.json` if you keep review decisions). |
 | `profile` | The design system's profile module: a path relative to this file, or a package name. Holds what config can't say (component list, role map, file conventions). See [docs/architecture.md](docs/architecture.md). |
 
-### Sections read by features still landing
+### Sections `dsa run` reads
 
-These keys are part of the schema now, so a config can carry them and editors
-check them. The commands that use them arrive over the next phases (see
-[docs/architecture.md](docs/architecture.md)); until then they are accepted and
-not acted on.
+`dsa run` and the history commands read these keys (scan, patterns and ratchet
+don't). Sections for add-ons still to come (`rendered`, `shots`, `figma`,
+`agents`) are accepted and kept for them. A value set here wins over the
+profile's.
 
 | Key | Meaning |
 |---|---|
@@ -460,7 +503,8 @@ the graph or validate reports.
 - **Skill adapters.** Thin `component-audit` and `drift-detection` readers
   that consume `patterns.json` and `scan.json` instead of re-implementing the
   rule.
-- **Vue / Svelte templates** once the JSX path has settled.
+- **Vue and Angular in the graph.** `dsa run` reads Vue single-file components
+  and Angular templates today; scan, patterns and ratchet read JSX only.
 
 ## Scope and provenance
 
@@ -492,7 +536,14 @@ pnpm test
 pnpm build
 pnpm schema            # regenerate schema/*.json from the zod sources (after build)
 node dist/cli.js patterns test/fixtures/app
+node dist/cli.js run --root test/fixtures/acme-monorepo --profile test/fixtures/profiles/acme-suite.mjs --data /tmp/acme
 ```
+
+`scripts/parity/` checks that dsa stores exactly what the earlier analytics
+suite stored on the same repo: `node scripts/parity/run.mjs --old <suite> --new .
+--root <repo> --out <dir> [--profile f] [--config f] [--rename f]`. It runs each
+side twice (each run is two runs a day apart), dumps every table as sorted JSON,
+and exits 1 on any difference.
 
 The fixture under `test/fixtures/app/` is a tiny fake app with a shadcn-style
 design system in `src/components/ui/`; the tests assert the exact tiers,

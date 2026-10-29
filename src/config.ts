@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { isSuiteConfig, migrateSuiteConfig } from "./migrate.js";
 
 export const CONFIG_FILENAME = "dsa.config.json";
 
@@ -265,6 +266,8 @@ export interface LoadedConfig {
   configPath: string | null;
   /** Directory every relative path in the config resolves against. */
   root: string;
+  /** Set when the file was an analytics-suite config, converted in memory: what moved and what was left out. */
+  migrated?: { moved: string[]; dropped: string[]; notes: string[] };
 }
 
 /** Walk upward from `startDir` until a `dsa.config.json` is found. */
@@ -305,9 +308,18 @@ export function loadConfig(options: LoadConfigOptions = {}): LoadedConfig {
     if (!fs.existsSync(configPath)) throw new Error(`Config file not found: ${configPath}`);
     raw = JSON.parse(fs.readFileSync(configPath, "utf8")) as Record<string, unknown>;
   }
+  // A config written for the earlier analytics suite is converted in memory; `dsa config migrate` writes it out.
+  let migrated: LoadedConfig["migrated"];
+  if (isSuiteConfig(raw)) {
+    const m = migrateSuiteConfig(raw);
+    raw = m.config as Record<string, unknown>;
+    migrated = { moved: m.moved, dropped: m.dropped, notes: m.notes };
+  }
   if (options.overrides) raw = mergeSections(raw, options.overrides as Record<string, unknown>);
   const config = parseConfig(raw, configPath ?? "default config");
-  return { config, configPath, root: configPath ? path.dirname(configPath) : cwd };
+  const out: LoadedConfig = { config, configPath, root: configPath ? path.dirname(configPath) : cwd };
+  if (migrated) out.migrated = migrated;
+  return out;
 }
 
 function mergeSections(base: Record<string, unknown>, over: Record<string, unknown>): Record<string, unknown> {

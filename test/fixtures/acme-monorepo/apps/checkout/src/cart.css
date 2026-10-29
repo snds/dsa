@@ -1,0 +1,21 @@
+.cart { color: var(--ds-color-text); background: var(--ds-color-surface); }
+.c0 { padding: var(--ds-space-0); }
+.c1 { padding: var(--ds-space-1); }
+.c2 { padding: var(--ds-space-2); }
+.c3 { padding: var(--ds-space-3); }
+.c4 { padding: var(--ds-space-4); }
+.c5 { padding: var(--ds-space-5); }
+.c6 { padding: var(--ds-space-6); }
+.c7 { padding: var(--ds-space-7); }
+.c8 { padding: var(--ds-space-8); }
+.c9 { padding: var(--ds-space-9); }
+.c10 { padding: var(--ds-space-10); }
+.c11 { padding: var(--ds-space-11); }
+.c12 { padding: var(--ds-space-12); }
+.c13 { padding: var(--ds-space-13); }
+.c14 { padding: var(--ds-space-14); }
+.c15 { padding: var(--ds-space-15); }
+.c16 { padding: var(--ds-space-16); }
+.c17 { padding: var(--ds-space-17); }
+.c18 { padding: var(--ds-space-18); }
+.promo { color: #e34948; }

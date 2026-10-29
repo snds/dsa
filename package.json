@@ -1,7 +1,7 @@
 {
   "name": "@snds/dsa",
   "version": "0.2.0",
-  "description": "Design-system analytics: composition graph, pattern-candidate detection, adoption and correct-use metrics, and a CI ratchet. Library + CLI.",
+  "description": "Design-system analytics: composition graph, pattern-candidate detection, adoption and correct-use metrics, a CI ratchet, findings with a lifecycle, issues and element review. Library + CLI.",
   "license": "Apache-2.0",
   "author": "Sean Sands",
   "repository": {
@@ -47,22 +47,28 @@
   },
   "packageManager": "pnpm@10.28.0",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.build.json && pnpm -r --filter \"./packages/*\" build",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p packages/history/tsconfig.check.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "schema": "node dist/schema/generate.js",
     "prepare": "pnpm build"
   },
   "dependencies": {
+    "@babel/parser": "8.0.6",
+    "@vue/compiler-sfc": "3.5.43",
     "commander": "^14.0.3",
     "fast-glob": "^3.3.3",
+    "htmlparser2": "12.0.0",
     "picocolors": "^1.1.1",
+    "semver": "7.8.5",
     "ts-morph": "^28.0.0",
+    "yaml": "2.9.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
+    "@types/semver": "7.8.0",
     "typescript": "~5.9.3",
     "vitest": "^3.2.7"
   }

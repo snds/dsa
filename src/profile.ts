@@ -30,6 +30,27 @@ export interface DsaProfile {
   labPaths?: string[];
   /** Agent-readiness checks the system ships (its own audit tool). */
   readiness?: ReadinessProvider;
+  /**
+   * Import sources whose exports are all icons, beyond the common icon libraries (exact source),
+   * and "source#Name" for one icon export of a wider package.
+   */
+  icons?: string[];
+  /**
+   * Button evidence for the element review, as regex sources over class tokens: which classes show
+   * each variant and each size (strongest first), and the icon-button size prop for each size.
+   */
+  buttonTokens?: { variants?: Record<string, string>; sizes?: Record<string, string>; iconSizes?: Record<string, string> };
+  /** Custom properties the system sizes controls with, without "--", and their height in px: { "acme-control-h": 32 }. */
+  controlHeights?: Record<string, number>;
+  /** Extra regex sources whose classes mark a navigation row (a sidebar item token). */
+  navTokens?: string[];
+  /**
+   * Where the system's container components are imported from, by name: the element review names the
+   * container a part needs (a menu row needs DropdownMenu). { DropdownMenu: "@acme/ui/dropdown-menu" }.
+   */
+  containers?: Record<string, string>;
+  /** Metrics the system adds to the catalog (the same shape as data/metric-catalog.yaml entries). */
+  metrics?: Record<string, unknown>[];
 }
 
 export interface ComponentEntry {
@@ -49,6 +70,8 @@ export interface RoleOffer {
   gap?: string;
   /** One line on how the component takes over when it isn't a one-for-one swap. */
   how?: string;
+  /** "gap" when the system has no home for the role; "keep" when the native element is right. */
+  verdict?: "replace" | "gap" | "keep" | "unclear" | "ignore";
 }
 
 export interface ProfileFiles {
@@ -67,11 +90,15 @@ export interface ProfileFiles {
 export interface ReadinessRow {
   subject: string;
   dir: string;
+  /** "host" for a repo that consumes the system; anything else (the provider's own word) is the system's repo. */
+  mode: string;
   score: number;
   tier: string;
   /** The system's agent kit is installed in that repo. */
   kit: boolean;
   checks: { id: string; title: string; score: number; weight: number; evidence: string[]; fixes: string[] }[];
+  /** More metric rows for this repo (a usage checker's error count), stored as they are. */
+  metrics?: { metric_id: string; value: number; detail: unknown }[];
 }
 
 export interface ReadinessProvider {
@@ -81,6 +108,12 @@ export interface ReadinessProvider {
   available(root: string): boolean;
   /** Never throws for one bad repo: push a line to `notes` and leave it out. */
   collect(repos: { subject: string; dir: string }[], notes: string[]): Promise<ReadinessRow[]>;
+  /** True when the host root is the system's own repo, so it is audited too. */
+  isSystemRepo?(root: string): boolean;
+  /** Said in a finding when no check names a fix: how to install the agent kit. */
+  setupHint?: string;
+  /** Said when `available` is false. */
+  missingNote?: string;
 }
 
 /** A profile with its defaults filled in. */
