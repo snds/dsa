@@ -18,6 +18,22 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   still reads every file no adapter claims. `FileGraph` gains `framework`.
 - A pnpm workspace for optional add-ons under `packages/`, and
   `docs/architecture.md`.
+- Config `profile`: the system's profile module, by path or package name.
+  `loadRunContext` loads it and every run carries `ctx.profile`; the CLI runs
+  through it. `createRunContext` takes `options.profile` and refuses a config
+  that names a profile it can't import.
+- Config sections for features still landing, in the schema now so configs can
+  carry them: `system.children` and the core's `tagPrefixes` / `mainRef`; where
+  code lives (`path`, `git`, `aliases`, `exclude`, `pin`, `owner`, `repo`);
+  `consumers`, `extraRepos`, `internalConsumers`; `correctUse.elementMap`,
+  `nativeLookalikes`, `exceptionsFile`, `deprecated`; `tokens`, `tailwind`,
+  `apps`, `review`, `rendered`, `shots`, `modules`, `figma`, `github`,
+  `agents`, `report`, `settings`. None has a default, so existing configs parse
+  and report exactly as before.
+- `dsa config migrate`: converts an analytics-suite config, listing every key
+  that moved or was left out. Library: `migrateSuiteConfig`, `isSuiteConfig`.
+- Exports `loadRunContext`, `scanFromContext`, `patternsFromContext`,
+  `ratchetFromContext`.
 
 ### Changed
 

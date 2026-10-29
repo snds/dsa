@@ -8,7 +8,8 @@ import { ignoreCandidate, loadDecisions, saveDecisions } from "./detect/decision
 import { decisionsPath, patternsFromContext } from "./patterns.js";
 import { ratchetFromContext } from "./ratchet.js";
 import { formatPatterns, formatRatchet, formatScan } from "./report/text.js";
-import { createRunContext, writeJson, type RunOptions } from "./run.js";
+import { loadRunContext, writeJson, type RunOptions } from "./run.js";
+import { isSuiteConfig, migrateSuiteConfig } from "./migrate.js";
 import { scanFromContext } from "./scan.js";
 import { dsaVersion } from "./version.js";
 
@@ -57,9 +58,9 @@ export function createProgram(io: CliIo = { out: console.log, err: console.error
     .command("scan")
     .argument("[dir]", "directory to scan", ".")
     .description("component inventory + adoption + correct-use metrics -> <output.dir>/scan.json")
-    .action((dir: string, _opts: unknown, cmd: Command) => {
+    .action(async (dir: string, _opts: unknown, cmd: Command) => {
       const g = cmd.optsWithGlobals<GlobalOpts>();
-      const ctx = createRunContext(runOptions(dir, g, io));
+      const ctx = await loadRunContext(runOptions(dir, g, io));
       const report = scanFromContext(ctx);
       emit(io, g.json, path.join(ctx.outputDir, "scan.json"), report, formatScan(report));
     });
@@ -70,9 +71,9 @@ export function createProgram(io: CliIo = { out: console.log, err: console.error
     .option("--all", "include snowflakes (compositions below the occurrence / host bar)")
     .option("--ignore <id>", "record that a reviewer ignored this candidate; parked after patterns.ignoreIgnoredTimes")
     .description("pattern-candidate suggestion records -> <output.dir>/patterns.json")
-    .action((dir: string, opts: { all?: boolean; ignore?: string }, cmd: Command) => {
+    .action(async (dir: string, opts: { all?: boolean; ignore?: string }, cmd: Command) => {
       const g = cmd.optsWithGlobals<GlobalOpts>();
-      const ctx = createRunContext(runOptions(dir, g, io));
+      const ctx = await loadRunContext(runOptions(dir, g, io));
       const decisions = loadDecisions(decisionsPath(ctx));
       if (opts.ignore) {
         const probe = patternsFromContext(ctx, { all: true, decisions: { version: 1, decisions: {} } });
@@ -94,15 +95,49 @@ export function createProgram(io: CliIo = { out: console.log, err: console.error
     .option("--init", "create the baseline from the current counts")
     .option("--update", "rewrite the baseline with the current counts")
     .description("compare correct-use violation counts against ratchet.baseline; exit 1 if any grew")
-    .action((dir: string, opts: { init?: boolean; update?: boolean }, cmd: Command) => {
+    .action(async (dir: string, opts: { init?: boolean; update?: boolean }, cmd: Command) => {
       const g = cmd.optsWithGlobals<GlobalOpts>();
-      const ctx = createRunContext(runOptions(dir, g, io));
+      const ctx = await loadRunContext(runOptions(dir, g, io));
       const extra: Parameters<typeof ratchetFromContext>[1] = {};
       if (opts.init) extra.init = true;
       if (opts.update) extra.update = true;
       const report = ratchetFromContext(ctx, extra);
       emit(io, g.json, path.join(ctx.outputDir, "ratchet.json"), report, formatRatchet(report));
       if (!report.ok) process.exitCode = 1;
+    });
+
+  const config = program.command("config").description("work with dsa.config.json");
+  config
+    .command("migrate")
+    .argument("<file>", "a config written for the earlier analytics suite")
+    .option("--profile <spec>", "set `profile` in the output (a path relative to the new config, or a package name)")
+    .option("--write <path>", "write the converted config here instead of printing it")
+    .option("--force", "overwrite --write's file if it exists")
+    .description("convert an analytics-suite config to this format; lists every key that moved or was left out")
+    .action((file: string, opts: { profile?: string; write?: string; force?: boolean }) => {
+      const src = path.resolve(io.cwd, file);
+      const raw = JSON.parse(fs.readFileSync(src, "utf8")) as unknown;
+      if (!isSuiteConfig(raw)) throw new Error(`${file} has no "designSystem" section, so it isn't a suite config.`);
+      const result = migrateSuiteConfig(raw, opts.profile ? { profile: opts.profile } : {});
+      const json = JSON.stringify(result.config, null, 2) + "\n";
+      const summary = [
+        pc.bold(`dsa config migrate — ${result.moved.length} keys moved, ${result.dropped.length} left out`),
+        ...result.moved.map((m) => `  ${m}`),
+        ...(result.dropped.length ? ["", pc.yellow("left out (no home in dsa):"), ...result.dropped.map((d) => `  ${d}`)] : []),
+        ...(result.notes.length ? ["", "notes:", ...result.notes.map((n) => `  ${n}`)] : []),
+      ];
+      if (!opts.write) {
+        io.out(json.trimEnd());
+        io.err(summary.join("\n"));
+        return;
+      }
+      const dest = path.resolve(io.cwd, opts.write);
+      if (fs.existsSync(dest) && !opts.force) throw new Error(`${dest} exists; pass --force to overwrite it.`);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.writeFileSync(dest, json);
+      io.out(summary.join("\n"));
+      io.out("");
+      io.out(pc.dim(`wrote ${dest}`));
     });
 
   return program;

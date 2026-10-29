@@ -219,6 +219,33 @@ defaults for a shadcn-style system called `unicron`:
 | `correctUse.rawElements` | Plain HTML tags counted as raw elements (bypasses of the system). Default `["button"]`; add `"a"`, `"input"`, or `"select"` if your system covers them, or `[]` to turn the check off. |
 | `ratchet.baseline` | Baseline path, relative to the config root. |
 | `output.dir` | Where reports go. Gitignore it except `baseline.json` (and `decisions.json` if you keep review decisions). |
+| `profile` | The design system's profile module: a path relative to this file, or a package name. Holds what config can't say (component list, role map, file conventions). See [docs/architecture.md](docs/architecture.md). |
+
+### Sections read by features still landing
+
+These keys are part of the schema now, so a config can carry them and editors
+check them. The commands that use them arrive over the next phases (see
+[docs/architecture.md](docs/architecture.md)); until then they are accepted and
+not acted on.
+
+| Key | Meaning |
+|---|---|
+| `system.children` | Child libraries built on the core (a product kit, a prototype), each with `name`, `packages`, and where its code lives. |
+| `system.tagPrefixes`, `system.mainRef` | Element tag prefixes the core owns (`ds-` maps `<ds-card>` to `Card`); the ref treated as the latest core for pin currency. |
+| `path`, `git`, `aliases`, `exclude`, `pin`, `owner`, `repo` | On `system`, each child, each consumer: where the code is (a folder, or a git URL cloned and only read), extra import aliases, folders to skip, a pinned-SHA file, and who gets its findings. |
+| `consumers`, `extraRepos`, `internalConsumers` | Consumers listed explicitly (else found from workspaces), consumers in other checkouts, and the system team's own apps (scored, not counted toward clusters). |
+| `correctUse.elementMap`, `nativeLookalikes`, `exceptionsFile`, `deprecated` | The system's element map, native elements that imitate a component (`{ "select": "Select" }`), each app's exceptions file, and deprecated components with their replacements. |
+| `tokens.patterns`, `tailwind` | What counts as a token reference; for Tailwind systems, the tier-leakage spec and semantic CSS the repo's own lint uses. |
+| `apps` | Per-app switches (versions, components, look-alikes, tokens), plus how to start the app and which pages and written-down flows to visit for screenshots. |
+| `review`, `rendered`, `shots`, `modules`, `figma`, `github`, `agents`, `report`, `settings` | Element review, Storybook measurement, screenshots, optional modules, Figma, GitHub issues, the agent workbench, report display, and rule settings. |
+
+### `dsa config migrate <file> [--profile <spec>] [--write <path>] [--force]`
+
+Converts a config written for the earlier analytics suite (`designSystem.core`,
+top-level `lookalikes`, `rawElements` as a file path, …) to this format. Every
+key moves to its new home or is listed as left out; a key the schema doesn't
+know is listed, never dropped silently. Without `--write` the converted JSON
+goes to stdout and the summary to stderr.
 
 How a JSX element gets its kind: **ds** if its tag resolves to an import from
 `packages` or `localAliases`; **local** if it resolves to any other in-repo

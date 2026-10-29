@@ -91,9 +91,12 @@ export default defineProfile({
 });
 ```
 
-`loadProfile(spec, dir)` loads it by relative path or package name. The config
-gains a `profile` key in Phase 1, and the run context carries the resolved
-profile from then on.
+The config's `profile` key names it, by a path relative to the config file or a
+package name. `loadRunContext` loads it and every run carries the resolved
+profile (`ctx.profile`); the CLI always runs that way. `createRunContext` stays
+synchronous: it takes an already-loaded `options.profile`, and refuses a config
+that names one it can't import. A config value for the same thing (an element
+map path, a lab-page glob) wins over the profile's.
 
 Rules and metrics a system adds on top of the catalog join the profile in Phase 2,
 when the catalog and rules move into the core.
@@ -103,8 +106,8 @@ when the catalog and rules move into the core.
 | Phase | What lands | State |
 |---|---|---|
 | 0 | Workspace, provenance, profile interface, reader seam, this note | done |
-| 1 | Extended config (tiers, other repos, per-app switches, `profile`) and `dsa config migrate` | next |
-| 2 | Core ports: repo discovery, Vue/Angular readers, versions, tokens, Tailwind drift, findings, issues; element facts | |
+| 1 | Extended config (tiers, other repos, per-app switches, `profile`) and `dsa config migrate` | done |
+| 2 | Core ports: repo discovery, Vue/Angular readers, versions, tokens, Tailwind drift, findings, issues; element facts | next |
 | 3 | Add-ons: review, dashboard, history, figma, agent | |
 | 4 | Neutralize: every system-specific name behind the profile; CI name check; port the suite's tests | |
 | 5 | A consuming system switches to dsa as a dependency, after a parity run | |
