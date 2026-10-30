@@ -1,6 +1,6 @@
 {
   "name": "@snds/dsa-agent",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Agents for @snds/dsa: the workbench in the dashboard, an MCP server (dsa mcp), briefs, sessions in a sandbox, proposals and visual before/after.",
   "license": "Apache-2.0",
   "author": "Sean Sands",

@@ -1,6 +1,6 @@
 {
   "name": "@snds/dsa",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Design-system analytics: composition graph, pattern-candidate detection, adoption and correct-use metrics, a CI ratchet, findings with a lifecycle, issues and element review. Library + CLI.",
   "license": "Apache-2.0",
   "author": "Sean Sands",

@@ -1,6 +1,6 @@
 {
   "name": "@snds/dsa-history",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Run history for @snds/dsa in a local DuckDB file: every run, metric, finding and finding event, so trends are queries.",
   "license": "Apache-2.0",
   "author": "Sean Sands",

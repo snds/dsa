@@ -1,6 +1,6 @@
 {
   "name": "@snds/dsa-figma",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Figma library usage for @snds/dsa: crawls design files for instances of the system's components and detached look-alikes.",
   "license": "Apache-2.0",
   "author": "Sean Sands",
