@@ -28,9 +28,12 @@ const norm = (s: string) => s.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
 const MIN = 0.35;
 
 export function typeConcepts(concepts: Concept[], data: Archetypes = archetypes()) {
+  const exact = new Set(Object.values(data.kinds).flatMap((k) => [k.prefLabel, ...k.altLabels].map(norm)));
+  // A class named exactly for a kind (btn, card, badge) is a component even beside declared ones: Tailwind
+  // systems ship class components alongside framework components.
+  for (const c of concepts) if (c.role === "style" && (exact.has(norm(c.key)) || exact.has(norm(c.name)))) c.role = "component";
   const components = concepts.filter((c) => c.role !== "style");
   const names = components.map((c) => c.name);
-  const exact = new Set(Object.values(data.kinds).flatMap((k) => [k.prefLabel, ...k.altLabels].map(norm)));
   for (const c of components) {
     // Exported constants and plumbing (ButtonKinds, ThemeProvider, DialogContext) aren't components.
     if (/(Kinds?|Sizes|Types|Variants|Props|Context|Provider|Config|Options|Constants|Utils|Hook|Store|Theme)$/.test(c.name)) continue;

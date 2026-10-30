@@ -114,6 +114,25 @@ describe("system model: one concept, every way it is written", () => {
     expect(uses(m, "modal.twig")).toEqual(["button@3"]);
   });
 
+  it("tag helpers and the TypeScript tag map; a macro's option classes; Tailwind @utility class components", () => {
+    const m = repo({
+      "ui/package.json": JSON.stringify({ name: "@acme/ui" }),
+      "ui/src/card.ts": "import { defineElement } from './define';\nexport class Card extends LitElement {}\ndefineElement('acme-card', Card);\n",
+      "ui/src/tabs.ts": "export class Tabs extends LitElement {}\ndeclare global {\n  interface HTMLElementTagNameMap {\n    'acme-tabs': Tabs;\n  }\n}\n",
+      "ui/src/details/macro.njk": "{% macro details(params) %}{% endmacro %}\n",
+      "ui/src/details/_index.scss": ".acme-details { x: 1 }\n",
+      "ui/src/tag/macro.njk": "{% macro tag(params) %}{% endmacro %}\n",
+      "ui/src/tag/_index.scss": ".acme-tag { x: 1 }\n",
+      "ui/src/utilities/buttons.css": "@utility btn { display: inline-flex; }\n@utility scrollbar-none { scrollbar-width: none; }\n",
+      "app/page.html": "<acme-card></acme-card>\n<acme-tabs></acme-tabs>\n<button class=\"btn\">Go</button>\n",
+      "app/page.njk": "{{ details({\n  text: 'More',\n  classes: 'acme-tag'\n}) }}\n",
+    }, { system: { name: "acme", path: "ui", tagPrefixes: ["acme-"] }, scan: { include: ["**/*.{html,njk}"], exclude: [] } });
+    expect(uses(m, "page.html")).toEqual(["card@1", "tabs@2", "btn@3"]);
+    expect(uses(m, "page.njk")).toEqual(["tag@1"]);
+    expect(m.concepts.find((c) => c.key === "btn")?.role).toBe("component");
+    expect(m.concepts.find((c) => c.key === "scrollbarnone")?.role).toBe("style");
+  });
+
   it("a file a reader can't read is skipped and listed; others still count", () => {
     const m = repo({
       "ui/x.ts": "customElements.define('acme-x', X);\n",
@@ -228,6 +247,21 @@ describe("facets: variant axes and parts", () => {
     expect(axes("alert")).toEqual({ color: ["error", "primary"] });
     expect(parts("alert")).toEqual(["icon", "root", "title"]);
     expect(parts("chip")).toEqual(["label", "removeIcon", "root"]);
+  });
+
+  it("prop definition objects, a package entry pointing at missing build output, and class modifiers split by meaning", () => {
+    const { axes } = facets({
+      "package.json": JSON.stringify({ name: "acme", main: "lib/index.js", typings: "es/index.d.ts" }),
+      "components/index.ts": "export { Button } from './button';\nexport { Badge } from './badge';\n",
+      "components/button.tsx": "export function Button() { return null }\n",
+      "components/button.props.ts": "export { basePropDefs as buttonPropDefs } from './_internal/base.props';\n",
+      "components/_internal/base.props.ts": "import { colorPropDef } from './color.prop';\nconst sizes = ['1', '2', '3'] as const;\nexport const basePropDefs = { size: { type: 'enum', values: sizes }, ...colorPropDef };\n",
+      "components/_internal/color.prop.ts": "export const colorPropDef = { color: { type: 'enum', values: ['red', 'blue'] } };\n",
+      "components/badge/index.tsx": "export function Badge() { return null }\n",
+      "components/badge/style.css": ".badge { x: 1 }\n.badge-sm { x: 1 }\n.badge-lg { x: 1 }\n.badge-primary { x: 1 }\n.badge-error { x: 1 }\n.badge-success { x: 1 }\n.badge-wide { x: 1 }\n",
+    }, { path: "." });
+    expect(axes("button")).toEqual({ color: ["blue", "red"], size: ["1", "2", "3"] });
+    expect(axes("badge")).toMatchObject({ size: ["lg", "sm"], tone: ["error", "success"], modifier: ["error", "lg", "primary", "sm", "success", "wide"] });
   });
 });
 

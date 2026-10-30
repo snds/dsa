@@ -187,7 +187,13 @@ export function discoverSources(root: string, config: DsaConfig, options: { thre
   const pass = (c: SourceCandidate) => c.confidence >= threshold;
   const named = scored.filter((x) => x.cand.because === "named by the config" && pass(x.cand));
   let picked = named.length ? named : scored.filter((x) => pass(x.cand));
-  const member = (dir: string) => { const y = scored.find((z) => z.key === dir); return Boolean(y?.holds && !y.penalized && y.cand.confidence >= 0.4); };
+  // A member comes in when it looks like part of a system on its own (0.45), or holds a token set (a theme or
+  // styles package); tools (a story decorator, a visual-diff viewer) stay out.
+  const member = (dir: string) => {
+    const y = scored.find((z) => z.key === dir);
+    if (!y?.holds || y.penalized) return false;
+    return y.cand.confidence >= 0.45 || (y.cand.signals.find((s) => s.name === "tokens")?.score ?? 0) >= 1;
+  };
   // A family that passes brings its members that hold components or tokens; tools (a CLI, a lint config) stay out.
   const out = new Set<string>();
   for (const x of picked) {
@@ -267,7 +273,9 @@ function factsOf(rel: string, text: string): FileFacts {
   let blocks: string[] = [];
   let declares = 0, variants = 0, tokens = 0;
   if (/\.(ts|tsx|js|jsx|mjs)$/.test(ext)) {
-    for (const m of text.matchAll(/(?:customElements\.define|@customElement|\b[A-Z]\w*\.define)\(\s*['"`]([a-z][\w$-]*-[\w${}-]+)['"`]/g)) { declares++; tags.push(m[1]!); }
+    for (const m of text.matchAll(/(?:customElements\.define|@customElement|\b[A-Z]\w*\.define|\b\w*(?:[dD]efine|[rR]egister)\w*)\(\s*['"`]([a-z][\w$-]*-[\w${}-]+)['"`]/g)) { declares++; tags.push(m[1]!); }
+    const tagMap = text.match(/interface\s+HTMLElementTagNameMap\s*\{([^}]*)\}/);
+    if (tagMap) for (const m of tagMap[1]!.matchAll(/['"]([a-z][\w-]*-[\w-]+)['"]\s*:/g)) if (!tags.includes(m[1]!)) { declares++; tags.push(m[1]!); }
     for (const m of text.matchAll(/@Component\(\s*\{[\s\S]{0,600}?\b(?:tag|selector)\s*:\s*['"`]([^'"`]+)['"`]/g)) { declares++; const t = m[1]!.match(/^[a-z][\w-]*-[\w-]+/)?.[0]; if (t) tags.push(t); }
     if (/\.(tsx|jsx)$/.test(ext)) {
       const listed = [...text.matchAll(/export\s*\{([^}]*)\}/g)].flatMap((m) => m[1]!.split(",")).filter((n) => /^\s*(?:\w+\s+as\s+)?[A-Z][a-z]\w*\s*$/.test(n)).length;

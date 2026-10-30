@@ -73,10 +73,26 @@ function readHtml(file: string, text: string, baseOffset: number, imports: Impor
 }
 
 /** `acmeButton({ … })`, `{% call acmeFieldset({ … }) %}`: a macro call is an element named by the macro. */
+/** The `classes: "…"` a macro call passes at the top level of its options (`details({ classes: "x-expander" })`). */
+function optionClasses(text: string, from: number): string[] {
+  let depth = 0;
+  for (let i = from; i < Math.min(text.length, from + 4000); i++) {
+    const c = text[i];
+    if (c === "{" || c === "[") depth++;
+    else if (c === "}" || c === "]") depth--;
+    else if (c === ")" && depth <= 0) break;
+    else if (depth === 1 && c === "c") {
+      const m = text.slice(i, i + 300).match(/^classes\s*:\s*(["'])([^"']*)\1/);
+      if (m && /[\s{,]/.test(text[i - 1] ?? " ")) return m[2]!.split(/\s+/).filter(Boolean);
+    }
+  }
+  return [];
+}
+
 function readMacroCalls(file: string, text: string): Element[] {
   const out: Element[] = [];
   for (const m of text.matchAll(/(?:\{\{-?|\{%-?\s*call|\{%-?\s*set\s+\w+\s*=)\s*([A-Za-z_]\w*)\s*\(/g)) {
-    out.push({ file, line: lineAt(text, m.index! + m[0].length - m[1]!.length - 1), tag: m[1]!, attributes: {}, classes: [], macro: true });
+    out.push({ file, line: lineAt(text, m.index! + m[0].length - m[1]!.length - 1), tag: m[1]!, attributes: {}, classes: optionClasses(text, m.index! + m[0].length), macro: true });
   }
   // A call nested inside another call's options or a {% set %} block: `x: acmeButton({`.
   for (const m of text.matchAll(/[:,(]\s*([a-z]+[A-Z]\w*)\s*\(\s*\{/g)) {
