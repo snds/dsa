@@ -20,7 +20,8 @@ describe("name check", () => {
   });
 
   it("passes when no tracked file matches", () => {
-    const r = run({ DSA_NAME_DENYLIST: "zzq-no-such-name-qzz" });
+    // Joined at runtime: written whole, this file would match it.
+    const r = run({ DSA_NAME_DENYLIST: ["zzq", "no-such-name", "qzz"].join("-") });
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/no denied names/);
   });
