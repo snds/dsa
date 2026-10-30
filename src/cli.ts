@@ -12,7 +12,7 @@ import { loadRunContext, writeJson, type RunOptions } from "./run.js";
 import { isSuiteConfig, migrateSuiteConfig } from "./migrate.js";
 import { scanFromContext } from "./scan.js";
 import { loadConfig } from "./config.js";
-import { buildSystemModel, type SystemModel } from "./model/index.js";
+import { buildSystemModel, discoverSources, type SourceDiscovery, type SystemModel } from "./model/index.js";
 import { dsaVersion } from "./version.js";
 import { addAddonCommands, addEngineCommands } from "./cli-engine.js";
 
@@ -82,6 +82,32 @@ export function createProgram(io: CliIo = { out: console.log, err: console.error
       const root = g.root ? path.resolve(g.root) : loaded.root;
       const model = buildSystemModel({ root, config: loaded.config });
       emit(io, g.json, path.resolve(root, loaded.config.output.dir, "model.json"), model, formatModel(model));
+    });
+
+  program
+    .command("sources")
+    .argument("[dir]", "directory to scan", ".")
+    .option("--pin <folders...>", "read these folders as the system's source from now on (writes system.sources)")
+    .option("--unpin", "forget pinned folders and find them again")
+    .option("--threshold <n>", "confidence a found folder needs (0–1, default 0.9)", parseFloat)
+    .description("where the system's code lives: every folder scored, the ones read, and the ones to confirm")
+    .action(async (dir: string, opts: { pin?: string[]; unpin?: boolean; threshold?: number }, cmd: Command) => {
+      const g = cmd.optsWithGlobals<GlobalOpts & { root?: string }>();
+      const loaded = loadConfig(g.config ? { configPath: g.config } : { cwd: path.resolve(dir) });
+      const root = g.root ? path.resolve(g.root) : loaded.root;
+      if (opts.pin || opts.unpin) {
+        const file = loaded.configPath ?? path.join(root, "dsa.config.json");
+        const raw = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : {};
+        raw.system ??= {};
+        delete raw.system.path;
+        if (opts.unpin) delete raw.system.sources;
+        else raw.system.sources = opts.pin!.map((p) => path.relative(root, path.resolve(root, p)) || ".");
+        fs.writeFileSync(file, JSON.stringify(raw, null, 2) + "\n");
+        io.err(opts.unpin ? `Unpinned sources in ${file}.` : `Pinned ${raw.system.sources.join(", ")} in ${file}.`);
+        Object.assign(loaded.config.system, { path: undefined, sources: raw.system.sources });
+      }
+      const found = discoverSources(root, loaded.config, opts.threshold !== undefined ? { threshold: opts.threshold } : {});
+      emit(io, g.json, path.resolve(root, loaded.config.output.dir, "sources.json"), found, formatSources(found));
     });
 
   program
@@ -195,6 +221,20 @@ const invokedDirectly = (() => {
   }
 })();
 if (invokedDirectly) void main();
+
+function formatSources(d: SourceDiscovery): string {
+  const pct = (n: number) => `${Math.round(n * 100)}%`.padStart(4);
+  const how = { pinned: "pinned in the config", expected: "where the config points", discovered: "found by scanning the repo", none: "none passed" }[d.how];
+  const lines = [`Sources (${how}; a found folder needs ${pct(d.threshold).trim()}):`];
+  for (const s of d.accepted) lines.push(`  ${pc.green("✓")} ${s}`);
+  const rest = d.candidates.filter((c) => !d.accepted.includes(c.dir)).slice(0, 12);
+  if (rest.length) lines.push("", "Also scored (confirm with `dsa sources --pin <folder>`):");
+  for (const c of rest) {
+    const top = c.signals.filter((s) => s.score > 0).sort((a, b) => b.weight * b.score - a.weight * a.score).slice(0, 3).map((s) => s.detail).join(", ");
+    lines.push(`  ${pct(c.confidence)}  ${c.dir}${c.expected ? pc.dim(` (${c.because})`) : ""}${top ? pc.dim(` · ${top}`) : ""}`);
+  }
+  return lines.join("\n");
+}
 
 function formatModel(m: SystemModel): string {
   const forms: Record<string, number> = {};

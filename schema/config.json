@@ -83,6 +83,13 @@
                 "description": "Folder of its code, relative to the config root (another checkout may be outside it, e.g. ../prototype).",
                 "type": "string"
               },
+              "sources": {
+                "description": "Folders of its code, when there are several (set by `dsa sources --pin` or Settings → Sources). Without `path` or `sources`, dsa finds them.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
               "git": {
                 "description": "Clone from here when `path` is missing (or when runs are told to use remotes). Only ever read.",
                 "type": "object",
@@ -149,6 +156,13 @@
           "description": "Folder of its code, relative to the config root (another checkout may be outside it, e.g. ../prototype).",
           "type": "string"
         },
+        "sources": {
+          "description": "Folders of its code, when there are several (set by `dsa sources --pin` or Settings → Sources). Without `path` or `sources`, dsa finds them.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "git": {
           "description": "Clone from here when `path` is missing (or when runs are told to use remotes). Only ever read.",
           "type": "object",
@@ -211,6 +225,23 @@
       ],
       "additionalProperties": false
     },
+    "discovery": {
+      "description": "Finding the system's source when `system.path` / `system.sources` are not set.",
+      "type": "object",
+      "properties": {
+        "threshold": {
+          "default": 0.9,
+          "description": "Confidence a found folder needs before dsa reads it as the system's source (0–1).",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "required": [
+        "threshold"
+      ],
+      "additionalProperties": false
+    },
     "consumers": {
       "description": "Consumers, listed explicitly. When absent, workspaces that depend on a system package are found.",
       "type": "array",
@@ -224,6 +255,13 @@
           "path": {
             "description": "Folder of its code, relative to the config root (another checkout may be outside it, e.g. ../prototype).",
             "type": "string"
+          },
+          "sources": {
+            "description": "Folders of its code, when there are several (set by `dsa sources --pin` or Settings → Sources). Without `path` or `sources`, dsa finds them.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "git": {
             "description": "Clone from here when `path` is missing (or when runs are told to use remotes). Only ever read.",
@@ -299,6 +337,13 @@
           "path": {
             "description": "Folder of its code, relative to the config root (another checkout may be outside it, e.g. ../prototype).",
             "type": "string"
+          },
+          "sources": {
+            "description": "Folders of its code, when there are several (set by `dsa sources --pin` or Settings → Sources). Without `path` or `sources`, dsa finds them.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "git": {
             "description": "Clone from here when `path` is missing (or when runs are told to use remotes). Only ever read.",
