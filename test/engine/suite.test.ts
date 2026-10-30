@@ -509,3 +509,24 @@ test('decide --file: decisions staged on the published dashboard apply as in dsa
   assert.equal(d1.who, 'Sean');
   assert.equal(after.find(e => e.id === r2.id)!.decided!.decision.verdict, 'ignore');
 });
+
+test('the element a component draws as (render prop) is not a look-alike; slot content is', async () => {
+  const host = shadcnHost();
+  write(host, {
+    'apps/docs/src/items.tsx': [
+      "import { Item } from '@x/ui/item';",
+      'export const L = () => (<>',
+      '  <Item render={<button type="button" />}>Open</Item>',
+      '  <Item render={<button type="button" disabled />}>Disabled</Item>',
+      '  <Item variant="outline" render={<button />} />',
+      '  <button>Plain</button>',
+      '  <Item action={<button>Slot content</button>}>Row</Item>',
+      '</>);',
+    ].join('\n'),
+  });
+  const res = await runPipeline({ root: host, dataDir: tmp(), git: false, now: NOW });
+  const rows = res.data.lookalikes.filter(l => l.target === 'docs' && l.element === 'button');
+  // page.tsx has 5 plain buttons; items.tsx adds the child and the slot content, not the three in render.
+  assert.equal(rows.length, 7);
+  assert.equal(rows.filter(l => l.file.endsWith('items.tsx')).length, 2);
+});

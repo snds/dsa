@@ -1,6 +1,6 @@
 {
   "name": "@snds/dsa-dashboard",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "The @snds/dsa dashboard: dsa serve (live, with Settings and review), the HTML report, dsa publish (a static site), the action queue.",
   "license": "Apache-2.0",
   "author": "Sean Sands",
@@ -35,9 +35,9 @@
     "build:ui": "pnpm --filter @snds/dsa-dashboard-ui build"
   },
   "peerDependencies": {
-    "@snds/dsa": "workspace:*",
-    "@snds/dsa-review": "workspace:*",
-    "@snds/dsa-figma": "workspace:*"
+    "@snds/dsa": "workspace:^",
+    "@snds/dsa-review": "workspace:^",
+    "@snds/dsa-figma": "workspace:^"
   },
   "devDependencies": {
     "@snds/dsa": "workspace:*",

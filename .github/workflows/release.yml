@@ -1,0 +1,43 @@
+name: release
+
+# Push a tag vX.Y.Z (matching every package's version) to release. The core and each add-on are
+# packed into tarballs and attached to a GitHub Release; consumers install them by URL
+# (README → Install). Nothing goes to npm.
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the release and its assets
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Name check
+        env:
+          DSA_NAME_DENYLIST: ${{ secrets.DSA_NAME_DENYLIST }}
+        run: node scripts/name-check.mjs --require
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm release:pack --tag "${GITHUB_REF_NAME}"
+      - run: pnpm release:smoke
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes=$(awk -v v="${GITHUB_REF_NAME#v}" '$0 ~ "^## " && found {exit} $0 ~ "^## \\[?"v {found=1; next} found' CHANGELOG.md)
+          gh release create "${GITHUB_REF_NAME}" artifacts/*.tgz --title "${GITHUB_REF_NAME}" --notes "${notes:-See CHANGELOG.md.}"

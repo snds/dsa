@@ -201,6 +201,7 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
   const sweeper = (u: string) => async (revealedBy?: string) => {
     const found: { id: string; score: number; ties: number }[] = await inPage(page, FIND_IN_PAGE, remaining);
     for (const f of found) {
+      f.score = matchConfidence(f.score, f.ties);
       const file = `${f.id}.png`;
       // Measure before capturing (capture clears the marker): the same properties rendered signatures record,
       // and where it sits (landmarks, live ARIA, geometry) for the next evaluation.
@@ -209,7 +210,7 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
       const cap = await capture(page, f.id, path.join(o.dir, file));
       if (!cap) continue;
       shots[f.id] = { file, page: u, matchScore: Math.round(f.score * 100) / 100, ties: f.ties, styles, placement, box: cap.box, revealedBy };
-      o.log(`  ${f.id} on ${u.replace(base.origin, '')}${revealedBy ? ` after ${revealedBy}` : ''} (match ${Math.round(f.score * 100)}%${f.ties > 1 ? `, ${f.ties} similar elements on the page` : ''})`);
+      o.log(`  ${f.id} on ${u.replace(base.origin, '')}${revealedBy ? ` after ${revealedBy}` : ''} (match ${Math.round(f.score * 100)}%${f.ties > 1 ? `, a guess among ${f.ties} similar elements on the page` : ''})`);
     }
     remaining = remaining.filter(r => !shots[r.id]);
   };
@@ -576,6 +577,15 @@ const FIND_CONTROL = `(label) => {
 }`;
 
 /**
+ * How sure a match is. The page scores every candidate; when several score within 0.05 of the best, the pick
+ * among them is a guess, right about one time in `ties`, so the confidence is capped there. Below
+ * PLACEMENT_MIN_MATCH a shot is still shown, but its placement doesn't feed the next evaluation.
+ */
+export function matchConfidence(score: number, ties: number): number {
+  return ties > 1 ? Math.min(score * 0.85, 1 / ties) : score;
+}
+
+/**
  * Runs in the page. Scores every element with the right tag against what the scan knows.
  * Kept as source text: tsx/esbuild wrap functions with helpers (__name) that don't exist in the page.
  */
@@ -609,7 +619,7 @@ const FIND_IN_PAGE = `(targets) => {
     const best = scored[0];
     const ties = scored.filter(x => best.s - x.s < 0.05).length;
     best.el.setAttribute('data-dsa-shot', t.id);
-    out.push({ id: t.id, score: best.s * (ties > 1 ? 0.85 : 1), ties });
+    out.push({ id: t.id, score: best.s, ties });
   }
   return out;
 }`;

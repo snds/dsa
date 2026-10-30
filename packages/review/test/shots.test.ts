@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fixtureCopy, loadConfig, NOW, runPipeline } from '../../../test/engine/fixture.js';
 import { discoverRoutes } from '../src/apps.js';
-import { takeShots } from '../src/shots.js';
+import { matchConfidence, takeShots } from '../src/shots.js';
 
 // Screenshots for the element review: the crawler starts each app itself (here, a tiny dev server),
 // visits routes it finds in the source, captures examples, stops the app, and caches by source.
@@ -41,4 +41,12 @@ test('screenshots start the app themselves, find routes in the source, and stop 
   fs.appendFileSync(path.join(app, 'src/Links.tsx'), '\n// edit\n');
   const r3 = await takeShots({ root, dataDir: data, config, target: 'checkout', perGroup: 2 });
   assert.ok(r3.apps.find(x => x.target === 'checkout')!.url, 'changed source restarts the app');
+});
+
+test('a match tied with other elements is only as sure as a guess among them', () => {
+  assert.equal(matchConfidence(0.9, 1), 0.9);
+  // Two ties keep the old 15% discount's ceiling; hundreds fall far below placement's 0.8.
+  assert.equal(matchConfidence(1, 2), 0.5);
+  assert.ok(matchConfidence(1, 299) < 0.01);
+  assert.equal(matchConfidence(0.5, 2), 0.425);
 });

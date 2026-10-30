@@ -6,6 +6,39 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-29
+
+Every feature of the earlier analytics suite now lives here (Phases 2–4), and the
+add-ons can be installed outside this repo.
+
+### Releases
+
+- Releases: one version for the core and every add-on. Pushing a tag `vX.Y.Z`
+  tests, packs, installs the tarballs into a fresh project and attaches them to a
+  GitHub Release (`.github/workflows/release.yml`, `pnpm release:pack`,
+  `pnpm release:smoke`). CI runs the pack and the install on every pull request.
+
+- Add-ons name the core and each other as peer dependencies (`workspace:^`), so a
+  consumer installs the release tarballs with no overrides. `@snds/dsa-agent`'s
+  dashboard and review are peers now, not dependencies.
+- `dsa mcp` reports the package's version instead of a fixed `0.1.0`.
+
+### Fixed after the Unicron QA review
+
+- Component signatures read components in subfolders of `src/` that the package's
+  `src/index` re-exports (a shadcn layout keeps them in `src/components/ui/`).
+  Files directly in `src/` are read as before; a deeper component never replaces
+  one found there.
+- An element passed as a component's `render` prop (`<Item render={<button />}>`)
+  is the element that component draws as, not a raw look-alike. Content passed to
+  other props (`action={<button>…</button>}`) still counts.
+- A screenshot match tied with other elements on the page is as sure as a guess
+  among them (at most 1 in N), so its placement no longer feeds the next
+  evaluation.
+- The report, dashboard, queue prompt and agent brief fall back to the system's
+  name before the folder's.
+
+
 ### Added
 
 - CI name check: `scripts/name-check.mjs` fails when a tracked file matches the

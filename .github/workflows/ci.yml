@@ -33,6 +33,11 @@ jobs:
           node dist/cli.js patterns test/fixtures/app
           node dist/cli.js ratchet test/fixtures/app --init
           node dist/cli.js ratchet test/fixtures/app
+      # What a release would ship: six tarballs at one version, installed into a fresh project.
+      - name: Release tarballs install
+        run: |
+          pnpm release:pack
+          pnpm release:smoke
       - name: Schemas are up to date
         run: |
           node dist/schema/generate.js
