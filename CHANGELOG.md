@@ -6,6 +6,16 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `dsa model`: the system model. Concepts from how a system declares itself (package
+  exports, web-component registration, Angular selectors, Vue components, template
+  macros, stylesheet class blocks and built CSS), every form each is written in, and
+  every use across JSX, Lit templates, Vue, Svelte, Angular templates, HTML, Markdown,
+  MDX, Astro and Nunjucks, each with evidence. Host elements with a system marker are
+  uses, not raw elements; dotted members are parts; class-only concepts in systems
+  that declare components otherwise are style objects. `src/model/`, `test/model.test.ts`.
+
 ### Fixed
 
 - One bad input no longer ends a run. A file its reader can't read is skipped and

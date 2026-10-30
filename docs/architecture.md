@@ -52,6 +52,20 @@ A run reads every included file into a `FileGraph`:
 Adoption, look-alikes, raw elements, pattern candidates and the ratchet all read
 this graph and nothing else.
 
+### The system model
+
+`dsa model` (`src/model/`) is the general replacement for both readers below. It
+builds a graph of **concepts** (the system's components), their **realizations** (every
+form one can be written in: export, tag, attribute selector, class block, macro) and
+their **uses**, each with evidence. System-side extractors read declarations; consumer
+readers turn every markup language into one element model; one matcher resolves an
+element to a concept by any realization. It scored 754 of 774 documented components
+and 571 of 587 hand-counted uses across ten open-source systems spanning React, Vue,
+Angular, Svelte, web components, Nunjucks and plain CSS classes (the corpus lives
+outside this repo, per rule 1). The rules were tuned on that corpus, so systems it
+hasn't seen are the next test. `scan`, `run` and `ratchet` move onto it next; their
+current numbers aren't preserved.
+
 ### Readers (adapters)
 
 A `SourceAdapter` claims file extensions and creates one `FileReader` per run, so a
