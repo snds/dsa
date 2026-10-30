@@ -35,8 +35,10 @@ export interface ExtractOptions {
 export function extractConcepts(root: string, sources: string[], options: ExtractOptions = {}): Concept[] {
   const raws: Raw[] = [];
   const consts = new Map<string, string>(); // `const prefix = 'ab'` and friends, for template tags
+  // An installed package's code is its dist; elsewhere dist is build output to skip.
+  const ignoreFor = (dir: string) => (dir.split(/[\\/]/).includes("node_modules") ? SKIP_DIRS.filter((g) => !/dist|build/.test(g)).concat("**/node_modules/**/node_modules/**", "**/*.map") : SKIP_DIRS);
   const files = sources.flatMap((dir) =>
-    fg.sync("**/*.{ts,tsx,js,jsx,mjs,vue,svelte,njk,scss,css,less}", { cwd: path.resolve(root, dir), absolute: true, ignore: SKIP_DIRS }),
+    fg.sync("**/*.{ts,tsx,js,jsx,mjs,vue,svelte,njk,scss,css,less}", { cwd: path.resolve(root, dir), absolute: true, ignore: ignoreFor(dir) }),
   ).sort();
   // Generated selectors (Sass loops over a list) only exist in built CSS: read the nearest package's dist/.
   for (const dir of sources) {

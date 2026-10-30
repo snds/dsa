@@ -106,3 +106,48 @@ describe("system model: one concept, every way it is written", () => {
     expect(m.files.skipped).toEqual([]);
   });
 });
+
+describe("run's instances from the model", () => {
+  it("one row per component use under the target, with overrides, and none from the system's own source", async () => {
+    const { readRepo } = await import("../src/model/index.js");
+    const { instancesFromReading } = await import("../src/engine/model-instances.js");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "dsa-inst-"));
+    const files: Record<string, string> = {
+      "ui/button.ts": "customElements.define('acme-button', AcmeButton);\nexport class AcmeButton {}\n",
+      "ui/internal.html": "<acme-button></acme-button>\n",
+      "app/page.html": "<acme-button style=\"color:red\">Go</acme-button>\n<div>plain</div>\n",
+      "dsa.config.json": JSON.stringify({ system: { name: "acme", path: "ui" }, scan: { include: ["**/*.{ts,html}"], exclude: [] } }),
+    };
+    for (const [f, t] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true }); fs.writeFileSync(path.join(root, f), t); }
+    const reading = readRepo({ root, config: loadConfig({ cwd: root }).config });
+    const rows = instancesFromReading(reading, root, { name: "app", dir: path.join(root, "app"), role: "consumer", deps: {} }, "acme");
+    expect(rows.map((r) => `${r.component}@${r.line}:${r.overrides.join(",")}:${r.framework}`)).toEqual(["AcmeButton@1:style:angular"]);
+  });
+});
+
+describe("several libraries: the core and its children", () => {
+  it("keeps each library's concepts apart, credits uses to the right one, and counts a child using the core", async () => {
+    const { readRepo } = await import("../src/model/index.js");
+    const { instancesFromReading } = await import("../src/engine/model-instances.js");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "dsa-libs-"));
+    const files: Record<string, string> = {
+      "package.json": JSON.stringify({ name: "host", private: true, workspaces: ["packages/*", "apps/*"] }),
+      "packages/core/package.json": JSON.stringify({ name: "@acme/core", main: "src/index.ts" }),
+      "packages/core/src/index.ts": "export function Button() { return null }\n",
+      "packages/kit/package.json": JSON.stringify({ name: "@acme/kit", main: "src/index.ts" }),
+      "packages/kit/src/index.ts": "import { Button } from '@acme/core';\nexport function Button2() { return <Button /> }\nexport function Card() { return <Card /> }\n",
+      "apps/web/package.json": JSON.stringify({ name: "web" }),
+      "apps/web/a.tsx": "import { Button } from '@acme/core';\nimport { Card } from '@acme/kit';\nexport const A = () => <><Button /><Card /></>;\n",
+      "apps/web/b.ts": "@Component({ selector: 'app-b', template: `<ds-data-table [rows]=\"r\"></ds-data-table>` })\nexport class B {}\n",
+      "dsa.config.json": JSON.stringify({ system: { name: "Core", packages: ["@acme/core"], tagPrefixes: ["ds-"], children: [{ name: "Kit", packages: ["@acme/kit"] }] }, scan: { include: ["**/*.{ts,tsx}"], exclude: [] } }),
+    };
+    for (const [f, t] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true }); fs.writeFileSync(path.join(root, f), t); }
+    const reading = readRepo({ root, config: loadConfig({ cwd: root }).config });
+    const web = instancesFromReading(reading, root, { name: "web", dir: path.join(root, "apps/web"), role: "consumer", deps: {} }, "Core");
+    // Button is the core's, Card the kit's; <ds-data-table> in an inline Angular template is the core's by its prefix.
+    expect(web.map((r) => `${r.library}:${r.component}@${r.file.split("/").pop()}:${r.line}`).sort()).toEqual(["Core:Button@a.tsx:3", "Core:DataTable@b.ts:1", "Kit:Card@a.tsx:3"]);
+    const kit = instancesFromReading(reading, root, { name: "Kit", dir: path.join(root, "packages/kit"), role: "child", deps: {} }, "Core");
+    // The kit using the core is consumption; the kit rendering its own Card is not.
+    expect(kit.map((r) => `${r.library}:${r.component}`)).toEqual(["Core:Button"]);
+  });
+});

@@ -9,6 +9,9 @@ import { effectiveSettings } from './settings.js';
 import { resolveTargets, latestVersions } from './workspaces.js';
 import { scanVersions, scanPins } from './scanners/versions.js';
 import { scanCode } from './scanners/code.js';
+import { readRepo } from '../model/index.js';
+import { instancesFromReading } from './model-instances.js';
+import type { DsaConfig } from '../config.js';
 import { scanTokens, gitTouchedFiles } from './scanners/tokens.js';
 import { loadHints } from './hints.js';
 import { auditTargets, collectReadiness, readinessMetrics } from './readiness.js';
@@ -82,6 +85,12 @@ export interface RunOptions {
   log?: (msg: string) => void | undefined;
   /** false = skip the profile's agent-readiness provider. */
   readiness?: boolean | undefined;
+  /**
+   * The dsa config: when given, instances come from the system model (every framework and markup
+   * the model reads) instead of the engine's code scanner. Look-alikes and element review still come
+   * from the engine.
+   */
+  dsaConfig?: DsaConfig | undefined;
 }
 
 export interface RunResult {
@@ -165,10 +174,13 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
   };
   const touched = touchedFor(opts.root);
   if (!touched) notes.push('Git history not available; every file counts as new code for token compliance.');
+  // Every code and markup file each target holds (docs pages aside), as the engine's own scanner reads.
+  const reading = opts.dsaConfig ? readRepo({ root: opts.root, config: opts.dsaConfig, include: ["**/*.{tsx,jsx,ts,js,mjs,vue,svelte,html,astro,njk}"] }) : undefined;
   for (const t of targets.filter(t => t.role !== 'core')) {
     const tEx = [...excludes, ...(t.exclude ?? [])];
     const app = appSettings(config, t.name);
     const res = scanCode(opts.root, config, t, tEx);
+    if (reading) res.instances = instancesFromReading(reading, opts.root, t, config.designSystem.core.name);
     if (app.components) data.instances.push(...res.instances);
     if (app.lookalikes) {
       const { kept: keptEx, exceptionOf } = exceptLookalikes(opts.root, config, t, res.lookalikes, notes, now);

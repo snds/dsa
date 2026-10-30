@@ -46,12 +46,16 @@ export interface Concept {
    * In a system made only of classes, every block is a component.
    */
   role: "component" | "style";
+  /** The library it belongs to: the system (core) or one of its children. */
+  library?: string | undefined;
   realizations: Realization[];
 }
 
 export interface Element {
   file: string;
   line: number;
+  /** 1-based column of the tag's start. */
+  column?: number | undefined;
   /** Tag as written: button, acme-button, XBtn, Dialog.Root. */
   tag: string;
   attributes: Record<string, string>;
@@ -61,6 +65,21 @@ export interface Element {
   importedName?: string | undefined;
   /** A template macro call (`acmeButton(`) rather than an element. */
   macro?: boolean | undefined;
+  /** Props spread onto it (`{...props}`, `v-bind="obj"`): its full prop list can't be read. */
+  spread?: boolean | undefined;
+  /** Written as a prop's value (`render={<button />}`, `icon={<Icon />}`), not as a child. */
+  inAttribute?: boolean | undefined;
+}
+
+/** A component declared in a consumer file, for look-alike detection: its name, root element and size. */
+export interface Declaration {
+  file: string;
+  line: number;
+  name: string;
+  /** The first element it renders, with that element's import binding. */
+  root?: Element | undefined;
+  /** Elements in its rendered tree. */
+  size: number;
 }
 
 export interface Use {
@@ -68,6 +87,8 @@ export interface Use {
   file: string;
   line: number;
   form: RealizationForm["form"];
+  /** The library of the concept used. */
+  library?: string | undefined;
   /** For a dotted sub-component (ActionMenu.Button): the part of the concept it names. */
   part?: string | undefined;
   /** Modifier classes or values found with the use (btn-primary → primary). */

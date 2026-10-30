@@ -253,7 +253,7 @@ export async function startServer(opts: ServeOptions): Promise<{ url: string; cl
         try {
           const ctx = await loadConfig(root);
           const r = await runPipeline({
-            root: ctx.root, dataDir: ctx.dataDir, config: ctx.config, profile: ctx.profile, configDir: ctx.configDir,
+            root: ctx.root, dataDir: ctx.dataDir, config: ctx.config, profile: ctx.profile, configDir: ctx.configDir, dsaConfig: ctx.loaded.config,
             store: d => openStore(d), stages: addons.flatMap(a => a.stages ?? []), log: m => { lines.push(m); },
           });
           // Screenshots (when shots.auto is on), the report, and the agent snapshot.

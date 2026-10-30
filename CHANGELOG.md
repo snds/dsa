@@ -6,6 +6,21 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `scan`, `ratchet` and `run` read through the system model, so they measure every
+  framework and markup the model reads (Vue, Angular templates incl. inline `template:`,
+  Svelte, Lit, HTML, Nunjucks, CSS classes), not only React imports. Counts can change:
+  run `dsa ratchet --update` once after upgrading. The React graph is now built only
+  when `patterns` needs it, so `scan` and `ratchet` are much faster on large repos.
+- The model reads the core and every `system.children` library, credits each use to its
+  library, and treats a child using the core as consumption. It finds a library's source
+  from `system.path`, workspaces, any `package.json` by name, local aliases, or the
+  installed package in `node_modules`; an import from a library or a tag with its
+  configured prefix counts even when no declaration was found.
+- Elements passed as a prop's value (`icon={<Icon />}`) are never raw elements, in any
+  language the model reads.
+
 ### Added
 
 - `dsa model`: the system model. Concepts from how a system declares itself (package
