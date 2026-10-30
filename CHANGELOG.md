@@ -6,6 +6,22 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Facets on every concept in the system model: **variant axes** (a prop or class
+  family and the closed set of values it picks from) and **parts** (named pieces of
+  its anatomy), each with evidence. Axes come from TypeScript string-literal unions
+  (type aliases resolved across the system, including `typeof X[number]` and
+  semicolon-free code), Lit/Angular class properties and `input<…>()`, Vue
+  `PropType<…>`, `PropTypes.oneOf`, cva/tailwind-variants recipes (also in Svelte and
+  Vue script blocks), spread prop factories followed through imports and `@/` aliases,
+  and stylesheet modifier classes. Parts come from sub-components, `Object.assign`
+  members, `data-slot`/`data-part`/`data-component`, `part="…"`, `@csspart`/`@slot`,
+  `<Name>Classes` and `<Name>Slots` types, BEM elements including nested Sass
+  (`&__title`), and template macros' object parameters. A family of sub-components with
+  no declared parent implies it. Type-only exports are no longer concepts.
+
+
 ### Changed
 
 - `scan`, `ratchet` and `run` read through the system model, so they measure every

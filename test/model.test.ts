@@ -151,3 +151,44 @@ describe("several libraries: the core and its children", () => {
     expect(kit.map((r) => `${r.library}:${r.component}`)).toEqual(["Core:Button"]);
   });
 });
+
+describe("facets: variant axes and parts", () => {
+  const facets = (files: Record<string, string>, system: object) => {
+    const m = repo(files, { system: { name: "acme", ...system }, scan: { include: ["**/*.html"], exclude: [] } });
+    const c = (k: string) => m.concepts.find((x) => x.key === k)!;
+    const axes = (k: string) => Object.fromEntries((c(k).axes ?? []).map((a) => [a.name, [...a.values].sort()]));
+    const parts = (k: string) => (c(k).parts ?? []).map((p) => p.name).sort();
+    return { c, axes, parts };
+  };
+
+  it("prop unions through aliases (also semicolon-free and typeof X[number]), recipes, and behaviour props left out", () => {
+    const { axes } = facets({
+      "ui/package.json": JSON.stringify({ name: "@acme/ui", main: "src/index.ts" }),
+      "ui/src/index.ts": "export { Button } from './button/Button';\nexport { Badge } from './badge';\n",
+      "ui/src/tokens.ts": "export const sizes = ['sm', 'md', 'lg'] as const\nexport type Size = typeof sizes[number]\nexport type Tone = 'neutral' | 'danger'\n",
+      "ui/src/button/Button.tsx": "import type { Size, Tone } from '../tokens';\nexport interface ButtonOwnProps { variant?: 'solid' | 'ghost'; size?: Size; tone?: Tone; type?: 'button' | 'submit' }\nexport type ButtonProps = ButtonOwnProps & Other;\nexport function Button(p: ButtonProps) { return null }\n",
+      "ui/src/badge.tsx": "const badge = cva('x', { variants: { emphasis: { low: 'a', high: 'b' } } });\nexport function Badge() { return null }\n",
+    }, { packages: ["@acme/ui"] });
+    expect(axes("button")).toEqual({ size: ["lg", "md", "sm"], tone: ["danger", "neutral"], variant: ["ghost", "solid"] });
+    expect(axes("badge")).toEqual({ emphasis: ["high", "low"] });
+  });
+
+  it("parts from sub-components, members, data-slot, data-component, doc tags and BEM (including nested Sass)", () => {
+    const { parts, c } = facets({
+      "ui/package.json": JSON.stringify({ name: "@acme/ui", main: "index.ts" }),
+      "ui/index.ts": "export * from './dialog';\nexport * from './menu';\nexport * from './sheet';\n",
+      "ui/dialog.tsx": "export function Dialog() { return <div data-slot=\"dialog-overlay\" /> }\nexport function DialogTitle() { return <h2 data-slot=\"dialog-title\" /> }\n",
+      "ui/menu.tsx": "export const Menu = Object.assign(Root, { Item: MenuItem });\nfunction Header() { return <div data-component=\"Menu.Header\" /> }\n",
+      "ui/sheet.tsx": "export function SheetTitle() { return null }\nexport function SheetBody() { return null }\n",
+      "ui/card.ts": "/** @slot footer\n * @csspart base */\nexport class AcmeCard {}\ncustomElements.define('acme-card', AcmeCard);\n",
+      "ui/_panel.scss": ".acme-panel { &__header { x: 1 } &--raised { x: 2 } }\n.acme-panel__body { x: 3 }\n",
+    }, { packages: ["@acme/ui"], path: "ui" });
+    expect(parts("dialog")).toEqual(["Title", "overlay", "title"]);
+    expect(parts("menu")).toEqual(["Header", "Item"]);
+    expect(parts("card")).toEqual(["base", "footer"]);
+    expect(parts("panel")).toEqual(["body", "header"]);
+    expect(c("panel").axes?.find((a) => a.name === "modifier")?.values).toEqual(["raised"]);
+    // A family with no declared parent implies one: SheetTitle and SheetBody → Sheet.
+    expect(parts("sheet")).toEqual(["Body", "Title"]);
+  });
+});
