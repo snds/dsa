@@ -2,7 +2,7 @@ import path from "node:path";
 import { Parser } from "htmlparser2";
 import { parse as parseSfc } from "@vue/compiler-sfc";
 import { lineAt, parseTs } from "./extract.js";
-import type { Element } from "./types.js";
+import type { Declaration, Element } from "./types.js";
 
 /**
  * Consumer-side readers: every markup language read into one element model (tag, attributes,
@@ -21,8 +21,17 @@ export const READABLE = /\.(tsx|jsx|ts|js|mjs|vue|svelte|html?|md|mdx|astro|njk)
 type Imports = Map<string, { source: string; imported: string }>;
 
 export function readElements(file: string, text: string): Element[] {
+  return readFile(file, text).elements;
+}
+
+/** Elements and, for script files, the components the file declares. */
+export function readFile(file: string, text: string): { elements: Element[]; declared: Declaration[] } {
   const ext = path.extname(file).toLowerCase();
   if (/\.(tsx|jsx|ts|js|mjs)$/.test(ext)) return readScript(file, text);
+  return { elements: readMarkup(file, text, ext), declared: [] };
+}
+
+function readMarkup(file: string, text: string, ext: string): Element[] {
   if (ext === ".vue") return readVue(file, text);
   if (ext === ".svelte") return readSvelte(file, text);
   if (/\.(html?|md|mdx|astro|njk)$/.test(ext)) {
@@ -47,7 +56,10 @@ function readHtml(file: string, text: string, baseOffset: number, imports: Impor
         const classes = (attribs.class ?? attribs.className ?? "").split(/\s+/).filter((c) => /^[a-zA-Z_-][\w-]*$/.test(c));
         const head = tag.split(".")[0]!;
         const imp = imports.get(head);
-        out.push({ file, line: lineAt(whole, baseOffset + parser.startIndex), tag, attributes: attribs, classes, importSource: imp?.source, importedName: imp?.imported });
+        // `v-bind="obj"`, Svelte `{...props}`: the prop list can't be read.
+        const spread = Object.keys(attribs).some((a) => a === "v-bind" || a.startsWith("{...") || a.startsWith("..."));
+        const at = baseOffset + parser.startIndex;
+        out.push({ file, line: lineAt(whole, at), column: at - whole.lastIndexOf("\n", at - 1), tag, attributes: attribs, classes, importSource: imp?.source, importedName: imp?.imported, ...(spread ? { spread } : {}) });
       },
     },
     { lowerCaseTags: false, lowerCaseAttributeNames: false, recognizeSelfClosing: true, decodeEntities: true },
@@ -73,9 +85,9 @@ function readMacroCalls(file: string, text: string): Element[] {
 
 // ---------- JSX and Lit ----------
 
-function readScript(file: string, text: string): Element[] {
+function readScript(file: string, text: string): { elements: Element[]; declared: Declaration[] } {
   const ast = parseTs(text, file);
-  if (!ast) return [];
+  if (!ast) return { elements: [], declared: [] };
   const imports: Imports = new Map();
   for (const st of ast.program.body) {
     if (st.type !== "ImportDeclaration") continue;
@@ -85,9 +97,19 @@ function readScript(file: string, text: string): Element[] {
     }
   }
   const out: Element[] = [];
-  const walk = (node: any) => {
+  const walk = (node: any, inAttr = false) => {
     if (!node || typeof node.type !== "string") return;
-    if (node.type === "JSXOpeningElement") out.push(jsxElement(file, node, imports));
+    // Record at the JSXElement, whose flag is its own; its opening tag's attributes are walked below.
+    if (node.type === "JSXElement") { const el = jsxElement(file, node.openingElement, imports); out.push(inAttr ? { ...el, inAttribute: true } : el); }
+    // Angular inline templates: `@Component({ template: `…` })`.
+    if ((node.type === "ObjectProperty" || node.type === "Property") && (node.key?.name === "template" || node.key?.value === "template") && (node.value?.type === "TemplateLiteral" || node.value?.type === "StringLiteral")) {
+      const v = node.value;
+      const start: number = v.type === "StringLiteral" ? v.start + 1 : v.quasis[0].start;
+      const end: number = v.type === "StringLiteral" ? v.end - 1 : v.quasis[v.quasis.length - 1].end;
+      let src = text.slice(start, end);
+      if (v.type === "TemplateLiteral") for (let i = 0; i < v.quasis.length - 1; i++) { const a = v.quasis[i].end - start, b = v.quasis[i + 1].start - start; src = src.slice(0, a) + "x".repeat(b - a) + src.slice(b); }
+      out.push(...readHtml(file, src, start, imports, text));
+    }
     if (node.type === "TaggedTemplateExpression" && node.tag?.type === "Identifier" && /^(html|svg)$/.test(node.tag.name)) {
       // Lit: read the template as HTML, each `${…}` blanked to x's of the same length so offsets stay true.
       const q = node.quasi;
@@ -100,14 +122,47 @@ function readScript(file: string, text: string): Element[] {
       }
       out.push(...readHtml(file, src, start, imports, text));
     }
+    // An element inside an attribute's value is that prop's, not a child; inside it, children are children again.
+    const next = node.type === "JSXAttribute" ? true : node.type === "JSXElement" ? false : inAttr;
     for (const k in node) {
       if (k === "loc" || k === "start" || k === "end" || k.endsWith("Comments")) continue;
       const v = node[k];
-      if (Array.isArray(v)) v.forEach(walk);
-      else if (v && typeof v.type === "string") walk(v);
+      if (Array.isArray(v)) v.forEach((c) => walk(c, next));
+      else if (v && typeof v.type === "string") walk(v, next);
     }
   };
   walk(ast.program);
+  return { elements: out, declared: declarations(file, ast, imports) };
+}
+
+/** Top-level PascalCase components: `function X()`, `const X = () =>`, `const X = forwardRef(…)`. */
+function declarations(file: string, ast: any, imports: Imports): Declaration[] {
+  const out: Declaration[] = [];
+  const add = (name: string, body: any, line: number) => {
+    if (!/^[A-Z][A-Za-z0-9]*$/.test(name) || !body) return;
+    let root: any;
+    let size = 0;
+    const visit = (n: any, inRoot: boolean) => {
+      if (!n || typeof n.type !== "string") return;
+      let now = inRoot;
+      if (n.type === "JSXElement") { if (!root) { root = n; now = true; } if (now) size++; }
+      for (const k in n) {
+        if (k === "loc" || k === "start" || k === "end" || k.endsWith("Comments")) continue;
+        const v = n[k];
+        if (Array.isArray(v)) v.forEach((c) => visit(c, now));
+        else if (v && typeof v.type === "string") visit(v, now);
+      }
+    };
+    visit(body, false);
+    if (!root) return;
+    out.push({ file, line, name, root: jsxElement(file, root.openingElement, imports), size });
+  };
+  for (const st0 of ast.program.body) {
+    const st = st0.type === "ExportNamedDeclaration" || st0.type === "ExportDefaultDeclaration" ? st0.declaration : st0;
+    if (!st) continue;
+    if (st.type === "FunctionDeclaration" && st.id) add(st.id.name, st.body, st.loc?.start.line ?? 0);
+    if (st.type === "VariableDeclaration") for (const d of st.declarations) if (d.id?.name && d.init) add(d.id.name, d.init, d.loc?.start.line ?? 0);
+  }
   return out;
 }
 
@@ -122,7 +177,9 @@ function jsxElement(file: string, node: any, imports: Imports): Element {
   const tag = jsxName(node.name);
   const attributes: Record<string, string> = {};
   let classes: string[] = [];
+  let spread = false;
   for (const a of node.attributes ?? []) {
+    if (a.type === "JSXSpreadAttribute") spread = true;
     if (a.type !== "JSXAttribute") continue;
     const name = a.name.type === "JSXNamespacedName" ? `${a.name.namespace.name}:${a.name.name.name}` : a.name.name;
     const v = a.value;
@@ -131,7 +188,7 @@ function jsxElement(file: string, node: any, imports: Imports): Element {
     if (name === "className" || name === "class") classes = value.split(/\s+/).filter((c: string) => /^[a-zA-Z_-][\w-]*$/.test(c));
   }
   const imp = imports.get(tag.split(".")[0]!);
-  return { file, line: node.loc?.start.line ?? 0, tag, attributes, classes, importSource: imp?.source, importedName: imp?.imported };
+  return { file, line: node.loc?.start.line ?? 0, column: (node.loc?.start.column ?? 0) + 1, tag, attributes, classes, importSource: imp?.source, importedName: imp?.imported, ...(spread ? { spread } : {}) };
 }
 
 // ---------- Vue and Svelte ----------

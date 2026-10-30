@@ -168,6 +168,7 @@ export function addEngineCommands(program: Command, io: CliIo): void {
         remote: Boolean(o.remote),
         git: o.git !== false,
         readiness: o.readiness !== false,
+        dsaConfig: ctx.loaded.config,
         ...(o.now ? { now: new Date(o.now) } : {}),
         log: (m) => io.out(m),
       });

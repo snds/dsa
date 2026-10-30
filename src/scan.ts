@@ -1,4 +1,5 @@
-import { computeAdoption, type AdoptionMetrics } from "./metrics/adoption.js";
+import type { AdoptionMetrics } from "./metrics/adoption.js";
+import { adoptionFromReading } from "./metrics/model-adoption.js";
 import { createRunContext, type ReportMeta, type RunContext, type RunOptions } from "./run.js";
 
 export interface ScanReport extends AdoptionMetrics {
@@ -9,7 +10,7 @@ export interface ScanReport extends AdoptionMetrics {
 }
 
 export function scanFromContext(ctx: RunContext): ScanReport {
-  const metrics = computeAdoption(ctx.graph, { rawElements: ctx.loaded.config.correctUse.rawElements });
+  const metrics = adoptionFromReading(ctx.reading, ctx.loaded.config);
   return { meta: ctx.meta, root: ctx.root, system: ctx.loaded.config.system.name, ...metrics };
 }
 

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { computeAdoption, type ViolationCounts } from "./metrics/adoption.js";
+import type { ViolationCounts } from "./metrics/adoption.js";
+import { adoptionFromReading } from "./metrics/model-adoption.js";
 import { createRunContext, writeJson, type ReportMeta, type RunContext, type RunOptions } from "./run.js";
 
 export interface Baseline {
@@ -47,7 +48,7 @@ export function readBaseline(file: string): Baseline | null {
 
 export function ratchetFromContext(ctx: RunContext, options: Pick<RatchetOptions, "init" | "update"> = {}): RatchetReport {
   const baselinePath = path.resolve(ctx.root, ctx.loaded.config.ratchet.baseline);
-  const current = computeAdoption(ctx.graph, { rawElements: ctx.loaded.config.correctUse.rawElements }).correctUse.counts;
+  const current = adoptionFromReading(ctx.reading, ctx.loaded.config).correctUse.counts;
   const existing = readBaseline(baselinePath);
 
   if (options.init && existing && !options.update) {

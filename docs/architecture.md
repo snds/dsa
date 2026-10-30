@@ -63,8 +63,11 @@ element to a concept by any realization. It scored 754 of 774 documented compone
 and 571 of 587 hand-counted uses across ten open-source systems spanning React, Vue,
 Angular, Svelte, web components, Nunjucks and plain CSS classes (the corpus lives
 outside this repo, per rule 1). The rules were tuned on that corpus, so systems it
-hasn't seen are the next test. `scan`, `run` and `ratchet` move onto it next; their
-current numbers aren't preserved.
+hasn't seen are the next test.
+
+`scan`, `ratchet` and `run`'s instances read through it (`readRepo`, built lazily on
+the run context). The React graph remains for `patterns` and is built only when they
+run; `run`'s look-alikes and element review still come from the engine's scanner.
 
 ### Readers (adapters)
 

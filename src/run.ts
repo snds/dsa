@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { loadConfig, type DsaConfig, type DsaConfigInput, type LoadedConfig } from "./config.js";
+import { readRepo, type RepoReading } from "./model/index.js";
 import { buildGraph, type CompositionGraph } from "./graph/index.js";
 import { loadProfile, NEUTRAL_PROFILE, resolveProfile, type DsaProfile, type ResolvedProfile } from "./profile.js";
 import { dsaVersion } from "./version.js";
@@ -31,7 +32,10 @@ export interface RunContext {
   root: string;
   /** Absolute directory being scanned (root, or a subdirectory of it). */
   scanDir: string;
+  /** The React composition graph (patterns); built on first use. */
   graph: CompositionGraph;
+  /** The system model's reading of the repo (scan, ratchet); built on first use. */
+  reading: RepoReading;
   meta: ReportMeta;
   outputDir: string;
   /** The system's profile, or the neutral one when the config names none. */
@@ -81,20 +85,42 @@ function buildContext(scanDir: string, loaded: LoadedConfig, profile: ResolvedPr
   const within = scanDir === root || !scanDir.startsWith(root + path.sep) ? undefined : scanDir;
   const graphOpts: Parameters<typeof buildGraph>[0] = { root, config: loaded.config };
   if (within) graphOpts.within = within;
-  const graph = buildGraph(graphOpts);
-  if (graph.skipped?.length) {
-    const first = graph.skipped[0]!;
-    process.stderr.write(`note: skipped ${graph.skipped.length} file${graph.skipped.length === 1 ? "" : "s"} dsa couldn't read (first: ${first.file}: ${first.message})\n`);
-  }
-  return {
+  let graph: CompositionGraph | undefined;
+  let reading: RepoReading | undefined;
+  const ctx = {
     loaded,
     root,
     scanDir,
-    graph,
     outputDir: path.resolve(root, loaded.config.output.dir),
     profile,
     meta: { dsaVersion: dsaVersion(), generatedAt: new Date().toISOString(), config: loaded.config, configPath: loaded.configPath },
-  };
+  } as RunContext;
+  // Each reader runs only when a command needs it: the graph for patterns, the reading for scan and ratchet.
+  Object.defineProperty(ctx, "graph", {
+    enumerable: true,
+    get() {
+      if (!graph) {
+        graph = buildGraph(graphOpts);
+        if (graph.skipped?.length) {
+          const first = graph.skipped[0]!;
+          process.stderr.write(`note: skipped ${graph.skipped.length} file${graph.skipped.length === 1 ? "" : "s"} dsa couldn't read (first: ${first.file}: ${first.message})\n`);
+        }
+      }
+      return graph;
+    },
+  });
+  Object.defineProperty(ctx, "reading", {
+    enumerable: true,
+    get() {
+      if (!reading) {
+        reading = readRepo({ root, config: loaded.config });
+        if (within) reading = { ...reading, files: reading.files.filter((f) => path.resolve(root, f.file).startsWith(within + path.sep)) };
+        if (reading.skipped.length) process.stderr.write(`note: skipped ${reading.skipped.length} file${reading.skipped.length === 1 ? "" : "s"} dsa couldn't read (first: ${reading.skipped[0]!.file}: ${reading.skipped[0]!.message})\n`);
+      }
+      return reading;
+    },
+  });
+  return ctx;
 }
 
 export function writeJson(file: string, data: unknown): void {
