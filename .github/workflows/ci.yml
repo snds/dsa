@@ -16,6 +16,13 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      # dsa knows no design system by name. The names it must not contain are a
+      # repository secret, so they never appear here. Required on main; pull
+      # requests from forks can't read secrets, so there it skips.
+      - name: Name check
+        env:
+          DSA_NAME_DENYLIST: ${{ secrets.DSA_NAME_DENYLIST }}
+        run: node scripts/name-check.mjs ${{ github.event_name == 'push' && '--require' || '' }}
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
