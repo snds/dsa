@@ -59,6 +59,8 @@ export interface CompositionGraph {
   /** Absolute scan root. */
   root: string;
   files: FileGraph[];
+  /** Files a reader couldn't read (root-relative), with why. Skipped, not fatal. */
+  skipped?: { file: string; message: string }[];
 }
 
 export function walk(node: ElementNode, fn: (n: ElementNode, depth: number) => void, depth = 0): void {

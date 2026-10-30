@@ -10,8 +10,11 @@ const EXPAND_WORDS = /expand|collaps|^isOpen$|^open$|^toggleRow$/i;
  * whether the loop returns a <tr> or a row component. Interaction is counted inside cells, not only on
  * <tr>/<th>: inline editors, buttons, expanders, and where the checkboxes sit.
  */
+/** What a table with no facts read looks like: a reader that doesn't collect table facts (Angular, Vue templates) gets this. */
+export const emptyTableInfo = (): TableInfo => ({ hasThead: false, headerCells: 0, rowsMapped: false, literalRows: 0, rowClick: false, headerClick: false, hasCheckbox: false, headersMapped: false, cellsMapped: false, cellEditors: 0, cellButtons: 0, expandableRows: false, sortable: false });
+
 export function tableInfo(el: any): TableInfo {
-  const t: TableInfo = { hasThead: false, headerCells: 0, rowsMapped: false, literalRows: 0, rowClick: false, headerClick: false, hasCheckbox: false, headersMapped: false, cellsMapped: false, cellEditors: 0, cellButtons: 0, expandableRows: false, sortable: false };
+  const t: TableInfo = emptyTableInfo();
   const isMap = (n: any) => (n.type === 'CallExpression' || n.type === 'OptionalCallExpression') && /^(map|flatMap)$/.test(n.callee?.property?.name ?? '');
   const attr = (o: any, name: string) => o.attributes.find((a: any) => a.name?.name === name);
   const isCheckbox = (o: any, nm: string) => (nm === 'input' && attr(o, 'type')?.value?.value === 'checkbox') || /Checkbox$/.test(nm);

@@ -82,6 +82,10 @@ function buildContext(scanDir: string, loaded: LoadedConfig, profile: ResolvedPr
   const graphOpts: Parameters<typeof buildGraph>[0] = { root, config: loaded.config };
   if (within) graphOpts.within = within;
   const graph = buildGraph(graphOpts);
+  if (graph.skipped?.length) {
+    const first = graph.skipped[0]!;
+    process.stderr.write(`note: skipped ${graph.skipped.length} file${graph.skipped.length === 1 ? "" : "s"} dsa couldn't read (first: ${first.file}: ${first.message})\n`);
+  }
   return {
     loaded,
     root,
