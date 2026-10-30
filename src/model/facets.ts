@@ -94,6 +94,32 @@ export function addFacets(root: string, sources: string[], concepts: Concept[], 
     if (parts.size) c.parts = [...parts].map(([name, evidence]) => ({ name, evidence }));
   }
 
+  // Central theme files: recipes kept apart from the component (Chakra `defineRecipe` / `defineSlotRecipe`,
+  // Panda `sva`, Nuxt UI's tailwind-variants themes, any `{ variants: { axis: { value: … } } }` object),
+  // matched to a concept by its variable or file name (badgeRecipe, theme/badge.ts) or its className.
+  const byKey = new Map(concepts.filter((c) => c.role !== "style").map((c) => [c.key, c]));
+  for (const [file, text] of texts) {
+    if (!/\.(tsx?|jsx?|mjs)$/.test(file) || !/\bvariants\s*:/.test(text)) continue;
+    const tree = parse(file);
+    if (!tree) continue;
+    readThemeRecipes(tree, path.basename(file).replace(/\.[^.]+$/, ""), (owners, recipe) => {
+      const c = owners.map((o) => byKey.get(o)).find(Boolean);
+      if (!c) return;
+      for (const a of recipe.axes) {
+        const vs = a.values.filter((v) => v.length > 0 && v.length <= 40);
+        if (vs.length < 2 || vs.length > 40 || NON_VISUAL.test(a.name)) continue;
+        c.axes ??= [];
+        const have = c.axes.find((x) => x.name === a.name);
+        if (have) have.values = [...new Set([...have.values, ...vs])];
+        else c.axes.push({ name: a.name, values: vs, evidence: ev(file, a.line, "theme-recipe", "declaration") });
+      }
+      for (const p of recipe.parts) {
+        c.parts ??= [];
+        if (!c.parts.some((x) => x.name === p.name)) c.parts.push({ name: p.name, evidence: ev(file, p.line, "recipe-slots", "declaration") });
+      }
+    });
+  }
+
   // A family of sub-components with no declared parent implies it (DialogTitle, DialogContent, DialogActions →
   // Dialog, when only a service or a function opens it). Its parts come from the family below.
   const familyOf = (n: string) => { const f = n.replace(/[A-Z][a-z0-9]*$/, ""); return /[A-Z][a-z]/.test(f) ? f : undefined; };
@@ -276,6 +302,8 @@ function readPropsIn(r: any, aliases: Map<string, string[]>, add: (name: string,
 function readNamedKeys(tree: any, names: Set<string>, aliases: Map<string, string[]>, add: (name: string, kind: "slots" | "classes", line?: number) => void) {
   const slotTypes = new Set([...names].map((n) => `${n}Slots`));
   const classTypes = new Set([...names].map((n) => `${n}Classes`));
+  // Pass-through options (PrimeVue `ButtonPassThroughOptions`): one key per styleable part, plus plumbing.
+  const passTypes = new Set([...names].map((n) => `${n}PassThroughOptions`));
   const decls = new Map<string, any>();
   visit(tree.program, (n) => { if ((n.type === "TSInterfaceDeclaration" || n.type === "TSTypeAliasDeclaration") && n.id?.name) decls.set(n.id.name, n); });
   const keysOf = (n: any): { name: string; line?: number }[] => {
@@ -285,6 +313,12 @@ function readNamedKeys(tree: any, names: Set<string>, aliases: Map<string, strin
   for (const [name, d] of decls) {
     if (slotTypes.has(name)) for (const k of keysOf(d)) add(k.name, "slots", k.line);
     if (classTypes.has(name)) for (const k of keysOf(d)) add(k.name, "classes", k.line);
+    if (passTypes.has(name)) for (const k of keysOf(d)) if (!/^(hooks|directives|transition|global|motion)$/.test(k.name)) add(k.name, "slots", k.line);
+  }
+  // Styles API selector names (Mantine `type ButtonStylesNames = 'root' | 'inner' | 'label'`): one per part.
+  for (const n of names) {
+    const d = decls.get(`${n}StylesNames`);
+    for (const v of d ? literalsOf(d.typeAnnotation, aliases) : []) add(v, "slots", d.loc?.start.line);
   }
   visit(tree.program, (n) => {
     // genericComponent<OverlaySlots>()({ name: … }): the slots type it's given.
@@ -296,7 +330,6 @@ function readNamedKeys(tree: any, names: Set<string>, aliases: Map<string, strin
     // A `slots` prop with an object type: its keys.
     if ((n.type === "TSPropertySignature") && (n.key?.name === "slots") && n.typeAnnotation?.typeAnnotation?.type === "TSTypeLiteral") for (const k of keysOf(n.typeAnnotation.typeAnnotation)) add(k.name, "slots", k.line);
   });
-  void aliases;
 }
 
 /** `cva(base, { variants: { size: { sm, lg } } })`, `tv({ variants: … })`. */
@@ -313,6 +346,55 @@ function readRecipes(tree: any, add: (name: string, values: string[], line?: num
       }
     }
   });
+}
+
+interface Recipe { axes: { name: string; values: string[]; line?: number }[]; parts: { name: string; line?: number }[] }
+
+/**
+ * Recipe objects anywhere in a file: an object whose `variants` maps axes to objects of values. Its owner is
+ * the variable that holds it (minus Recipe/Theme/Styles/Variants), its `className` (minus the system stem),
+ * or, for a default export, the file. Parts are its `slots` (keys or strings), else a slot recipe's `base` keys.
+ */
+function readThemeRecipes(tree: any, fileBase: string, found: (owners: string[], recipe: Recipe) => void) {
+  const key = (n: any) => n?.key?.name ?? n?.key?.value;
+  const owner = (s: string) => norm(s.replace(/(Slot)?(Recipe|Theme|Styles?|Variants?|Config)$/, ""));
+  const isRecipe = (o: any) => {
+    const v = o?.properties?.find((p: any) => key(p) === "variants")?.value;
+    return v?.type === "ObjectExpression" && v.properties.some((p: any) => p.value?.type === "ObjectExpression");
+  };
+  const firstRecipe = (node: any): any => {
+    let hit: any;
+    visit(node, (n) => { if (!hit && n.type === "ObjectExpression" && isRecipe(n)) hit = n; });
+    return hit;
+  };
+  const read = (o: any, slotCall: boolean): Recipe => {
+    const prop = (k: string) => o.properties.find((p: any) => key(p) === k)?.value;
+    const axes = (prop("variants")?.properties ?? []).filter((p: any) => p.value?.type === "ObjectExpression").map((p: any) => ({
+      name: String(key(p) ?? ""),
+      values: p.value.properties.map((v: any) => String(key(v) ?? "")).filter(Boolean),
+      line: p.loc?.start.line,
+    })).filter((a: any) => a.name);
+    const slots = prop("slots");
+    let parts: Recipe["parts"] = [];
+    if (slots?.type === "ObjectExpression") parts = slots.properties.map((p: any) => ({ name: String(key(p) ?? ""), line: p.loc?.start.line }));
+    else if (slots?.type === "ArrayExpression") parts = slots.elements.filter((e: any) => typeof e?.value === "string").map((e: any) => ({ name: e.value, line: e.loc?.start.line }));
+    else if (slotCall && prop("base")?.type === "ObjectExpression") parts = prop("base").properties.map((p: any) => ({ name: String(key(p) ?? ""), line: p.loc?.start.line }));
+    return { axes, parts: parts.filter((p) => p.name) };
+  };
+  const className = (o: any) => { const v = o.properties.find((p: any) => key(p) === "className")?.value?.value; return typeof v === "string" ? [norm(v.replace(/^[a-z0-9]+-/, "")), norm(v)] : []; };
+  const slotCall = (node: any) => { let s = false; visit(node, (n) => { if (n.type === "CallExpression" && /slot|sva/i.test(n.callee?.name ?? n.callee?.property?.name ?? "")) s = true; }); return s; };
+  for (const st of tree.program.body) {
+    const decl = st.type === "ExportNamedDeclaration" ? st.declaration : st;
+    if (decl?.type === "VariableDeclaration") {
+      for (const d of decl.declarations) {
+        const o = d.init && firstRecipe(d.init);
+        if (o) found([owner(d.id?.name ?? ""), ...className(o), owner(fileBase)].filter(Boolean), read(o, slotCall(d.init)));
+      }
+    } else if (st.type === "ExportDefaultDeclaration") {
+      const o = firstRecipe(st.declaration);
+      if (o) found([owner(fileBase), ...className(o)], read(o, slotCall(st.declaration)));
+    }
+  }
 }
 
 /** `Object.assign(Root, { Item, Group })` and `Root.Item = Item` for a concept's export. */

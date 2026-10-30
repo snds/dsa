@@ -138,7 +138,7 @@ export function readRepo({ root, config, include }: BuildModelOptions): RepoRead
           const resolve = (n: string) => li.symbol.get(n) ?? (li.byKey.has(ns(normKey(n))) ? ns(normKey(n)) : undefined);
           // An import from a library that no extractor declared is still that library's: name it by the import.
           const orImported = (key: string | undefined, name: string) => key ?? (/^[A-Z]/.test(name) ? (li.unknown.add(name), ns(normKey(name))) : undefined);
-          if (!member) add(orImported(resolve(local) ?? resolve(path.basename(el.importSource)), local), "import");
+          if (!member) add(orImported(resolve(local) ?? resolve(path.basename(el.importSource).replace(/\.(vue|svelte|[jt]sx?)$/, "")), local), "import");
           else {
             // Dialog.Root → Dialog. Dialog.Content → DialogContent when the library exports that name;
             // otherwise a part of its parent (ActionMenu.Button is ActionMenu's button, not the Button).

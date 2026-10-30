@@ -97,6 +97,23 @@ describe("system model: one concept, every way it is written", () => {
     expect(uses(m, "a.vue")).toEqual(["btn@2", "alerttitle@3", "alerttitle@4"]);
   });
 
+  it("Stencil tags, file-named single-file components, an auto-import prefix, and server templates", () => {
+    const m = repo({
+      "ui/package.json": JSON.stringify({ name: "@acme/ui" }),
+      "ui/src/button.tsx": "@Component({\n  tag: 'acme-button',\n  styleUrls: { ios: 'a.scss', md: 'b.scss' },\n  shadow: true,\n})\nexport class Button {}\n",
+      "ui/src/defaults.ts": "export const defaultOptions = { prefix: 'U', theme: {} }\n",
+      "ui/src/components/Badge.vue": "<template><span><slot /></span></template>\n",
+      "ui/src/components/card-header.svelte": "<div><slot /></div>\n",
+      "app/page.vue": "<template>\n  <UBadge />\n  <u-badge />\n  <acme-button />\n</template>\n",
+      "app/x.svelte": "<script>import CardHeader from '@acme/ui/components/card-header.svelte';</script>\n<CardHeader />\n",
+      "app/modal.twig": "{% set id = 'm' %}\n<div class=\"x\">\n  <acme-button>{{ label }}</acme-button>\n</div>\n",
+    }, { system: { name: "acme", path: "ui", packages: ["@acme/ui"] }, scan: { include: ["**/*.{vue,svelte,twig}"], exclude: [] } });
+    expect(m.concepts.map((c) => c.key)).toEqual(expect.arrayContaining(["button", "badge", "cardheader"]));
+    expect(uses(m, "page.vue")).toEqual(["badge@2", "badge@3", "button@4"]);
+    expect(uses(m, "x.svelte")).toEqual(["cardheader@2"]);
+    expect(uses(m, "modal.twig")).toEqual(["button@3"]);
+  });
+
   it("a file a reader can't read is skipped and listed; others still count", () => {
     const m = repo({
       "ui/x.ts": "customElements.define('acme-x', X);\n",
@@ -191,6 +208,27 @@ describe("facets: variant axes and parts", () => {
     // A family with no declared parent implies one: SheetTitle and SheetBody → Sheet.
     expect(parts("sheet")).toEqual(["Body", "Title"]);
   });
+
+  it("central theme recipes (slot recipes, tailwind-variants themes) and pass-through types", () => {
+    const { axes, parts } = facets({
+      "ui/package.json": JSON.stringify({ name: "@acme/ui", main: "src/index.ts" }),
+      "ui/src/index.ts": "export { Badge } from './badge';\nexport { Tabs } from './tabs';\nexport { Alert } from './alert';\nexport { Chip } from './chip';\n",
+      "ui/src/badge.tsx": "export function Badge() { return null }\n",
+      "ui/src/tabs.tsx": "export function Tabs() { return null }\n",
+      "ui/src/alert.tsx": "export function Alert() { return null }\n",
+      "ui/src/chip.tsx": "export function Chip() { return null }\n",
+      "ui/src/chip.d.ts": "export interface ChipPassThroughOptions { root?: any; label?: any; removeIcon?: any; hooks?: any }\n",
+      "ui/src/theme/recipes/badge.ts": "export const badgeRecipe = defineRecipe({ className: 'acme-badge', variants: { variant: { solid: {}, outline: {} }, size: { sm: {}, md: {} } } })\n",
+      "ui/src/theme/recipes/tabs.ts": "export const tabsSlotRecipe = defineSlotRecipe({ slots: anatomy.keys(), base: { root: {}, list: {}, trigger: {} }, variants: { variant: { line: {}, enclosed: {} } } })\n",
+      "ui/src/theme/alert.ts": "export default (options) => ({ slots: { root: '', title: '', icon: '' }, variants: { color: { primary: '', error: '' } } })\n",
+    }, { packages: ["@acme/ui"] });
+    expect(axes("badge")).toEqual({ size: ["md", "sm"], variant: ["outline", "solid"] });
+    expect(axes("tabs")).toEqual({ variant: ["enclosed", "line"] });
+    expect(parts("tabs")).toEqual(["list", "root", "trigger"]);
+    expect(axes("alert")).toEqual({ color: ["error", "primary"] });
+    expect(parts("alert")).toEqual(["icon", "root", "title"]);
+    expect(parts("chip")).toEqual(["label", "removeIcon", "root"]);
+  });
 });
 
 describe("tokens: definitions in every format, tiers, modes and bindings", () => {
@@ -211,6 +249,27 @@ describe("tokens: definitions in every format, tiers, modes and bindings", () =>
     expect(t("$acme-palette.red.primary")).toMatchObject({ value: "#d4351c", group: "color" });
     expect(t("radius.md")).toMatchObject({ aliasOf: "radius.sm", group: "radius" });
     expect(m.concepts.find((c) => c.name === "AcmeButton")!.tokens!.map((x) => x.name)).toEqual(["--acme-button-bg"]);
+  });
+
+  it("reads JS/TS token objects and the presets of an installed token package the repo imports", () => {
+    const m = repo({
+      "package.json": JSON.stringify({ name: "app", dependencies: { "@acme/themes": "1.0.0" } }),
+      "ui/package.json": JSON.stringify({ name: "@acme/ui" }),
+      "ui/tokens/colors.ts": "export const colors = defineTokens.colors({ red: { 500: { value: '#f00' } }, white: { value: '#fff' } })\n",
+      "ui/tokens/semantic.ts": "export const s = defineSemanticTokens.colors({ bg: { DEFAULT: { value: { _light: '{colors.white}', _dark: '{colors.red.500}' } } } })\n",
+      "ui/theme.ts": "import Aura from '@acme/themes/aura';\nexport const theme = Aura;\n",
+      "node_modules/@acme/themes/package.json": JSON.stringify({ name: "@acme/themes" }),
+      "node_modules/@acme/themes/dist/aura/base/index.mjs": "var r={borderRadius:{sm:'4px',md:'6px'},emerald:{50:'#ecfdf5'}},s={colorScheme:{light:{surface:{0:'#fff'}},dark:{surface:{0:'#000'}}}};export{r as primitive,s as semantic};\n",
+      "node_modules/@acme/themes/dist/aura/button/index.mjs": "var r={borderRadius:'{form.radius}',gap:'0.5rem'};export{r as default};\n",
+      "node_modules/@acme/themes/dist/lara/base/index.mjs": "var r={lara:{a:'1px',b:'2px'}};export{r as default};\n",
+    }, { system: { name: "acme", path: "ui" }, scan: { include: ["**/*.html"], exclude: [] } });
+    const t = (n: string) => m.tokens.find((x) => x.name === n);
+    expect(t("colors.red.500")).toMatchObject({ value: "#f00", group: "color", tier: "primitive" });
+    expect(t("colors.bg")).toMatchObject({ aliasOf: "colors.white", tier: "semantic", modes: ["dark"] });
+    expect(t("borderRadius.md")).toMatchObject({ group: "radius" });
+    expect(t("surface.0")).toMatchObject({ value: "#fff", modes: ["dark"] });
+    expect(t("button.borderRadius")).toMatchObject({ aliasOf: "form.radius" });
+    expect(t("lara.a")).toBeUndefined();
   });
 });
 

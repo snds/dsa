@@ -12,11 +12,14 @@ import type { Declaration, Element } from "./types.js";
  *   .tsx .jsx .ts .js .mjs   JSX elements, plus Lit `html\`…\`` templates
  *   .vue                      the <template> block
  *   .svelte                   markup, with imports from <script>
- *   .html .htm .md .mdx .astro .njk   HTML wherever it appears; .njk also macro calls
+ *   .html .htm .md .mdx .astro        HTML wherever it appears
+ *   .njk .twig .jinja .j2 .liquid .hbs .handlebars .erb .ejs .blade.php .cshtml
+ *                                     server templates: HTML around template tags; .njk also macro calls
  *
  * A file with any other extension is not read.
  */
-export const READABLE = /\.(tsx|jsx|ts|js|mjs|vue|svelte|html?|md|mdx|astro|njk)$/;
+export const READABLE = /\.(tsx|jsx|ts|js|mjs|vue|svelte|html?|md|mdx|astro|njk|twig|jinja2?|j2|liquid|hbs|handlebars|erb|ejs|cshtml|blade\.php)$/;
+const TEMPLATE = /\.(njk|twig|jinja2?|j2|liquid|hbs|handlebars|erb|ejs|cshtml)$|\.blade\.php$/;
 
 type Imports = Map<string, { source: string; imported: string }>;
 
@@ -26,7 +29,7 @@ export function readElements(file: string, text: string): Element[] {
 
 /** Elements and, for script files, the components the file declares. */
 export function readFile(file: string, text: string): { elements: Element[]; declared: Declaration[] } {
-  const ext = path.extname(file).toLowerCase();
+  const ext = /\.blade\.php$/i.test(file) ? ".blade.php" : path.extname(file).toLowerCase();
   if (/\.(tsx|jsx|ts|js|mjs)$/.test(ext)) return readScript(file, text);
   return { elements: readMarkup(file, text, ext), declared: [] };
 }
@@ -34,7 +37,7 @@ export function readFile(file: string, text: string): { elements: Element[]; dec
 function readMarkup(file: string, text: string, ext: string): Element[] {
   if (ext === ".vue") return readVue(file, text);
   if (ext === ".svelte") return readSvelte(file, text);
-  if (/\.(html?|md|mdx|astro|njk)$/.test(ext)) {
+  if (/\.(html?|md|mdx|astro)$/.test(ext) || TEMPLATE.test(ext)) {
     const imports = /\.(mdx|astro)$/.test(ext) ? importsFromText(text) : new Map();
     const body = ext === ".astro" ? text.replace(/^---[\s\S]*?\n---/, (m) => m.replace(/[^\n]/g, " ")) : text;
     const out = readHtml(file, body, 0, imports);

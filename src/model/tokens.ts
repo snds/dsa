@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import fg from "fast-glob";
+import { parseTs } from "./extract.js";
 import type { Concept, Evidence, Token } from "./types.js";
 
 /**
@@ -9,6 +10,10 @@ import type { Concept, Evidence, Token } from "./types.js";
  *   CSS custom properties   `--acme-color-primary: #06c;` (with the mode a selector sets: :root, .dark, [data-theme])
  *   Sass variables          top-level `$acme-space-2: 8px;`
  *   DTCG / Style Dictionary JSON   `{ "color": { "primary": { "$value": "{color.blue.500}" } } }`
+ *   JS/TS token objects     `defineTokens.colors({ red: { 500: { value: "#f00" } } })`, `defineSemanticTokens`,
+ *                           `{ tokens, semanticTokens }` configs, and preset objects (`{ primitive, semantic }`)
+ *   installed token packages   a dependency named for tokens, themes or presets, read from node_modules
+ *                           (only the presets the repo imports, when it imports a subpath: `@x/themes/aura`)
  *
  * Each token gets an alias (when its value is another token), a group from the words in its name, and a
  * tier from the alias graph: a literal is a primitive, an alias is semantic, a name carrying a component's
@@ -43,6 +48,14 @@ export function readTokens(root: string, sources: string[], concepts: Concept[])
     if (fs.existsSync(path.join(d, "package.json"))) for (const f of fg.sync("dist/**/*.css", { cwd: d, absolute: true, ignore: ["**/*.min.css"] })) if (!files.includes(f)) files.push(f);
   }
 
+  // Tokens written as JS/TS objects: in the system's sources, and in installed token packages.
+  const scripts = sources.flatMap((dir) => {
+    const cwd = path.resolve(root, dir);
+    if (dir.split(/[\\/]/).includes("node_modules")) return [];
+    return fg.sync("**/*.{ts,mts,js,mjs}", { cwd, absolute: true, ignore: ["**/node_modules/**", "**/dist/**", "**/build/**", "**/*.d.ts", "**/*.test.*", "**/*.spec.*", "**/*.stories.*"] });
+  });
+  const tokenPackages = installedTokenPackages(root, sources, scripts);
+
   const tokens = new Map<string, Token>();
   const add = (t: Token) => {
     const prev = tokens.get(t.name);
@@ -56,6 +69,19 @@ export function readTokens(root: string, sources: string[], concepts: Concept[])
     const rel = path.relative(root, file);
     if (file.endsWith(".json") || file.endsWith(".tokens")) { readJsonTokens(text, rel, add); continue; }
     readStyleTokens(text, rel, add);
+  }
+  for (const file of scripts) {
+    let text: string;
+    try { text = fs.readFileSync(file, "utf8"); } catch { continue; }
+    if (/define\w*Tokens|create\w*Tokens|semanticTokens\s*:|\bprimitive\s*:\s*\{/.test(text)) readScriptTokens(text, path.relative(root, file), add, false);
+  }
+  for (const pkg of tokenPackages) for (const file of pkg.files) {
+    let text: string;
+    try { text = fs.readFileSync(file, "utf8"); } catch { continue; }
+    const rel = path.relative(root, file);
+    if (file.endsWith(".css")) readStyleTokens(text, rel, add);
+    else if (file.endsWith(".json")) readJsonTokens(text, rel, add);
+    else readScriptTokens(text, rel, add, true, pkg.prefixOf(file));
   }
 
   // A copy-in system's tokens live in the app's global stylesheet, not beside its components: with none in the
@@ -106,8 +132,133 @@ export function readTokens(root: string, sources: string[], concepts: Concept[])
 
 function groupOf(name: string, value?: string): Token["group"] {
   if (value && COLOR_VALUE.test(value.trim())) return "color";
-  for (const [g, re] of GROUPS) if (re.test(name)) return g;
+  // Also as words: fontSizes.md → font-size.md, colors.bg → color.bg, shadows → shadow.
+  const words = name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase().replace(/(colors|fonts|sizes|shadows|borders|spacings|durations|easings|breakpoints|layers)(?=[-_.]|$)/g, (w) => w.slice(0, -1)).replace(/radii(?=[-_.]|$)/g, "radius");
+  for (const [g, re] of GROUPS) if (re.test(name) || re.test(words)) return g;
   return "other";
+}
+
+const MODE_KEY = /^(_?light|_?dark|base|_?default|DEFAULT|_osLight|_osDark|_highContrast)$/;
+
+/**
+ * Tokens in a JS/TS module. `{ value }` leaves under a `define*Tokens` call (or `tokens` / `semanticTokens`
+ * keys); plain leaves under a preset's `primitive` / `semantic` keys, or (in an installed token package) any
+ * top-level object of literal leaves. `{ _light, _dark }` values and `colorScheme.light|dark` set modes.
+ */
+function readScriptTokens(text: string, file: string, add: (t: Token) => void, plainTopLevel: boolean, prefix: string[] = []) {
+  let tree: any;
+  try { tree = parseTs(text, file.replace(/\.(mjs|js|mts)$/, ".ts")); } catch { return; }
+  if (!tree) return;
+  const key = (p: any) => p?.key?.name ?? p?.key?.value;
+  const lit = (n: any): string | undefined => n?.type === "StringLiteral" ? n.value : n?.type === "NumericLiteral" ? String(n.value) : n?.type === "TemplateLiteral" && !n.expressions.length ? n.quasis.map((q: any) => q.value.cooked).join("") : undefined;
+  const emit = (trail: string[], value: string, mode: string | undefined, line?: number) => {
+    if (value.length > 200 || /[;\n]/.test(value)) return; // raw CSS strings, not tokens
+    const segs = trail.filter((s) => s !== "DEFAULT" && s !== "root" && s !== "colorScheme");
+    if (!segs.length) return;
+    const name = segs.join(".");
+    const alias = value.match(/^\{([\w.-]+)\}$/)?.[1];
+    add({ name, value, ...(alias ? { aliasOf: alias } : {}), group: groupOf(name, value), tier: "primitive", ...(mode ? { modes: [mode] } : {}), evidence: { file, line, extractor: "token-object", tier: "declaration" } });
+  };
+  const modeOfKey = (k: string) => (k.replace(/^_/, "") === "light" || /^(base|_?default)$/.test(k) ? undefined : k.replace(/^_(os)?/, "").toLowerCase());
+  // `{ value }` leaves (Chakra, Panda, Stitches-like configs).
+  const walkValue = (o: any, trail: string[]) => {
+    for (const p of o?.properties ?? []) {
+      const k = key(p);
+      if (k === undefined) continue;
+      if (String(k) === "value" || String(k) === "$value") {
+        const v = lit(p.value);
+        if (v !== undefined) emit(trail, v, undefined, p.loc?.start.line);
+        else if (p.value?.type === "ObjectExpression") for (const m of p.value.properties) { const mv = lit(m.value); if (mv !== undefined) emit(trail, mv, MODE_KEY.test(String(key(m))) ? modeOfKey(String(key(m))) : String(key(m)), m.loc?.start.line); }
+        continue;
+      }
+      if (p.value?.type === "ObjectExpression") walkValue(p.value, [...trail, String(k)]);
+    }
+  };
+  // Plain leaves (PrimeUIX presets): every literal is a token; colorScheme.light|dark set the mode.
+  const walkPlain = (o: any, trail: string[], mode: string | undefined) => {
+    for (const p of o?.properties ?? []) {
+      const k = key(p);
+      if (k === undefined) continue;
+      const v = lit(p.value);
+      if (v !== undefined) emit([...trail, String(k)], v, mode, p.loc?.start.line);
+      else if (p.value?.type === "ObjectExpression") {
+        const inScheme = trail[trail.length - 1] === "colorScheme" && /^(light|dark)$/.test(String(k));
+        walkPlain(p.value, inScheme ? trail : [...trail, String(k)], inScheme ? (String(k) === "dark" ? "dark" : undefined) : mode);
+      }
+    }
+  };
+  const visitAll = (n: any, fn: (n: any) => void) => {
+    if (!n || typeof n.type !== "string") return;
+    fn(n);
+    for (const k in n) {
+      if (k === "loc" || k === "start" || k === "end") continue;
+      const v = n[k];
+      if (Array.isArray(v)) v.forEach((x) => visitAll(x, fn));
+      else if (v && typeof v.type === "string") visitAll(v, fn);
+    }
+  };
+  visitAll(tree.program, (n) => {
+    if (n.type === "CallExpression" && n.arguments?.[0]?.type === "ObjectExpression") {
+      const c = n.callee;
+      const fname = c?.name ?? c?.object?.name ?? "";
+      if (/^(define|create)\w*Tokens$/.test(fname)) walkValue(n.arguments[0], c?.type === "MemberExpression" && c.property?.name ? [c.property.name] : []);
+    }
+    if (n.type === "ObjectExpression") for (const p of n.properties ?? []) {
+      const k = key(p);
+      if ((k === "tokens" || k === "semanticTokens") && p.value?.type === "ObjectExpression") walkValue(p.value, []);
+      if ((k === "primitive" || k === "semantic") && p.value?.type === "ObjectExpression") walkPlain(p.value, [], undefined);
+    }
+  });
+  if (plainTopLevel) {
+    for (const st of tree.program.body) {
+      const decls = st.type === "VariableDeclaration" ? st.declarations : st.type === "ExportNamedDeclaration" && st.declaration?.type === "VariableDeclaration" ? st.declaration.declarations : [];
+      for (const d of decls) {
+        if (d.init?.type !== "ObjectExpression") continue;
+        // An object of literal leaves (some nested): a token set. Objects only of other bindings are skipped.
+        let leaves = 0;
+        visitAll(d.init, (x) => { if (x.type === "ObjectProperty" && lit(x.value) !== undefined) leaves++; });
+        if (leaves >= 2) walkPlain(d.init, prefix, undefined);
+      }
+    }
+  }
+}
+
+/**
+ * Dependencies named for tokens, themes or presets (`@acme/tokens`, `@primeuix/themes`), installed in
+ * node_modules. When the repo imports subpaths of one (`@primeuix/themes/aura`), only those presets are read.
+ */
+function installedTokenPackages(root: string, sources: string[], scripts: string[]): { files: string[]; prefixOf: (file: string) => string[] }[] {
+  const names = new Set<string>();
+  const pkgJsons = new Set([path.join(root, "package.json"), ...sources.map((s) => path.join(path.resolve(root, s), "package.json"))]);
+  for (const pj of pkgJsons) {
+    try {
+      const j = JSON.parse(fs.readFileSync(pj, "utf8"));
+      for (const n of Object.keys({ ...j.dependencies, ...j.devDependencies, ...j.peerDependencies })) if (/(^|[-/@])(design-)?(tokens?|themes?|presets?|primitives)($|[-/])/.test(n)) names.add(n);
+    } catch { /* none */ }
+  }
+  const out: { files: string[]; prefixOf: (file: string) => string[] }[] = [];
+  for (const name of names) {
+    const dir = path.join(root, "node_modules", name);
+    if (!fs.existsSync(path.join(dir, "package.json"))) continue;
+    const subpaths = new Set<string>();
+    const esc = name.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+    for (const f of scripts) {
+      let t: string;
+      try { t = fs.readFileSync(f, "utf8"); } catch { continue; }
+      for (const m of t.matchAll(new RegExp(`['"]${esc}/([\\w-]+)`, "g"))) subpaths.add(m[1]!);
+    }
+    const base = fs.existsSync(path.join(dir, "dist")) ? path.join(dir, "dist") : dir;
+    const globs = subpaths.size ? [...subpaths].map((s) => `${s}/**/*.{mjs,js,css,json}`) : ["**/*.{mjs,js,css,json}"];
+    const files = fg.sync(globs, { cwd: base, absolute: true, ignore: ["**/node_modules/**", "**/*.map", "**/*.min.*", "**/*.d.*", "**/*.cjs", "**/package.json"] }).slice(0, 2000);
+    // The file's folders inside the preset name its tokens' component (aura/button/index.mjs → button).
+    const prefixOf = (file: string) => {
+      const segs = path.relative(base, path.dirname(file)).split(path.sep).filter(Boolean);
+      const inPreset = subpaths.size ? segs.slice(1) : segs;
+      return inPreset.filter((s) => s !== "base" && s !== "index");
+    };
+    out.push({ files, prefixOf });
+  }
+  return out;
 }
 
 /** Sass maps: `$palette: ("blue": ("primary": #1d70b8), …)` → `$palette.blue.primary`. */
