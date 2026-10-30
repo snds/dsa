@@ -30,7 +30,7 @@ export const CONFIG_SCHEMA_URL = "https://raw.githubusercontent.com/snds/dsa/mai
 const SAME = ["consumers", "extraRepos", "internalConsumers", "tailwind", "apps", "rendered", "shots", "modules", "figma", "github", "agents", "report", "settings"] as const;
 
 /** Fields of a suite library def and where each lands on a dsa library. */
-const LIBRARY_FIELDS = ["packages", "tagPrefixes", "path", "git", "aliases", "exclude", "pin", "owner", "repo"] as const;
+const LIBRARY_FIELDS = ["packages", "tagPrefixes", "path", "sources", "git", "aliases", "exclude", "pin", "owner", "repo"] as const;
 
 /** True when a parsed JSON value looks like a suite config rather than a dsa one. */
 export function isSuiteConfig(raw: unknown): boolean {

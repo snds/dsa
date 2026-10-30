@@ -90,7 +90,29 @@ form it can be written in, and every use of it in the repo, whatever the markup.
   row, a text class), not a component; a use inside the system's own source is
   marked `internal`.
 
-The system's source is `system.path`, else the packages named in `system.packages`.
+The system's source is found, not assumed (see `dsa sources`).
+
+### `dsa sources [dir] [--pin <folders...>] [--unpin] [--threshold <n>]`
+
+Where the system's code lives → `.dsa/sources.json`. Every folder in the repo that could hold a library
+(each package, each folder dense with components inside an app, and each family of packages one npm
+scope publishes) is scored against signatures any system leaves, whatever it is written in:
+
+| Signal | Weight | What counts |
+|---|---|---|
+| declarations | 0.35 | custom elements, Stencil/Angular decorators, single-file components, exported PascalCase components, template macros, CSS class families |
+| uses | 0.25 | files that import it (package name, relative path, or an alias path), write its tags, or write its classes, from outside it or its own docs and stories |
+| surface | 0.15 | a package with exports, or an index that re-exports it |
+| variants | 0.15 | recipes, literal prop unions, enum prop definitions, modifier class families |
+| tokens | 0.05 | custom properties, Sass variables, token files and objects |
+| stories | 0.05 | stories or docs pages beside it |
+
+Folders the config names (`system.packages`, `system.localAliases`, an installed package) are
+scored first and trusted; the full scan still runs, so a system kept somewhere unusual is found. A
+folder dsa finds on its own is read only at 90% confidence or above (`discovery.threshold`). Below
+that it is listed for a person to confirm: `dsa sources --pin <folder>` or, in `dsa serve`,
+Settings → Sources → tick the folder. Pinned folders (`system.path` or `system.sources`) always win;
+`--unpin` or Find again goes back to finding them.
 
 ### `dsa patterns [dir] [--all] [--ignore <id>]`
 

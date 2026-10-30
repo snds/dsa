@@ -1,7 +1,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { runAfterHooks, type DsaAddon, type EngineContext, type ServeRequest } from '@snds/dsa';
+import { discoverSources, runAfterHooks, type DsaAddon, type EngineContext, type ServeRequest } from '@snds/dsa';
 import { MEASURES, appSettings, clearEvents, clearMappingCache, computeFit, decideMany, effectiveSettings, figmaToken, githubToken, latestEvals, loadCatalog, logEvent, mapInstance, mask, materializeRemotes, openStore, parseFigmaUrl, readRendered, readSource, resolveTargets, runPipeline, setSetting, targetRelative, undecide, withMetrics, writeSecrets, type AppSettings, type Config } from '@snds/dsa/engine';
 import { renderReport } from './report.js';
 import { buildQueue, createIssues, syncLinks } from './queue.js';
@@ -338,8 +338,29 @@ export function readView(ctx: EngineContext) {
       core: { name: config.designSystem.core.name, packages: config.designSystem.core.packages },
       children: (config.designSystem.children ?? []).map(c => ({ name: c.name, path: c.path ?? '', gitUrl: c.git?.url ?? '', gitRef: c.git?.ref ?? 'main', exclude: (c.exclude ?? []).join(', ') })),
       internalConsumers: (config.internalConsumers ?? []).join(', '),
+      discovery: discoveryView(ctx),
     },
   };
+}
+
+/** Where the system's code is: the folders read, and every scored folder with its confidence and reasons. */
+function discoveryView(ctx: EngineContext) {
+  const sys = ctx.loaded.config.system as { path?: string; sources?: string[] };
+  const pinned = sys.path ? [sys.path] : sys.sources ?? [];
+  try {
+    // Scored as if nothing were pinned, so the list shows what dsa would find on its own.
+    const found = discoverSources(ctx.root, { ...ctx.loaded.config, system: { ...ctx.loaded.config.system, path: undefined, sources: undefined } } as any);
+    const reading = pinned.length ? pinned : found.accepted;
+    return {
+      pinned, reading, how: pinned.length ? 'pinned' : found.how, threshold: found.threshold,
+      candidates: found.candidates.slice(0, 15).map(c => ({
+        dir: c.dir, confidence: c.confidence, because: c.because ?? '', members: c.members ?? [c.dir],
+        why: c.signals.filter(s => s.score > 0).sort((a, b) => b.weight * b.score - a.weight * a.score).slice(0, 3).map(s => s.detail),
+      })),
+    };
+  } catch (e) {
+    return { pinned, reading: pinned, how: pinned.length ? 'pinned' : 'none', threshold: 0.9, candidates: [], error: errText(e) };
+  }
 }
 
 const list = (s: unknown) => String(s ?? '').split(',').map(x => x.trim()).filter(Boolean);
@@ -405,6 +426,14 @@ export async function saveView(ctx: EngineContext, body: any): Promise<{ saved: 
       k.exclude = list(c.exclude);
     }
     raw.internalConsumers = list(body.sources.internalConsumers);
+    // The folders the user points at as the system's code. An empty list goes back to finding them.
+    if (Array.isArray(body.sources.pinned)) {
+      const dirs = body.sources.pinned.map((d: unknown) => String(d ?? '').trim().replace(/\/+$/, '')).filter(Boolean);
+      for (const d of dirs) if (!fs.existsSync(path.resolve(ctx.root, d)) || !fs.statSync(path.resolve(ctx.root, d)).isDirectory()) errors.push(`"${d}" isn't a folder in ${ctx.root}.`);
+      const target = raw.designSystem ? (raw.designSystem.core ??= {}) : (raw.system ??= {});
+      delete target.path;
+      if (dirs.length) target.sources = [...new Set(dirs)]; else delete target.sources;
+    }
   }
   const ruleChanges: [string, number][] = [];
   if (body.rules) {

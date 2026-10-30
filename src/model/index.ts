@@ -2,17 +2,17 @@ import fs from "node:fs";
 import path from "node:path";
 import fg from "fast-glob";
 import type { DsaConfig } from "../config.js";
-import { discoverWorkspaces } from "../engine/workspaces.js";
-import { dsSourceDirs } from "../graph/index.js";
 import { READABLE, readFile } from "./elements.js";
 import { extractConcepts } from "./extract.js";
 import { readTokens } from "./tokens.js";
 import { typeConcepts } from "./kinds.js";
+import { discoverSources } from "./discover.js";
 import type { Concept, Declaration, Element, RealizationForm, SystemModel, Token, Use } from "./types.js";
 
 export type { Concept, Declaration, Element, Realization, RealizationForm, SystemModel, Token, Use, Evidence, Tier } from "./types.js";
 export { extractConcepts } from "./extract.js";
 export { readElements } from "./elements.js";
+export { discoverSources, type SourceCandidate, type SourceDiscovery } from "./discover.js";
 
 export interface BuildModelOptions {
   /** Repo root; config paths resolve against it. */
@@ -187,34 +187,9 @@ export function buildSystemModel(options: BuildModelOptions): SystemModel {
   return { system: options.config.system.name, sources: r.sources, concepts: r.concepts, tokens: r.tokens, uses: r.files.flatMap((f) => f.elements.flatMap((e) => e.uses)), files: { read: r.files.length, skipped: r.skipped } };
 }
 
-/** A library's own source folders: its path, else workspaces named in its packages, else aliases or the installed package. */
+/** A library's own source folders: pinned in the config, else found (see discover.ts). */
 export function systemSources(root: string, config: DsaConfig): string[] {
-  const sys = config.system as DsaConfig["system"] & { path?: string };
-  if (sys.path) return [sys.path];
-  const names = new Set(config.system.packages);
-  const dirs = discoverWorkspaces(root).filter((w) => names.has(w.name)).map((w) => path.relative(root, w.dir) || ".");
-  if (dirs.length) return dirs;
-  // Not declared as workspaces (Bazel, a single package, a folder of packages): find the package.json files.
-  const found = new Set<string>();
-  const placed = new Set<string>();
-  for (const pjFile of fg.sync("**/package.json", { cwd: root, absolute: true, ignore: ["**/node_modules/**", "**/dist/**"], deep: 5 })) {
-    try {
-      const name = JSON.parse(fs.readFileSync(pjFile, "utf8")).name;
-      if (names.has(name)) { found.add(path.relative(root, path.dirname(pjFile)) || "."); placed.add(name); }
-    } catch { /* unreadable */ }
-  }
-  // Copy-in source reached through local aliases (`@/components/ui` → src/components/ui).
-  for (const d of dsSourceDirs(root, config)) {
-    const abs = path.resolve(root, d);
-    if (fs.existsSync(abs) && fs.statSync(abs).isDirectory()) found.add(path.relative(root, abs) || ".");
-  }
-  // A consumer repo: the system is an installed package. Read it there.
-  for (const name of names) {
-    if (placed.has(name)) continue;
-    const installed = path.join(root, "node_modules", name);
-    if (fs.existsSync(path.join(installed, "package.json"))) found.add(path.relative(root, installed));
-  }
-  return [...found].sort();
+  return discoverSources(root, config).accepted;
 }
 
 // ---------- matching ----------

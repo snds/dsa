@@ -23,6 +23,7 @@ export { componentFamilies, patternCatalog, canonicalComponent, familyOf, catalo
 export { formatScan, formatPatterns, formatRatchet, table } from "./report/text.js";
 export { createProgram, type CliIo } from "./cli.js";
 export { dsaVersion } from "./version.js";
+export { buildSystemModel, discoverSources, type SystemModel, type SourceCandidate, type SourceDiscovery } from "./model/index.js";
 export * as schemas from "./schema/index.js";
 export { defineAddon, findAddons, loadAddons, runAfterHooks, type DsaAddon, type AddonApi, type FoundAddon, type AfterRunHook, type AfterRunContext, type ServeRequest, type ServeRoute } from "./addons.js";
 export { engineContext, useAddons, type EngineGlobals } from "./cli-engine.js";

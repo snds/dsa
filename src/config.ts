@@ -14,6 +14,7 @@ const nonNegativeInt = (fallback: number) => z.number().int().min(0).default(fal
 /** Where a library's or consumer's code lives, and who owns it. Shared by `system`, `system.children`, `consumers`, `extraRepos`. */
 const sourceFields = {
   path: z.string().optional().describe("Folder of its code, relative to the config root (another checkout may be outside it, e.g. ../prototype)."),
+  sources: z.array(z.string()).optional().describe("Folders of its code, when there are several (set by `dsa sources --pin` or Settings → Sources). Without `path` or `sources`, dsa finds them."),
   git: z
     .object({ url: z.string(), ref: z.string().optional() })
     .optional()
@@ -106,6 +107,10 @@ export const ConfigSchema = z
       .optional()
       .describe("The design system's profile module: a path relative to this file, or a package name. See docs/architecture.md."),
     system: SystemSchema,
+    discovery: z
+      .object({ threshold: z.number().min(0).max(1).default(0.9).describe("Confidence a found folder needs before dsa reads it as the system's source (0–1).") })
+      .optional()
+      .describe("Finding the system's source when `system.path` / `system.sources` are not set."),
     consumers: z
       .array(ConsumerSchema)
       .optional()
