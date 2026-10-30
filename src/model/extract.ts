@@ -60,11 +60,28 @@ export function extractConcepts(root: string, sources: string[], options: Extrac
       webComponents(text, consts, (name, tag, i) => raws.push({ name, family: name.includes("-") ? "tag" : "class-name", form: { form: "tag", tag }, evidence: ev("custom-element", "declaration", i) }));
       angularSelectors(text, (name, sel, i) => raws.push({ name, family: "class-name", form: sel, evidence: ev("angular-selector", "declaration", i) }));
       vueComponents(text, (name, i) => raws.push({ name, family: "class-name", form: { form: "tag", tag: name }, evidence: ev("vue-component", "declaration", i) }));
+      stencilComponents(text, (name, tag, i) => raws.push({ name, family: "class-name", form: { form: "tag", tag }, evidence: ev("stencil-component", "declaration", i) }));
+    } else if (ext === ".vue" || ext === ".svelte") {
+      // A single-file component is named by its file (Button.vue, button.svelte) unless it says otherwise.
+      const base = path.basename(file, ext);
+      if (!/^[+_]|^(index|app|layout|page|error)$/i.test(base) && !/\b(stories|story|examples?|demos?|docs?|test|__tests__|playground)\b/i.test(path.dirname(rel))) {
+        const name = base.replace(/(^|[-_.])([a-z0-9])/g, (_, __, ch: string) => ch.toUpperCase());
+        raws.push({ name, family: "class-name", form: { form: "import", symbol: name }, evidence: ev("single-file-component", "convention") });
+      }
+      vueComponents(text, (name, i) => raws.push({ name, family: "class-name", form: { form: "tag", tag: name }, evidence: ev("vue-component", "declaration", i) }));
     } else if (ext === ".njk") {
       for (const m of text.matchAll(/\{%-?\s*macro\s+([A-Za-z_]\w*)\s*\(/g)) raws.push({ name: m[1]!, family: "macro", form: { form: "macro", name: m[1]! }, evidence: ev("template-macro", "declaration", m.index) });
     } else if (/\.(s?css|less)$/.test(ext) && !NON_COMPONENT_STYLE.test(rel.replace(/\\/g, "/"))) {
       for (const { cls, index, group } of topLevelClasses(text)) raws.push({ name: cls, family: "css-class", form: { form: "class", block: cls }, group, evidence: ev("style-class", "style", index) });
     }
+  }
+  // An auto-import prefix (Nuxt modules, unplugin resolvers: `prefix: 'U'`) makes every single-file
+  // component a tag with no import: Button.vue is written <UButton> or <u-button>. Convention tier.
+  const prefixes = new Map<string, number>();
+  for (const [, text] of texts) for (const m of text.matchAll(/\bprefix\s*:\s*['"]([A-Z][A-Za-z]{0,3})['"]/g)) prefixes.set(m[1]!, (prefixes.get(m[1]!) ?? 0) + 1);
+  const autoPrefix = [...prefixes.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+  if (autoPrefix) for (const r of raws.filter((x) => x.evidence.extractor === "single-file-component")) {
+    raws.push({ ...r, form: { form: "tag", tag: `${autoPrefix}${r.name}` }, evidence: { ...r.evidence, extractor: "auto-import-prefix" } });
   }
   macroTemplateClasses(root, raws, texts);
   const exported = packageExports(root, sources, texts);
@@ -91,6 +108,15 @@ function webComponents(text: string, consts: Map<string, string>, add: (name: st
   for (const m of text.matchAll(/@customElement\(\s*['"`]([^'"`]+)['"`]\s*\)\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+(\w+)/g)) {
     const tag = resolve(m[1]!);
     if (ok(tag)) add(m[2]!, tag, m.index!);
+  }
+}
+
+/** Stencil: `@Component({ tag: 'ion-button', … }) export class Button`. */
+function stencilComponents(text: string, add: (name: string, tag: string, index: number) => void) {
+  if (!/@Component\(/.test(text)) return;
+  for (const m of text.matchAll(/@Component\(\s*\{([\s\S]*?)\}\s*\)\s*(?:export\s+)?(?:default\s+)?class\s+(\w+)/g)) {
+    const tag = m[1]!.match(/\btag\s*:\s*['"`]([a-z][a-z0-9]*(?:-[a-z0-9]+)+)['"`]/);
+    if (tag) add(m[2]!, tag[1]!, m.index!);
   }
 }
 
