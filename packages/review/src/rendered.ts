@@ -1,0 +1,222 @@
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import http from 'node:http';
+import path from 'node:path';
+import { readRendered, resolveTargets, type Config, type RenderedSet, type Styles } from '@snds/dsa/engine';
+
+import { detectApp, ensureBrowser, startApp } from './apps.js';
+
+/**
+ * Rendered signatures: what each system component × variant × size actually looks like in a browser,
+ * read from the design system's own Storybook. Static signatures (signatures.ts) say which classes a
+ * variant applies; rendered ones say what they compute to — height, padding, radius, colors, border,
+ * type — after tokens, density, and cascade. Prototype elements are measured the same way during
+ * screenshots, so the two can be compared property by property, and side by side as images.
+ */
+
+/** Runs in the page: computed visual properties of one element. Source text so bundler helpers don't leak in. */
+export const READ_STYLE = `(el) => {
+  const cs = getComputedStyle(el); const r = el.getBoundingClientRect();
+  return {
+    height: Math.round(r.height), width: Math.round(r.width),
+    paddingLeft: cs.paddingLeft, paddingRight: cs.paddingRight, paddingTop: cs.paddingTop, paddingBottom: cs.paddingBottom,
+    borderRadius: cs.borderTopLeftRadius, backgroundColor: cs.backgroundColor, color: cs.color,
+    borderWidth: cs.borderTopWidth, borderColor: cs.borderTopColor, borderStyle: cs.borderTopStyle,
+    fontSize: cs.fontSize, fontWeight: cs.fontWeight, lineHeight: cs.lineHeight, textDecoration: cs.textDecorationLine,
+    boxShadow: cs.boxShadow === 'none' ? 'none' : 'shadow', gap: cs.columnGap,
+  };
+}`;
+
+interface StoryCache { hash: string; files: string[]; results: { component: string; key: string; styles: Styles; shot?: string }[] }
+
+const sha = (s: string | Buffer) => crypto.createHash('sha1').update(s).digest('hex').slice(0, 16);
+const readOr = (f: string) => { try { return fs.readFileSync(f); } catch { return Buffer.from(''); } };
+const hashFiles = (files: string[], extra = '') => sha(Buffer.concat([...files.map(f => Buffer.concat([Buffer.from(f + '\0'), readOr(f)])), Buffer.from(extra)]));
+
+/** Every token/CSS file in the core packages: a token change re-measures every story. */
+function tokensHash(root: string, config: Config) {
+  const dirs = resolveTargets(root, config).filter(t => t.role === 'core').map(t => t.dir);
+  const css: string[] = [];
+  const walk = (d: string, depth = 0) => { if (depth > 4 || !fs.existsSync(d)) return; for (const e of fs.readdirSync(d, { withFileTypes: true })) { if (e.name === 'node_modules' || e.name.startsWith('.')) continue; const p = path.join(d, e.name); if (e.isDirectory()) walk(p, depth + 1); else if (e.name.endsWith('.css')) css.push(p); } };
+  for (const d of dirs) walk(d);
+  return hashFiles(css.sort());
+}
+
+/** Story files on disk in the core packages (a new or deleted story file means re-measuring). */
+function storyFiles(root: string, config: Config) {
+  const out: string[] = [];
+  for (const t of resolveTargets(root, config).filter(t => t.role === 'core')) {
+    const walk = (d: string, depth = 0) => { if (depth > 5 || !fs.existsSync(d)) return; for (const e of fs.readdirSync(d, { withFileTypes: true })) { if (e.name === 'node_modules' || e.name.startsWith('.') || e.name === 'vendor') continue; const p = path.join(d, e.name); if (e.isDirectory()) walk(p, depth + 1); else if (/\.stories\.tsx?$/.test(e.name)) out.push(p); } };
+    walk(path.join(t.dir, 'src'));
+  }
+  return out.sort();
+}
+
+/** The files a story's rendering depends on: the story, the component file, its vendored stock layer. */
+function storyInputs(storyFile: string, compFiles: string[]) {
+  const stock = compFiles.map(f => path.join(path.dirname(f), 'vendor', 'shadcn', path.basename(f))).filter(f => fs.existsSync(f));
+  return [storyFile, ...compFiles, ...stock];
+}
+
+/**
+ * Measure the system's components in its Storybook. Each story is cached by a hash of its inputs (story file,
+ * component source, vendored stock layer, every token CSS file): unchanged stories are reused, so a run
+ * only opens the stories that changed, and skips starting Storybook when none did.
+ */
+export async function renderSignatures(opts: { root: string; config: Config; dataDir: string; log?: (m: string) => void; force?: boolean }): Promise<RenderedSet> {
+  const log = opts.log ?? (() => {});
+  const sigFile = path.join(opts.dataDir, 'signatures.json');
+  if (!fs.existsSync(sigFile)) throw new Error('No signatures yet. Run "dsa run" first.');
+  const sigs: any[] = JSON.parse(fs.readFileSync(sigFile, 'utf8'));
+  const byStem = new Map<string, any[]>();
+  for (const c of sigs) if (c.slot && c.file) { const stem = path.basename(c.file).replace(/\.tsx$/, ''); byStem.set(stem, [...(byStem.get(stem) ?? []), c]); }
+  const prev: any = opts.force ? null : readRendered(opts.dataDir);
+  const prevStories: Record<string, StoryCache> = prev?.stories ?? {};
+  const tHash = tokensHash(opts.root, opts.config);
+
+  const { url, stop, source, dir: sbDir } = await startStorybook(opts.root, opts.config, log);
+  const out: any = { takenAt: new Date().toISOString(), source, components: {}, notes: [], stories: {}, storyFiles: storyFiles(opts.root, opts.config), tokensHash: tHash };
+  const dir = path.join(opts.dataDir, 'rendered');
+  fs.mkdirSync(dir, { recursive: true });
+  let reused = 0, measured = 0;
+  try {
+    const index: any = await (await fetch(new URL('index.json', url))).json();
+    const stories = Object.values<any>(index.entries ?? index.stories ?? {}).filter(s => s.type !== 'docs' && s.importPath);
+    // Stories that show many combinations first (All Variants, All Sizes…), then the rest; a few per component is enough.
+    const rank = (s: any) => (/all|variant|size|matrix|gallery|overview/i.test(s.name) ? 0 : /default|primary|basic/i.test(s.name) ? 1 : 2);
+    const perStem = new Map<string, number>();
+    const wanted = stories
+      .filter(s => byStem.has(path.basename(s.importPath).replace(/\.stories\.tsx?$/, '')))
+      .sort((a, b) => rank(a) - rank(b))
+      .filter(s => { const k = s.importPath; const n = perStem.get(k) ?? 0; perStem.set(k, n + 1); return n < (opts.config.rendered?.storiesPerComponent ?? 6); });
+    const inputsOf = (s: any) => storyInputs(path.resolve(sbDir ?? opts.root, s.importPath), byStem.get(path.basename(s.importPath).replace(/\.stories\.tsx?$/, ''))!.map((c: any) => c.file));
+    const todo = wanted.filter(s => { const files = inputsOf(s); const h = hashFiles(files, tHash); const c = prevStories[s.id]; if (c && c.hash === h) { out.stories[s.id] = c; reused++; return false; } return true; });
+    log(`Storybook (${source}): ${stories.length} stories, ${wanted.length} cover components with signatures · ${reused} unchanged (cached) · ${todo.length} to measure.`);
+    if (todo.length) {
+      const pw = await ensureBrowser(log);
+      const browser = await pw.chromium.launch();
+      const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2 });
+      try {
+        const started = Date.now();
+        const budget = (opts.config.rendered?.maxMinutes ?? 8) * 60000;
+        let n = 0;
+        for (const s of todo) {
+          n++;
+          if (Date.now() - started > budget) { out.notes.push(`Stopped after ${n - 1} of ${todo.length} stories (rendered.maxMinutes); the rest are measured next run.`); log(`  time budget reached after ${n - 1} stories`); break; }
+          if (n === 1 || n % 10 === 0 || n === todo.length) log(`  measuring stories ${n}/${todo.length}…`);
+          const comps = byStem.get(path.basename(s.importPath).replace(/\.stories\.tsx?$/, ''))!;
+          try {
+            // Storybook dev keeps connections open (HMR), so "network idle" never comes: wait for the story to render instead.
+            await page.goto(new URL(`iframe.html?id=${encodeURIComponent(s.id)}&viewMode=story`, url).toString(), { waitUntil: 'domcontentloaded', timeout: 60000 });
+            await page.waitForFunction(`(() => { const r = document.querySelector('#storybook-root, #root'); return r && r.children.length > 0; })()`, null, { timeout: n === 1 ? 90000 : 20000 });
+            await page.waitForTimeout(250);
+          } catch (e: any) { out.notes.push(`${s.id}: ${String(e.message).split('\n')[0]}`); continue; }
+          const results: StoryCache['results'] = [];
+          for (const c of comps) {
+            const found: { key: string; styles: Styles; idx: number }[] = await page.evaluate(`(() => {
+              const read = ${READ_STYLE};
+              const els = Array.from(document.querySelectorAll('[data-slot="${c.slot}"]'));
+              const seen = new Set(); const out = [];
+              els.forEach((el, idx) => {
+                const r = el.getBoundingClientRect(); if (!r.width || !r.height) return;
+                if (el.matches(':disabled,[aria-disabled="true"],[data-disabled]')) return;
+                const key = (el.getAttribute('data-variant') || '${c.defaults?.variant ?? 'default'}') + '/' + (el.getAttribute('data-size') || '${c.defaults?.size ?? 'default'}');
+                if (seen.has(key)) return; seen.add(key);
+                el.setAttribute('data-dsa-r', String(idx));
+                out.push({ key, styles: read(el), idx });
+              });
+              return out;
+            })()`);
+            for (const f of found) {
+              const file = `${c.component}-${f.key.replace(/[^\w-]+/g, '_')}-${sha(s.id).slice(0, 6)}.png`;
+              const shot = await shoot(page, `[data-dsa-r="${f.idx}"][data-slot="${c.slot}"]`, path.join(dir, file));
+              results.push({ component: c.component, key: f.key, styles: f.styles, shot: shot ? file : undefined });
+            }
+          }
+          out.stories[s.id] = { hash: hashFiles(inputsOf(s), tHash), files: inputsOf(s), results };
+          measured++;
+        }
+      } finally { await browser.close(); }
+    }
+    // Assemble: stories in rank order, first story that shows a combination wins.
+    for (const s of wanted) for (const r of out.stories[s.id]?.results ?? []) {
+      const slot = (out.components[r.component] ??= {});
+      if (!slot[r.key]) slot[r.key] = { styles: r.styles, shot: r.shot, story: s.id };
+    }
+  } finally { stop(); }
+  const n = Object.values<any>(out.components).reduce((a: number, c: any) => a + Object.keys(c).length, 0);
+  log(`Rendered ${n} variant × size combinations across ${Object.keys(out.components).length} components (${measured} stories measured, ${reused} reused).`);
+  fs.writeFileSync(path.join(dir, 'index.json'), JSON.stringify(out, null, 1));
+  return out;
+}
+
+async function shoot(page: any, sel: string, file: string) {
+  try {
+    const loc = page.locator(sel).first();
+    await loc.scrollIntoViewIfNeeded({ timeout: 2000 });
+    const b = await loc.boundingBox();
+    if (!b) return false;
+    const pad = 6, vp = page.viewportSize(); // tight: Storybook grids put other variants right next to it
+    const x = Math.max(0, b.x - pad), y = Math.max(0, b.y - pad);
+    await page.screenshot({ path: file, clip: { x, y, width: Math.min(vp.width - x, b.width + pad * 2), height: Math.min(vp.height - y, b.height + pad * 2) } });
+    return true;
+  } catch { return false; }
+}
+
+/** Find the design system's Storybook in the host repo: run it (fresh) or serve its static build. */
+export async function startStorybook(root: string, config: Config, log: (m: string) => void): Promise<{ url: string; stop: () => void; source: string; dir?: string }> {
+  const targets = resolveTargets(root, config);
+  const sb = targets.find(t => /storybook/.test(JSON.stringify(readPkg(t.dir)?.scripts ?? {})) && /storybook dev/.test(readPkg(t.dir)?.scripts?.dev ?? readPkg(t.dir)?.scripts?.storybook ?? ''));
+  const staticDir = sb ? path.join(sb.dir, 'storybook-static') : null;
+  if (config.rendered?.useStatic && staticDir && fs.existsSync(path.join(staticDir, 'index.json'))) return { ...(await serveStatic(staticDir)), dir: sb!.dir };
+  if (sb) {
+    const plan = detectApp(sb, config);
+    if (!('reason' in plan)) {
+      try {
+        log(`Starting ${sb.name} (${plan.how}) for rendered signatures…`);
+        const app = await startApp(plan, 180000);
+        return { url: app.url, stop: app.stop, source: 'storybook dev', dir: sb.dir };
+      } catch (e: any) { log(`  ${String(e.message).split('\n')[0]}`); }
+    }
+  }
+  if (staticDir && fs.existsSync(path.join(staticDir, 'index.json'))) {
+    const age = Math.round((Date.now() - fs.statSync(path.join(staticDir, 'index.json')).mtimeMs) / 864e5);
+    log(`Using the static Storybook build (${age} day${age === 1 ? '' : 's'} old); rebuild it for current styles.`);
+    const s = await serveStatic(staticDir);
+    return { ...s, source: `static build, ${age} days old`, dir: sb!.dir };
+  }
+  throw new Error('No Storybook found in the host repo (a workspace with a "storybook dev" script, or a storybook-static build).');
+}
+
+function serveStatic(dir: string): Promise<{ url: string; stop: () => void; source: string }> {
+  const types: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.png': 'image/png' };
+  const server = http.createServer((req, res) => {
+    const p = path.join(dir, decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname));
+    if (!p.startsWith(dir) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404); return res.end(); }
+    res.writeHead(200, { 'Content-Type': types[path.extname(p)] ?? 'application/octet-stream' });
+    fs.createReadStream(p).pipe(res);
+  });
+  return new Promise(ok => server.listen(0, '127.0.0.1', () => {
+    const port = (server.address() as any).port;
+    ok({ url: `http://127.0.0.1:${port}/`, stop: () => server.close(), source: 'static build' });
+  }));
+}
+
+const readPkg = (dir: string) => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')); } catch { return null; } };
+
+/**
+ * Re-measure only what changed. Without starting Storybook: if no story file was added or removed and
+ * every cached story's inputs (story, component, stock layer, token CSS) hash the same, skip entirely.
+ */
+export async function renderIfStale(root: string, config: Config, dataDir: string, log: (m: string) => void = () => {}) {
+  const prev: any = readRendered(dataDir);
+  if (prev?.stories && prev.storyFiles) {
+    const tHash = tokensHash(root, config);
+    const filesNow = storyFiles(root, config);
+    const sameFiles = JSON.stringify(filesNow) === JSON.stringify(prev.storyFiles);
+    const changed = Object.entries<any>(prev.stories).filter(([, c]) => hashFiles(c.files, tHash) !== c.hash).length;
+    if (sameFiles && !changed && prev.tokensHash === tHash) { log(`Storybook measurements up to date (${Object.keys(prev.stories).length} stories cached).`); return; }
+    log(`Storybook: ${changed} changed stor${changed === 1 ? 'y' : 'ies'}${sameFiles ? '' : ', story files added or removed'}${prev.tokensHash !== tHash ? ', token CSS changed' : ''}; re-measuring those.`);
+  }
+  await renderSignatures({ root, config, dataDir, log });
+}

@@ -1,0 +1,57 @@
+{
+  "name": "@snds/dsa-dashboard",
+  "version": "0.1.0",
+  "description": "The @snds/dsa dashboard: dsa serve (live, with Settings and review), the HTML report, dsa publish (a static site), the action queue.",
+  "license": "Apache-2.0",
+  "author": "Sean Sands",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/snds/dsa.git",
+    "directory": "packages/dashboard"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "templates"
+  ],
+  "dsa": {
+    "addon": "./dist/index.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.check.json",
+    "build:ui": "pnpm --filter @snds/dsa-dashboard-ui build"
+  },
+  "peerDependencies": {
+    "@snds/dsa": "workspace:*",
+    "@snds/dsa-review": "workspace:*",
+    "@snds/dsa-figma": "workspace:*"
+  },
+  "devDependencies": {
+    "@snds/dsa": "workspace:*",
+    "@types/node": "^22.20.5",
+    "typescript": "~5.9.3",
+    "@snds/dsa-review": "workspace:*",
+    "@snds/dsa-figma": "workspace:*"
+  },
+  "peerDependenciesMeta": {
+    "@snds/dsa-review": {
+      "optional": true
+    },
+    "@snds/dsa-figma": {
+      "optional": true
+    }
+  }
+}

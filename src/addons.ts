@@ -2,9 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Command } from "commander";
 import type { PipelineStage } from "./engine/pipeline.js";
 import type { StoreFactory } from "./engine/store.js";
+import type { EngineContext } from "./engine/from-dsa.js";
 import { APP_DIR } from "./engine/paths.js";
 
 /**
@@ -25,6 +27,10 @@ export interface DsaAddon {
   stages?: PipelineStage[];
   /** Add commands (or options) to the CLI. */
   commands?: (program: Command, api: AddonApi) => void;
+  /** Steps after a run (or a re-evaluation) finishes: screenshots, the report, the agent snapshot. */
+  afterRun?: AfterRunHook[];
+  /** Routes the dashboard's `dsa serve` mounts (the agent workbench's API). */
+  routes?: ServeRoute;
 }
 
 /** What the CLI hands an add-on's `commands`. */
@@ -33,7 +39,64 @@ export interface AddonApi {
   cwd: string;
   out: (text: string) => void;
   err: (text: string) => void;
+  /** Config, profile, repo and data folder for a command, from the CLI's global options (--config, --root, --data, --profile). */
+  context: (cmd: Command) => Promise<EngineContext>;
+  /** Every installed add-on, loaded. */
+  addons: () => Promise<DsaAddon[]>;
+  /** Throws the install hint when no add-on offers run history. */
+  requireStore: (command: string) => Promise<void>;
 }
+
+/**
+ * A step that runs after `dsa run` (kind "run") or `dsa reevaluate` (kind "reevaluate") has stored
+ * its results. Hooks run in `order` (lowest first; screenshots 10, the report 50, the agent snapshot
+ * 90). A hook that throws costs only itself: the error goes to `notes`.
+ */
+export interface AfterRunHook {
+  id: string;
+  order: number;
+  run(ctx: AfterRunContext): Promise<void> | void;
+}
+
+export interface AfterRunContext {
+  kind: "run" | "reevaluate";
+  ctx: EngineContext;
+  /** The run's options: CLI flags (--shots, --no-report…) and { from: "serve" } from the dashboard. */
+  options: Record<string, unknown>;
+  /** Opens the run history. */
+  store: StoreFactory;
+  notes: string[];
+  log: (msg: string) => void;
+}
+
+/** Run every add-on's after-run hooks in order. */
+export async function runAfterHooks(addons: DsaAddon[], a: AfterRunContext): Promise<void> {
+  const hooks = addons.flatMap((x) => x.afterRun ?? []).sort((x, y) => x.order - y.order);
+  for (const h of hooks) {
+    try {
+      await h.run(a);
+    } catch (e) {
+      a.notes.push(`${h.id} skipped: ${String((e as Error)?.message ?? e).split("\n")[0]!.slice(0, 200)}`);
+    }
+  }
+}
+
+/** What a dashboard route gets: the request, helpers, and the run context (reloaded per request). */
+export interface ServeRequest {
+  req: IncomingMessage;
+  res: ServerResponse;
+  url: URL;
+  /** The request body, parsed as JSON. */
+  body: () => Promise<any>;
+  send: (code: number, body: unknown, type?: string) => void;
+  /** Config, profile, repo and data folder, read fresh (the config may have changed in Settings). */
+  context: () => Promise<EngineContext>;
+  root: string;
+  dataDir: string;
+}
+
+/** Handle a request and return true, or return false to let the next route try. */
+export type ServeRoute = (r: ServeRequest) => Promise<boolean>;
 
 /** Identity helper so an add-on module gets type checking. */
 export function defineAddon(addon: DsaAddon): DsaAddon {

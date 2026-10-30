@@ -29,6 +29,7 @@ dsa/                     @snds/dsa: core library + the `dsa` CLI
   schema/                published JSON Schemas for config and reports
   data/                  neutral reference data (component families, pattern catalog)
 packages/                optional add-ons (review, dashboard, history, figma, agent)
+  dashboard/ui/          the dashboard's React source; its build is dashboard/templates/ui
 docs/                    this note
 ```
 
@@ -128,8 +129,26 @@ An add-on is a package named `@snds/dsa-<name>` whose `package.json` has
 - `store` opens the run history.
 - `stages` add steps to `dsa run`: "scan" stages run before metrics (a Figma
   crawl), "metrics" stages after, with the store open. A stage that fails costs
-  only itself.
-- `commands(program, api)` adds commands to the one CLI.
+  only itself. The run's CLI flags reach a stage as `ctx.options`.
+- `afterRun` hooks run after `dsa run` and `dsa reevaluate` have stored their
+  results, in order: screenshots (10), the report (50), the agent snapshot (90).
+  The dashboard's Run button runs the same hooks.
+- `routes` are mounted by `dsa serve` (the agent workbench's API).
+- `commands(program, api)` adds commands to the one CLI, or options to the
+  core's (`run --shots`). `api.context(cmd)` loads config and profile from the
+  global options, the way core commands do.
+
+Add-ons import the engine from `@snds/dsa/engine`. Code without a heavy
+dependency that two add-ons need lives in the core: rendered comparison and fit
+scores (the report and the review both use them) and Figma link parsing
+(Settings). Each package keeps the suite's TypeScript strictness for its ported
+code (`noUncheckedIndexedAccess` and `exactOptionalPropertyTypes` off); the core
+keeps both on.
+
+What a system knows that the add-ons need comes from its profile: `label` (every
+place the UI or a brief names the system), `usage` (the Usage view), `iconFont`,
+`readiness.usageMetric`, `reconcile` and `benchRuns`, and `agent` (its docs,
+component entries, MCP server, checker, and folders a sandbox links).
 
 The CLI finds add-ons in `node_modules/@snds` next to the repo it runs on and next
 to dsa, and in this checkout's `packages/`.
@@ -143,6 +162,15 @@ timestamps blanked) and compares. Phase 2 ended with no differences on the
 fixture monorepo (222 rows) and on the system the suite was built for (9,512
 rows, agent readiness included).
 
+Since Phase 3 each side also writes what its CLI writes for people, and those
+are compared: the report and the published site (their embedded data by
+top-level key, and the HTML around the UI's script and stylesheet), issue
+drafts, the review queue, and screenshot and Storybook manifests (ids, files,
+routes; never pixels). `--shots` takes screenshots on both sides first. A few
+field names changed on purpose (the suite named them after its system; dsa says
+`system`, as in `systemShot`) and two sentences changed wording; `dump.mjs`
+lists them and maps the suite's side.
+
 ## Phases
 
 | Phase | What lands | State |
@@ -150,8 +178,8 @@ rows, agent readiness included).
 | 0 | Workspace, provenance, profile interface, reader seam, this note | done |
 | 1 | Extended config (tiers, other repos, per-app switches, `profile`) and `dsa config migrate` | done |
 | 2 | Core ports: repo discovery, Vue/Angular reading, versions, tokens, Tailwind drift, findings, issues, element review; run history (`@snds/dsa-history`); add-on API | done |
-| 3 | Add-ons: review (screenshots, Storybook measurement), dashboard (`serve`, `report`, `publish`), figma, agent (`mcp`, `agent brief`) | next |
-| 4 | Neutralize: every system-specific name behind the profile; CI name check; port the suite's tests | |
+| 3 | Add-ons: review (screenshots, Storybook measurement), dashboard (`serve`, `report`, `publish`), figma, agent (`mcp`, `agent brief`) | done |
+| 4 | Neutralize: every system-specific name behind the profile; CI name check; port the suite's tests | next |
 | 5 | A consuming system switches to dsa as a dependency, after a parity run | |
 
 Every phase keeps today's numbers: the fixture app's scan, patterns and ratchet
@@ -175,3 +203,22 @@ reports don't change, and existing configs keep working.
 - From `scan.exclude`, the engine skips the extra entries that name one folder
   (`legacy/**`); other globs only shape the graph.
 
+
+### Phase 3 notes
+
+- Four packages: `review`, `dashboard`, `figma`, `agent`. `agent` depends on
+  `dashboard` (the queue) and `review` (before/after pictures). `dashboard`
+  uses `review` and `figma` only when they are installed.
+- Moved to the core instead of an add-on: rendered comparison, fit scores and
+  Figma link parsing (no heavy dependency, needed by two packages).
+- The system-specific parts of the suite's agent code (its component list,
+  contract and decision records, MCP server, usage checker, bench runs, usage
+  scan, icon font) are profile hooks. A system without them gets a working
+  workbench that only uses dsa's own tools.
+- `dsa publish` writes to `<data>/site` by default (the suite wrote to its own
+  folder). The queue's agent prompt names the configured decisions file and
+  `dsa run --no-shots`.
+- The UI takes the system's name from the profile (`label`). Recharts calls its
+  polar layout by a word the name check forbids; the UI build renames that one
+  internal value.
+- Agent sandboxes live in `~/.cache/dsa/sandboxes`.

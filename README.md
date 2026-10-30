@@ -227,8 +227,30 @@ Global options: `--root <repo>` (config paths resolve against it), `--data <dir>
 (default `<output.dir>`), `--profile <spec>` (takes the place of the config's),
 `--config <file>`, `--json`.
 
-The dashboard, screenshots, Storybook measurement, Figma and the agent
-workbench are add-ons that land in Phase 3.
+### Add-ons: dashboard, review, Figma, agents
+
+Heavier features are separate packages. Each adds its commands to the same
+`dsa` CLI when it is installed (`dsa where` lists the ones it found).
+
+```sh
+npm install --save-dev @snds/dsa-dashboard @snds/dsa-review @snds/dsa-figma @snds/dsa-agent
+```
+
+| Command | Add-on | What it does |
+|---|---|---|
+| `dsa serve [--port 4319]` | dashboard | The dashboard on localhost: findings, element review, the action queue, trends, live Settings and a Run button. |
+| `dsa report` | dashboard | Rebuilds the single-file report in `<data>/report/index.html`. `dsa run` writes it too (`--no-report` skips it). |
+| `dsa publish [--out <dir>]` | dashboard | The dashboard as a static folder (default `<data>/site`), with only the images it shows. Read-only. |
+| `dsa shots [--target] [--url] [--routes a,b] [--per-group 3] [--fresh] [--retry-missing]` | review | Screenshots example elements. It starts each app itself, visits its routes, and stops it. |
+| `dsa render [--force]` | review | Measures the system's components in its Storybook (height, padding, radius, colors, border, type). |
+| `dsa setup` | review | One time: installs the headless browser and app dependencies, and turns screenshots on for every run. |
+| `dsa run --figma \| --no-figma` | figma | Forces or skips the Figma crawl. It runs by itself when `modules.figma` is on and a token and a library are set. |
+| `dsa mcp [--session] [--repo]` | agent | The scan as MCP tools over stdio, for Claude Code, Cursor or any MCP client. |
+| `dsa agent brief [E-id,… \| F-id \| A-id \| R:<repo>]` | agent | Prints the brief an agent gets for a review group, a queue item or a repo. |
+
+With the review add-on, `dsa run --shots` (or `shots.auto`) takes screenshots
+after the run; `--no-shots` skips them. The system's name, its agent tools and
+its usage data come from its profile, never from dsa.
 
 ## Configuration
 
@@ -267,9 +289,8 @@ defaults for a shadcn-style system called `unicron`:
 ### Sections `dsa run` reads
 
 `dsa run` and the history commands read these keys (scan, patterns and ratchet
-don't). Sections for add-ons still to come (`rendered`, `shots`, `figma`,
-`agents`) are accepted and kept for them. A value set here wins over the
-profile's.
+don't). The add-ons read `rendered`, `shots`, `figma`, `agents` and `report`.
+A value set here wins over the profile's.
 
 | Key | Meaning |
 |---|---|

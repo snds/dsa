@@ -146,7 +146,7 @@ describe("cli: run and the history commands", () => {
 
     out.length = 0;
     await run("where");
-    expect(out.join("\n")).toMatch(/Add-ons: {2}@snds\/dsa-history/);
+    expect(out.join("\n")).toMatch(/Add-ons: {2}.*@snds\/dsa-history/);
   });
 
   it("init writes a first config and refuses to overwrite it", async () => {

@@ -1,0 +1,48 @@
+{
+  "name": "@snds/dsa-review",
+  "version": "0.1.0",
+  "description": "Element review in a browser for @snds/dsa: screenshots of the app, Storybook measurements of the system, flows and page placement.",
+  "license": "Apache-2.0",
+  "author": "Sean Sands",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/snds/dsa.git",
+    "directory": "packages/review"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "dsa": {
+    "addon": "./dist/index.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.check.json"
+  },
+  "peerDependencies": {
+    "@snds/dsa": "workspace:*"
+  },
+  "dependencies": {
+    "playwright": "^1.63.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@snds/dsa": "workspace:*",
+    "@types/node": "^22.20.5",
+    "typescript": "~5.9.3"
+  }
+}

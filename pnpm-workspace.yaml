@@ -2,3 +2,5 @@
 # Optional add-ons live under packages/ and depend on it with workspace:*.
 packages:
   - "packages/*"
+  # The dashboard's React app; its build output (packages/dashboard/templates/ui) is committed.
+  - "packages/dashboard/ui"

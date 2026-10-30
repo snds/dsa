@@ -51,6 +51,30 @@ export interface DsaProfile {
   containers?: Record<string, string>;
   /** Metrics the system adds to the catalog (the same shape as data/metric-catalog.yaml entries). */
   metrics?: Record<string, unknown>[];
+  /** The system's own usage summary (tokens and components per library) for the dashboard's Usage view. */
+  usage?: (root: string) => unknown;
+  /** The system's icon font (a .woff2 file), for icon previews in the dashboard's component picker. */
+  iconFont?: (root: string) => string | null;
+  /** What agents get from the system beyond the scan (used by @snds/dsa-agent). */
+  agent?: AgentProfile;
+}
+
+/** The system's own agent tooling: its docs, MCP server and checker. Every part is optional. */
+export interface AgentProfile {
+  /** The system's checkout (its docs and agent tools); agents may read it. */
+  root?: string;
+  /** A component's entry for briefs: import path, variants, docs. */
+  component?(name: string): { import?: string; variants?: Record<string, string[]>; docs?: { description?: string; path?: string } } | null;
+  /** Lines (markdown list items) pointing at the system's intent: its contract, decision records. */
+  intent?(repoDir: string): string[];
+  /** The system's MCP server for an agent working in `repoDir` (a sandbox copy when `sandbox` is set). */
+  mcpServer?(repoDir: string, sandbox?: string): { name: string; command: string; args: string[]; env?: Record<string, string> } | null;
+  /** One line naming the system's MCP tools, for briefs. */
+  tools?: string;
+  /** Run the system's usage checker on one file of a repo; returns its report as text. */
+  checkFile?(root: string, relPath: string): Promise<string>;
+  /** Folders (relative to a repo) a sandbox links to the real checkout besides node_modules, such as a vendored copy of the system. */
+  sandboxLinks?: string[];
 }
 
 export interface ComponentEntry {
@@ -114,6 +138,12 @@ export interface ReadinessProvider {
   setupHint?: string;
   /** Said when `available` is false. */
   missingNote?: string;
+  /** The metric (one of `ReadinessRow.metrics`) whose detail is a usage checker's per-file errors, shown with each repo. */
+  usageMetric?: string;
+  /** Say where the usage checker's raw-element count and the scan's look-alikes differ, and why. */
+  reconcile?(usage: any, lookalikes: { file: string }[], hostDir: string, root: string): { note: string; [k: string]: unknown } | null;
+  /** Benchmark runs of agents building with the system, newest first, for the dashboard. */
+  benchRuns?(dirs: string[]): Promise<unknown[]>;
 }
 
 /** A profile with its defaults filled in. */

@@ -65,6 +65,27 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 - Dependencies: `@babel/parser`, `@vue/compiler-sfc`, `htmlparser2`, `semver`,
   `yaml` (all plain JavaScript).
 
+- Phase 3 add-ons, each adding its commands to the one CLI:
+  - `@snds/dsa-dashboard`: `serve` (port 4319), `report`, `publish`, the action
+    queue, and the React dashboard (its build ships in the package).
+  - `@snds/dsa-review`: `shots`, `render`, `setup`, scripted flows, the
+    Storybook preview proxy, and `run --shots` / `--no-shots`.
+  - `@snds/dsa-figma`: the Figma crawl as a `dsa run` stage, and
+    `run --figma` / `--no-figma`.
+  - `@snds/dsa-agent`: `mcp`, `agent brief`, and the dashboard's agent
+    workbench (sessions in a sandbox, proposals, before/after pictures).
+- Add-on API: `afterRun` hooks (screenshots, the report, the agent snapshot run
+  after `run` and `reevaluate`) and `routes` the dashboard mounts. Commands get
+  `context`, `addons` and `requireStore`.
+- `@snds/dsa/engine`: the engine's modules, for add-ons.
+- Profile fields for add-ons: `usage`, `iconFont`, `agent` (docs, MCP server,
+  checker, sandbox links), and a readiness provider's `usageMetric`,
+  `reconcile` and `benchRuns`.
+- Rendered comparison and fit scores (`compareRendered`, `computeFit`) are in
+  the core, so the report needs no browser.
+- `scripts/parity/` also compares the report, the published site, issue drafts,
+  the review queue and screenshot manifests (`--shots`).
+
 ### Changed
 
 - A config written for the analytics suite is converted in memory when it is

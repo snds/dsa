@@ -1,0 +1,132 @@
+{
+  "lib-components": {
+    "meta": {
+      "components": [
+        {
+          "key": "k-btn-primary",
+          "name": "Variant=Primary",
+          "containing_frame": {
+            "containingComponentSet": {
+              "name": "Button"
+            }
+          }
+        },
+        {
+          "key": "k-btn-secondary",
+          "name": "Variant=Secondary",
+          "containing_frame": {
+            "containingComponentSet": {
+              "name": "Button"
+            }
+          }
+        },
+        {
+          "key": "k-toast",
+          "name": "Toast",
+          "containing_frame": {}
+        }
+      ]
+    }
+  },
+  "lib-sets": {
+    "meta": {
+      "component_sets": [
+        {
+          "key": "s-btn",
+          "name": "Button"
+        }
+      ]
+    }
+  },
+  "projects": {
+    "files": [
+      {
+        "key": "FILE1",
+        "name": "Checkout redesign",
+        "last_modified": "2026-10-01T00:00:00Z"
+      },
+      {
+        "key": "OLD",
+        "name": "Old explorations",
+        "last_modified": "2024-01-01T00:00:00Z"
+      }
+    ]
+  },
+  "file1": {
+    "name": "Checkout redesign",
+    "components": {
+      "1:1": {
+        "key": "k-btn-primary"
+      },
+      "1:2": {
+        "key": "k-toast"
+      },
+      "9:9": {
+        "key": "local-only"
+      }
+    },
+    "document": {
+      "type": "DOCUMENT",
+      "children": [
+        {
+          "type": "CANVAS",
+          "name": "Page",
+          "children": [
+            {
+              "type": "FRAME",
+              "name": "Screen",
+              "children": [
+                {
+                  "type": "INSTANCE",
+                  "componentId": "1:1",
+                  "name": "Button",
+                  "children": [
+                    {
+                      "type": "INSTANCE",
+                      "componentId": "1:2"
+                    }
+                  ]
+                },
+                {
+                  "type": "INSTANCE",
+                  "componentId": "1:1",
+                  "name": "Button"
+                },
+                {
+                  "type": "INSTANCE",
+                  "componentId": "1:2",
+                  "name": "Toast"
+                },
+                {
+                  "type": "INSTANCE",
+                  "componentId": "9:9",
+                  "name": "Local"
+                },
+                {
+                  "type": "FRAME",
+                  "name": "Toast"
+                },
+                {
+                  "type": "FRAME",
+                  "name": "toast"
+                },
+                {
+                  "type": "FRAME",
+                  "name": "Toast"
+                },
+                {
+                  "type": "FRAME",
+                  "name": "Toast"
+                },
+                {
+                  "type": "FRAME",
+                  "name": "Frame 4471"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
