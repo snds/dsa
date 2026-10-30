@@ -19,6 +19,9 @@ import type { Concept, Evidence, Tier } from "./types.js";
 // Props that set behaviour or HTML attributes, not a visual variant.
 const NON_VISUAL = /^(type|as|role|target|rel|method|enc[Tt]ype|autoComplete|autocomplete|inputMode|inputmode|enterKeyHint|dir|loading|decoding|crossOrigin|referrerPolicy|wrap|spellCheck|spellcheck|autoCapitalize|autocapitalize|lang|translate|form[A-Z]\w*|aria[A-Z-]\w*|data[A-Z-]\w*|on[A-Z]\w*|key|ref|id|name|value|defaultValue|tabIndex|component|tag|mode)$/;
 
+// Words that name a piece of a component, never a component of its own.
+const ANATOMY_WORDS = new Set(["title", "subtitle", "header", "footer", "body", "content", "item", "items", "trigger", "label", "description", "icon", "close", "actions", "action", "panel", "list", "separator", "divider", "indicator", "thumb", "track", "root", "positioner", "backdrop", "overlay", "portal", "arrow", "control", "text", "summary", "details", "media", "image", "prefix", "suffix", "addon", "section", "cell", "row", "head", "caption", "value", "heading", "start", "end", "viewport", "scrollbar", "corner", "handle", "fallback", "container", "wrapper", "inner", "outer", "heading", "legend", "hint", "message", "helper", "slot", "subheader", "subcontent", "subtrigger", "marker", "range", "tick", "dot", "skeleton", "placeholder", "chevron", "ellipsis"]);
+
 export interface ClassExtension {
   block: string;
   ext: string;
@@ -128,6 +131,20 @@ export function addFacets(root: string, sources: string[], concepts: Concept[], 
     });
   }
 
+  // CSS-module classes are a component's private pieces: the classes in Button.module.css are Button's parts.
+  const byFileName = new Map(concepts.filter((c) => c.role === "component").map((c) => [norm(c.name), c]));
+  for (const [file, text] of texts) {
+    const m = file.match(/([^/\\]+)\.module\.(s?css|less)$/);
+    const owner = m ? byFileName.get(norm(m[1]!)) : undefined;
+    if (!owner) continue;
+    for (const cm of text.matchAll(/(?:^|[\s,}])\.([A-Za-z][\w-]*)(?=[\s,{:.[>+~)])/gm)) {
+      const name = cm[1]!;
+      if (norm(name) === owner.key || /^(is|has)[A-Z-]|^(disabled|active|selected|open|loading|hidden|visible)$/i.test(name)) continue;
+      owner.parts ??= [];
+      if (!owner.parts.some((p) => p.name === name)) owner.parts.push({ name, evidence: ev(file, lineAt(text, cm.index!), "css-module-class", "style") });
+    }
+  }
+
   // A family of sub-components with no declared parent implies it (DialogTitle, DialogContent, DialogActions →
   // Dialog, when only a service or a function opens it). Its parts come from the family below.
   const familyOf = (n: string) => { const f = n.replace(/[A-Z][a-z0-9]*$/, ""); return /[A-Z][a-z]/.test(f) ? f : undefined; };
@@ -149,12 +166,18 @@ export function addFacets(root: string, sources: string[], concepts: Concept[], 
   }
 
   // Sub-components are parts of their parent: DialogTitle of Dialog, AcCardTitle of AcCard (same library).
+  // They leave the inventory (role "part"), unless the name is itself a kind's name (TextInput beside Text).
+  const kindNames = new Set(Object.values(archetypes().kinds).flatMap((k) => [k.prefLabel, ...k.altLabels].map(norm)));
   const byName = [...concepts].sort((a, b) => b.name.length - a.name.length);
   for (const child of concepts) {
     if (child.role === "style") continue;
     const parent = byName.find((p) => p !== child && p.role !== "style" && p.library === child.library && child.name.startsWith(p.name) && /^[A-Z]/.test(child.name.slice(p.name.length)));
     if (!parent) continue;
     const part = child.name.slice(parent.name.length);
+    // A part only when the extension ends in a word of anatomy (DialogTitle, MenuItem, TabsTrigger), not a
+    // word that makes another component (ButtonGroup, InputNumber, TreeView, ColorPicker).
+    const lastWord = part.match(/[A-Z][a-z0-9]*$/)?.[0]?.toLowerCase() ?? "";
+    if (ANATOMY_WORDS.has(lastWord) && !kindNames.has(norm(child.name)) && !kindNames.has(child.key)) { child.role = "part"; child.partOf = parent.key; }
     parent.parts ??= [];
     if (!parent.parts.some((p) => p.name === part)) parent.parts.push({ name: part, evidence: { ...child.realizations[0]!.evidence, extractor: "sub-component", tier: "convention" } });
   }

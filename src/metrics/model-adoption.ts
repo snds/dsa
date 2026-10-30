@@ -105,7 +105,7 @@ function kindOf(el: Element, declaredHere: Set<string>): "local" | "external" | 
  * from-scratch rebuild under such a name, or carries a well-known synonym (Modal for Dialog).
  */
 function findModelLookAlikes(reading: RepoReading, localUsage: Map<string, number>): LookAlikeFinding[] {
-  const concepts = reading.concepts.filter((c) => c.role !== "style");
+  const concepts = reading.concepts.filter((c) => c.role === "component");
   const byNorm = new Map<string, Concept>();
   for (const c of concepts) for (const n of [c.name, c.key]) if (!byNorm.has(normalizeName(n))) byNorm.set(normalizeName(n), c);
   const canonical = new Map<string, Concept>();

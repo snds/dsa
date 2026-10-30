@@ -12,6 +12,10 @@ import { addFacets, type ClassExtension } from "./facets.js";
  * by name, so nothing here knows a system.
  */
 
+// Inside a library, examples, demos and fixtures declare things that aren't the system's.
+const NOT_DECLARATIONS = ["**/examples/**", "**/example/**", "**/demos/**", "**/demo/**", "**/__fixtures__/**", "**/fixtures/**", "**/playground/**", "**/playgrounds/**", "**/__mocks__/**"];
+// Exports that are plumbing, not components: providers, contexts, hooks' data, flags, defaults, settings.
+export const PLUMBING = /(Context|Data|Flags?|Prefix|Config|Configuration|Utils?|Props|Hooks?|Store|Kinds?|Sizes|Types|Variants|Options|Constants|Defaults|Helpers?|Adapter|Service|Manager|Registry|Settings|Locale|Messages|PropsProvider|RootProvider|Alignments|Positions|Placements|Directions|Orientations|Sizes|Kinds|Key|Symbol|Map|Presets|Builder|Factory|Controller)$|^Default[A-Z]/;
 const SKIP_DIRS = ["**/node_modules/**", "**/dist/**", "**/build/**", "**/*.d.ts", "**/*.test.*", "**/*.spec.*", "**/__tests__/**", "**/*.stories.*", "**/stories/**"];
 // Stylesheets that hold settings, helpers or utilities, not components.
 const NON_COMPONENT_STYLE = /(^|\/)(_?(root|variables|config|functions|utilities|helpers|reboot|maps|tokens|settings|grid|print)(\.import)?\.(s?css|less)$|(utilities|helpers|mixins|functions|vendor|settings|tools)\/|(-grid|-reboot|-utilities|\.min)\.css$)/i;
@@ -39,7 +43,7 @@ export function extractConcepts(root: string, sources: string[], options: Extrac
   // An installed package's code is its dist; elsewhere dist is build output to skip.
   const ignoreFor = (dir: string) => (dir.split(/[\\/]/).includes("node_modules") ? SKIP_DIRS.filter((g) => !/dist|build/.test(g)).concat("**/node_modules/**/node_modules/**", "**/*.map") : SKIP_DIRS);
   const files = sources.flatMap((dir) =>
-    fg.sync("**/*.{ts,tsx,js,jsx,mjs,vue,svelte,njk,scss,css,less}", { cwd: path.resolve(root, dir), absolute: true, ignore: ignoreFor(dir) }),
+    fg.sync("**/*.{ts,tsx,js,jsx,mjs,vue,svelte,njk,scss,css,less}", { cwd: path.resolve(root, dir), absolute: true, ignore: [...ignoreFor(dir), ...NOT_DECLARATIONS] }),
   ).sort();
   // Generated selectors (Sass loops over a list) only exist in built CSS: read the nearest package's dist/.
   for (const dir of sources) {
@@ -70,8 +74,10 @@ export function extractConcepts(root: string, sources: string[], options: Extrac
       }
       vueComponents(text, (name, i) => raws.push({ name, family: "class-name", form: { form: "tag", tag: name }, evidence: ev("vue-component", "declaration", i) }));
     } else if (ext === ".njk") {
-      for (const m of text.matchAll(/\{%-?\s*macro\s+([A-Za-z_]\w*)\s*\(/g)) raws.push({ name: m[1]!, family: "macro", form: { form: "macro", name: m[1]! }, evidence: ev("template-macro", "declaration", m.index) });
-    } else if (/\.(s?css|less)$/.test(ext)) {
+      // A macro whose name starts with `_` is the template's private helper, not a component.
+      for (const m of text.matchAll(/\{%-?\s*macro\s+([A-Za-z]\w*)\s*\(/g)) raws.push({ name: m[1]!, family: "macro", form: { form: "macro", name: m[1]! }, evidence: ev("template-macro", "declaration", m.index) });
+    } else if (/\.(s?css|less)$/.test(ext) && !/\.module\.(s?css|less)$/.test(file)) {
+      // CSS-module classes are a component's private styling (hashed at build): consumers can't write them.
       // Utility and settings files hold no components, except Tailwind 4's `@utility btn {…}`, which is how a
       // Tailwind system declares its component classes, often in a folder named utilities.
       const utilityOnly = NON_COMPONENT_STYLE.test(rel.replace(/\\/g, "/"));
@@ -241,7 +247,7 @@ function packageExports(root: string, sources: string[], texts: Map<string, stri
       if (!ast) return;
       const rel = path.relative(root, file);
       const push = (name: string, node: any, from?: string) => {
-        if (/^[A-Z][A-Za-z0-9]*$/.test(name)) out.push({ name, family: "export", form: { form: "import", symbol: name }, evidence: { file: from ? path.relative(root, from) : rel, line: from ? undefined : node?.loc?.start.line, extractor: "package-export", tier: "export" } });
+        if (/^[A-Z][A-Za-z0-9]*$/.test(name) && !PLUMBING.test(name)) out.push({ name, family: "export", form: { form: "import", symbol: name }, evidence: { file: from ? path.relative(root, from) : rel, line: from ? undefined : node?.loc?.start.line, extractor: "package-export", tier: "export" } });
       };
       for (const st of ast.program.body) {
         if (st.type === "ExportNamedDeclaration") {
@@ -252,7 +258,16 @@ function packageExports(root: string, sources: string[], texts: Map<string, stri
           for (const v of d?.declarations ?? []) if (v.id?.name) push(v.id.name, v);
           // A re-export's evidence is the module it comes from, where the component (and its props) live.
           const from = st.source?.value?.startsWith(".") ? resolveModule(file, st.source.value) : undefined;
-          for (const sp of st.specifiers ?? []) if (sp.exportKind !== "type") push(sp.exported?.name ?? sp.exported?.value, sp, from);
+          for (const sp of st.specifiers ?? []) {
+            if (sp.exportKind === "type") continue;
+            const exported = sp.exported?.name ?? sp.exported?.value;
+            const local = sp.local?.name;
+            // `DialogTitle as Title` in a namespace file: the member is DialogTitle (written <Dialog.Title>),
+            // which the sub-component rule makes a part of Dialog. A bare `Title` concept would merge every
+            // namespace's Title into one.
+            if (local && local !== exported && local.endsWith(exported) && /^[A-Z]/.test(local)) { push(local, sp, from); continue; }
+            push(exported, sp, from);
+          }
           if (st.source?.value?.startsWith(".")) visit(resolveModule(file, st.source.value), depth + 1);
         } else if (st.type === "ExportAllDeclaration" && st.source?.value?.startsWith(".")) {
           visit(resolveModule(file, st.source.value), depth + 1);

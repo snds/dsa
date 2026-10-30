@@ -3,7 +3,7 @@ import path from "node:path";
 import fg from "fast-glob";
 import type { DsaConfig } from "../config.js";
 import { READABLE, readFile } from "./elements.js";
-import { extractConcepts } from "./extract.js";
+import { extractConcepts, PLUMBING } from "./extract.js";
 import { readTokens } from "./tokens.js";
 import { typeConcepts } from "./kinds.js";
 import { discoverSources } from "./discover.js";
@@ -107,7 +107,8 @@ export function readRepo({ root, config, include }: BuildModelOptions): RepoRead
     const display = isTag ? pascal(name.slice(l.tagPrefixes.find((p) => name.startsWith(p))?.length ?? 0)) : name;
     const key = l.core ? normKey(display) : `${normKey(l.name)}:${normKey(display)}`;
     if (global.byKey.has(key)) continue;
-    const c: Concept = { key, name: display, library: l.name, role: "component", realizations: [isTag ? { form: "tag", tag: name, evidence: { file: "(consumer tags)", extractor: "tag-prefix", tier: "convention" } } : { form: "import", symbol: name, evidence: { file: "(consumer imports)", extractor: "system-import", tier: "convention" } }] };
+    if ((!isTag && PLUMBING.test(display)) || !/^[A-Za-z]\w*$/.test(display)) continue;
+    const c: Concept = { key, name: display, library: l.name, role: /Icon$/.test(display) ? "icon" : "component", realizations: [isTag ? { form: "tag", tag: name, evidence: { file: "(consumer tags)", extractor: "tag-prefix", tier: "convention" } } : { form: "import", symbol: name, evidence: { file: "(consumer imports)", extractor: "system-import", tier: "convention" } }] };
     l.concepts.push(c);
     global.byKey.set(key, c);
   }

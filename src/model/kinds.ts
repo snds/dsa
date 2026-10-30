@@ -32,7 +32,7 @@ export function typeConcepts(concepts: Concept[], data: Archetypes = archetypes(
   // A class named exactly for a kind (btn, card, badge) is a component even beside declared ones: Tailwind
   // systems ship class components alongside framework components.
   for (const c of concepts) if (c.role === "style" && (exact.has(norm(c.key)) || exact.has(norm(c.name)))) c.role = "component";
-  const components = concepts.filter((c) => c.role !== "style");
+  const components = concepts.filter((c) => c.role === "component");
   const names = components.map((c) => c.name);
   for (const c of components) {
     // Exported constants and plumbing (ButtonKinds, ThemeProvider, DialogContext) aren't components.

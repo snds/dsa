@@ -43,9 +43,13 @@ export interface Concept {
   /**
    * `component` unless the system declares components some other way (macros, exports, tags) and this
    * concept is known only as a CSS class: then it is a `style` object (a grid row, a heading class).
-   * In a system made only of classes, every block is a component.
+   * In a system made only of classes, every block is a component. A sub-component (DialogTitle beside
+   * Dialog) is a `part` of its parent; an icon a consumer imports (ChevronDownIcon) is an `icon`. Uses of
+   * parts and icons are still uses of the system; neither is in the component inventory.
    */
-  role: "component" | "style";
+  role: "component" | "style" | "part" | "icon";
+  /** For a part (a sub-component such as DialogTitle): the concept it belongs to. */
+  partOf?: string | undefined;
   /** The library it belongs to: the system (core) or one of its children. */
   library?: string | undefined;
   realizations: Realization[];
