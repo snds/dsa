@@ -1,4 +1,6 @@
+import fs from 'node:fs';
 import path from 'node:path';
+import { discoverSources } from '../model/discover.js';
 import { loadConfig, parseConfig, type DsaConfig, type LoadedConfig } from '../config.js';
 import { loadProfile, NEUTRAL_PROFILE, type ResolvedProfile } from '../profile.js';
 import type { Config } from './config.js';
@@ -96,13 +98,22 @@ export async function loadEngineContext(o: EngineContextOptions): Promise<Engine
   else if (loaded.config.profile) profile = await loadProfile(loaded.config.profile, loaded.root);
   const dataDir = o.dataDir ? path.resolve(cwd, o.dataDir) : path.resolve(loaded.root, loaded.config.output.dir);
   const profileSpec = o.profile ? (o.profile.startsWith('.') || path.isAbsolute(o.profile) ? path.resolve(cwd, o.profile) : o.profile) : undefined;
+  // No package names in the config: take them from the folders dsa finds (or the user pinned), so a config
+  // with only a name runs end to end.
+  if (!loaded.config.system.packages.length) {
+    try {
+      const found = discoverSources(root, loaded.config);
+      const names = found.accepted.map((d) => { try { return JSON.parse(fs.readFileSync(path.join(root, d, 'package.json'), 'utf8')).name as string | undefined; } catch { return undefined; } }).filter((n): n is string => Boolean(n));
+      if (names.length) { loaded.config.system.packages = names; (loaded.config.system as { discovered?: boolean }).discovered = true; }
+    } catch { /* leave it to requirePackages */ }
+  }
   return { loaded, root, dataDir, configDir: loaded.configPath ? path.dirname(loaded.configPath) : root, profile, profileSpec, config: engineConfig(loaded.config, profile) };
 }
 
 /** Throw the suite's error when the config doesn't name the system's packages. */
 export function requirePackages(ctx: EngineContext): void {
   if (!ctx.config.designSystem.core.packages.length) {
-    throw new Error(`${ctx.loaded.configPath ?? 'The config'} needs system.packages (the package names of the design system). Run "dsa init" to write a first guess.`);
+    throw new Error(`${ctx.loaded.configPath ?? 'The config'} needs system.packages (the package names of the design system), and no folder in the repo reached the confidence bar to find them. Run "dsa sources" to see the candidates and "dsa sources --pin <folder>" to choose one.`);
   }
 }
 

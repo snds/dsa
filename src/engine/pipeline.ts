@@ -9,7 +9,7 @@ import { effectiveSettings } from './settings.js';
 import { resolveTargets, latestVersions } from './workspaces.js';
 import { scanVersions, scanPins } from './scanners/versions.js';
 import { scanCode } from './scanners/code.js';
-import { readRepo } from '../model/index.js';
+import { modelSummary, readRepo } from '../model/index.js';
 import { instancesFromReading } from './model-instances.js';
 import type { DsaConfig } from '../config.js';
 import { scanTokens, gitTouchedFiles } from './scanners/tokens.js';
@@ -175,7 +175,13 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
   const touched = touchedFor(opts.root);
   if (!touched) notes.push('Git history not available; every file counts as new code for token compliance.');
   // Every code and markup file each target holds (docs pages aside), as the engine's own scanner reads.
-  const reading = opts.dsaConfig ? readRepo({ root: opts.root, config: opts.dsaConfig, include: ["**/*.{tsx,jsx,ts,js,mjs,vue,svelte,html,astro,njk}"] }) : undefined;
+  // Apps in other checkouts (consumers with a path outside the root) are read too.
+  const reading = opts.dsaConfig ? readRepo({ root: opts.root, config: opts.dsaConfig, include: ["**/*.{tsx,jsx,ts,js,mjs,vue,svelte,html,astro,njk,twig,hbs,liquid,erb,ejs}"], extraDirs: targets.filter((t) => t.role !== "core").map((t) => t.dir) }) : undefined;
+  // What the system is, for the dashboard: inventory, kinds, facets, tokens, uses, and where its code was found.
+  if (reading && opts.dsaConfig) {
+    try { fs.mkdirSync(opts.dataDir, { recursive: true }); fs.writeFileSync(path.join(opts.dataDir, "model-summary.json"), JSON.stringify(modelSummary(reading, opts.root, opts.dsaConfig))); }
+    catch (e: any) { notes.push(`Model summary not written: ${String(e?.message ?? e).split("\n")[0]}`); }
+  }
   for (const t of targets.filter(t => t.role !== 'core')) {
     const tEx = [...excludes, ...(t.exclude ?? [])];
     const app = appSettings(config, t.name);

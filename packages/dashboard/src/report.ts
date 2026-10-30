@@ -220,6 +220,8 @@ export async function renderReport(root: string, config: Config, dataDir: string
       usage: profile.usage?.(root) ?? null,
       thresholds: fOn ? thresholds : thresholds.filter(t => !t.id.startsWith('figma_')),
       libraries: [config.designSystem.core, ...(config.designSystem.children ?? [])].map(l => ({ name: l.name, packages: l.packages })),
+      // What the system is (inventory, kinds, facets, tokens, where its code was found), from this scan.
+      model: readJson(path.join(dataDir, 'model-summary.json')),
       ...displayOpts(root, config, profile, opts.serve),
       published: Boolean(opts.site),
     };
@@ -261,3 +263,7 @@ function shell(root: string, config: Config, payload: object): string {
 const escapeHtml = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 
 const mostCommon = (xs: string[]) => { const n = new Map<string, number>(); for (const x of xs) n.set(x, (n.get(x) ?? 0) + 1); return [...n].sort((a, b) => b[1] - a[1])[0]?.[0] ?? ''; };
+
+function readJson(file: string): any {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+}

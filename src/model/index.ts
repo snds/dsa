@@ -13,6 +13,7 @@ export type { Concept, Declaration, Element, Realization, RealizationForm, Syste
 export { extractConcepts } from "./extract.js";
 export { readElements } from "./elements.js";
 export { discoverSources, type SourceCandidate, type SourceDiscovery } from "./discover.js";
+export { modelSummary, type ModelSummary } from "./summary.js";
 
 export interface BuildModelOptions {
   /** Repo root; config paths resolve against it. */
@@ -20,6 +21,8 @@ export interface BuildModelOptions {
   config: DsaConfig;
   /** Globs of files to read for uses (default: the config's scan.include). */
   include?: string[] | undefined;
+  /** Folders outside the root to read for uses too (apps in other checkouts). */
+  extraDirs?: string[] | undefined;
 }
 
 const DEFAULT_EXCLUDE = ["**/node_modules/**", "**/dist/**", "**/build/**", "**/.git/**", "**/coverage/**", "**/*.min.js", "**/*.d.ts"];
@@ -62,7 +65,7 @@ interface Library {
 }
 
 /** Read every library's declarations, then every file in the repo, matching each element to concepts. */
-export function readRepo({ root, config, include }: BuildModelOptions): RepoReading {
+export function readRepo({ root, config, include, extraDirs = [] }: BuildModelOptions): RepoReading {
   const absRoot = path.resolve(root);
   const specs = [
     { ...config.system, core: true },
@@ -83,7 +86,10 @@ export function readRepo({ root, config, include }: BuildModelOptions): RepoRead
     (spec.startsWith(".") ? libs.find((l) => l.sourceAbs.some((d) => isInside(path.resolve(path.dirname(file), spec), d))) : undefined);
   const match = (el: Element, file: string) => matchElement(el, global, (spec) => libraryOf(spec, path.resolve(absRoot, file)));
 
-  const files = fg.sync(include ?? config.scan.include, { cwd: absRoot, absolute: true, ignore: [...DEFAULT_EXCLUDE, ...config.scan.exclude] }).filter((f) => READABLE.test(f)).sort();
+  const globs = include ?? config.scan.include;
+  const ignore = [...DEFAULT_EXCLUDE, ...config.scan.exclude];
+  const outside = extraDirs.map((d) => path.resolve(absRoot, d)).filter((d) => !isInside(d, absRoot));
+  const files = [...new Set([absRoot, ...outside].flatMap((cwd) => fg.sync(globs, { cwd, absolute: true, ignore })))].filter((f) => READABLE.test(f)).sort();
   const readings: FileReading[] = [];
   const skipped: { file: string; message: string }[] = [];
   for (const file of files) {

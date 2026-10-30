@@ -273,9 +273,19 @@ function installedTokenPackages(root: string, sources: string[], scripts: string
     } catch { /* none */ }
   }
   const out: { files: string[]; prefixOf: (file: string) => string[] }[] = [];
+  // A sibling workspace package (`"@acme/tokens": "workspace:*"`) is read where it lives, installed or not.
+  const workspaceDirs = new Map<string, string>();
+  for (const pj of fg.sync("**/package.json", { cwd: root, absolute: true, ignore: ["**/node_modules/**", "**/dist/**"], deep: 4 })) {
+    try { const n = JSON.parse(fs.readFileSync(pj, "utf8")).name; if (n && !workspaceDirs.has(n)) workspaceDirs.set(n, path.dirname(pj)); } catch { /* skip */ }
+  }
+  const sourceAbs = sources.map((s) => path.resolve(root, s));
   for (const name of names) {
-    const dir = path.join(root, "node_modules", name);
-    if (!fs.existsSync(path.join(dir, "package.json"))) continue;
+    const installed = path.join(root, "node_modules", name);
+    const sibling = workspaceDirs.get(name);
+    // Already one of the system's own source folders: read there already.
+    if (sibling && sourceAbs.some((s) => s === sibling || sibling.startsWith(`${s}${path.sep}`))) continue;
+    const dir = fs.existsSync(path.join(installed, "package.json")) ? installed : sibling;
+    if (!dir) continue;
     const subpaths = new Set<string>();
     const esc = name.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
     for (const f of scripts) {
@@ -285,7 +295,7 @@ function installedTokenPackages(root: string, sources: string[], scripts: string
     }
     const base = fs.existsSync(path.join(dir, "dist")) ? path.join(dir, "dist") : dir;
     const globs = subpaths.size ? [...subpaths].map((s) => `${s}/**/*.{mjs,js,css,json}`) : ["**/*.{mjs,js,css,json}"];
-    const files = fg.sync(globs, { cwd: base, absolute: true, ignore: ["**/node_modules/**", "**/*.map", "**/*.min.*", "**/*.d.*", "**/*.cjs", "**/package.json"] }).slice(0, 2000);
+    const files = fg.sync(globs, { cwd: base, absolute: true, ignore: ["**/node_modules/**", "**/*.map", "**/*.min.*", "**/*.d.*", "**/*.cjs", "**/package.json", "**/examples/**", "**/scripts/**", "**/test/**", "**/*.test.*"] }).slice(0, 2000);
     // The file's folders inside the preset name its tokens' component (aura/button/index.mjs → button).
     const prefixOf = (file: string) => {
       const segs = path.relative(base, path.dirname(file)).split(path.sep).filter(Boolean);
