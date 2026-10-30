@@ -230,7 +230,7 @@ export async function renderReport(root: string, config: Config, dataDir: string
 }
 
 function displayOpts(root: string, config: Config, profile: ResolvedProfile, serve?: boolean) {
-  return { label: profile.label, modules: { figma: figmaEnabled(config) }, timeZone: config.report?.timeZone ?? null, title: config.report?.title ?? path.basename(root), serve: Boolean(serve) };
+  return { label: profile.label, modules: { figma: figmaEnabled(config) }, timeZone: config.report?.timeZone ?? null, title: config.report?.title || config.designSystem?.core?.name || path.basename(root), serve: Boolean(serve) };
 }
 
 function emptyPayload(root: string, config: Config, profile: ResolvedProfile, serve?: boolean) {

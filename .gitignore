@@ -6,3 +6,4 @@ test/fixtures/app/.dsa/
 *.log
 .DS_Store
 coverage/
+artifacts/

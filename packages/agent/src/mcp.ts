@@ -14,7 +14,8 @@ import { tools } from './system.js';
  * Code get it from their MCP settings and work without a session (proposals are marked "external").
  * Read tools never write. Propose tools append a proposal for a human to accept in the dashboard.
  */
-export const SERVER_INFO = { name: 'dsa', title: 'dsa (scan, review, proposals)', version: '0.1.0' };
+const ownVersion = (JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version;
+export const SERVER_INFO = { name: 'dsa', title: 'dsa (scan, review, proposals)', version: ownVersion };
 const PROTOCOLS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const INSTRUCTIONS = [
   'The design-system scan: element review, the action queue, agent readiness, screenshots.',

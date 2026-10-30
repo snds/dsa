@@ -277,6 +277,53 @@ export function readTokenAliases(dirs: string[]) {
 }
 
 /**
+ * Component source files under a package's src/, at any depth (src/button.tsx, src/components/ui/button.tsx),
+ * in a fixed order: a folder's files before its subfolders, each sorted. Stories and tests are skipped, and so is
+ * vendor/: the stock layer under a component (vendor/shadcn) is read through the component that wraps it.
+ * Files directly in src/ are always read. Deeper files are read only when the package's src/index re-exports
+ * them (its public surface), so a feature's internals or a helper in state/ never become a recommendation.
+ */
+export function componentFiles(src: string): string[] {
+  const all = allTsx(src);
+  const pub = publicFiles(src);
+  return all.filter(f => path.dirname(f) === src || pub.has(f));
+}
+
+/** Files src/index.ts(x) re-exports (export … from), following re-exporting barrels a few hops. */
+function publicFiles(src: string): Set<string> {
+  const out = new Set<string>();
+  const seen = new Set<string>();
+  const follow = (file: string, depth: number) => {
+    if (depth > 4 || seen.has(file) || !fs.existsSync(file)) return;
+    seen.add(file);
+    const ast = parseFile(file);
+    if (!ast) return;
+    for (const st of ast.program.body) {
+      if ((st.type !== 'ExportAllDeclaration' && st.type !== 'ExportNamedDeclaration') || !st.source?.value?.startsWith('.')) continue;
+      const target = resolveTs(file, st.source.value);
+      out.add(target);
+      if (/\.ts$/.test(target)) follow(target, depth + 1);
+    }
+  };
+  for (const f of ['index.ts', 'index.tsx']) follow(path.join(src, f), 0);
+  return out;
+}
+
+function allTsx(src: string): string[] {
+  const out: string[] = [];
+  const walk = (d: string) => {
+    const entries = fs.readdirSync(d, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const e of entries) if (e.isFile() && /\.tsx$/.test(e.name) && !/\.(stories|test|spec)\.tsx$/.test(e.name)) out.push(path.join(d, e.name));
+    for (const e of entries) {
+      if (!e.isDirectory() || e.name.startsWith('.') || /^(node_modules|vendor|test|tests|__tests__|stories)$/.test(e.name)) continue;
+      walk(path.join(d, e.name));
+    }
+  };
+  if (fs.existsSync(src)) walk(src);
+  return out;
+}
+
+/**
  * Build signatures from the core packages. `packages` maps package dirs to their npm names,
  * so a component file maps to its public import (@acme/ui/button).
  */
@@ -287,9 +334,7 @@ export function buildSignatures(packages: { dir: string; name: string }[]): Sign
     const src = path.join(pkg.dir, 'src');
     if (!fs.existsSync(src)) continue;
     const exportsMap = readExports(pkg.dir, pkg.name);
-    for (const f of fs.readdirSync(src)) {
-      if (!/\.tsx$/.test(f) || /\.(stories|test)\.tsx$/.test(f)) continue;
-      const file = path.join(src, f);
+    for (const file of componentFiles(src)) {
       const ast = parseFile(file);
       if (!ast) continue;
       const cvas = cvasIn(ast);
@@ -326,7 +371,8 @@ export function buildSignatures(packages: { dir: string; name: string }[]): Sign
           }
           sigs.push({ component: c.name, from, variant: v, size: s, tag, role, childSlots, iconOnly: /icon/.test(s), props: normalize(tokens, aliases) });
         }
-        if (!components.has(c.name) || c.cvaRefs.length) components.set(c.name, { component: c.name, from, file, tag, role, childSlots, slot: c.slots[0] ?? stock?.slots[0], axes, defaults, sigs });
+        const deeper = path.dirname(file) !== src;
+        if (!components.has(c.name) || (c.cvaRefs.length && !deeper)) components.set(c.name, { component: c.name, from, file, tag, role, childSlots, slot: c.slots[0] ?? stock?.slots[0], axes, defaults, sigs });
       }
     }
   }
@@ -342,9 +388,7 @@ export function buildSignatures(packages: { dir: string; name: string }[]): Sign
 function deriveSizeMapped(dir: string, components: Map<string, ComponentSig>) {
   const src = path.join(dir, 'src');
   if (!fs.existsSync(src)) return;
-  for (const f of fs.readdirSync(src)) {
-    if (!/\.tsx$/.test(f) || /\.(stories|test)\.tsx$/.test(f)) continue;
-    const file = path.join(src, f);
+  for (const file of componentFiles(src)) {
     const ast = parseFile(file);
     if (!ast) continue;
     // Components this file imports from a sibling module, with a size axis.

@@ -270,6 +270,9 @@ function scanScript(ctx: Ctx, file: string, src: string, ext: string) {
     if (node.type === 'JSXElement' && node.openingElement.name.type === 'JSXIdentifier' && /^[a-z]/.test(node.openingElement.name.name) && !bindings.has(node.openingElement.name.name)) {
       const name = node.openingElement.name.name;
       if (!ctx.lookalikes[name] || !ctx.countLookalikes) return;
+      // render={<button />} hands the component the element it draws as (Base UI): the component's own element,
+      // not a bypass. Content slots (action={<button>…</button>}) are still raw elements.
+      if (inRenderProp(ancestors)) return;
       const feats = reactFeatures(node, ancestors, src, file, ctx.aliases);
       pushLookalike(ctx, file, node.loc?.start.line ?? 0, name, feats.attrs, feats);
     }
@@ -280,6 +283,16 @@ function scanScript(ctx: Ctx, file: string, src: string, ext: string) {
       if (text) scanAngularTemplate(ctx, file, text, (v.loc?.start.line ?? 1) - 1);
     }
   });
+}
+
+/** Whether the element is the value of a `render` prop, the element a component draws as. */
+function inRenderProp(ancestors: any[]): boolean {
+  for (let i = ancestors.length - 1; i >= 0; i--) {
+    const a = ancestors[i];
+    if (a.type === 'JSXAttribute') return a.name?.name === 'render';
+    if (a.type === 'JSXElement' || a.type === 'JSXFragment') return false;
+  }
+  return false;
 }
 
 /** All string fragments inside an attribute value: "a b", cn('a', cond && 'b'), `a ${x} b`. */

@@ -233,7 +233,7 @@ export async function buildQueue(root: string, config: Config, dataDir: string):
   if (dirty) writeState(dataDir, st);
 
   const open = items.filter(i => i.status === 'open');
-  return { items, prompt: agentPrompt(open, config.report?.title || path.basename(root), config.rawElementDecisions ?? DEFAULT_DECISIONS_FILE), github: { token: Boolean(githubToken(dataDir)), defaultRepo: config.github?.defaultRepo ?? null }, syncedAt: st.syncedAt ?? null };
+  return { items, prompt: agentPrompt(open, config.report?.title || config.designSystem?.core?.name || path.basename(root), config.rawElementDecisions ?? DEFAULT_DECISIONS_FILE), github: { token: Boolean(githubToken(dataDir)), defaultRepo: config.github?.defaultRepo ?? null }, syncedAt: st.syncedAt ?? null };
 }
 
 /** One prompt an agent can work the whole open queue from: rules first, then every item with what "done" means. */

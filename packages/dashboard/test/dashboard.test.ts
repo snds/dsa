@@ -6,6 +6,7 @@ import { decideMany, latestEvals, openStore, type Http } from '@snds/dsa/engine'
 import { ACME_PROFILE, ACME_ROOT, contextFor, fixtureCopy, loadConfig, NOW, runPipeline, tmp } from '../../../test/engine/fixture.js';
 import { buildQueue, createIssues, syncLinks } from '../src/queue.js';
 import { publish } from '../src/publish.js';
+import { renderReport } from '../src/report.js';
 import { readView, saveView } from '../src/server.js';
 
 // The dashboard's server side: Settings, the action queue, and the published site.
@@ -107,4 +108,15 @@ test('publish: a static folder for Pages with site-relative images, only the one
   }
   assert.ok(!html.includes(data), 'no local data path in the page');
   assert.equal(payload.label, 'Acme', "the system's name comes from its profile");
+});
+
+test('report title: the system\'s name when no report.title is set, never the folder', async () => {
+  const data = tmp();
+  await runPipeline({ root: ROOT, dataDir: data, git: false, now: NOW, readiness: false });
+  const config = loadConfig(ROOT).config;
+  delete (config as any).report?.title;
+  const name = config.designSystem.core.name;
+  assert.ok(name && name !== path.basename(ROOT), 'the fixture names its system');
+  const html = await renderReport(ROOT, config, data, ACME_PROFILE);
+  assert.ok(html.includes(`<title>Design System Analytics · ${name}</title>`));
 });

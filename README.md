@@ -32,15 +32,31 @@ fail CI if it grows.
 
 ## Install
 
-```sh
-# today: straight from GitHub (builds on install via `prepare`)
-pnpm add -D github:snds/dsa
+Each release on GitHub carries a tarball for the core and one per add-on, all at
+the same version. Install by URL; there is nothing on npm.
 
-# later: from npm
-pnpm add -D @snds/dsa
+```sh
+V=0.3.0
+R=https://github.com/snds/dsa/releases/download/v$V
+# the core: scan, patterns, ratchet, element review
+pnpm add -D $R/snds-dsa-$V.tgz
+# add-ons, as you need them (see Add-ons below)
+pnpm add -D $R/snds-dsa-history-$V.tgz $R/snds-dsa-dashboard-$V.tgz \
+  $R/snds-dsa-review-$V.tgz $R/snds-dsa-figma-$V.tgz $R/snds-dsa-agent-$V.tgz
 ```
 
+Add-ons name the core and each other as peer dependencies, so list every one you
+use; the agent add-on needs the dashboard and review add-ons too. To upgrade, change
+`V` everywhere at once. `github:snds/dsa#<sha>` still installs the core alone
+(it builds through `prepare`), but not the add-ons.
+
 Requires Node 22+ and pnpm 10 (the package sets `engine-strict=true`).
+
+Releasing: set every package's version (they move together), add the changelog
+entry, merge, then push the tag `v<version>`. The release workflow tests, packs
+(`pnpm release:pack`), installs the tarballs into a fresh project
+(`pnpm release:smoke`) and attaches them to a GitHub Release. CI runs the same
+pack and install on every pull request.
 
 ## Commands
 
@@ -200,7 +216,7 @@ Run history is kept in DuckDB, which is a native module, so it ships as an
 add-on. Install it next to dsa:
 
 ```sh
-npm install --save-dev @snds/dsa-history
+pnpm add -D https://github.com/snds/dsa/releases/download/v0.3.0/snds-dsa-history-0.3.0.tgz
 dsa run --profile ./dsa.profile.mjs
 ```
 
@@ -232,9 +248,7 @@ Global options: `--root <repo>` (config paths resolve against it), `--data <dir>
 Heavier features are separate packages. Each adds its commands to the same
 `dsa` CLI when it is installed (`dsa where` lists the ones it found).
 
-```sh
-npm install --save-dev @snds/dsa-dashboard @snds/dsa-review @snds/dsa-figma @snds/dsa-agent
-```
+Install them from the release (see [Install](#install)).
 
 | Command | Add-on | What it does |
 |---|---|---|

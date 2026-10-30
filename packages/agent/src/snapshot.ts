@@ -62,7 +62,7 @@ export async function writeSnapshot(ctx: Pick<EngineContext, 'root' | 'config' |
   const shots: Snapshot['shots'] = {};
   for (const [id, s] of Object.entries<any>(idx.shots ?? {})) shots[id] = { file: s.file, abs: path.join(dataDir, 'shots', s.file), page: String(s.page ?? '').replace(/^https?:\/\/[^/]+/, '') || undefined, match: s.matchScore, revealedBy: revealedOf(s.revealedBy) };
   const snap: Snapshot = {
-    generatedAt: new Date().toISOString(), root, dataDir, title: config.report?.title || path.basename(root), run,
+    generatedAt: new Date().toISOString(), root, dataDir, title: config.report?.title || config.designSystem?.core?.name || path.basename(root), run,
     threshold: config.review?.threshold ?? DEFAULT_THRESHOLD, targets, evals, shots, missingShots: idx.missing ?? [],
     queue: (queue.items ?? []).map((i: any) => ({ ...i, issue: i.issue ? { title: i.issue.title, body: String(i.issue.body ?? '').slice(0, 6000) } : null })),
     readiness, hints: loadHints(ctx.configDir).hints,

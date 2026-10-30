@@ -1,6 +1,6 @@
 {
   "name": "@snds/dsa-agent",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Agents for @snds/dsa: the workbench in the dashboard, an MCP server (dsa mcp), briefs, sessions in a sandbox, proposals and visual before/after.",
   "license": "Apache-2.0",
   "author": "Sean Sands",
@@ -33,15 +33,15 @@
     "typecheck": "tsc -p tsconfig.check.json"
   },
   "peerDependencies": {
-    "@snds/dsa": "workspace:*"
-  },
-  "dependencies": {
-    "@snds/dsa-dashboard": "workspace:*",
-    "@snds/dsa-review": "workspace:*"
+    "@snds/dsa": "workspace:^",
+    "@snds/dsa-dashboard": "workspace:^",
+    "@snds/dsa-review": "workspace:^"
   },
   "devDependencies": {
     "@snds/dsa": "workspace:*",
     "@types/node": "^22.20.5",
-    "typescript": "~5.9.3"
+    "typescript": "~5.9.3",
+    "@snds/dsa-dashboard": "workspace:*",
+    "@snds/dsa-review": "workspace:*"
   }
 }
