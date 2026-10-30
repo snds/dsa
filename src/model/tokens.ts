@@ -74,6 +74,7 @@ export function readTokens(root: string, sources: string[], concepts: Concept[])
     let text: string;
     try { text = fs.readFileSync(file, "utf8"); } catch { continue; }
     if (/define\w*Tokens|create\w*Tokens|semanticTokens\s*:|\bprimitive\s*:\s*\{/.test(text)) readScriptTokens(text, path.relative(root, file), add, false);
+    if (TOKEN_INTERFACE.test(text)) readTokenInterfaces(text, path.relative(root, file), add);
   }
   for (const pkg of tokenPackages) for (const file of pkg.files) {
     let text: string;
@@ -136,6 +137,41 @@ function groupOf(name: string, value?: string): Token["group"] {
   const words = name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase().replace(/(colors|fonts|sizes|shadows|borders|spacings|durations|easings|breakpoints|layers)(?=[-_.]|$)/g, (w) => w.slice(0, -1)).replace(/radii(?=[-_.]|$)/g, "radius");
   for (const [g, re] of GROUPS) if (re.test(name) || re.test(words)) return g;
   return "other";
+}
+
+// Token sets declared as types (CSS-in-JS systems: seed, map and alias tokens, a component's tokens).
+const TOKEN_INTERFACE = /\binterface\s+(\w*(?:Seed|Map|Alias|Component|Design|Global|Theme)Tokens?)\b/;
+
+/**
+ * `interface SeedToken { colorPrimary: string; … }`: each member is a token (its value is computed at run
+ * time). Members marked `@internal` or `@deprecated` are left out. A component's token interface
+ * (`components/button/style/…`) names component tokens, prefixed with the component's folder.
+ */
+function readTokenInterfaces(text: string, file: string, add: (t: Token) => void) {
+  let tree: any;
+  try { tree = parseTs(text, file); } catch { return; }
+  if (!tree) return;
+  const component = /ComponentToken/.test(text) ? file.split(/[\\/]/).find((s, i, all) => all[i - 1] === "components" && s !== "theme") : undefined;
+  const walk = (n: any) => {
+    if (!n || typeof n.type !== "string") return;
+    if (n.type === "TSInterfaceDeclaration" && TOKEN_INTERFACE.test(`interface ${n.id?.name}`)) {
+      const prefix = /Component/.test(n.id.name) && component ? `${component}.` : "";
+      for (const m of n.body?.body ?? []) {
+        const name = m.key?.name ?? m.key?.value;
+        if (!name || m.type !== "TSPropertySignature") continue;
+        if ((m.leadingComments ?? []).some((c: any) => /@(internal|deprecated)\b/.test(c.value))) continue;
+        const full = `${prefix}${name}`;
+        add({ name: full, group: groupOf(name), tier: prefix ? "component" : "primitive", evidence: { file, line: m.loc?.start.line, extractor: "token-interface", tier: "declaration" } });
+      }
+    }
+    for (const k in n) {
+      if (k === "loc" || k === "start" || k === "end" || k === "leadingComments" || k === "trailingComments") continue;
+      const v = n[k];
+      if (Array.isArray(v)) v.forEach(walk);
+      else if (v && typeof v.type === "string") walk(v);
+    }
+  };
+  walk(tree.program);
 }
 
 const MODE_KEY = /^(_?light|_?dark|base|_?default|DEFAULT|_osLight|_osDark|_highContrast)$/;

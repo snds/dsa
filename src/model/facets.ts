@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import fg from "fast-glob";
 import { parseTs } from "./extract.js";
+import { archetypes } from "./kinds.js";
 import type { Concept, Evidence, Tier } from "./types.js";
 
 /**
@@ -63,7 +64,8 @@ export function addFacets(root: string, sources: string[], concepts: Concept[], 
     const names = new Set([c.name, ...c.realizations.flatMap((r) => (r.form === "import" ? [r.symbol] : []))]);
     // Follow what the concept's own files import: same-folder modules (its types, its base), and the
     // modules behind spread prop factories (`...makeVariantProps()`), one hop.
-    for (const f of [...files]) {
+    // Two hops: a re-exported definition, then the shared definitions it spreads in.
+    for (let hop = 0; hop < 2; hop++) for (const f of [...files]) {
       const tree = parse(f);
       if (!tree) continue;
       const imports = new Map<string, string>();
@@ -73,7 +75,13 @@ export function addFacets(root: string, sources: string[], concepts: Concept[], 
         if (target) for (const sp of st.specifiers ?? []) imports.set(sp.local.name, target);
       }
       for (const target of new Set(imports.values())) if (path.dirname(target) === path.dirname(f)) files.add(target);
-      visit(tree.program, (n) => { if (n.type === "SpreadElement" && n.argument?.type === "CallExpression" && imports.has(n.argument.callee?.name)) files.add(imports.get(n.argument.callee.name)!); });
+      // `export { basePropDefs as buttonPropDefs } from './_internal/base.props'`: the definition is there.
+      for (const st of tree.program.body) if (st.type === "ExportNamedDeclaration" && typeof st.source?.value === "string") { const t = resolveImport(f, st.source.value); if (t) files.add(t); }
+      visit(tree.program, (n) => {
+        if (n.type !== "SpreadElement") return;
+        const name = n.argument?.type === "CallExpression" ? n.argument.callee?.name : n.argument?.type === "Identifier" ? n.argument.name : undefined;
+        if (name && imports.has(name)) files.add(imports.get(name)!);
+      });
     }
     for (const file of files) {
       const tree = parse(file);
@@ -202,6 +210,22 @@ export function addFacets(root: string, sources: string[], concepts: Concept[], 
       if (!a.values.includes(value)) a.values.push(value);
     }
   }
+  // A class system's modifiers are one list (btn-primary, btn-outline, btn-sm, btn-wide). Split them by
+  // meaning with the archetypes' variant vocabulary: size, orientation, shape, tone, emphasis. A group needs
+  // two values; the full `modifier` list stays as written.
+  const vocab = archetypes().variantVocabulary;
+  const order = ["size", "orientation", "shape", "tone", "emphasis"].filter((k) => vocab[k]);
+  const claim = (v: string) => order.find((k) => Object.values(vocab[k]!.values).flat().includes(v.toLowerCase()));
+  for (const c of concepts) {
+    const mod = c.axes?.find((a) => a.name === "modifier");
+    if (!mod) continue;
+    const groups = new Map<string, string[]>();
+    for (const v of mod.values) { const k = claim(v); if (k) groups.set(k, [...(groups.get(k) ?? []), v]); }
+    for (const [k, vs] of groups) {
+      if (vs.length < 2 || c.axes!.some((a) => a.name === k)) continue;
+      c.axes!.push({ name: k, values: vs, evidence: { ...mod.evidence, extractor: "modifier-vocabulary" } });
+    }
+  }
 }
 
 // ---------- readers ----------
@@ -271,13 +295,19 @@ function readProps(tree: any, names: Set<string>, aliases: Map<string, string[]>
   // The scoped types first; if they carry no closed sets (built from other types), the whole file.
   let found = 0;
   const counted = (name: string, values: string[], line?: number) => { if (values.length >= 2) found++; add(name, values, line); };
+  // `const sizes = ['1', '2'] as const`: arrays a prop definition may name.
+  const arrays = new Map<string, string[]>();
+  visit(tree.program, (n) => {
+    const init = n.type === "VariableDeclarator" ? (n.init?.type === "TSAsExpression" ? n.init.expression : n.init) : undefined;
+    if (init?.type === "ArrayExpression" && n.id?.name) arrays.set(n.id.name, init.elements.filter((e: any) => e?.type === "StringLiteral").map((e: any) => e.value));
+  });
   for (const roots of scoped ? [scoped, [tree.program]] : [[tree.program]]) {
     if (found) break;
-    for (const r of roots) readPropsIn(r, aliases, counted);
+    for (const r of roots) readPropsIn(r, aliases, counted, arrays);
   }
 }
 
-function readPropsIn(r: any, aliases: Map<string, string[]>, add: (name: string, values: string[], line?: number) => void) {
+function readPropsIn(r: any, aliases: Map<string, string[]>, add: (name: string, values: string[], line?: number) => void, arrays = new Map<string, string[]>()) {
   visit(r, (n) => {
     const keyName = n.key?.name ?? n.key?.value;
     if ((n.type === "TSPropertySignature" || n.type === "ClassProperty" || n.type === "ClassAccessorProperty" || n.type === "PropertyDefinition") && keyName) {
@@ -291,6 +321,12 @@ function readPropsIn(r: any, aliases: Map<string, string[]>, add: (name: string,
       const v = n.value;
       if (v?.type === "ObjectExpression") for (const p of v.properties ?? []) if ((p.key?.name === "type") && p.value?.type === "TSAsExpression") add(keyName, literalsOf(p.value.typeAnnotation, aliases), n.loc?.start.line);
       if (v?.type === "CallExpression" && v.callee?.property?.name === "oneOf" && v.arguments?.[0]?.type === "ArrayExpression") add(keyName, v.arguments[0].elements.filter((e: any) => e?.type === "StringLiteral").map((e: any) => e.value), n.loc?.start.line);
+      // Prop definition objects: `size: { type: 'enum', values: sizes }` (Radix-style PropDefs).
+      if (v?.type === "ObjectExpression" && v.properties?.some((p: any) => p.key?.name === "type" && p.value?.value === "enum")) {
+        const vals = v.properties.find((p: any) => p.key?.name === "values")?.value;
+        const list = vals?.type === "ArrayExpression" ? vals.elements.filter((e: any) => e?.type === "StringLiteral").map((e: any) => e.value) : vals?.type === "Identifier" ? arrays.get(vals.name) ?? [] : [];
+        add(keyName, list, n.loc?.start.line);
+      }
     }
   });
 }

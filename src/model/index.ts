@@ -71,7 +71,9 @@ export function readRepo({ root, config, include }: BuildModelOptions): RepoRead
   const libs: Library[] = specs.map((spec) => {
     const sources = systemSources(absRoot, { ...config, system: { ...config.system, ...spec, children: [] } } as DsaConfig);
     const concepts = extractConcepts(absRoot, sources, { tagPrefixes: spec.tagPrefixes ?? [] }).map((c) => ({ ...c, key: spec.core ? c.key : `${normKey(spec.name)}:${c.key}`, library: spec.name }));
-    return { name: spec.name, core: spec.core, packages: spec.packages ?? [], localAliases: spec.localAliases ?? [], tagPrefixes: (spec.tagPrefixes ?? []).map((t) => t.toLowerCase()), sources, sourceAbs: sources.map((s) => path.resolve(absRoot, s)), concepts, index: indexConcepts(concepts) };
+    // Folders dsa found (or the user pinned) name the packages consumers import, when the config names none.
+    const packages = spec.packages?.length ? spec.packages : sources.map((s) => packageName(path.resolve(absRoot, s))).filter((n): n is string => Boolean(n));
+    return { name: spec.name, core: spec.core, packages, localAliases: spec.localAliases ?? [], tagPrefixes: (spec.tagPrefixes ?? []).map((t) => t.toLowerCase()), sources, sourceAbs: sources.map((s) => path.resolve(absRoot, s)), concepts, index: indexConcepts(concepts) };
   });
   // Tags, selectors, classes and macros are told apart by their prefixes: one index across libraries.
   // Imports resolve within the library that owns the import.
@@ -123,7 +125,13 @@ export function readRepo({ root, config, include }: BuildModelOptions): RepoRead
       const library = ix.byKey.get(key)?.library ?? libs.find((l) => l.index.byKey.has(key) || key.startsWith(`${normKey(l.name)}:`))?.name;
       out.push({ concept: key, file: el.file, line: el.line, form, ...(library ? { library } : {}), ...(part ? { part } : {}), ...(modifiers?.length ? { modifiers } : {}) });
     };
-    if (el.macro) { add(ix.macro.get(el.tag), "macro"); return out; }
+    if (el.macro) {
+      // A class passed in the options can make it another component (`details({ classes: "x-expander" })`).
+      const own = ix.macro.get(el.tag);
+      const other = el.classes.map((c) => ix.cls.get(c)).find((k) => k && k !== own && ix.byKey.get(k)?.role !== "style");
+      add(other ?? own, "macro");
+      return out;
+    }
 
     const isComponentTag = /^[A-Z]/.test(el.tag) || el.tag.includes(".");
     if (isComponentTag) {
@@ -218,6 +226,10 @@ function indexConcepts(concepts: Concept[]): Index {
     }
   }
   return ix;
+}
+
+function packageName(dir: string): string | undefined {
+  try { return JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8")).name || undefined; } catch { return undefined; }
 }
 
 const normKey = (s: string) => s.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();

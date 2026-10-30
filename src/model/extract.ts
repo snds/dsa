@@ -71,8 +71,11 @@ export function extractConcepts(root: string, sources: string[], options: Extrac
       vueComponents(text, (name, i) => raws.push({ name, family: "class-name", form: { form: "tag", tag: name }, evidence: ev("vue-component", "declaration", i) }));
     } else if (ext === ".njk") {
       for (const m of text.matchAll(/\{%-?\s*macro\s+([A-Za-z_]\w*)\s*\(/g)) raws.push({ name: m[1]!, family: "macro", form: { form: "macro", name: m[1]! }, evidence: ev("template-macro", "declaration", m.index) });
-    } else if (/\.(s?css|less)$/.test(ext) && !NON_COMPONENT_STYLE.test(rel.replace(/\\/g, "/"))) {
-      for (const { cls, index, group } of topLevelClasses(text)) raws.push({ name: cls, family: "css-class", form: { form: "class", block: cls }, group, evidence: ev("style-class", "style", index) });
+    } else if (/\.(s?css|less)$/.test(ext)) {
+      // Utility and settings files hold no components, except Tailwind 4's `@utility btn {…}`, which is how a
+      // Tailwind system declares its component classes, often in a folder named utilities.
+      const utilityOnly = NON_COMPONENT_STYLE.test(rel.replace(/\\/g, "/"));
+      for (const { cls, index, group, utility } of topLevelClasses(text)) if (!utilityOnly || utility) raws.push({ name: cls, family: "css-class", form: { form: "class", block: cls }, group, evidence: ev(utility ? "tailwind-utility" : "style-class", "style", index) });
     }
   }
   // An auto-import prefix (Nuxt modules, unplugin resolvers: `prefix: 'U'`) makes every single-file
@@ -99,12 +102,19 @@ export function extractConcepts(root: string, sources: string[], options: Extrac
 
 // ---------- declaration forms ----------
 
-/** `X.define('acme-button')`, `customElements.define('x-y', Cls)`, `@customElement('x-y')` (with `${prefix}`). */
+/**
+ * `X.define('acme-button')`, `customElements.define('x-y', Cls)`, `@customElement('x-y')` (with `${prefix}`),
+ * a library's own registration helper (`defineElement('sp-card', Card)`, `safeDefine`, `register…`), and the
+ * TypeScript tag map every typed web-component library declares (`interface HTMLElementTagNameMap { 'sp-card': Card }`).
+ */
 function webComponents(text: string, consts: Map<string, string>, add: (name: string, tag: string, index: number) => void) {
   const resolve = (raw: string) => raw.replace(/\$\{(\w+)\}/g, (_, v: string) => consts.get(v) ?? `\${${v}}`);
   const ok = (tag: string) => /^[a-z][a-z0-9]*(-[a-z0-9]+)+$/.test(tag);
   for (const m of text.matchAll(/\b([A-Z]\w*)\.define\(\s*['"`]([^'"`]+)['"`]/g)) { const tag = resolve(m[2]!); if (ok(tag)) add(m[1]!, tag, m.index!); }
   for (const m of text.matchAll(/customElements\.define\(\s*['"`]([^'"`]+)['"`]\s*,\s*(\w+)/g)) { const tag = resolve(m[1]!); if (ok(tag)) add(m[2]!, tag, m.index!); }
+  for (const m of text.matchAll(/\b(?!customElements\b)\w*(?:[dD]efine|[rR]egister)\w*\(\s*['"`]([^'"`]+)['"`]\s*,\s*([A-Z]\w*)/g)) { const tag = resolve(m[1]!); if (ok(tag)) add(m[2]!, tag, m.index!); }
+  const map = text.match(/interface\s+HTMLElementTagNameMap\s*\{([^}]*)\}/);
+  if (map) for (const m of map[1]!.matchAll(/['"]([a-z][\w-]*-[\w-]+)['"]\s*:\s*([A-Z]\w*)/g)) add(m[2]!, m[1]!, map.index! + m.index!);
   for (const m of text.matchAll(/@customElement\(\s*['"`]([^'"`]+)['"`]\s*\)\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+(\w+)/g)) {
     const tag = resolve(m[1]!);
     if (ok(tag)) add(m[2]!, tag, m.index!);
@@ -147,9 +157,9 @@ function vueComponents(text: string, add: (name: string, index: number) => void)
  * `@layer`, `@media` and `@include` are see-through). A selector counts only when it is exactly one
  * class (`.btn`, `.acme-button`); `.a .b`, `.a:hover` and `.a.b` describe parts and states.
  */
-function topLevelClasses(text: string): { cls: string; index: number; group: string[] }[] {
+function topLevelClasses(text: string): { cls: string; index: number; group: string[]; utility?: boolean }[] {
   const src = text.replace(/\/\*[\s\S]*?\*\//g, (s) => s.replace(/[^\n]/g, " ")).replace(/(^|[^:])\/\/[^\n]*/g, (s) => s.replace(/[^\n]/g, " "));
-  const out: { cls: string; index: number; group: string[] }[] = [];
+  const out: { cls: string; index: number; group: string[]; utility?: boolean }[] = [];
   const stack: string[] = []; // the head of each open block; a rule's head doesn't start with "@"
   let start = 0;
   for (let i = 0; i < src.length; i++) {
@@ -158,6 +168,9 @@ function topLevelClasses(text: string): { cls: string; index: number; group: str
       // `#{…}` is Sass interpolation, not a block.
       if (src[i - 1] === "#") { const close = src.indexOf("}", i); if (close > i) { i = close; continue; } }
       const head = src.slice(start, i).trim();
+      // Tailwind 4 declares a class as `@utility btn { … }` (and `@utility preset-* { … }` for a family).
+      const utility = head.match(/^@utility\s+([a-zA-Z][\w-]*?)(-\*)?$/);
+      if (utility && stack.every((h) => h.startsWith("@") && !NON_COMPONENT_LAYER.test(h))) out.push({ cls: utility[1]!, index: start, group: [], utility: true });
       const isAt = head.startsWith("@");
       // Sass nesting under a class block: `.block { &__title {…} &--large {…} }` declares block__title, block--large.
       const parentRule = [...stack].reverse().find((h) => !h.startsWith("@"));
@@ -259,11 +272,19 @@ function entryFiles(dir: string): string[] {
     const cands: string[] = [];
     const walk = (v: unknown) => { if (typeof v === "string") cands.push(v); else if (v && typeof v === "object") for (const x of Object.values(v)) walk(x); };
     walk(pj.exports); // every entry point: ".", "./experimental", "./deprecated"…
-    cands.push(pj.source, pj.module, pj.main);
+    cands.push(pj.source, pj.module, pj.main, pj.typings, pj.types);
+    // Where built files come from: tsconfig's rootDir, then src/, then any top-level folder holding the same index.
+    let rootDir: string | undefined;
+    try { rootDir = JSON.parse(fs.readFileSync(path.join(dir, "tsconfig.json"), "utf8").replace(/\/\/.*$/gm, "").replace(/,(\s*[}\]])/g, "$1")).compilerOptions?.rootDir; } catch { /* none or not plain JSON */ }
+    const topDirs = (() => { try { return fs.readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory() && !/^(\.|node_modules$|dist$|lib$|es$|esm$|cjs$|build$|tests?$|scripts$|docs?$|site$|\.dumi$)/.test(d.name)).map((d) => d.name); } catch { return []; } })();
     for (const c of cands.filter(Boolean)) {
-      // Built paths point at dist; prefer the source twin.
-      const src = c.replace(/^\.?\/?(dist|lib|esm|cjs|build)\//, "src/").replace(/\.(m|c)?js$/, "");
-      for (const cand of [path.join(dir, c), path.join(dir, src)]) { const r = resolveModule(cand, "."); if (fs.existsSync(r) && /\.(ts|tsx|js|jsx|mjs)$/.test(r)) out.add(r); }
+      const built = c.match(/^\.?\/?(dist|lib|es|esm|cjs|build)\/(.*)$/);
+      const rest = (built?.[2] ?? "").replace(/\.d\.ts$|\.(m|c)?js$/, "");
+      const twins = built ? [rootDir, "src", ...topDirs].filter(Boolean).map((r) => path.join(dir, r!, rest)) : [];
+      for (const cand of [path.join(dir, c), ...twins]) {
+        const r = resolveModule(cand, ".");
+        if (fs.existsSync(r) && /\.(ts|tsx|js|jsx|mjs)$/.test(r) && !/\.d\.ts$/.test(r)) { out.add(r); break; }
+      }
     }
   } catch { /* no package.json */ }
   for (const f of ["src/index.ts", "src/index.tsx", "src/index.js", "index.ts", "index.js"]) { const p = path.join(dir, f); if (fs.existsSync(p)) out.add(p); }
