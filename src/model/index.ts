@@ -7,6 +7,7 @@ import { dsSourceDirs } from "../graph/index.js";
 import { READABLE, readFile } from "./elements.js";
 import { extractConcepts } from "./extract.js";
 import { readTokens } from "./tokens.js";
+import { typeConcepts } from "./kinds.js";
 import type { Concept, Declaration, Element, RealizationForm, SystemModel, Token, Use } from "./types.js";
 
 export type { Concept, Declaration, Element, Realization, RealizationForm, SystemModel, Token, Use, Evidence, Tier } from "./types.js";
@@ -108,6 +109,8 @@ export function readRepo({ root, config, include }: BuildModelOptions): RepoRead
     l.concepts.push(c);
     global.byKey.set(key, c);
   }
+  // Kinds: type every concept by the name-free archetypes.
+  typeConcepts(libs.flatMap((l) => l.concepts));
   // Tokens and their bindings, per library (a child's tokens are its own).
   const tokens: Token[] = [];
   for (const l of libs) for (const t of readTokens(absRoot, l.sources, l.concepts).tokens) if (!tokens.some((x) => x.name === t.name)) tokens.push(t);

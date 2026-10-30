@@ -55,6 +55,8 @@ export interface Concept {
   parts?: { name: string; evidence: Evidence }[] | undefined;
   /** Tokens its own styles reference (`var(--x)`, `$x`): the concept-to-token binding. */
   tokens?: { name: string; evidence: Evidence }[] | undefined;
+  /** Its kind by the name-free archetypes (dialog, tabs, button…), with confidence, runner-up and why. */
+  kind?: { kind: string; confidence: number; runnerUp?: string | undefined; ambiguous?: boolean | undefined; evidence: string[] } | undefined;
 }
 
 /** A named design decision: a CSS custom property, a Sass variable, or a DTCG / Style Dictionary token. */

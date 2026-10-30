@@ -8,6 +8,19 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- Name-free archetypes (`data/archetypes.json`) for twelve core kinds: button, text
+  input, checkbox, select, dialog, tabs, card, alert, badge or tag, tooltip, menu, table.
+  Each holds preferred and alternative names, false friends, native elements, ARIA
+  roles, parts with their aliases, states, and the variant vocabulary (emphasis, tone,
+  size, shape, orientation) with value synonyms.
+- Concepts are typed against them (`concept.kind`: kind, confidence, runner-up,
+  ambiguous, evidence) by name (word by word), parts and variants. Sub-components,
+  exported constants and false-friend matches are handled; with no name signal,
+  structure must be strong on its own.
+
+
+### Added
+
 - Tokens in the system model: CSS custom properties (with the mode a selector or
   `prefers-color-scheme` sets), top-level Sass variables and Sass maps (`$map.key.sub`),
   and DTCG / Style Dictionary JSON (`{a.b}` aliases), from the system's sources and the
