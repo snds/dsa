@@ -6,6 +6,14 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- One bad input no longer ends a run. A file its reader can't read is skipped and
+  listed (`note: skipped N files`), a pnpm lockfile holding several YAML documents
+  is read in full, an unreadable lockfile costs only the version rows, and a
+  `<table>` from a reader that collects no table facts (Angular, Vue templates) is
+  still classified. Found running dsa on ten open-source design systems.
+
 ## [0.3.1] - 2026-10-29
 
 ### Fixed

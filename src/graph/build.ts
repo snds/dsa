@@ -43,6 +43,7 @@ export function buildGraph(options: BuildGraphOptions): CompositionGraph {
   const readers = new Map<SourceAdapter, FileReader>();
   const dsDirs = dsSourceDirs(root, options.config);
   const graphs: FileGraph[] = [];
+  const skipped: { file: string; message: string }[] = [];
   try {
     for (const file of files) {
       const adapter = adapterFor(file, adapters, reactAdapter);
@@ -51,14 +52,21 @@ export function buildGraph(options: BuildGraphOptions): CompositionGraph {
         reader = adapter.createReader(ctx);
         readers.set(adapter, reader);
       }
-      const graph = reader.read(file);
+      let graph: FileGraph;
+      try {
+        graph = reader.read(file);
+      } catch (e) {
+        // One file the reader can't read (a computed import specifier, a syntax it doesn't know) is skipped and listed.
+        skipped.push({ file: path.relative(root, file), message: String((e as Error)?.message ?? e).split("\n")[0]! });
+        continue;
+      }
       if (isUnder(path.resolve(file), dsDirs)) graph.role = "ds-source";
       graphs.push(graph);
     }
   } finally {
     for (const reader of readers.values()) reader.dispose?.();
   }
-  return { root, files: graphs };
+  return skipped.length ? { root, files: graphs, skipped } : { root, files: graphs };
 }
 
 /** The built-in reader: TSX / JSX (and plain TS / JS) through ts-morph. */

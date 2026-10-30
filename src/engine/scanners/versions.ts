@@ -23,8 +23,16 @@ export class LockfileResolver {
     }
     const pnpmFile = path.join(root, 'pnpm-lock.yaml');
     if (fs.existsSync(pnpmFile)) {
-      this.pnpm = YAML.parse(fs.readFileSync(pnpmFile, 'utf8'))?.importers ?? {};
-      this.kind = 'pnpm';
+      // A lockfile can hold several YAML documents (pnpm's env lockfile, then the project's); read them all.
+      // One that can't be read costs the version rows, never the run.
+      try {
+        const docs = YAML.parseAllDocuments(fs.readFileSync(pnpmFile, 'utf8'));
+        if (!Array.isArray(docs) || docs.some(d => d.errors.length)) throw new Error('unreadable lockfile');
+        this.pnpm = Object.assign({}, ...docs.map(d => (d.toJS() as any)?.importers ?? {}));
+        this.kind = 'pnpm';
+      } catch {
+        this.kind = 'none';
+      }
       return;
     }
     const yarnFile = path.join(root, 'yarn.lock');
