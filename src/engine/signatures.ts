@@ -224,9 +224,13 @@ function cvaFor(file: string, name: string, local?: Map<string, Cva>, depth = 0)
     return fs.existsSync(target) ? cvaFor(target, sp.imported?.name ?? name, undefined, depth + 1) : undefined;
   }
   let inner: string | undefined;
+  // A wrapper around the cva (const buttonVariants = (p) => cn(variants(p)), or the same as a function declaration).
   visit(ast.program, (n: any) => {
-    if (inner || n.type !== 'VariableDeclarator' || n.id?.name !== name || !/Function|Arrow/.test(n.init?.type ?? '')) return;
-    visit(n.init.body, (x: any) => { if (!inner && x.type === 'CallExpression' && x.callee?.type === 'Identifier' && !/^(cn|clsx|cx)$/.test(x.callee.name)) inner = x.callee.name; });
+    if (inner) return;
+    const body = n.type === 'VariableDeclarator' && n.id?.name === name && /Function|Arrow/.test(n.init?.type ?? '') ? n.init.body
+      : n.type === 'FunctionDeclaration' && n.id?.name === name ? n.body : undefined;
+    if (!body) return;
+    visit(body, (x: any) => { if (!inner && x.type === 'CallExpression' && x.callee?.type === 'Identifier' && !/^(cn|clsx|cx)$/.test(x.callee.name)) inner = x.callee.name; });
   });
   return inner && inner !== name ? cvaFor(file, inner, undefined, depth + 1) : undefined;
 }

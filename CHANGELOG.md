@@ -6,6 +6,14 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-29
+
+### Fixed
+
+- Signatures follow a cva wrapped in a function declaration
+  (`function buttonVariants(p) { return cn(variants(p)) }`), not only in an arrow
+  function, so such a component's variants and sizes are read.
+
 ## [0.3.0] - 2026-10-29
 
 Every feature of the earlier analytics suite now lives here (Phases 2–4), and the

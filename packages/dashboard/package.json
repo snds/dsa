@@ -1,6 +1,6 @@
 {
   "name": "@snds/dsa-dashboard",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "The @snds/dsa dashboard: dsa serve (live, with Settings and review), the HTML report, dsa publish (a static site), the action queue.",
   "license": "Apache-2.0",
   "author": "Sean Sands",

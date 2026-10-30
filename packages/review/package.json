@@ -1,6 +1,6 @@
 {
   "name": "@snds/dsa-review",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Element review in a browser for @snds/dsa: screenshots of the app, Storybook measurements of the system, flows and page placement.",
   "license": "Apache-2.0",
   "author": "Sean Sands",

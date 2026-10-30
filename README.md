@@ -36,7 +36,7 @@ Each release on GitHub carries a tarball for the core and one per add-on, all at
 the same version. Install by URL; there is nothing on npm.
 
 ```sh
-V=0.3.0
+V=0.3.1
 R=https://github.com/snds/dsa/releases/download/v$V
 # the core: scan, patterns, ratchet, element review
 pnpm add -D $R/snds-dsa-$V.tgz
@@ -216,7 +216,7 @@ Run history is kept in DuckDB, which is a native module, so it ships as an
 add-on. Install it next to dsa:
 
 ```sh
-pnpm add -D https://github.com/snds/dsa/releases/download/v0.3.0/snds-dsa-history-0.3.0.tgz
+pnpm add -D https://github.com/snds/dsa/releases/download/v0.3.1/snds-dsa-history-0.3.1.tgz
 dsa run --profile ./dsa.profile.mjs
 ```
 

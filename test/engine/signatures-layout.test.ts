@@ -58,4 +58,16 @@ describe('signatures read components wherever the package keeps its public ones'
     const sig = buildSignatures([{ dir, name: '@acme/ui' }]).components.get('Tip')!;
     expect(rel(dir)(sig.file)).toBe('tip.tsx');
   });
+
+  it('follows a cva wrapped in a function declaration', () => {
+    const dir = pkg({
+      'src/button.tsx': `import { cva } from 'class-variance-authority';
+const variants = cva('inline-flex', { variants: { variant: { default: 'bg-primary', outline: 'border' }, size: { sm: 'h-8', lg: 'h-10' } }, defaultVariants: { variant: 'default', size: 'sm' } });
+function buttonVariants(props?: any): string { return cn(variants(props)); }
+export function Button({ variant, size, ...props }: any) { return <button data-slot="button" className={cn(buttonVariants({ variant, size }))} {...props} />; }
+`,
+    });
+    const b = buildSignatures([{ dir, name: '@acme/ui' }]).components.get('Button')!;
+    expect(b.axes).toEqual({ variant: ['default', 'outline'], size: ['sm', 'lg'] });
+  });
 });
