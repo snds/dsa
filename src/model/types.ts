@@ -53,6 +53,22 @@ export interface Concept {
   axes?: { name: string; values: string[]; evidence: Evidence }[] | undefined;
   /** Named parts of its anatomy (title, trigger, body), from sub-components, slots, parts and BEM elements. */
   parts?: { name: string; evidence: Evidence }[] | undefined;
+  /** Tokens its own styles reference (`var(--x)`, `$x`): the concept-to-token binding. */
+  tokens?: { name: string; evidence: Evidence }[] | undefined;
+}
+
+/** A named design decision: a CSS custom property, a Sass variable, or a DTCG / Style Dictionary token. */
+export interface Token {
+  name: string;
+  value?: string | undefined;
+  /** The token its value refers to, when it's an alias (`var(--x)`, `$x`, `{a.b}`). */
+  aliasOf?: string | undefined;
+  group: "color" | "typography" | "spacing" | "radius" | "elevation" | "motion" | "breakpoints" | "zIndex" | "other";
+  /** From the alias graph: a literal is primitive, an alias semantic; a name carrying a component's is component. */
+  tier: "primitive" | "semantic" | "component";
+  /** Modes it is set in besides the default (dark, a theme name). */
+  modes?: string[] | undefined;
+  evidence: Evidence;
 }
 
 export interface Element {
@@ -106,6 +122,7 @@ export interface SystemModel {
   /** Root-relative folders read as the system's own source. */
   sources: string[];
   concepts: Concept[];
+  tokens: Token[];
   uses: Use[];
   /** Files read for uses, and files a reader skipped. */
   files: { read: number; skipped: { file: string; message: string }[] };

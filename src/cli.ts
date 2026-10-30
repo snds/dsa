@@ -206,6 +206,7 @@ function formatModel(m: SystemModel): string {
   const lines = [
     `dsa model — ${m.system} — ${m.concepts.length} concepts from ${m.sources.join(", ") || "(no system source found)"}`,
     `  realizations: ${Object.entries(forms).map(([f, n]) => `${f} ${n}`).join(", ") || "none"}`,
+    `  tokens: ${m.tokens.length}${m.tokens.length ? ` (${Object.entries(m.tokens.reduce<Record<string, number>>((a, t) => ({ ...a, [t.group]: (a[t.group] ?? 0) + 1 }), {})).map(([g, n]) => `${g} ${n}`).join(", ")})` : ""}; ${m.concepts.filter((c) => c.tokens?.length).length} concepts bound to tokens`,
     `  uses: ${external.length} in consumer code, ${m.uses.length - external.length} inside the system; ${m.files.read} files read${m.files.skipped.length ? `, ${m.files.skipped.length} skipped` : ""}`,
   ];
   if (top.length) lines.push(`  most used: ${top.map(([k, n]) => `${m.concepts.find((c) => c.key === k)?.name ?? k} ${n}`).join(", ")}`);
