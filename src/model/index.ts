@@ -6,9 +6,10 @@ import { discoverWorkspaces } from "../engine/workspaces.js";
 import { dsSourceDirs } from "../graph/index.js";
 import { READABLE, readFile } from "./elements.js";
 import { extractConcepts } from "./extract.js";
-import type { Concept, Declaration, Element, RealizationForm, SystemModel, Use } from "./types.js";
+import { readTokens } from "./tokens.js";
+import type { Concept, Declaration, Element, RealizationForm, SystemModel, Token, Use } from "./types.js";
 
-export type { Concept, Declaration, Element, Realization, RealizationForm, SystemModel, Use, Evidence, Tier } from "./types.js";
+export type { Concept, Declaration, Element, Realization, RealizationForm, SystemModel, Token, Use, Evidence, Tier } from "./types.js";
 export { extractConcepts } from "./extract.js";
 export { readElements } from "./elements.js";
 
@@ -39,6 +40,7 @@ export interface FileReading {
 export interface RepoReading {
   sources: string[];
   concepts: Concept[];
+  tokens: Token[];
   files: FileReading[];
   skipped: { file: string; message: string }[];
   /** Resolve an element to its uses (for a declaration's root, read outside the walk). */
@@ -106,7 +108,10 @@ export function readRepo({ root, config, include }: BuildModelOptions): RepoRead
     l.concepts.push(c);
     global.byKey.set(key, c);
   }
-  return { sources: libs.flatMap((l) => l.sources), concepts: libs.flatMap((l) => l.concepts), files: readings, skipped, match };
+  // Tokens and their bindings, per library (a child's tokens are its own).
+  const tokens: Token[] = [];
+  for (const l of libs) for (const t of readTokens(absRoot, l.sources, l.concepts).tokens) if (!tokens.some((x) => x.name === t.name)) tokens.push(t);
+  return { sources: libs.flatMap((l) => l.sources), concepts: libs.flatMap((l) => l.concepts), tokens, files: readings, skipped, match };
 
   function matchElement(el: Element, ix: Index, owner: (spec: string) => Library | undefined): Use[] {
     const out: Use[] = [];
@@ -176,7 +181,7 @@ export function readRepo({ root, config, include }: BuildModelOptions): RepoRead
 /** Build the system model: the system's concepts and realizations, then every use in the repo. */
 export function buildSystemModel(options: BuildModelOptions): SystemModel {
   const r = readRepo(options);
-  return { system: options.config.system.name, sources: r.sources, concepts: r.concepts, uses: r.files.flatMap((f) => f.elements.flatMap((e) => e.uses)), files: { read: r.files.length, skipped: r.skipped } };
+  return { system: options.config.system.name, sources: r.sources, concepts: r.concepts, tokens: r.tokens, uses: r.files.flatMap((f) => f.elements.flatMap((e) => e.uses)), files: { read: r.files.length, skipped: r.skipped } };
 }
 
 /** A library's own source folders: its path, else workspaces named in its packages, else aliases or the installed package. */

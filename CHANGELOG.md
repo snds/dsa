@@ -8,6 +8,15 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- Tokens in the system model: CSS custom properties (with the mode a selector or
+  `prefers-color-scheme` sets), top-level Sass variables and Sass maps (`$map.key.sub`),
+  and DTCG / Style Dictionary JSON (`{a.b}` aliases), from the system's sources and the
+  package's built CSS; for a copy-in system with none, the app's global stylesheet.
+  Each token has a group (from its name, or its DTCG type or value), an alias, and a
+  tier from the alias graph (literal = primitive, alias = semantic, a component's name =
+  component). Concepts carry the tokens their own styles reference (`var(--x)`, `$x`,
+  including Lit `css` in sibling `*.styles.ts`). `dsa model` prints the token summary.
+
 - Facets on every concept in the system model: **variant axes** (a prop or class
   family and the closed set of values it picks from) and **parts** (named pieces of
   its anatomy), each with evidence. Axes come from TypeScript string-literal unions

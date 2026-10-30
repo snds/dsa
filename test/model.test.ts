@@ -192,3 +192,24 @@ describe("facets: variant axes and parts", () => {
     expect(parts("sheet")).toEqual(["Body", "Title"]);
   });
 });
+
+describe("tokens: definitions in every format, tiers, modes and bindings", () => {
+  it("reads custom properties with modes, Sass variables and maps, and DTCG aliases; binds a concept to what its styles use", () => {
+    const m = repo({
+      "ui/package.json": JSON.stringify({ name: "@acme/ui" }),
+      "ui/tokens.css": ":root { --acme-blue-500: #06c; --acme-color-primary: var(--acme-blue-500); --acme-button-bg: var(--acme-color-primary); }\n.dark { --acme-color-primary: #39f; }\n",
+      "ui/_settings.scss": "$acme-space-2: 8px !default;\n$acme-palette: (\"red\": (\"primary\": #d4351c), \"grey\": #505a5f);\n",
+      "ui/tokens/base.tokens.json": JSON.stringify({ radius: { $type: "dimension", sm: { $value: "2px" }, md: { $value: "{radius.sm}" } } }),
+      "ui/button.ts": "customElements.define('acme-button', AcmeButton);\nexport class AcmeButton {}\n",
+      "ui/button.styles.ts": "export default css`:host { background: var(--acme-button-bg); padding: var(--acme-space-missing); }`;\n",
+    }, { system: { name: "acme", path: "ui" }, scan: { include: ["**/*.html"], exclude: [] } });
+    const t = (n: string) => m.tokens.find((x) => x.name === n)!;
+    expect(t("--acme-blue-500")).toMatchObject({ group: "color", tier: "primitive" });
+    expect(t("--acme-color-primary")).toMatchObject({ aliasOf: "--acme-blue-500", tier: "semantic", modes: ["dark"] });
+    expect(t("--acme-button-bg").tier).toBe("component");
+    expect(t("$acme-space-2")).toMatchObject({ value: "8px !default".replace(" !default", ""), group: "spacing" });
+    expect(t("$acme-palette.red.primary")).toMatchObject({ value: "#d4351c", group: "color" });
+    expect(t("radius.md")).toMatchObject({ aliasOf: "radius.sm", group: "radius" });
+    expect(m.concepts.find((c) => c.name === "AcmeButton")!.tokens!.map((x) => x.name)).toEqual(["--acme-button-bg"]);
+  });
+});
