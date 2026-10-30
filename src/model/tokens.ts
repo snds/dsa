@@ -98,7 +98,7 @@ export function readTokens(root: string, sources: string[], concepts: Concept[])
 
   // Tier from the alias graph and the concepts' names.
   const all = [...tokens.values()];
-  const conceptKeys = concepts.filter((c) => c.role !== "style" && c.key.length >= 4).map((c) => c.key);
+  const conceptKeys = concepts.filter((c) => c.role !== "style" && c.role !== "icon" && c.key.length >= 4).map((c) => c.key);
   for (const t of all) {
     const segs = t.name.toLowerCase().split(/[-_.]+/).join("");
     if (conceptKeys.some((k) => segs.includes(k))) t.tier = "component";

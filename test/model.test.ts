@@ -228,6 +228,35 @@ describe("facets: variant axes and parts", () => {
     expect(parts("sheet")).toEqual(["Body", "Title"]);
   });
 
+  it("the inventory is components only: sub-components are parts, plumbing and private pieces are left out", () => {
+    const m = repo({
+      "ui/package.json": JSON.stringify({ name: "@acme/ui", main: "src/index.ts" }),
+      "ui/src/index.ts": [
+        "export { Dialog, DialogTitle, DialogContent } from './dialog';",
+        "export { Button, ButtonGroup } from './button';",
+        "export { ThemeProvider, DialogContext, DefaultTheme, LayoutKey, ButtonSizes } from './plumbing';",
+        "export * as Menu from './menu';",
+        "export { Card } from './Card';",
+      ].join("\n"),
+      "ui/src/dialog.tsx": "export function Dialog() { return null }\nexport function DialogTitle() { return null }\nexport function DialogContent() { return null }\n",
+      "ui/src/button.tsx": "export function Button() { return null }\nexport function ButtonGroup() { return null }\n",
+      "ui/src/plumbing.ts": "export const ThemeProvider = 1, DialogContext = 2, DefaultTheme = 3, LayoutKey = 4, ButtonSizes = 5;\n",
+      "ui/src/menu.tsx": "function MenuRoot() { return null }\nfunction MenuItem() { return null }\nexport { MenuRoot as Root, MenuItem as Item };\n",
+      "ui/src/Card.tsx": "export function Card() { return null }\n",
+      "ui/src/Card.module.css": ".card { x: 1 }\n.header { x: 1 }\n.media { x: 1 }\n.isActive { x: 1 }\n",
+      "ui/src/examples/demo.tsx": "export function DemoThing() { return null }\n",
+    }, { system: { name: "acme", path: "ui", packages: ["@acme/ui"] }, scan: { include: ["**/*.html"], exclude: [] } });
+    const role = (n: string) => m.concepts.find((c) => c.name === n)?.role;
+    expect(role("Dialog")).toBe("component");
+    expect(role("DialogTitle")).toBe("part");
+    expect(m.concepts.find((c) => c.name === "DialogTitle")?.partOf).toBe("dialog");
+    expect(role("ButtonGroup")).toBe("component"); // Group makes another component, not a part
+    expect(role("MenuItem")).toBe("part"); // a namespace member, written <Menu.Item>
+    expect(role("ThemeProvider")).toBe("component"); // systems document their providers
+    for (const n of ["DialogContext", "DefaultTheme", "LayoutKey", "ButtonSizes", "DemoThing", "Root", "Item", "header"]) expect([n, role(n)]).toEqual([n, undefined]);
+    expect(m.concepts.find((c) => c.name === "Card")?.parts?.map((p) => p.name)).toEqual(expect.arrayContaining(["header", "media"]));
+  });
+
   it("central theme recipes (slot recipes, tailwind-variants themes) and pass-through types", () => {
     const { axes, parts } = facets({
       "ui/package.json": JSON.stringify({ name: "@acme/ui", main: "src/index.ts" }),
