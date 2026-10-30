@@ -11,6 +11,8 @@ import { formatPatterns, formatRatchet, formatScan } from "./report/text.js";
 import { loadRunContext, writeJson, type RunOptions } from "./run.js";
 import { isSuiteConfig, migrateSuiteConfig } from "./migrate.js";
 import { scanFromContext } from "./scan.js";
+import { loadConfig } from "./config.js";
+import { buildSystemModel, type SystemModel } from "./model/index.js";
 import { dsaVersion } from "./version.js";
 import { addAddonCommands, addEngineCommands } from "./cli-engine.js";
 
@@ -67,6 +69,19 @@ export function createProgram(io: CliIo = { out: console.log, err: console.error
       const ctx = await loadRunContext(runOptions(dir, g, io));
       const report = scanFromContext(ctx);
       emit(io, g.json, path.join(ctx.outputDir, "scan.json"), report, formatScan(report));
+    });
+
+  program
+    .command("model")
+    .argument("[dir]", "directory to scan", ".")
+    .description("the system model: concepts, every form they are written in, and every use -> <output.dir>/model.json")
+    .action(async (dir: string, _opts: unknown, cmd: Command) => {
+      // Config only: the model reads every markup language itself, so the React graph isn't built.
+      const g = cmd.optsWithGlobals<GlobalOpts & { root?: string }>();
+      const loaded = loadConfig(g.config ? { configPath: g.config } : { cwd: path.resolve(dir) });
+      const root = g.root ? path.resolve(g.root) : loaded.root;
+      const model = buildSystemModel({ root, config: loaded.config });
+      emit(io, g.json, path.resolve(root, loaded.config.output.dir, "model.json"), model, formatModel(model));
     });
 
   program
@@ -180,3 +195,19 @@ const invokedDirectly = (() => {
   }
 })();
 if (invokedDirectly) void main();
+
+function formatModel(m: SystemModel): string {
+  const forms: Record<string, number> = {};
+  for (const c of m.concepts) for (const r of c.realizations) forms[r.form] = (forms[r.form] ?? 0) + 1;
+  const external = m.uses.filter((u) => !u.internal);
+  const byConcept = new Map<string, number>();
+  for (const u of external) byConcept.set(u.concept, (byConcept.get(u.concept) ?? 0) + 1);
+  const top = [...byConcept.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const lines = [
+    `dsa model — ${m.system} — ${m.concepts.length} concepts from ${m.sources.join(", ") || "(no system source found)"}`,
+    `  realizations: ${Object.entries(forms).map(([f, n]) => `${f} ${n}`).join(", ") || "none"}`,
+    `  uses: ${external.length} in consumer code, ${m.uses.length - external.length} inside the system; ${m.files.read} files read${m.files.skipped.length ? `, ${m.files.skipped.length} skipped` : ""}`,
+  ];
+  if (top.length) lines.push(`  most used: ${top.map(([k, n]) => `${m.concepts.find((c) => c.key === k)?.name ?? k} ${n}`).join(", ")}`);
+  return lines.join("\n");
+}
