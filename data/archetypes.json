@@ -1,0 +1,261 @@
+{
+  "$comment": "Name-free archetypes: one per component kind, the field's shared vocabulary for it. Built from the WAI-ARIA Authoring Practices, HTML semantics and common UI vocabulary, never from one system. altLabels are names the field uses for the kind; falseFriends are names that often mean another kind. Part aliases and variant synonyms are the words systems use for the same thing.",
+  "version": 1,
+  "variantVocabulary": {
+    "emphasis": {
+      "axisNames": ["variant", "appearance", "kind", "emphasis", "priority", "hierarchy", "fill", "style", "look", "type"],
+      "values": {
+        "high": ["primary", "solid", "filled", "fill", "contained", "elevated", "raised", "flat", "default", "strong", "bold", "emphasized", "accent", "cta"],
+        "medium": ["secondary", "outline", "outlined", "stroked", "bordered", "tonal", "soft", "light", "subtle", "muted", "neutral", "tertiary"],
+        "low": ["ghost", "text", "plain", "invisible", "link", "naked", "borderless", "transparent", "minimal", "quiet", "tertiary"]
+      }
+    },
+    "tone": {
+      "axisNames": ["tone", "intent", "status", "severity", "color", "colour", "variant", "type", "kind", "theme", "level", "sentiment", "appearance"],
+      "values": {
+        "danger": ["danger", "destructive", "error", "critical", "negative", "alert", "red"],
+        "warning": ["warning", "warn", "caution", "attention", "yellow", "orange"],
+        "success": ["success", "positive", "ok", "confirmation", "green"],
+        "info": ["info", "information", "informative", "notice", "blue", "discovery", "highlight"],
+        "neutral": ["neutral", "default", "secondary", "grey", "gray", "subtle", "muted", "basic"]
+      }
+    },
+    "size": {
+      "axisNames": ["size", "scale", "density", "dimension"],
+      "values": {
+        "small": ["xs", "x-small", "xsmall", "sm", "small", "s", "mini", "tiny", "compact", "dense"],
+        "medium": ["md", "medium", "m", "default", "regular", "normal", "base", "comfortable"],
+        "large": ["lg", "large", "l", "xl", "x-large", "xlarge", "xxl", "huge", "spacious", "expressive"]
+      }
+    },
+    "shape": {
+      "axisNames": ["shape", "rounded", "radius", "corner", "pill"],
+      "values": { "round": ["pill", "round", "rounded", "circle", "circular", "full"], "square": ["square", "sharp", "rectangle", "default"] }
+    },
+    "orientation": {
+      "axisNames": ["orientation", "direction", "layout", "placement", "position", "side", "align"],
+      "values": { "horizontal": ["horizontal", "row", "inline", "top", "bottom", "start", "end", "left", "right"], "vertical": ["vertical", "column", "stacked", "block"] }
+    }
+  },
+  "kinds": {
+    "button": {
+      "prefLabel": "Button",
+      "altLabels": ["btn", "push button", "command button", "action button", "icon button", "fab", "floating action button", "split button", "cta"],
+      "falseFriends": [{ "label": "toggle", "mayDenote": ["checkbox", "switch"] }, { "label": "link", "mayDenote": ["link"] }],
+      "native": ["button", "input[type=button]", "input[type=submit]"],
+      "roles": ["button"],
+      "parts": [
+        { "part": "label", "aliases": ["label", "text", "content", "children", "caption", "title"], "required": true },
+        { "part": "icon", "aliases": ["icon", "start icon", "end icon", "leading icon", "trailing icon", "leading visual", "trailing visual", "leading", "trailing", "prefix", "suffix", "prepend", "append", "before", "after", "start", "end", "start content", "end content", "icon left", "icon right"] },
+        { "part": "loader", "aliases": ["loader", "loading", "spinner", "progress", "loading indicator", "busy"] },
+        { "part": "focus ring", "aliases": ["focus ring", "focus", "focus visible", "ripple", "overlay", "state layer"] }
+      ],
+      "states": ["hover", "focus-visible", "active", "pressed", "disabled", "loading", "selected"],
+      "axes": ["emphasis", "tone", "size", "shape"],
+      "distinguishFrom": [{ "kind": "link", "test": "navigates (href) instead of acting" }, { "kind": "checkbox", "test": "keeps an on/off value (aria-pressed, aria-checked)" }]
+    },
+    "text-input": {
+      "prefLabel": "Text input",
+      "altLabels": ["input", "text field", "textfield", "text box", "textbox", "text input", "input field", "field", "form control", "entry", "line edit"],
+      "falseFriends": [{ "label": "field", "mayDenote": ["form-field"] }, { "label": "textarea", "mayDenote": ["textarea"] }],
+      "native": ["input", "input[type=text]", "input[type=email]", "input[type=search]", "input[type=password]", "textarea"],
+      "roles": ["textbox", "searchbox"],
+      "parts": [
+        { "part": "label", "aliases": ["label", "legend", "title", "floating label"], "required": true },
+        { "part": "input", "aliases": ["input", "field", "control", "native input", "textbox", "native", "element", "inner", "wrapper", "root"] },
+        { "part": "hint", "aliases": ["hint", "help", "helper", "helper text", "help text", "description", "supporting text", "details", "caption", "messages", "message"] },
+        { "part": "error", "aliases": ["error", "error message", "error text", "validation", "validation message", "invalid", "feedback", "invalid feedback"] },
+        { "part": "adornment", "aliases": ["adornment", "prefix", "suffix", "start", "end", "leading", "trailing", "leading visual", "trailing visual", "prepend", "append", "prepend inner", "append inner", "icon", "start adornment", "end adornment", "addon", "affix"] },
+        { "part": "counter", "aliases": ["counter", "character count", "count", "char count", "max length"] },
+        { "part": "clear", "aliases": ["clear", "clear button", "reset", "clearable"] }
+      ],
+      "states": ["focus", "disabled", "readonly", "invalid", "required", "filled"],
+      "axes": ["size", "emphasis"],
+      "distinguishFrom": [{ "kind": "select", "test": "chooses from a list instead of free text" }]
+    },
+    "checkbox": {
+      "prefLabel": "Checkbox",
+      "altLabels": ["checkbox", "check box", "check", "checkboxes", "tick box", "checkbox group"],
+      "falseFriends": [{ "label": "toggle", "mayDenote": ["switch", "button"] }],
+      "native": ["input[type=checkbox]"],
+      "roles": ["checkbox"],
+      "parts": [
+        { "part": "control", "aliases": ["control", "box", "input", "indicator", "checkmark", "check", "icon", "mark", "native", "native input", "background", "frame", "ripple"] },
+        { "part": "label", "aliases": ["label", "text", "content", "children"], "required": true },
+        { "part": "hint", "aliases": ["hint", "description", "helper", "helper text", "caption", "details"] },
+        { "part": "error", "aliases": ["error", "error message", "validation", "invalid"] }
+      ],
+      "states": ["checked", "unchecked", "indeterminate", "mixed", "disabled", "invalid", "focus-visible"],
+      "axes": ["size", "tone"],
+      "distinguishFrom": [{ "kind": "switch", "test": "applies immediately (role=switch)" }]
+    },
+    "select": {
+      "prefLabel": "Select",
+      "altLabels": ["select", "dropdown", "picker", "combobox", "combo box", "listbox", "list box", "native select", "autocomplete", "single select", "multiselect", "multi select", "option list"],
+      "falseFriends": [{ "label": "dropdown", "mayDenote": ["menu"] }, { "label": "picker", "mayDenote": ["date-picker", "color-picker"] }],
+      "native": ["select"],
+      "roles": ["combobox", "listbox"],
+      "parts": [
+        { "part": "label", "aliases": ["label", "legend", "title"] },
+        { "part": "trigger", "aliases": ["trigger", "button", "control", "toggle", "input", "field", "selection", "anchor", "activator"] },
+        { "part": "value", "aliases": ["value", "selected value", "display", "selection", "selected", "placeholder", "tag", "chips", "chip"] },
+        { "part": "listbox", "aliases": ["listbox", "list", "menu", "popover", "popup", "panel", "content", "dropdown", "options", "overlay", "portal", "positioner", "viewport"] },
+        { "part": "option", "aliases": ["option", "item", "choice", "menu item", "option group", "group", "item text", "item indicator"] },
+        { "part": "icon", "aliases": ["icon", "indicator", "arrow", "chevron", "caret", "expand icon", "dropdown icon", "menu icon", "append inner"] },
+        { "part": "hint", "aliases": ["hint", "helper", "helper text", "description", "messages"] },
+        { "part": "error", "aliases": ["error", "error message", "validation", "invalid"] }
+      ],
+      "states": ["open", "closed", "disabled", "invalid", "selected", "focus-visible", "highlighted"],
+      "axes": ["size", "emphasis"],
+      "distinguishFrom": [{ "kind": "menu", "test": "picks a value for a form instead of running commands" }]
+    },
+    "dialog": {
+      "prefLabel": "Dialog",
+      "altLabels": ["dialog", "modal", "modal dialog", "alert dialog", "confirm dialog", "lightbox", "overlay", "sheet", "drawer", "side panel", "tearsheet", "popup window"],
+      "falseFriends": [{ "label": "popover", "mayDenote": ["popover"] }, { "label": "sheet", "mayDenote": ["drawer"] }],
+      "native": ["dialog"],
+      "roles": ["dialog", "alertdialog"],
+      "parts": [
+        { "part": "trigger", "aliases": ["trigger", "activator", "opener", "launcher", "button"] },
+        { "part": "backdrop", "aliases": ["backdrop", "overlay", "scrim", "underlay", "mask", "blanket", "shade", "overlay root"] },
+        { "part": "container", "aliases": ["container", "positioner", "wrapper", "portal", "root", "viewport", "outer"] },
+        { "part": "surface", "aliases": ["surface", "content", "paper", "panel", "box", "window", "frame", "card", "inner", "popup"] },
+        { "part": "title", "aliases": ["title", "heading", "header", "headline", "label", "name"], "required": true },
+        { "part": "description", "aliases": ["description", "body", "content", "content text", "text", "message", "subtitle", "supporting text", "details"] },
+        { "part": "actions", "aliases": ["actions", "footer", "buttons", "button group", "action bar", "controls", "button set"] },
+        { "part": "close", "aliases": ["close", "close button", "dismiss", "x", "close icon", "cancel"] }
+      ],
+      "states": ["open", "closed", "modal", "entering", "leaving"],
+      "axes": ["size", "tone", "orientation"],
+      "distinguishFrom": [{ "kind": "popover", "test": "non-modal, anchored to a trigger, no focus trap" }, { "kind": "alert", "test": "inline in the page, no focus move" }]
+    },
+    "tabs": {
+      "prefLabel": "Tabs",
+      "altLabels": ["tabs", "tab", "tab group", "tabset", "tab set", "tab bar", "tab view", "tab panel", "tab navigation", "underline nav", "underline panels", "content switcher", "segmented"],
+      "falseFriends": [{ "label": "segmented", "mayDenote": ["toggle-group"] }, { "label": "tab navigation", "mayDenote": ["navigation"] }],
+      "native": [],
+      "roles": ["tablist", "tab", "tabpanel"],
+      "parts": [
+        { "part": "list", "aliases": ["list", "tablist", "tab list", "nav", "header", "tabs", "bar", "scroller", "items", "track"], "required": true },
+        { "part": "tab", "aliases": ["tab", "trigger", "item", "button", "tab button", "label", "tab label"], "required": true },
+        { "part": "panel", "aliases": ["panel", "content", "tab panel", "tabpanel", "panels", "body", "window", "window item", "pane"], "required": true },
+        { "part": "indicator", "aliases": ["indicator", "ink bar", "underline", "highlight", "slider", "active indicator", "selection"] },
+        { "part": "scroll", "aliases": ["scroll button", "scroll", "arrow", "prev", "next", "pagination", "scroll buttons"] }
+      ],
+      "states": ["selected", "focus-visible", "disabled", "active"],
+      "axes": ["emphasis", "size", "orientation"],
+      "distinguishFrom": [{ "kind": "toggle-group", "test": "no panels (role=group or radiogroup)" }, { "kind": "navigation", "test": "links with aria-current, no tabpanel" }]
+    },
+    "card": {
+      "prefLabel": "Card",
+      "altLabels": ["card", "tile", "panel", "surface", "box", "container card", "summary card", "media card", "item card"],
+      "falseFriends": [{ "label": "panel", "mayDenote": ["tabs", "dialog", "disclosure"] }, { "label": "box", "mayDenote": ["layout"] }],
+      "native": ["article", "section"],
+      "roles": ["article", "region", "group"],
+      "parts": [
+        { "part": "header", "aliases": ["header", "head", "top"] },
+        { "part": "title", "aliases": ["title", "heading", "headline", "name", "label"] },
+        { "part": "subtitle", "aliases": ["subtitle", "subheader", "subhead", "description", "eyebrow", "meta", "metadata", "caption", "supporting text"] },
+        { "part": "media", "aliases": ["media", "image", "img", "cover", "thumbnail", "hero", "figure", "picture"] },
+        { "part": "body", "aliases": ["body", "content", "text", "main", "inner", "details"] },
+        { "part": "actions", "aliases": ["actions", "footer", "action area", "buttons", "controls", "bottom"] },
+        { "part": "avatar", "aliases": ["avatar", "icon", "leading", "prepend"] }
+      ],
+      "states": ["hover", "focus-visible", "selected", "disabled", "clickable"],
+      "axes": ["emphasis", "size"],
+      "distinguishFrom": [{ "kind": "list-item", "test": "a row inside a list with no surface of its own" }]
+    },
+    "alert": {
+      "prefLabel": "Alert",
+      "altLabels": ["alert", "notification", "inline notification", "banner", "notification banner", "callout", "message", "message bar", "notice", "flash", "flashbar", "section message", "inline alert", "toast", "snackbar", "flag", "infobar"],
+      "falseFriends": [{ "label": "toast", "mayDenote": ["toast"] }, { "label": "alert dialog", "mayDenote": ["dialog"] }, { "label": "banner", "mayDenote": ["page-banner"] }],
+      "native": [],
+      "roles": ["alert", "status", "log", "region"],
+      "parts": [
+        { "part": "icon", "aliases": ["icon", "status icon", "leading visual", "prepend", "leading", "visual"] },
+        { "part": "title", "aliases": ["title", "heading", "header", "headline", "subtitle"] },
+        { "part": "description", "aliases": ["description", "body", "message", "content", "text", "details", "subtitle", "children"] },
+        { "part": "actions", "aliases": ["actions", "action", "buttons", "footer", "action button", "cta"] },
+        { "part": "close", "aliases": ["close", "close button", "dismiss", "x", "close icon"] }
+      ],
+      "states": ["open", "dismissed", "entering", "leaving"],
+      "axes": ["tone", "emphasis"],
+      "distinguishFrom": [{ "kind": "toast", "test": "timed, stacked in a corner, not in the page flow" }, { "kind": "dialog", "test": "modal (role=alertdialog)" }]
+    },
+    "badge-or-tag": {
+      "prefLabel": "Badge or tag",
+      "altLabels": ["badge", "tag", "chip", "pill", "label", "lozenge", "token", "status", "status badge", "counter", "count", "dot", "chips", "tags", "tag group", "chip group"],
+      "falseFriends": [{ "label": "label", "mayDenote": ["form-label"] }, { "label": "token", "mayDenote": ["design-token"] }, { "label": "status", "mayDenote": ["status-indicator"] }],
+      "native": [],
+      "roles": ["status", "listitem", "button", "option"],
+      "parts": [
+        { "part": "label", "aliases": ["label", "text", "content", "children", "value", "name"] },
+        { "part": "icon", "aliases": ["icon", "leading visual", "leading", "avatar", "prepend", "start", "prefix", "dot", "indicator"] },
+        { "part": "remove", "aliases": ["remove", "close", "delete", "dismiss", "remove button", "close button", "delete icon", "clear", "x", "append"] }
+      ],
+      "states": ["selected", "disabled", "hover", "focus-visible", "removable"],
+      "axes": ["tone", "emphasis", "size", "shape"],
+      "distinguishFrom": [{ "kind": "button", "test": "acts on click with no persistent value" }]
+    },
+    "tooltip": {
+      "prefLabel": "Tooltip",
+      "altLabels": ["tooltip", "tool tip", "tip", "hint", "info tip", "toggletip", "definition tooltip", "icon tooltip"],
+      "falseFriends": [{ "label": "hint", "mayDenote": ["text-input"] }, { "label": "popover", "mayDenote": ["popover"] }],
+      "native": [],
+      "roles": ["tooltip"],
+      "parts": [
+        { "part": "trigger", "aliases": ["trigger", "anchor", "activator", "target", "reference", "children", "host"], "required": true },
+        { "part": "content", "aliases": ["content", "popup", "body", "text", "bubble", "label", "panel", "overlay", "portal", "positioner", "surface", "container"], "required": true },
+        { "part": "arrow", "aliases": ["arrow", "caret", "tip", "beak", "pointer", "notch"] }
+      ],
+      "states": ["open", "closed", "delayed"],
+      "axes": ["orientation", "tone"],
+      "distinguishFrom": [{ "kind": "popover", "test": "holds interactive content or opens on click" }]
+    },
+    "menu": {
+      "prefLabel": "Menu",
+      "altLabels": ["menu", "dropdown menu", "action menu", "context menu", "overflow menu", "menu button", "popup menu", "action list", "dropdown", "kebab menu", "more menu", "menubar", "split menu", "list menu"],
+      "falseFriends": [{ "label": "dropdown", "mayDenote": ["select"] }, { "label": "menu", "mayDenote": ["navigation"] }],
+      "native": [],
+      "roles": ["menu", "menubar", "menuitem", "menuitemcheckbox", "menuitemradio"],
+      "parts": [
+        { "part": "trigger", "aliases": ["trigger", "button", "activator", "toggle", "anchor", "menu button", "opener", "anchor element"], "required": true },
+        { "part": "content", "aliases": ["content", "list", "popover", "panel", "surface", "overlay", "popup", "portal", "positioner", "paper", "dropdown", "items", "container"] },
+        { "part": "item", "aliases": ["item", "menu item", "menuitem", "option", "action", "entry", "row", "link item", "checkbox item", "radio item"], "required": true },
+        { "part": "group", "aliases": ["group", "section", "radio group", "item group"] },
+        { "part": "label", "aliases": ["label", "header", "heading", "group label", "section header", "title"] },
+        { "part": "separator", "aliases": ["separator", "divider", "rule", "line"] },
+        { "part": "submenu", "aliases": ["submenu", "sub", "sub menu", "sub trigger", "sub content", "nested"] },
+        { "part": "shortcut", "aliases": ["shortcut", "kbd", "accelerator", "trailing visual", "trailing"] },
+        { "part": "icon", "aliases": ["icon", "leading visual", "leading", "prepend", "item indicator", "indicator", "check"] }
+      ],
+      "states": ["open", "closed", "highlighted", "checked", "disabled", "focus-visible"],
+      "axes": ["size", "orientation"],
+      "distinguishFrom": [{ "kind": "select", "test": "picks a form value (role=listbox / combobox)" }, { "kind": "navigation", "test": "links between pages (nav, aria-current)" }]
+    },
+    "table": {
+      "prefLabel": "Table",
+      "altLabels": ["table", "data table", "datatable", "data grid", "datagrid", "grid", "dynamic table", "structured list", "list view", "table view", "simple table"],
+      "falseFriends": [{ "label": "grid", "mayDenote": ["layout-grid"] }, { "label": "list", "mayDenote": ["list"] }],
+      "native": ["table"],
+      "roles": ["table", "grid", "treegrid"],
+      "parts": [
+        { "part": "head", "aliases": ["head", "header", "thead", "table head", "column headers", "headers"] },
+        { "part": "body", "aliases": ["body", "tbody", "table body", "rows", "content"] },
+        { "part": "row", "aliases": ["row", "tr", "table row", "item"], "required": true },
+        { "part": "cell", "aliases": ["cell", "td", "data cell", "table cell", "column"], "required": true },
+        { "part": "header cell", "aliases": ["header cell", "th", "column header", "table header", "header"] },
+        { "part": "footer", "aliases": ["footer", "tfoot", "table footer", "summary"] },
+        { "part": "caption", "aliases": ["caption", "title", "heading", "description"] },
+        { "part": "toolbar", "aliases": ["toolbar", "toolbar content", "batch actions", "actions", "filters", "search"] },
+        { "part": "pagination", "aliases": ["pagination", "pager", "paginator", "page"] },
+        { "part": "sort", "aliases": ["sort", "sort indicator", "sort label", "sort header", "sortable", "expand"] },
+        { "part": "selection", "aliases": ["selection", "select", "checkbox", "select all", "select row", "radio"] },
+        { "part": "container", "aliases": ["container", "wrapper", "scroll", "table container", "responsive"] }
+      ],
+      "states": ["sorted", "selected", "expanded", "hover", "loading", "empty"],
+      "axes": ["size", "emphasis"],
+      "distinguishFrom": [{ "kind": "list", "test": "one column of items, no headers" }, { "kind": "layout-grid", "test": "page layout columns, no role=table or grid" }]
+    }
+  }
+}

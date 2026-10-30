@@ -213,3 +213,33 @@ describe("tokens: definitions in every format, tiers, modes and bindings", () =>
     expect(m.concepts.find((c) => c.name === "AcmeButton")!.tokens!.map((x) => x.name)).toEqual(["--acme-button-bg"]);
   });
 });
+
+describe("kinds: typing concepts by the name-free archetypes", () => {
+  it("types by name, parts and variants; sub-components, constants and look-alike words are left alone", async () => {
+    const { typeConcepts } = await import("../src/model/kinds.js");
+    const ev = { file: "x", extractor: "t", tier: "declaration" as const };
+    const c = (name: string, extra: Partial<import("../src/model/types.js").Concept> = {}) => ({ key: name.toLowerCase(), name, role: "component" as const, realizations: [{ form: "import" as const, symbol: name, evidence: ev }], ...extra });
+    const concepts = [
+      c("Modal", { parts: [{ name: "header", evidence: ev }, { name: "footer", evidence: ev }, { name: "close", evidence: ev }] }),
+      c("ModalHeader"),
+      c("IconButton", { axes: [{ name: "variant", values: ["primary", "ghost"], evidence: ev }, { name: "size", values: ["sm", "lg"], evidence: ev }] }),
+      c("Snackbar"),
+      c("TableToolbar"),
+      c("ButtonKinds"),
+      c("Flyout", { parts: [{ name: "trigger", evidence: ev }, { name: "content", evidence: ev }, { name: "arrow", evidence: ev }], axes: [{ name: "placement", values: ["top", "bottom"], evidence: ev }] }),
+      c("Gizmo", { parts: [{ name: "trigger", evidence: ev }] }),
+      c("Dropdown"),
+    ];
+    typeConcepts(concepts);
+    const k = (n: string) => concepts.find((x) => x.name === n)!.kind;
+    expect(k("Modal")?.kind).toBe("dialog");
+    expect(k("ModalHeader")).toBeUndefined(); // a part of Modal
+    expect(k("IconButton")?.kind).toBe("button");
+    expect(k("Snackbar")?.kind).toBe("alert");
+    expect(k("TableToolbar")?.kind).not.toBe("tabs"); // words, not characters: Table is not Tab
+    expect(k("ButtonKinds")).toBeUndefined(); // an exported constant
+    expect(k("Flyout")?.kind).toBe("tooltip"); // no name signal: structure (trigger, content, arrow, placement)
+    expect(k("Gizmo")).toBeUndefined(); // too little structure without a name
+    expect(k("Dropdown")?.ambiguous).toBe(true); // select or menu
+  });
+});
