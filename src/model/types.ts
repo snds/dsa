@@ -49,6 +49,10 @@ export interface Concept {
   /** The library it belongs to: the system (core) or one of its children. */
   library?: string | undefined;
   realizations: Realization[];
+  /** Variant axes: a prop or class family and the closed set of values it picks from. */
+  axes?: { name: string; values: string[]; evidence: Evidence }[] | undefined;
+  /** Named parts of its anatomy (title, trigger, body), from sub-components, slots, parts and BEM elements. */
+  parts?: { name: string; evidence: Evidence }[] | undefined;
 }
 
 export interface Element {

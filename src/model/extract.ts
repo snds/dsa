@@ -3,6 +3,7 @@ import path from "node:path";
 import fg from "fast-glob";
 import { parse as babelParse } from "@babel/parser";
 import type { Concept, Evidence, Realization, RealizationForm, Tier } from "./types.js";
+import { addFacets, type ClassExtension } from "./facets.js";
 
 /**
  * System-side extractors: read how a design system declares its components, in whatever form it
@@ -73,7 +74,10 @@ export function extractConcepts(root: string, sources: string[], options: Extrac
   if (raws.some((r) => r.evidence.extractor === "vue-component")) {
     for (const r of exported) raws.push({ ...r, family: "class-name", form: { form: "tag", tag: (r.form as { symbol: string }).symbol }, evidence: { ...r.evidence, extractor: "vue-global-registration", tier: "convention" } });
   }
-  return assemble(raws, options);
+  const extensions: ClassExtension[] = [];
+  const concepts = assemble(raws, options, extensions);
+  addFacets(root, sources, concepts, texts, extensions);
+  return concepts;
 }
 
 // ---------- declaration forms ----------
@@ -129,6 +133,15 @@ function topLevelClasses(text: string): { cls: string; index: number; group: str
       if (src[i - 1] === "#") { const close = src.indexOf("}", i); if (close > i) { i = close; continue; } }
       const head = src.slice(start, i).trim();
       const isAt = head.startsWith("@");
+      // Sass nesting under a class block: `.block { &__title {…} &--large {…} }` declares block__title, block--large.
+      const parentRule = [...stack].reverse().find((h) => !h.startsWith("@"));
+      const parentClass = parentRule?.match(/^\.(-?[a-zA-Z][\w-]*)$/)?.[1];
+      if (!isAt && parentClass && stack.filter((h) => !h.startsWith("@")).length === 1) {
+        for (const sel of head.split(",").map((s) => s.trim())) {
+          const m = sel.match(/^&((?:__|--|-)[a-zA-Z0-9][\w-]*)$/);
+          if (m) out.push({ cls: parentClass + m[1], index: start, group: [] });
+        }
+      }
       // Only classes outside any rule, and outside cascade layers that hold utilities or resets.
       if (!isAt && stack.every((h) => h.startsWith("@")) && !stack.some((h) => NON_COMPONENT_LAYER.test(h))) {
         const sels = head.split(",").map((s) => s.trim());
@@ -188,15 +201,19 @@ function packageExports(root: string, sources: string[], texts: Map<string, stri
       const ast = parseTs(text, file);
       if (!ast) return;
       const rel = path.relative(root, file);
-      const push = (name: string, node: any) => {
-        if (/^[A-Z][A-Za-z0-9]*$/.test(name)) out.push({ name, family: "export", form: { form: "import", symbol: name }, evidence: { file: rel, line: node?.loc?.start.line, extractor: "package-export", tier: "export" } });
+      const push = (name: string, node: any, from?: string) => {
+        if (/^[A-Z][A-Za-z0-9]*$/.test(name)) out.push({ name, family: "export", form: { form: "import", symbol: name }, evidence: { file: from ? path.relative(root, from) : rel, line: from ? undefined : node?.loc?.start.line, extractor: "package-export", tier: "export" } });
       };
       for (const st of ast.program.body) {
         if (st.type === "ExportNamedDeclaration") {
+          // Types, interfaces and enums are not components.
+          if (st.exportKind === "type") continue;
           const d = st.declaration;
-          if (d?.id?.name) push(d.id.name, d);
+          if (d?.id?.name && !/^TS(InterfaceDeclaration|TypeAliasDeclaration|EnumDeclaration|ModuleDeclaration)$/.test(d.type) && d.declare !== true) push(d.id.name, d);
           for (const v of d?.declarations ?? []) if (v.id?.name) push(v.id.name, v);
-          for (const sp of st.specifiers ?? []) push(sp.exported?.name ?? sp.exported?.value, sp);
+          // A re-export's evidence is the module it comes from, where the component (and its props) live.
+          const from = st.source?.value?.startsWith(".") ? resolveModule(file, st.source.value) : undefined;
+          for (const sp of st.specifiers ?? []) if (sp.exportKind !== "type") push(sp.exported?.name ?? sp.exported?.value, sp, from);
           if (st.source?.value?.startsWith(".")) visit(resolveModule(file, st.source.value), depth + 1);
         } else if (st.type === "ExportAllDeclaration" && st.source?.value?.startsWith(".")) {
           visit(resolveModule(file, st.source.value), depth + 1);
@@ -238,7 +255,7 @@ function resolveModule(from: string, spec: string): string {
 
 // ---------- assembly: detect prefixes, normalise, merge ----------
 
-function assemble(raws: Raw[], options: ExtractOptions): Concept[] {
+function assemble(raws: Raw[], options: ExtractOptions, extensions: ClassExtension[] = []): Concept[] {
   // A system writes one stem everywhere: acme-button / AcmeButton, acme-button / acmeButton,
   // ac-card / AcCard, ab-button / ab--btn / ABButton. Detect it once, across every family.
   const stems = systemStems(raws, options.tagPrefixes ?? []);
@@ -261,7 +278,13 @@ function assemble(raws: Raw[], options: ExtractOptions): Concept[] {
 
   const concepts = new Map<string, Concept>();
   for (const r of raws) {
-    if (r.family === "css-class" && isExtension(r.name)) continue;
+    if (r.family === "css-class" && isExtension(r.name)) {
+      // Kept for facets: block__x is a part, block--x a modifier, block-x either.
+      const block = [...cssNames].filter((b) => b !== r.name && (r.name.startsWith(`${b}-`) || r.name.startsWith(`${b}__`))).sort((a, b) => b.length - a.length)[0]!;
+      const rest = r.name.slice(block.length);
+      extensions.push({ block, ext: rest.replace(/^(__|--|-)/, ""), kind: rest.startsWith("__") ? "element" : rest.startsWith("--") ? "modifier" : "dash", evidence: r.evidence });
+      continue;
+    }
     const raw = r.form.form === "tag" && r.family !== "class-name" ? r.form.tag : r.family === "css-class" ? aliasOf.get(r.name) ?? r.name : r.name;
     const base = stripStem(raw, r.form.form === "tag" && r.family !== "class-name" ? "tag" : r.family);
     const key = base.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
