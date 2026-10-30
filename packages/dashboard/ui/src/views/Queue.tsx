@@ -12,6 +12,8 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 import { Panel, Pre, SevBadge, Stat, sevTone } from "@/components/bits"
 import { D, SCOPES, ago, api, copy, fmtD, say } from "@/lib/dsa"
 import { AskAgent } from "@/agent/AskAgent"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { CERTAINTY, ROLES, classify, forRole, useRole, type Certainty } from "@/lib/insight"
 
 /** Only https links reach an href (a javascript: or data: URL from the data never does). */
 const safeHref = (u: unknown) => { try { const x = new URL(String(u)); return x.protocol === "https:" ? x.href : undefined } catch { return undefined } }
@@ -27,7 +29,10 @@ type Q = { items: any[]; prompt: string; github: { token: boolean; defaultRepo: 
 export function Queue() {
   const [q, setQ] = React.useState<Q | null>(D.queue ?? null)
   const [scope, setScope] = React.useState("all")
-  const [current, setCurrent] = React.useState<string | null>(null)
+  const [role] = useRole()
+  const [certainty, setCertainty] = React.useState<"any" | Certainty>("any")
+  // An Overview link opens the queue on one item: #queue/<id>.
+  const [current, setCurrent] = React.useState<string | null>(() => { const id = location.hash.split("/")[1]; return id ? decodeURIComponent(id) : null })
   const [syncing, setSyncing] = React.useState(false)
   const [confirm, setConfirm] = React.useState(false)
   const [creating, setCreating] = React.useState<string[] | null>(null)
@@ -59,7 +64,7 @@ export function Queue() {
 
   if (!q) return <Empty className="border"><EmptyHeader><EmptyTitle>The queue isn't in this report</EmptyTitle><EmptyDescription>Re-run the scan to build it.</EmptyDescription></EmptyHeader></Empty>
 
-  const inScope = (i: any) => scope === "all" || i.scope === scope
+  const inScope = (i: any) => (scope === "all" || i.scope === scope) && forRole(role, i.rule) && (certainty === "any" || classify(i.rule).certainty === certainty)
   const open = q.items.filter(i => i.status === "open")
   const findings = open.filter(i => i.kind === "finding" && inScope(i)).sort((a, b) => b.score - a.score)
   const approvals = open.filter(i => i.kind === "approval" && inScope(i))
@@ -78,6 +83,16 @@ export function Queue() {
     <div className="flex flex-col gap-6">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {tiles.map(([k, l, n, d]) => <Stat key={k} label={l} value={n} detail={d} active={scope === k} onClick={() => { setScope(k); setCurrent(null) }} />)}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <ToggleGroup value={[certainty]} onValueChange={(v: any) => { const c = Array.isArray(v) ? v[0] : v; if (c) setCertainty(c) }} variant="outline" size="sm">
+          <ToggleGroupItem value="any">All</ToggleGroupItem>
+          {(["definite", "recommendation"] as const).map(c => (
+            <Tooltip key={c}><TooltipTrigger render={<ToggleGroupItem value={c} />}>{CERTAINTY[c].label}</TooltipTrigger><TooltipContent>{CERTAINTY[c].hint}</TooltipContent></Tooltip>
+          ))}
+        </ToggleGroup>
+        {role !== "all" && <span className="text-sm text-muted-foreground">Showing actions for {ROLES.find(r => r.id === role)?.label}. Change the role at the top of the page.</span>}
       </div>
 
       <AgentPrompt prompt={q.prompt} count={open.length} />
@@ -189,6 +204,19 @@ function CompletedPanel({ items, sel, onPick }: { items: any[]; sel?: string; on
   )
 }
 
+/** Definite (measured, known fix) or a recommendation (inferred: a person decides), with who acts. */
+function CertaintyBadge({ rule }: { rule?: string }) {
+  const c = classify(rule)
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className="inline-flex" />}>
+        <Badge variant={c.certainty === "definite" ? "default" : "outline"}>{c.verb} · {CERTAINTY[c.certainty].label}</Badge>
+      </TooltipTrigger>
+      <TooltipContent>{CERTAINTY[c.certainty].hint} For {c.roles.map(r => ROLES.find(x => x.id === r)?.label).join(", ")}.</TooltipContent>
+    </Tooltip>
+  )
+}
+
 function IssueBadge({ link }: { link: any }) {
   if (!link) return null
   return <Badge variant={link.state === "open" ? "secondary" : "outline"} className="gap-1"><GithubLogoIcon />#{link.number} {link.state}{link.assignees?.length ? ` · ${link.assignees.join(", ")}` : ""}</Badge>
@@ -204,6 +232,7 @@ function Row({ i, sel, onClick }: { i: any; sel: boolean; onClick: () => void })
         <span className={cn("min-w-0 flex-1", done && "opacity-70")}>
           <span className="block text-sm font-medium">{i.title}</span>
           <span className="mt-1.5 flex flex-wrap gap-1.5">
+            <CertaintyBadge rule={i.rule} />
             {i.kind === "finding" ? <SevBadge sev={i.severity} /> : <Badge variant="outline">Approved{i.approvedBy ? ` by ${i.approvedBy}` : ""}</Badge>}
             <Badge variant="secondary">{i.owner}</Badge>
             {i.kind === "finding" && <Badge variant="outline">{i.family}</Badge>}

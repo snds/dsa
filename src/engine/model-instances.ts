@@ -3,6 +3,15 @@ import { displayPath } from "./paths.js";
 import type { RepoReading } from "../model/index.js";
 import type { Framework, Instance, Target } from "./types.js";
 
+// Utility classes that place a component (margin, size, flex and grid placement) without changing how it
+// looks. A className made only of these is layout, not an override of the system's styling.
+const LAYOUT = /^(?:[a-z0-9]+:)*-?(?:m[trblxyse]?|w|h|size|min-w|max-w|min-h|max-h|basis|grow|shrink|flex|flex-\w+|order|col-span|col-start|col-end|row-span|row-start|row-end|self|justify-self|place-self|inset|inset-[xy]|top|right|bottom|left|z|hidden|block|inline|inline-block|inline-flex|contents|relative|absolute|sticky|fixed|static|shrink-0|grow-0|truncate|sr-only|not-sr-only|visible|invisible|overflow|overflow-[xy]|aspect|container|float|clear|isolate)(?:-[\w./[\]%-]+)?$/;
+export function layoutOnly(className: string): boolean {
+  if (className === "{expr}" || className === "true") return false; // computed: can't tell, so it counts
+  const tokens = className.split(/\s+/).filter(Boolean);
+  return tokens.length > 0 && tokens.every((t) => LAYOUT.test(t));
+}
+
 const FRAMEWORK: [RegExp, Framework][] = [[/\.(tsx|jsx|ts|js|mjs)$/, "react"], [/\.vue$/, "vue"], [/\.(html?)$/, "angular"]];
 
 /**
@@ -24,16 +33,20 @@ export function instancesFromReading(reading: RepoReading, root: string, target:
         if (u.internal) continue; // a library's own code using its own component
         const c = role.get(u.concept);
         if (!c || c.role === "style") continue;
+        // A part is a use of its component (DialogTitle → Dialog.Title), so counts roll up.
+        const parent = c.role === "part" && c.partOf ? role.get(c.partOf) : undefined;
+        const name = parent ? `${parent.name}.${c.name.startsWith(parent.name) ? c.name.slice(parent.name.length) : c.name}` : `${c.name}${u.part ? `.${u.part}` : ""}`;
         const lib = u.library ?? library;
         // A child library rendering its own components isn't consumption.
         if (target.role !== "consumer" && lib === target.name) continue;
         const overrides: string[] = [];
         if (u.form !== "class" && u.form !== "macro") {
-          if ("className" in el.attributes || ("class" in el.attributes && u.form !== "selector")) overrides.push("className");
+          const cls = el.attributes.className ?? (u.form !== "selector" ? el.attributes.class : undefined);
+          if (cls !== undefined && !layoutOnly(cls)) overrides.push("className");
           if ("style" in el.attributes || "sx" in el.attributes || "css" in el.attributes) overrides.push("style");
         }
         if (el.spread) overrides.push("spread");
-        out.push({ target: target.name, library: lib, pkg: el.importSource ?? u.form, component: `${c.name}${u.part ? `.${u.part}` : ""}`, file: displayPath(root, abs, target.dir), line: el.line, framework, overrides: overrides.sort() });
+        out.push({ target: target.name, library: lib, pkg: el.importSource ?? u.form, component: name, file: displayPath(root, abs, target.dir), line: el.line, framework, overrides: overrides.sort() });
       }
     }
   }

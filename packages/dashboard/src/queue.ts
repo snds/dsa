@@ -45,6 +45,8 @@ export interface Instance { id: string; file: string; line: number; element: str
 export interface QueueItem {
   id: string;
   kind: 'finding' | 'approval';
+  /** The finding's rule (deprecated, lookalike…), or 'approval' for a reviewer-approved migration. */
+  rule: string;
   title: string;
   owner: string;
   scope: string;
@@ -147,7 +149,7 @@ export async function buildQueue(root: string, config: Config, dataDir: string):
     const closed = link?.state === 'closed';
     const done = f.status === 'resolved' || closed;
     items.push({
-      id: f.id, kind: 'finding', title: f.title, owner: f.owner, scope: f.scope, repo: repoFor(f.repo),
+      id: f.id, kind: 'finding', rule: f.rule, title: f.title, owner: f.owner, scope: f.scope, repo: repoFor(f.repo),
       severity: f.severity, score: f.score, family: f.family, pushed: pushed.has(f.id),
       why: f.why, evidence: f.evidence, fix: f.fix, exit: f.exit, affected: f.affected,
       status: done ? 'done' : 'open',
@@ -203,7 +205,7 @@ export async function buildQueue(root: string, config: Config, dataDir: string):
     const closed = link?.state === 'closed';
     const done = closed && !fresh;
     const item: QueueItem = {
-      id: g.id, kind: 'approval', title, owner: gap ? config.designSystem.core.name : (t?.owner ?? g.target), scope: gap ? 'core' : (t?.role ?? 'consumer'),
+      id: g.id, kind: 'approval', rule: 'approval', title, owner: gap ? config.designSystem.core.name : (t?.owner ?? g.target), scope: gap ? 'core' : (t?.role ?? 'consumer'),
       repo: repoFor(gap ? coreRepo : t?.repo),
       why: gap
         ? `A reviewer confirmed that ${n} ${tags} in ${g.target} have no matching component: ${d.gap || 'the system is missing one'}. It's design system work, not a consumer fix.`
@@ -227,7 +229,7 @@ export async function buildQueue(root: string, config: Config, dataDir: string):
     if (memo.ids.some(x => present.has(x))) { delete st.approvals[id]; dirty = true; continue; }
     if (!memo.doneAt) { memo.doneAt = new Date().toISOString(); memo.doneReason = 'Migrated: no longer in the code'; note(st, id, 'migrated'); dirty = true; }
     const link: IssueLink | null = st.links[id] ?? null;
-    items.push({ id, kind: 'approval', title: memo.title, owner: memo.target, scope: 'consumer', repo: link?.repo ?? null, why: '', evidence: `${memo.ids.length} element(s)`, fix: '', exit: '', affected: [memo.target],
+    items.push({ id, kind: 'approval', rule: 'approval', title: memo.title, owner: memo.target, scope: 'consumer', repo: link?.repo ?? null, why: '', evidence: `${memo.ids.length} element(s)`, fix: '', exit: '', affected: [memo.target],
       status: 'done', doneReason: memo.doneReason, doneAt: memo.doneAt, history: st.events[id] ?? [], issue: { title: memo.title, body: '' }, link, target: memo.target, ids: memo.ids });
   }
   if (dirty) writeState(dataDir, st);
