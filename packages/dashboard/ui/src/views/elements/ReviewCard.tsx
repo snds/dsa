@@ -2,7 +2,6 @@ import * as React from "react"
 import { cn } from "cn"
 import { ArrowRightIcon, CaretDownIcon, CheckIcon, ImageBrokenIcon } from "@phosphor-icons/react"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -10,7 +9,7 @@ import { Pre } from "@/components/bits"
 import { D, short, SYS } from "@/lib/dsa"
 import { stageKey, useStaged } from "@/lib/staged"
 import { AskAgent } from "@/agent/AskAgent"
-import { Conf, ElementRow, NoShot, Reasons, ReviewControls, Ring, contentText, desc, nameOf, pickText, revealedText, useEl, useReviewState } from "./shared"
+import { Conf, ElementRow, NoShot, Reasons, ReviewControls, Ring, contentText, desc, nameOf, pickText, proposalFor, revealedText, useEl, useReviewState } from "./shared"
 import { styleName } from "./units"
 
 /**
@@ -21,8 +20,9 @@ import { styleName } from "./units"
  *    need different answers, one row per part.
  * 3. What do I do? Approve, Change, Ignore, a note, and what the answer covers. In `dsa serve` that
  *    saves to the repo; on the published dashboard it stages in the browser for export.
- * 4. Why? The evidence: one tile per look (shared classes render the same), app next to the system, and only
- *    the properties that change. Reasons, alternatives and every element sit under Details.
+ * 4. Why? The evidence: every case the answer covers, grouped by look (shared classes render the same), each
+ *    look next to the proposal rendered with its props, and only the properties that change. Reasons,
+ *    alternatives and every element sit under Details.
  */
 export interface Part { key: string; ask: string; ids: string[]; options: { label: string; decision: any }[]; auto: any; fit?: any }
 export function ReviewCard({ items, auto, pattern, options, fit, kind, title, ask, note, parts, context }: {
@@ -44,7 +44,6 @@ export function ReviewCard({ items, auto, pattern, options, fit, kind, title, as
   const looks = React.useMemo(() => looksOf(items), [items])
   const captured = looks.filter(l => l.shot)
   const uncaptured = looks.filter(l => !l.shot).flatMap(l => l.items)
-  const [allLooks, setAllLooks] = React.useState(false)
   const lo = Math.min(...items.map(e => e.confidence)), hi = Math.max(...items.map(e => e.confidence))
   const files = new Set(items.map(e => e.file)).size
   // Where most of them sit (an area half or more share), with the count, so one element in an aside doesn't label all 41.
@@ -53,12 +52,13 @@ export function ReviewCard({ items, auto, pattern, options, fit, kind, title, as
     for (const e of items) for (const r of new Set<string>(e.regions ?? [])) n.set(r, (n.get(r) ?? 0) + 1)
     return [...n].filter(([, c]) => c * 2 >= items.length).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([r, c]) => (items.length > 1 && c < items.length ? `${r} (${c} of ${items.length})` : r))
   })()
-  const visible = allLooks ? captured : captured.slice(0, 3)
-  const hiddenLooks = captured.length - visible.length
-  const showUncaptured = uncaptured.length > 0 && (allLooks || visible.length < 3)
+  // Every look and every case, so a reviewer can see they really are the same before one answer covers them.
+  const visible = captured
+  const shotCount = items.filter(e => e.shot).length
   // A system rendering only means something for a replacement, so gap / keep tiles show the app alone.
   const compares = shown.verdict === "replace" && !split
-  const unrendered = compares && !visible.some(l => l.rep.rendered?.systemShot || l.rep.systemPreview)
+  const proposal = compares ? proposalFor(shown) : null
+  const unrendered = compares && !proposal?.url && !visible.some(l => l.rep.rendered?.systemShot || l.rep.systemPreview)
   const unmeasured = compares && !visible.some(l => deltaOf(l.rep))
   const answered = partStates?.filter(x => x.state !== "open").length ?? 0
   const status = split && state === "open" && answered ? `${answered} of ${split.length} parts answered`
@@ -121,21 +121,16 @@ export function ReviewCard({ items, auto, pattern, options, fit, kind, title, as
       {/* 4. The evidence. */}
       <CardContent className={cn("flex flex-col gap-3 py-4", off && "opacity-50")}>
         <h4 className="text-xs font-medium text-muted-foreground">
-          {captured.length ? `${looks.length === 1 ? "One look" : `${looks.length} looks`} · ${compares ? `the app next to ${SYS}` : "as the app renders it"}` : "Not captured in the app"}
+          {captured.length ? `${n === 1 ? "The case" : `All ${n} cases`} · ${looks.length === 1 ? "one look" : `${looks.length} looks`} · ${shotCount} captured · ${compares ? `the app next to ${SYS} ${pickText(shown)}` : "as the app renders it"}` : "Not captured in the app"}
         </h4>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {visible.map(l => <LookTile key={l.key} look={l} group={items.map(e => e.id)} target={shown} compare={compares && !unrendered} measure={compares && !unmeasured} />)}
-          {showUncaptured && <Uncaptured items={uncaptured} />}
+          {visible.map(l => <LookTile key={l.key} look={l} group={items.map(e => e.id)} target={shown} proposal={proposal} compare={compares && !unrendered} measure={compares && !unmeasured} />)}
+          {uncaptured.length > 0 && <Uncaptured items={uncaptured} />}
         </div>
         {(unrendered || unmeasured) && captured.length > 0 && (
           <p className="text-xs text-muted-foreground">
             {unrendered ? `No Storybook rendering of ${shown.use}${Object.keys(shown.props ?? {}).length ? ` ${Object.values(shown.props).join("/")}` : ""} to show next to ${n === 1 ? "it" : "them"} yet.${unmeasured ? " Nothing is measured." : ""}` : `Not measured against ${SYS} yet.`}
           </p>
-        )}
-        {(hiddenLooks > 0 || (uncaptured.length > 0 && !showUncaptured) || allLooks) && (
-          <Button variant="ghost" size="xs" className="self-start" onClick={() => setAllLooks(v => !v)}>
-            {allLooks ? "Show fewer looks" : `Show ${[hiddenLooks && `${hiddenLooks} more look${hiddenLooks === 1 ? "" : "s"}`, uncaptured.length && !showUncaptured && `${uncaptured.length} not captured`].filter(Boolean).join(" and ")}`}
-          </Button>
         )}
         <Details items={items} ready={ready} />
       </CardContent>
@@ -281,11 +276,16 @@ export function deltaOf(e: any): { source: "measured" | "source"; changes: { lab
   return { source: "source", changes, same: s.matched.length, score: s.score }
 }
 
-function LookTile({ look, group, target, compare, measure }: { look: Look; group: string[]; target: any; compare: boolean; measure: boolean }) {
+function LookTile({ look, group, target, proposal, compare, measure }: { look: Look; group: string[]; target: any; proposal: any; compare: boolean; measure: boolean }) {
   const { openLightbox, byId } = useEl()
   const e = look.rep, r = e.rendered
   const delta = deltaOf(e)
-  const open = () => { const ids = group.filter(id => byId.get(id)?.shot); openLightbox(ids, Math.max(0, ids.indexOf(e.id))) }
+  const shotIds = group.filter(id => byId.get(id)?.shot)
+  const openAt = (id: string) => openLightbox(shotIds, Math.max(0, shotIds.indexOf(id)))
+  const open = () => openAt(e.id)
+  // The proposal with its exact props first; else the closest variant × size Storybook already showed.
+  const sys = proposal?.url ?? r?.systemShot ?? e.systemPreview?.url ?? null
+  const others = look.items.filter(x => x.shot && x.id !== e.id)
   const b = e.shot.box
   const caption = e.shot.revealedBy ? revealedText(e.shot.revealedBy) : null
   return (
@@ -297,12 +297,21 @@ function LookTile({ look, group, target, compare, measure }: { look: Look; group
           <Ring b={b} />
         </span>
         {compare && <ArrowRightIcon className="text-muted-foreground" aria-hidden />}
-        {compare && (r?.systemShot || e.systemPreview ? (
+        {compare && (sys ? (
           <span className="grid h-full min-h-16 place-items-center overflow-hidden rounded-md border bg-background p-3">
-            <img src={r?.systemShot ?? e.systemPreview.url} alt={`${SYS} ${target.use ?? ""}`} loading="lazy" className="block max-h-16 w-auto max-w-full object-contain" />
+            <img src={sys} alt={`${SYS} ${pickText(target)}`} loading="lazy" className="block max-h-16 w-auto max-w-full object-contain" />
           </span>
         ) : <span className="grid h-full place-items-center rounded-md border border-dashed p-2 text-center text-[11px] text-muted-foreground">No rendering for this look</span>)}
       </button>
+      {others.length > 0 && (
+        <div className="flex flex-wrap gap-1" aria-label={`The other ${others.length} cases with this look`}>
+          {others.map(x => (
+            <button key={x.id} type="button" onClick={() => openAt(x.id)} className="h-9 max-w-24 cursor-zoom-in overflow-hidden rounded border bg-background" title={`${short(x.file)}:${x.line}`}>
+              <img src={x.shot.url} alt={`Same look: ${x.snippet.slice(0, 40)}`} loading="lazy" className="block h-full w-auto object-contain" />
+            </button>
+          ))}
+        </div>
+      )}
       <figcaption className="flex flex-col gap-1.5 px-0.5">
         <span className="flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground">
           <b className="font-medium text-foreground tabular-nums">×{look.items.length}</b>

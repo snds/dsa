@@ -45,11 +45,19 @@ export function freePort(): Promise<number> {
   });
 }
 
+/** Installed here, or hoisted to a workspace root above (npm, pnpm and yarn workspaces install there). */
+export function hasDeps(dir: string): boolean {
+  for (let d = path.resolve(dir); ; d = path.dirname(d)) {
+    if (fs.existsSync(path.join(d, 'node_modules'))) return true;
+    if (fs.existsSync(path.join(d, '.git')) || path.dirname(d) === d) return false;
+  }
+}
+
 export interface RunningApp { url: string; stop: () => void; logTail: () => string }
 
 /** Start an app and wait until it serves. Throws with the app's own output if it doesn't come up. */
 export async function startApp(plan: AppPlan, timeoutMs = 90000): Promise<RunningApp> {
-  if (!fs.existsSync(path.join(plan.cwd, 'node_modules'))) throw new Error(`${plan.target}: dependencies aren't installed in ${plan.cwd}. Run "dsa setup" (or npm install there).`);
+  if (!hasDeps(plan.cwd)) throw new Error(`${plan.target}: dependencies aren't installed in ${plan.cwd}. Run "dsa setup" (or npm install there).`);
   const port = await freePort();
   const args = plan.args.map(a => a.replace('{port}', String(port)));
   let out = '';
@@ -138,7 +146,7 @@ export async function ensureBrowser(log: (m: string) => void = () => {}): Promis
 
 /** Install an app's dependencies if they're missing (setup only; scans never install on their own). */
 export function installAppDeps(plan: AppPlan, log: (m: string) => void): boolean {
-  if (fs.existsSync(path.join(plan.cwd, 'node_modules'))) return true;
+  if (hasDeps(plan.cwd)) return true;
   const lock = ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'].find(f => fs.existsSync(path.join(plan.cwd, f)));
   const [cmd, args] = lock === 'pnpm-lock.yaml' ? ['pnpm', ['install', '--frozen-lockfile']] : lock === 'yarn.lock' ? ['yarn', ['install', '--frozen-lockfile']] : ['npm', [lock ? 'ci' : 'install', '--no-audit', '--no-fund']];
   log(`Installing ${plan.target} dependencies (${cmd} ${(args as string[]).join(' ')})…`);

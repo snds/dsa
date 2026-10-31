@@ -3,14 +3,14 @@ import type { Command } from 'commander';
 import { defineAddon, type AddonApi, type EngineContext } from '@snds/dsa';
 import { applyRenderedEvidence, logEvent, materializeRemotes, openStore, pagePlacementKey, reevaluateElements, resolveTargets, type Config } from '@snds/dsa/engine';
 import { detectApp, ensureBrowser, installAppDeps, linkCoreForChild } from './apps.js';
-import { renderIfStale, renderSignatures } from './rendered.js';
+import { renderIfStale, renderProposals, renderSignatures } from './rendered.js';
 import { takeShots } from './shots.js';
 
 export { detectApp, discoverRoutes, ensureBrowser, freePort, installAppDeps, linkCoreForChild, startApp, type AppPlan, type RunningApp } from './apps.js';
 export { takeShots, captureSession, type ShotResult } from './shots.js';
 export { flowProblems, guardNetwork, runFlow, describeStep, NEVER, type Flow, type Step } from './flows.js';
 export { HARNESS, startProxy } from './sbproxy.js';
-export { READ_STYLE, renderSignatures, renderIfStale, startStorybook } from './rendered.js';
+export { READ_STYLE, argsParam, renderProposals, renderSignatures, renderIfStale, startStorybook, wantedProposals } from './rendered.js';
 
 export interface ShotOptions {
   url?: string | undefined;
@@ -95,6 +95,10 @@ export default defineAddon({
           notes.push(`rendered signatures skipped: ${firstLine(e)}`);
           logEvent(dataDir, { level: 'warning', source: 'Rendered signatures', message: 'Storybook measurements were skipped.', detail: firstLine(e) });
         }
+        try { await renderProposals({ root, config, dataDir, log }); } catch (e) {
+          notes.push(`proposed components not rendered: ${firstLine(e)}`);
+          logEvent(dataDir, { level: 'warning', source: 'Rendered signatures', message: 'Proposed components were not rendered with their props.', detail: firstLine(e) });
+        }
         try { printShots(await shotsAndEvidence(ctx, {}, log), ctx.profile.label, log); } catch (e) {
           notes.push(`screenshots skipped: ${firstLine(e)}`);
           logEvent(dataDir, { level: 'warning', source: 'Screenshots', message: 'Screenshots were skipped.', detail: firstLine(e) });
@@ -125,12 +129,13 @@ export default defineAddon({
 
     program
       .command('render')
-      .description("measure the system's components in its Storybook: computed height, padding, radius, colors, border, type per variant × size")
+      .description("measure the system's components in its Storybook (computed height, padding, radius, colors, border, type per variant × size), and render each proposed replacement with its props")
       .option('--force', 're-measure every story')
       .action(async (o: { force?: boolean }, cmd: Command) => {
         const ctx = await api.context(cmd);
         const r = await renderSignatures({ root: ctx.root, config: ctx.config, dataDir: ctx.dataDir, force: Boolean(o.force), log: api.out });
         for (const n of r.notes.slice(0, 5)) api.out(`note: ${n}`);
+        await renderProposals({ root: ctx.root, config: ctx.config, dataDir: ctx.dataDir, force: Boolean(o.force), log: api.out });
       });
 
     program

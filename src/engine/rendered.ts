@@ -26,6 +26,42 @@ export function readRendered(dataDir: string): RenderedSet | null {
   try { return JSON.parse(fs.readFileSync(path.join(dataDir, 'rendered', 'index.json'), 'utf8')); } catch { return null; }
 }
 
+/**
+ * A proposed replacement rendered as the review proposes it: the system component with exactly the
+ * recommended props, set through Storybook args. `check` says how far the picture can be trusted:
+ * exact (the rendered element's data attributes confirm every prop), unverified (rendered with the
+ * args, but the component doesn't expose the props to confirm), closest (the story ignored the args,
+ * so this is the nearest rendering it had), none (nothing rendered; `note` says why).
+ */
+export interface Proposal {
+  use: string;
+  props: Record<string, string>;
+  check: 'exact' | 'unverified' | 'closest' | 'none';
+  shot?: string | undefined;
+  styles?: Styles | undefined;
+  story?: string | undefined;
+  /** Where the content came from when the props were set on another story's element: its default label, or an icon borrowed from a story that has one. */
+  content?: string | undefined;
+  /** The props the rendered element shows, when they differ from the ones asked for. */
+  actual?: Record<string, string> | undefined;
+  note?: string | undefined;
+  hash?: string | undefined;
+}
+
+/** Props that change how a component looks; `render` and `asChild` change what it's built from. */
+export const lookProps = (props?: Record<string, unknown> | null): Record<string, string> =>
+  Object.fromEntries(Object.entries(props ?? {}).filter(([k, v]) => k !== 'render' && k !== 'asChild' && v != null).map(([k, v]): [string, string] => [k, String(v)]).sort((a, b) => (a[0] < b[0] ? -1 : 1)));
+
+/** The key a proposal is stored under: the component and its look props, in name order. The dashboard builds the same key. */
+export function proposalKey(use: string, props?: Record<string, unknown> | null) {
+  const p = Object.entries(lookProps(props)).map(([k, v]) => `${k}=${v}`).join(';');
+  return p ? `${use}|${p}` : use;
+}
+
+export function readProposals(dataDir: string): Record<string, Proposal> {
+  try { return JSON.parse(fs.readFileSync(path.join(dataDir, 'rendered', 'proposals.json'), 'utf8')).items ?? {}; } catch { return {}; }
+}
+
 // ---------- comparison ----------
 
 const px = (v: string | number | undefined) => (typeof v === 'number' ? v : parseFloat(String(v)) || 0);

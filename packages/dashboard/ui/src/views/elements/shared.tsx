@@ -1,6 +1,6 @@
 import * as React from "react"
 import { cn } from "cn"
-import { CaretDownIcon, CheckIcon } from "@phosphor-icons/react"
+import { CaretDownIcon, CheckIcon, ImageBrokenIcon } from "@phosphor-icons/react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -217,6 +217,57 @@ export const pickText = (r: any) => r.verdict === "gap" ? "System gap" : r.verdi
 export const optionText = (r: any) => r.verdict === "keep" ? "Keep the native element" : r.verdict === "gap" ? `System gap: no ${SYS} component fits` : r.verdict === "ignore" ? "Ignore" : [r.use, ...Object.entries(r.props ?? {}).map(([k, v]) => `${k} ${v}`)].join(" · ")
 
 /** The ways a card can be answered without the live picker: the question's options and alternatives, then keep or gap. */
+/** The engine's proposalKey: the component and its look props in name order, without render or asChild. */
+export const proposalKey = (use: string, props?: Record<string, unknown> | null) => {
+  const p = Object.entries(props ?? {}).filter(([k, v]) => k !== "render" && k !== "asChild" && v != null).sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([k, v]) => `${k}=${v}`).join(";")
+  return p ? `${use}|${p}` : use
+}
+/** The proposed replacement rendered with exactly its props (dsa render), when there is one. */
+export const proposalFor = (r: any): any | null => (r?.verdict === "replace" && r.use ? D.elements?.proposals?.[proposalKey(r.use, r.props)] ?? null : null)
+
+/** How far a rendered proposal can be trusted, in words. */
+export const proposalCheck = (p: any): { text: string; warn: boolean } | null =>
+  !p ? { text: "Not rendered yet: dsa render draws it", warn: true }
+  : p.check === "exact" ? null
+  : p.check === "unverified" ? { text: "Props set; the component doesn't expose them to confirm", warn: false }
+  : p.check === "closest" ? { text: `Nearest story: ${Object.entries(p.actual ?? {}).map(([k, v]) => `${k} ${v}`).join(", ")}. Its stories don't take these props`, warn: true }
+  : { text: p.note ?? "Not rendered", warn: true }
+
+/**
+ * Every replacement the card could take, drawn as the system component with its props, so the reviewer
+ * picks by look. The recommendation comes first; the current decision is pressed. Click to choose.
+ */
+function OptionTiles({ choices, current, onPick, disabled }: { choices: { decision: any; recommended: boolean }[]; current: any; onPick: (d: any, recommended: boolean) => void; disabled: boolean }) {
+  return (
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4" role="group" aria-label="Options, rendered">
+      {choices.map(({ decision, recommended }) => {
+        const p = proposalFor(decision)
+        const chk = proposalCheck(p)
+        const on = sameDecision(decision, current)
+        return (
+          <button key={desc(decision)} type="button" disabled={disabled} aria-pressed={on} onClick={() => onPick(decision, recommended)}
+            className={cn("flex min-w-0 flex-col gap-1.5 rounded-lg border bg-card p-2 text-left transition-colors hover:bg-muted/60 disabled:opacity-60", on && "border-primary ring-1 ring-primary")}>
+            <span className="grid h-20 place-items-center overflow-hidden rounded-md border bg-background p-2">
+              {p?.url ? <img src={p.url} alt={`${SYS} ${pickText(decision)}`} loading="lazy" className="block max-h-16 w-auto max-w-full object-contain" />
+                : <span className="flex flex-col items-center gap-1 text-[11px] text-muted-foreground"><ImageBrokenIcon />No rendering</span>}
+            </span>
+            <span className="flex flex-wrap items-center gap-1 text-xs">
+              <b className="font-medium">{decision.use}</b>
+              {Object.entries(decision.props ?? {}).filter(([k]) => k !== "render").map(([k, v]) => <Badge key={k} variant="secondary" className="font-mono text-[10px] font-normal">{k} {String(v)}</Badge>)}
+            </span>
+            <span className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+              {recommended && <Badge variant="outline" className="text-[10px]">Recommended</Badge>}
+              {on && <span className="inline-flex items-center gap-0.5 text-primary"><CheckIcon />Chosen</span>}
+              {chk && <span className={cn(chk.warn && "text-warning-soft-foreground")} title={chk.text}>{chk.text}</span>}
+              {p?.content && <span title={p.content}>{p.content.startsWith("icon") ? "Stand-in icon" : "Story's sample label"}</span>}
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 export function staticOptions(items: any[], auto: any, options?: { label: string; decision: any }[]) {
   const role = items[0].role
   const alts = (items[0].alternatives ?? []).map((a: any) => ({ verdict: a.verdict ?? "replace", role: a.role ?? role, use: a.use, from: a.from, props: a.props ?? {}, gap: a.gap }))
@@ -258,9 +309,16 @@ export function ReviewControls({ items, auto, pattern, options, label }: { items
   // A decision already in the repo when this page was published can be replaced here (staged), but
   // only undone in dsa serve: a decisions file records decisions, not removals.
   const locked = !live && !staged && state !== "open"
+  // The replacements this card could take: the recommendation, then every scored alternative.
+  const choices = [auto, ...staticOptions(items, auto, options).map(o => o.decision)].filter(r => r?.verdict === "replace" && r.use).map((decision, i) => ({ decision, recommended: i === 0 && auto?.verdict === "replace" }))
+  const current = state === "changed" ? d.decision : state === "approved" ? auto : null
 
   return (
     <div className="flex flex-col gap-2">
+      {choices.length > 0 && (
+        <OptionTiles choices={choices} current={current} disabled={busy || off || locked}
+          onPick={(r, recommended) => (sameDecision(r, current) ? undo("Choice removed") : recommended ? decide(auto, "Approved") : decide(r, `Changed to ${pickText(r)}`))} />
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" variant={state === "approved" ? "secondary" : "default"} aria-pressed={state === "approved"} disabled={busy || off || (locked && state === "approved")}
           onClick={() => (state === "approved" ? undo("Approval removed") : decide(auto, "Approved"))}>

@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { readRendered, resolveTargets, type Config, type RenderedSet, type Styles } from '@snds/dsa/engine';
+import { latestEvals, lookProps, proposalKey, readProposals, readRendered, resolveTargets, type Config, type Proposal, type RenderedSet, type Styles } from '@snds/dsa/engine';
 
 import { detectApp, ensureBrowser, startApp } from './apps.js';
 
@@ -148,6 +148,142 @@ export async function renderSignatures(opts: { root: string; config: Config; dat
   log(`Rendered ${n} variant × size combinations across ${Object.keys(out.components).length} components (${measured} stories measured, ${reused} reused).`);
   fs.writeFileSync(path.join(dir, 'index.json'), JSON.stringify(out, null, 1));
   return out;
+}
+
+/** Every component and look props the review proposes: each recommendation, each scored alternative, each decision. */
+export async function wantedProposals(dataDir: string): Promise<Map<string, { use: string; props: Record<string, string> }>> {
+  const { evals } = await latestEvals(dataDir);
+  const out = new Map<string, { use: string; props: Record<string, string> }>();
+  for (const e of evals) {
+    for (const r of [e, e.decided?.decision, ...(e.alternatives ?? [])] as any[]) {
+      if (r?.verdict === 'replace' && r.use) out.set(proposalKey(r.use, r.props), { use: r.use, props: lookProps(r.props) });
+    }
+  }
+  return out;
+}
+
+/** Storybook URL args: `variant:ghost;size:sm`. Storybook drops values outside letters, digits, space, - and _, so those are left out. */
+export const argsParam = (props: Record<string, string>) => Object.entries(props).filter(([, v]) => /^[\w -]+$/.test(v)).map(([k, v]) => `${k}:${v}`).join(';');
+
+/**
+ * Render each proposed replacement with its props set: open a story of the component with those props
+ * as Storybook args and photograph the element. The element's data attributes (data-variant,
+ * data-size…) confirm the props took; a story that ignores args yields its nearest rendering, marked
+ * closest. Cached per proposal by the component's source and the token CSS, like rendered signatures.
+ */
+export async function renderProposals(opts: { root: string; config: Config; dataDir: string; log?: (m: string) => void; force?: boolean; storybook?: { url: string; dir?: string | undefined } }): Promise<{ rendered: number; reused: number; exact: number }> {
+  const log = opts.log ?? (() => {});
+  const sigFile = path.join(opts.dataDir, 'signatures.json');
+  if (!fs.existsSync(sigFile)) throw new Error('No signatures yet. Run "dsa run" first.');
+  const sigs: any[] = JSON.parse(fs.readFileSync(sigFile, 'utf8'));
+  const sigOf = (use: string) => sigs.find(c => c.component === use && c.slot && c.file);
+  const want = await wantedProposals(opts.dataDir);
+  const prev = opts.force ? {} : readProposals(opts.dataDir);
+  const tHash = tokensHash(opts.root, opts.config);
+  const hashOf = (use: string) => { const s = sigOf(use); return s ? hashFiles([s.file], tHash) : `none:${tHash}`; };
+  const items: Record<string, Proposal> = {};
+  const todo: [string, { use: string; props: Record<string, string> }][] = [];
+  for (const [k, p] of want) {
+    const c = prev[k];
+    if (c && c.hash === hashOf(p.use) && (!c.shot || fs.existsSync(path.join(opts.dataDir, 'rendered', c.shot)))) items[k] = c; else todo.push([k, p]);
+  }
+  const reused = Object.keys(items).length;
+  const write = () => {
+    fs.mkdirSync(path.join(opts.dataDir, 'rendered'), { recursive: true });
+    fs.writeFileSync(path.join(opts.dataDir, 'rendered', 'proposals.json'), JSON.stringify({ takenAt: new Date().toISOString(), items }, null, 1));
+  };
+  const exactCount = () => Object.values(items).filter(p => p.check === 'exact').length;
+  if (!todo.length) { write(); log(`Proposed components: ${reused} rendered with their props (all cached).`); return { rendered: 0, reused, exact: exactCount() }; }
+
+  let sb = opts.storybook, stop = () => {};
+  if (!sb) { const started = await startStorybook(opts.root, opts.config, log); sb = started; stop = started.stop; }
+  const dir = path.join(opts.dataDir, 'rendered');
+  fs.mkdirSync(dir, { recursive: true });
+  let rendered = 0;
+  try {
+    const index: any = await (await fetch(new URL('index.json', sb.url))).json();
+    const stories = Object.values<any>(index.entries ?? index.stories ?? {}).filter(s => s.type !== 'docs' && s.importPath);
+    // Args-driven stories (Default, Playground), then ones showing many combinations, then the rest.
+    const rank = (s: any) => (/default|playground|basic|primary/i.test(s.name) ? 0 : /all|variant|size|matrix|gallery|overview/i.test(s.name) ? 1 : 2);
+    const stemOf = (f: string) => path.basename(f).split('.')[0]!.toLowerCase();
+    log(`Proposed components: ${todo.length} to render with their props, ${reused} cached.`);
+    const pw = await ensureBrowser(log);
+    const browser = await pw.chromium.launch();
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2 });
+    const order: Record<Proposal['check'], number> = { exact: 0, unverified: 1, closest: 2, none: 3 };
+    try {
+      for (const [k, p] of todo) {
+        const s = sigOf(p.use);
+        if (!s) { items[k] = { ...p, check: 'none', note: `No ${p.use} signature with a data-slot to find it by in Storybook.`, hash: hashOf(p.use) }; continue; }
+        const candidates = stories.filter(x => stemOf(x.importPath) === stemOf(s.file)).sort((a, b) => rank(a) - rank(b)).slice(0, 8);
+        if (!candidates.length) { items[k] = { ...p, check: 'none', note: `No story for ${p.use} (${path.basename(s.file)}).`, hash: hashOf(p.use) }; continue; }
+        const args = argsParam(p.props);
+        const hasProps = Object.keys(p.props).length > 0;
+        // First every story as its authors wrote it: one that already shows these props shows them with real content
+        // (an icon in an icon button). Then the args-driven stories with the props set, whose content is the story default.
+        const attempts = [...candidates.map(st => ({ st, set: false })), ...(hasProps ? candidates.filter(st => rank(st) === 0).map(st => ({ st, set: true })) : [])];
+        let best: Proposal | null = null;
+        // An icon-size proposal set through args holds the story's default label; give it the system's own icon, taken from any story where this component holds one.
+        const iconSize = /icon/i.test(p.props.size ?? '');
+        let icon: { html: string; story: string } | null = null;
+        for (const { st, set } of attempts) {
+          try {
+            await page.goto(new URL(`iframe.html?id=${encodeURIComponent(st.id)}&viewMode=story${set && args ? `&args=${encodeURIComponent(args)}` : ''}`, sb.url).toString(), { waitUntil: 'domcontentloaded', timeout: 60000 });
+            await page.waitForFunction(`(() => { const r = document.querySelector('#storybook-root, #root'); return r && r.children.length > 0; })()`, null, { timeout: rendered === 0 ? 90000 : 20000 });
+            // Storybook 8+ ignores URL args inside the preview frame; its channel (what Controls uses) sets them on any version.
+            if (set) {
+              await page.evaluate(`window.__STORYBOOK_ADDONS_CHANNEL__ && window.__STORYBOOK_ADDONS_CHANNEL__.emit('updateStoryArgs', { storyId: ${JSON.stringify(st.id)}, updatedArgs: ${JSON.stringify(p.props)} })`);
+              await page.waitForTimeout(600);
+            }
+            await page.waitForTimeout(250);
+          } catch { continue; }
+          // Every visible element of the component, scored by how many props its data attributes confirm.
+          const scan = (): Promise<{ idx: number; confirmed: number; contradicted: number; unknown: number; actual: Record<string, string>; styles: Styles }[]> => page.evaluate(`(() => {
+            const read = ${READ_STYLE};
+            const want = ${JSON.stringify(p.props)};
+            return Array.from(document.querySelectorAll('[data-slot="${s.slot}"]')).map((el, idx) => {
+              const r = el.getBoundingClientRect(); if (!r.width || !r.height) return null;
+              let confirmed = 0, contradicted = 0, unknown = 0; const actual = {};
+              for (const [k, v] of Object.entries(want)) {
+                const a = el.getAttribute('data-' + k.replace(/[A-Z]/g, m => '-' + m.toLowerCase()));
+                if (a == null) unknown++; else if (a === v) confirmed++; else { contradicted++; actual[k] = a; }
+              }
+              el.setAttribute('data-dsa-p', String(idx));
+              return { idx, confirmed, contradicted, unknown, actual, styles: read(el) };
+            }).filter(Boolean);
+          })()`);
+          if (iconSize && !icon) {
+            const html: string | null = await page.evaluate(`(() => { const i = document.querySelector('[data-slot="${s.slot}"] [data-slot=icon], [data-slot="${s.slot}"] svg'); return i ? i.outerHTML : null; })()`);
+            if (html) icon = { html, story: st.id };
+          }
+          if (set && iconSize && icon) await page.evaluate(`(() => { for (const el of document.querySelectorAll('[data-slot="${s.slot}"]')) if (!el.querySelector('svg, [data-slot=icon]')) el.innerHTML = ${JSON.stringify(icon.html)}; })()`);
+          let found = await scan();
+          // A menu item or popover part renders only once its overlay is open: open the story's trigger and look again.
+          if (!found.length) {
+            const trigger = page.locator('[data-slot$="-trigger"]:visible').first();
+            if (await trigger.count()) { await trigger.click({ timeout: 2000 }).catch(() => {}); await page.waitForTimeout(500); found = await scan(); }
+          }
+          // Where the component shows its props as attributes, an element that shows none is something else (a stock copy, a wrapper).
+          const exposing = found.filter(f => f.confirmed + f.contradicted > 0);
+          const top = (exposing.length ? exposing : found).sort((a, b) => a.contradicted - b.contradicted || b.confirmed - a.confirmed)[0];
+          if (!top) continue;
+          const check: Proposal['check'] = top.contradicted ? 'closest' : top.unknown ? 'unverified' : 'exact';
+          if (best && order[best.check] <= order[check]) continue;
+          const file = `proposal-${sha(k).slice(0, 12)}.png`;
+          const shot = await shoot(page, `[data-dsa-p="${top.idx}"][data-slot="${s.slot}"]`, path.join(dir, file));
+          const content = set ? (iconSize && icon ? `icon from ${icon.story}` : 'story default') : undefined;
+          best = { ...p, check, shot: shot ? file : undefined, styles: top.styles, story: st.id, ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash: hashOf(p.use) };
+          if (check === 'exact') break;
+        }
+        items[k] = best ?? { ...p, check: 'none', note: `${p.use} isn't visible in its stories (it may sit inside a closed overlay).`, hash: hashOf(p.use) };
+        rendered++;
+        if (rendered % 10 === 0) log(`  rendered ${rendered}/${todo.length}…`);
+      }
+    } finally { await browser.close(); }
+  } finally { stop(); }
+  write();
+  log(`Proposed components: ${Object.keys(items).length} rendered with their props · ${exactCount()} exact (confirmed by the element's attributes).`);
+  return { rendered, reused, exact: exactCount() };
 }
 
 async function shoot(page: any, sel: string, file: string) {
