@@ -15,6 +15,9 @@ import { openDuckStore } from "../../packages/history/src/index.js";
 
 const NOW = "2026-10-06T12:00:00.000Z";
 const GIT_TIMEOUT = 180_000;
+/** CI sets these on pull-request builds, and the env source rightly ignores CI variables then. */
+const PR_VARS = ["GITHUB_EVENT_NAME", "CI_MERGE_REQUEST_IID", "BITBUCKET_PR_ID", "CIRCLE_PULL_REQUEST", "BUILDKITE_PULL_REQUEST", "TRAVIS_PULL_REQUEST", "SYSTEM_PULLREQUEST_PULLREQUESTID", "DRONE_PULL_REQUEST"];
+let savedPr: Record<string, string | undefined> = {};
 const git = (cwd: string, ...args: string[]) => {
   const r = spawnSync("git", args, { cwd, encoding: "utf8", env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
   if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
@@ -44,8 +47,11 @@ describe("cli: runs against what is live", () => {
     out = [];
     io = { out: (s) => out.push(s), err: (s) => out.push(s), cwd: repo };
     resetAddons();
+    savedPr = Object.fromEntries(PR_VARS.map((k) => [k, process.env[k]]));
+    for (const k of PR_VARS) delete process.env[k];
   }, GIT_TIMEOUT);
   afterEach(() => {
+    for (const [k, v] of Object.entries(savedPr)) if (v !== undefined) process.env[k] = v;
     fs.rmSync(dir, { recursive: true, force: true });
     registerStore(openDuckStore);
   });
