@@ -1,5 +1,5 @@
 import * as React from "react"
-import { D, api, say } from "@/lib/dsa"
+import { D, api, at, say } from "@/lib/dsa"
 
 /**
  * The agent workbench, client side: which session is open in the side panel, its transcript, and the
@@ -56,7 +56,7 @@ const NO_VISUAL: State["visual"] = { running: false, log: [], stale: false, erro
 
 /** POST, then read the server's newline-delimited JSON events as they arrive. */
 async function stream(url: string, body: unknown, onEvent: (e: any) => void) {
-  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "X-DSA": "1" }, body: JSON.stringify(body) })
+  const r = await fetch(at(url), { method: "POST", headers: { "Content-Type": "application/json", "X-DSA": "1" }, body: JSON.stringify(body) })
   if (!r.ok || !r.body) { const j = await r.json().catch(() => ({})); throw new Error(j.error || r.statusText) }
   const reader = r.body.getReader()
   const dec = new TextDecoder()

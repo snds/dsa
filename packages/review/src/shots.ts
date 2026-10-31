@@ -3,11 +3,12 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { groupKey, latestEvals, materializeRemotes, resolveTargets, targetRelative, type Config, type ElementEval } from '@snds/dsa/engine';
+import { appSurface, openSurface } from '@snds/dsa';
 
 import { detectApp, discoverRoutes, ensureBrowser, linkCoreForChild, startApp } from './apps.js';
 
 import { READ_STYLE } from './rendered.js';
-import { flowProblems, guardNetwork, runFlow, type Flow } from './flows.js';
+import { flowProblems, guardNetwork, routeUrl, runFlow, type Flow } from './flows.js';
 
 /**
  * Example screenshots for the element review. Not every instance: a few per recommendation
@@ -99,7 +100,7 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
     return { picked, need, cached: picked.filter(e => cached.has(e.id)).length };
   };
 
-  const sessions: { target: string; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; stop?: () => void; how?: string; need: ElementEval[] }[] = [];
+  const sessions: { target: string; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; stop?: () => void; how?: string; need: ElementEval[]; storageState?: string | undefined; readApi?: boolean }[] = [];
   const evalTargets = [...new Set(evals.filter(e => !e.exception).map(e => e.target))].filter(t => !opts.target || t === opts.target);
   if (opts.url) {
     const p = plan(evals.filter(e => !opts.target || e.target === opts.target));
@@ -115,15 +116,27 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
       const p = plan(evals.filter(e => e.target === name));
       if (!p.need.length) { log(`${name}: all ${p.picked.length} examples cached (sources unchanged); not starting the app.`); result.apps.push({ target: name, captured: 0, cached: p.cached }); continue; }
       log(`${name}: ${p.need.length} examples to capture, ${p.cached} cached.`);
+      const configured = opts.routes ?? opts.config.apps?.[name]?.routes;
+      const extra = opts.routes ? [] : (opts.config.apps?.[name]?.extraRoutes ?? []);
+      const routesFor = () => [...new Set([...extra, ...(configured ?? ['', ...discoverRoutes(t.dir, (t.exclude ?? []))])])];
+      // What is live: the deployed site (signed in) or the built folder that ships, instead of a dev server.
+      const surface = appSurface(opts.config.live, name);
+      if (surface) {
+        try {
+          const open = await openSurface(surface, opts.root);
+          const routes = routesFor();
+          log(`  ${open.how} · ${routes.length} route${routes.length === 1 ? '' : 's'} ${configured ? 'from config' : 'found in the source'}`);
+          sessions.push({ target: name, url: open.url, routes, first: extra, flows: opts.config.apps?.[name]?.flows as Flow[] | undefined, crawl: true, stop: open.stop, how: open.how, need: p.need, storageState: open.storageState, readApi: open.readApi });
+        } catch (e: any) { result.apps.push({ target: name, skipped: e.message.split('\n')[0] }); log(`  ${e.message}`); }
+        continue;
+      }
       if (t.role === 'child') linkCoreForChild(t.dir, opts.root, opts.config.designSystem.core.packages, log);
       const ap = detectApp(t, opts.config);
       if ('reason' in ap) { result.apps.push({ target: name, skipped: ap.reason }); continue; }
       log(`Starting ${name} (${ap.how})…`);
       try {
         const app = await startApp(ap);
-        const configured = opts.routes ?? opts.config.apps?.[name]?.routes;
-        const extra = opts.routes ? [] : (opts.config.apps?.[name]?.extraRoutes ?? []);
-        const routes = [...new Set([...extra, ...(configured ?? ['', ...discoverRoutes(t.dir, (t.exclude ?? []))])])];
+        const routes = routesFor();
         log(`  ${app.url} · ${routes.length} route${routes.length === 1 ? '' : 's'} ${configured ? 'from config' : 'found in the source'}${extra.length ? ` (${extra.length} extra, visited first)` : ''}`);
         sessions.push({ target: name, url: app.url, routes, first: extra, flows: opts.config.apps?.[name]?.flows as Flow[] | undefined, crawl: true, stop: app.stop, how: ap.how, need: p.need });
       } catch (e: any) { result.apps.push({ target: name, skipped: e.message.split('\n')[0] }); log(`  ${e.message}`); }
@@ -135,7 +148,7 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
       if (!s.need.length) { log('Nothing new to capture.'); continue; }
       log(`${s.target === '*' ? '' : s.target + ': '}${s.need.length} examples to find across ${new Set(s.need.map(e => groupKey(e))).size} groups.`);
       const sh = opts.config.shots ?? {};
-      const r = await session(pw, { url: s.url, routes: s.routes, first: s.first, flows: s.flows, crawl: s.crawl, examples: s.need, dir, maxPages: sh.maxPages ?? 90, waitMs: sh.waitMs ?? 600, log, reveal: sh.reveal, maxActions: sh.maxActions ?? sh.maxTriggers, maxDepth: sh.maxDepth, maxMinutes: sh.maxMinutes });
+      const r = await session(pw, { url: s.url, routes: s.routes, first: s.first, flows: s.flows, crawl: s.crawl, examples: s.need, dir, storageState: s.storageState, readApi: s.readApi, maxPages: sh.maxPages ?? 90, waitMs: sh.waitMs ?? 600, log, reveal: sh.reveal, maxActions: sh.maxActions ?? sh.maxTriggers, maxDepth: sh.maxDepth, maxMinutes: sh.maxMinutes });
       const at = new Date().toISOString();
       const byId = new Map(s.need.map(e => [e.id, e]));
       for (const [id, v] of Object.entries<any>(r.shots)) { index.shots[id] = { ...v, at, fileHash: hashOf(byId.get(id)!) }; delete misses[id]; }
@@ -158,7 +171,7 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
 /** One interaction the explorer can take: click, hover, or right-click a control on the page. */
 interface Act { n: number; key: string; kind: 'click' | 'hover' | 'context'; label: string; why: string; prio: number }
 
-async function session(pw: any, o: { url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; examples: ElementEval[]; dir: string; maxPages: number; waitMs: number; log: (m: string) => void; reveal?: boolean; maxActions?: number; maxDepth?: number; maxMinutes?: number; maxReplays?: number }) {
+async function session(pw: any, o: { url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; examples: ElementEval[]; dir: string; storageState?: string | undefined; readApi?: boolean | undefined; maxPages: number; waitMs: number; log: (m: string) => void; reveal?: boolean; maxActions?: number; maxDepth?: number; maxMinutes?: number; maxReplays?: number }) {
   const shots: Record<string, any> = {};
   const pages: string[] = [];
   let browser: any, page: any;
@@ -166,11 +179,11 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
   let net = { blocked: 0, last: [] as string[] };
   const launch = async () => {
     browser = await pw.chromium.launch();
-    page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
+    page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, ...(o.storageState ? { storageState: o.storageState } : {}) });
     // alert/confirm/prompt: dismiss, so nothing the explorer opens can confirm an action.
     page.on('dialog', (d: any) => d.dismiss().catch(() => {}));
     // Reads only: no writes, nothing under /api/, nothing to another host but images, fonts, and styles (flows.ts).
-    net = await guardNetwork(page, base.origin);
+    net = await guardNetwork(page, base.origin, { readApi: Boolean(o.readApi) });
   };
   await launch();
   // A page can crash or close under the crawler (a heavy view, a control that closes the window):
@@ -179,8 +192,8 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
     try { await browser.close(); } catch { /* already gone */ }
     await launch();
   };
-  const queue: string[] = o.routes.map(r => new URL(r, base).toString());
-  const firstUrls = new Set((o.first ?? []).map(r => new URL(r, base).toString()));
+  const queue: string[] = o.routes.map(r => routeUrl(r, base));
+  const firstUrls = new Set((o.first ?? []).map(r => routeUrl(r, base)));
   const seen = new Set<string>();
   let remaining: Target[] = o.examples.map(e => ({ id: e.id, m: e.match, steps: e.reach?.steps?.map(x => ({ label: x.label, event: x.event })), hints: hintsOf(e) }));
   const replayed = new Set<string>();
@@ -224,7 +237,7 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
     if (f.reveals?.length && !f.reveals.some(id => remaining.some(r => r.id === id))) continue;
     try {
       const before = remaining.length;
-      const r = await runFlow(page, f, { base, waitMs: o.waitMs, inPage: (src, arg) => inPage(page, src, arg), sweep: sweeper(new URL(f.route, base).toString()), log: o.log });
+      const r = await runFlow(page, f, { base, waitMs: o.waitMs, inPage: (src, arg) => inPage(page, src, arg), sweep: sweeper(routeUrl(f.route, base)), log: o.log });
       o.log(`  flow “${f.name}”: ${r.done ? 'ran' : `stopped at step ${(r.at ?? 0) + 1} (${r.why})`}, ${before - remaining.length} found`);
     } catch (e: any) {
       o.log(`  flow “${f.name}” failed: ${String(e?.message ?? e).split('\n')[0]}`);

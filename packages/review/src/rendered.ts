@@ -1,9 +1,9 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import http from 'node:http';
 import path from 'node:path';
 import { latestEvals, lookProps, proposalKey, readProposals, readRendered, resolveTargets, type Config, type Proposal, type RenderedSet, type Styles } from '@snds/dsa/engine';
 
+import { cookiesFor, openSurface, serveStatic } from '@snds/dsa';
 import { detectApp, ensureBrowser, startApp } from './apps.js';
 
 /**
@@ -74,13 +74,13 @@ export async function renderSignatures(opts: { root: string; config: Config; dat
   const prevStories: Record<string, StoryCache> = prev?.stories ?? {};
   const tHash = tokensHash(opts.root, opts.config);
 
-  const { url, stop, source, dir: sbDir } = await startStorybook(opts.root, opts.config, log);
+  const { url, stop, source, dir: sbDir, storageState, cookie } = await startStorybook(opts.root, opts.config, log);
   const out: any = { takenAt: new Date().toISOString(), source, components: {}, notes: [], stories: {}, storyFiles: storyFiles(opts.root, opts.config), tokensHash: tHash };
   const dir = path.join(opts.dataDir, 'rendered');
   fs.mkdirSync(dir, { recursive: true });
   let reused = 0, measured = 0;
   try {
-    const index: any = await (await fetch(new URL('index.json', url))).json();
+    const index: any = await storyIndex(url, cookie);
     const stories = Object.values<any>(index.entries ?? index.stories ?? {}).filter(s => s.type !== 'docs' && s.importPath);
     // Stories that show many combinations first (All Variants, All Sizes…), then the rest; a few per component is enough.
     const rank = (s: any) => (/all|variant|size|matrix|gallery|overview/i.test(s.name) ? 0 : /default|primary|basic/i.test(s.name) ? 1 : 2);
@@ -95,7 +95,7 @@ export async function renderSignatures(opts: { root: string; config: Config; dat
     if (todo.length) {
       const pw = await ensureBrowser(log);
       const browser = await pw.chromium.launch();
-      const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2 });
+      const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2, ...(storageState ? { storageState } : {}) });
       try {
         const started = Date.now();
         const budget = (opts.config.rendered?.maxMinutes ?? 8) * 60000;
@@ -171,7 +171,7 @@ export const argsParam = (props: Record<string, string>) => Object.entries(props
  * data-size…) confirm the props took; a story that ignores args yields its nearest rendering, marked
  * closest. Cached per proposal by the component's source and the token CSS, like rendered signatures.
  */
-export async function renderProposals(opts: { root: string; config: Config; dataDir: string; log?: (m: string) => void; force?: boolean; storybook?: { url: string; dir?: string | undefined } }): Promise<{ rendered: number; reused: number; exact: number }> {
+export async function renderProposals(opts: { root: string; config: Config; dataDir: string; log?: (m: string) => void; force?: boolean; storybook?: { url: string; dir?: string | undefined; storageState?: string | undefined; cookie?: string | undefined } }): Promise<{ rendered: number; reused: number; exact: number }> {
   const log = opts.log ?? (() => {});
   const sigFile = path.join(opts.dataDir, 'signatures.json');
   if (!fs.existsSync(sigFile)) throw new Error('No signatures yet. Run "dsa run" first.');
@@ -201,7 +201,7 @@ export async function renderProposals(opts: { root: string; config: Config; data
   fs.mkdirSync(dir, { recursive: true });
   let rendered = 0;
   try {
-    const index: any = await (await fetch(new URL('index.json', sb.url))).json();
+    const index: any = await storyIndex(sb.url, sb.cookie);
     const stories = Object.values<any>(index.entries ?? index.stories ?? {}).filter(s => s.type !== 'docs' && s.importPath);
     // Args-driven stories (Default, Playground), then ones showing many combinations, then the rest.
     const rank = (s: any) => (/default|playground|basic|primary/i.test(s.name) ? 0 : /all|variant|size|matrix|gallery|overview/i.test(s.name) ? 1 : 2);
@@ -209,7 +209,7 @@ export async function renderProposals(opts: { root: string; config: Config; data
     log(`Proposed components: ${todo.length} to render with their props, ${reused} cached.`);
     const pw = await ensureBrowser(log);
     const browser = await pw.chromium.launch();
-    const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2 });
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2, ...(sb.storageState ? { storageState: sb.storageState } : {}) });
     const order: Record<Proposal['check'], number> = { exact: 0, unverified: 1, closest: 2, none: 3 };
     try {
       for (const [k, p] of todo) {
@@ -299,12 +299,32 @@ async function shoot(page: any, sel: string, file: string) {
   } catch { return false; }
 }
 
-/** Find the design system's Storybook in the host repo: run it (fresh) or serve its static build. */
-export async function startStorybook(root: string, config: Config, log: (m: string) => void): Promise<{ url: string; stop: () => void; source: string; dir?: string }> {
+/** Storybook's story index, signed in when the live Storybook needs it. */
+async function storyIndex(url: string, cookie?: string): Promise<any> {
+  const r = await fetch(new URL('index.json', url), { headers: cookie ? { Cookie: cookie } : {} });
+  if (!r.ok) throw new Error(`Storybook's index.json answered ${r.status} at ${url}${r.status === 401 || r.status === 403 || r.status === 404 ? ' (a private site needs live.storybook.auth from dsa login)' : ''}.`);
+  return r.json();
+}
+
+export interface StartedStorybook { url: string; stop: () => void; source: string; dir?: string; storageState?: string | undefined; cookie?: string | undefined }
+
+/**
+ * Find the design system's Storybook. With live.storybook set, that one: the deployed URL (signed in
+ * with its saved state) or the built folder that gets deployed. Otherwise from the host repo: run it
+ * (fresh) or serve its static build.
+ */
+export async function startStorybook(root: string, config: Config, log: (m: string) => void): Promise<StartedStorybook> {
+  const live = config.live?.storybook;
+  if (live) {
+    const s = await openSurface(live, root);
+    log(`Storybook: ${s.how}.`);
+    const cookie = s.deployed && s.storageState ? cookiesFor(s.url, [s.storageState]) : undefined;
+    return { url: s.url, stop: s.stop, source: s.how, storageState: s.storageState, cookie };
+  }
   const targets = resolveTargets(root, config);
   const sb = targets.find(t => /storybook/.test(JSON.stringify(readPkg(t.dir)?.scripts ?? {})) && /storybook dev/.test(readPkg(t.dir)?.scripts?.dev ?? readPkg(t.dir)?.scripts?.storybook ?? ''));
   const staticDir = sb ? path.join(sb.dir, 'storybook-static') : null;
-  if (config.rendered?.useStatic && staticDir && fs.existsSync(path.join(staticDir, 'index.json'))) return { ...(await serveStatic(staticDir)), dir: sb!.dir };
+  if (config.rendered?.useStatic && staticDir && fs.existsSync(path.join(staticDir, 'index.json'))) return { ...(await serveStatic(staticDir)), source: 'static build', dir: sb!.dir };
   if (sb) {
     const plan = detectApp(sb, config);
     if (!('reason' in plan)) {
@@ -321,21 +341,7 @@ export async function startStorybook(root: string, config: Config, log: (m: stri
     const s = await serveStatic(staticDir);
     return { ...s, source: `static build, ${age} days old`, dir: sb!.dir };
   }
-  throw new Error('No Storybook found in the host repo (a workspace with a "storybook dev" script, or a storybook-static build).');
-}
-
-function serveStatic(dir: string): Promise<{ url: string; stop: () => void; source: string }> {
-  const types: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.png': 'image/png' };
-  const server = http.createServer((req, res) => {
-    const p = path.join(dir, decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname));
-    if (!p.startsWith(dir) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404); return res.end(); }
-    res.writeHead(200, { 'Content-Type': types[path.extname(p)] ?? 'application/octet-stream' });
-    fs.createReadStream(p).pipe(res);
-  });
-  return new Promise(ok => server.listen(0, '127.0.0.1', () => {
-    const port = (server.address() as any).port;
-    ok({ url: `http://127.0.0.1:${port}/`, stop: () => server.close(), source: 'static build' });
-  }));
+  throw new Error('No Storybook found in the host repo (a workspace with a "storybook dev" script, or a storybook-static build). Set live.storybook to a deployed URL or a built folder.');
 }
 
 const readPkg = (dir: string) => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')); } catch { return null; } };

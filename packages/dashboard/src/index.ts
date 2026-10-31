@@ -1,6 +1,6 @@
 import path from 'node:path';
 import type { Command } from 'commander';
-import { defineAddon, type AddonApi } from '@snds/dsa';
+import { defineAddon, deployOf, normalizeBase, type AddonApi } from '@snds/dsa';
 import { buildReport } from './report.js';
 import { publish } from './publish.js';
 import { serve } from './server.js';
@@ -37,11 +37,14 @@ export default defineAddon({
 
     program
       .command('serve')
-      .description('the dashboard on localhost, with live Settings, element review, the action queue and a Run button')
+      .description('the live dashboard (localhost, or a server under a sub-path such as /dsa/), with live Settings, element review, the action queue and a Run button')
       .option('--port <n>', 'port', '4319')
-      .action(async (o: { port: string }, cmd: Command) => {
-        await api.context(cmd); // fail early on a bad config or profile
-        await serve({ load: () => api.context(cmd), port: Number(o.port), addons: await api.addons(), log: api.out });
+      .option('--host <address>', 'address to listen on (default 127.0.0.1; 0.0.0.0 on a server, behind your sign-in proxy)')
+      .option('--base <path>', 'the sub-path it is served under, e.g. /dsa/ (default host.base, else /)')
+      .option('--allow-host <names...>', 'Host headers to accept besides localhost (the public name, e.g. example.com); required with --host')
+      .action(async (o: { port: string; host?: string; base?: string; allowHost?: string[] }, cmd: Command) => {
+        const ctx = await api.context(cmd); // fail early on a bad config or profile
+        await serve({ load: () => api.context(cmd), port: Number(o.port), addons: await api.addons(), log: api.out, host: o.host, base: normalizeBase(o.base ?? ctx.config.host?.base), allowHosts: o.allowHost ?? [], deploy: c => deployOf(api.cwd, c) });
       });
 
     program
@@ -55,12 +58,13 @@ export default defineAddon({
 
     program
       .command('publish')
-      .description('the dashboard as a static folder for GitHub Pages or any host (default <data>/site); read-only: live actions need dsa serve')
+      .description('the dashboard as a static folder for any static host, mountable under a sub-path such as /dsa/ (default <data>/site); Re-scan and decisions go where host.adapter says')
       .option('--out <dir>', 'where to write the site')
       .action(async (o: { out?: string }, cmd: Command) => {
         const ctx = await api.context(cmd);
         await api.requireStore('publish');
-        const r = await publish(ctx.root, ctx.config, ctx.dataDir, ctx.profile, o.out ? path.resolve(api.cwd, o.out) : undefined);
+        const actions = (await deployOf(api.cwd, ctx)).actions();
+        const r = await publish(ctx.root, ctx.config, ctx.dataDir, ctx.profile, o.out ? path.resolve(api.cwd, o.out) : undefined, actions);
         api.out(`Published ${r.dir}: ${r.shots} screenshots, ${r.rendered} ${ctx.profile.label} renderings, ${(r.bytes / 1e6).toFixed(1)} MB.`);
       });
   },

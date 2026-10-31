@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -136,12 +137,30 @@ export async function ensureBrowser(log: (m: string) => void = () => {}): Promis
     await b.close();
   } catch (e: any) {
     if (!/Executable doesn't exist|browserType.launch|install/i.test(String(e?.message))) throw e;
-    log('Installing the headless browser for screenshots (one time, ~150 MB)…');
-    const cli = path.join(path.dirname(createRequire(import.meta.url).resolve('playwright/package.json')), 'cli.js');
-    const r = spawnSync(process.execPath, [cli, 'install', 'chromium'], { stdio: 'inherit' });
-    if (r.status !== 0) throw new Error('Could not install Chromium for Playwright. Run "npx playwright install chromium".');
+    // One install at a time on this machine: two at once write the same folder and leave a broken browser.
+    await withInstallLock(async () => {
+      try { const b = await pw.chromium.launch(); await b.close(); return; } catch { /* still missing: install it */ }
+      log('Installing the headless browser for screenshots (one time, ~150 MB)…');
+      const cli = path.join(path.dirname(createRequire(import.meta.url).resolve('playwright/package.json')), 'cli.js');
+      const r = spawnSync(process.execPath, [cli, 'install', 'chromium'], { stdio: 'inherit' });
+      if (r.status !== 0) throw new Error('Could not install Chromium for Playwright. Run "npx playwright install chromium".');
+    });
   }
   return pw;
+}
+
+/** Run `fn` holding a machine-wide lock file (a stale lock older than 10 minutes is taken over). */
+async function withInstallLock(fn: () => Promise<void>): Promise<void> {
+  const lock = path.join(os.tmpdir(), 'dsa-playwright-install.lock');
+  const deadline = Date.now() + 15 * 60_000;
+  for (;;) {
+    try { fs.closeSync(fs.openSync(lock, 'wx')); break; } catch {
+      try { if (Date.now() - fs.statSync(lock).mtimeMs > 10 * 60_000) { fs.rmSync(lock, { force: true }); continue; } } catch { continue; }
+      if (Date.now() > deadline) throw new Error(`Another browser install holds ${lock}. Remove it if no install is running.`);
+      await new Promise(r => setTimeout(r, 500));
+    }
+  }
+  try { await fn(); } finally { fs.rmSync(lock, { force: true }); }
 }
 
 /** Install an app's dependencies if they're missing (setup only; scans never install on their own). */

@@ -4,17 +4,18 @@ import type { Config } from '@snds/dsa/engine';
 
 import { renderReport } from './report.js';
 
-import type { ResolvedProfile } from '@snds/dsa';
+import type { PageActions, ResolvedProfile } from '@snds/dsa';
 
 /**
- * `dsa publish`: the dashboard as a static folder (for GitHub Pages or any static host). One page with
- * the data embedded, plus only the screenshots and system renderings it shows. The live parts (decide,
- * run a scan, ask an agent) say they need `dsa serve`. Default folder: <data>/site.
+ * `dsa publish`: the dashboard as a static folder for any static host. One page with the data
+ * embedded, plus only the screenshots and system renderings it shows. Every link is relative, so the
+ * folder works under any sub-path (https://example.com/dsa/). Re-scan and decisions go where the
+ * host adapter says (`actions`); asking an agent needs `dsa serve`. Default folder: <data>/site.
  */
 export const siteDir = (dataDir: string) => path.join(dataDir, 'site');
 
-export async function publish(root: string, config: Config, dataDir: string, profile: ResolvedProfile, outDir = siteDir(dataDir)): Promise<{ dir: string; shots: number; rendered: number; bytes: number }> {
-  const html = await renderReport(root, config, dataDir, profile, { site: true });
+export async function publish(root: string, config: Config, dataDir: string, profile: ResolvedProfile, outDir = siteDir(dataDir), actions: PageActions | null = null): Promise<{ dir: string; shots: number; rendered: number; bytes: number }> {
+  const html = await renderReport(root, config, dataDir, profile, { site: true, actions });
   // Start clean so images from an older scan don't linger in the commit.
   for (const sub of ['shots', 'rendered']) fs.rmSync(path.join(outDir, sub), { recursive: true, force: true });
   fs.mkdirSync(outDir, { recursive: true });

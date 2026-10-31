@@ -8,6 +8,7 @@ import type { PipelineStage } from "./engine/pipeline.js";
 import type { StoreFactory } from "./engine/store.js";
 import type { EngineContext } from "./engine/from-dsa.js";
 import { APP_DIR } from "./engine/paths.js";
+import type { HistoryFactory, HostAdapter } from "./deploy/types.js";
 
 /**
  * An add-on is an optional package (@snds/dsa-<name>) that adds commands to the one `dsa` CLI,
@@ -31,6 +32,10 @@ export interface DsaAddon {
   afterRun?: AfterRunHook[];
   /** Routes the dashboard's `dsa serve` mounts (the agent workbench's API). */
   routes?: ServeRoute;
+  /** Host adapters (what a static dashboard's buttons do, where decisions come from), picked by host.adapter. */
+  hosts?: HostAdapter[];
+  /** History backends (where the data folder persists between runs), picked by history.adapter. */
+  histories?: HistoryFactory[];
 }
 
 /** What the CLI hands an add-on's `commands`. */

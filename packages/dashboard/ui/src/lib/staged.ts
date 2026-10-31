@@ -57,7 +57,7 @@ export function decisionsFile(list: Staged[]) {
 
 export const FILE_NAME = "dsa-decisions.json"
 /** Run from the repo root, where `dsa publish` runs too. */
-export const APPLY_COMMAND = `npm run dsa -- decide --file ~/Downloads/${FILE_NAME}`
+export const APPLY_COMMAND = `npm run dsa -- apply-decisions --file ~/Downloads/${FILE_NAME}`
 
 export function downloadDecisions(list: Staged[]) {
   const url = URL.createObjectURL(new Blob([`${JSON.stringify(decisionsFile(list), null, 2)}\n`], { type: "application/json" }))

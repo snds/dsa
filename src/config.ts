@@ -78,6 +78,101 @@ const AppSchema = z.object({
   screenshots: z.boolean().optional().describe("false: never start this app for screenshots."),
 });
 
+/** Where to see one live surface (an app or the system's Storybook): a deployed URL, or the built folder that gets deployed. */
+const SurfaceSchema = z
+  .object({
+    url: z.string().optional().describe("The deployed URL, e.g. https://example.com/app/. Used as is: nothing is started."),
+    dir: z
+      .string()
+      .optional()
+      .describe("The built output folder that is deployed (dist, storybook-static), relative to the config root. dsa serves it on localhost for the run."),
+    base: z.string().optional().describe('With `dir`: the path the folder is mounted at on the live site, e.g. "/app/" (default "/").'),
+    auth: z
+      .string()
+      .optional()
+      .describe("A saved sign-in (browser storage state) for `url`, made once with `dsa login <url>`. Relative to the config root. Never commit it."),
+    readApi: z
+      .boolean()
+      .optional()
+      .describe("Let the screenshot crawler read (GET) the site's own /api/ routes, so signed-in pages load their data. Writes stay blocked. Default on for `url`, off for `dir`."),
+  })
+  .refine((s) => !(s.url && s.dir), { message: "Give `url` or `dir`, not both." });
+
+const LiveSchema = z
+  .object({
+    revision: z
+      .object({
+        value: z.string().optional().describe("The deployed commit SHA, when the deploy step writes it into the config."),
+        env: z
+          .union([z.array(z.string()), z.literal(false)])
+          .optional()
+          .describe("Environment variables that hold the deployed commit (default: the common CI ones, such as GITHUB_SHA and CI_COMMIT_SHA). false: don't read them."),
+        endpoint: z.string().optional().describe("A URL on the live site that reports its version (JSON or text), e.g. https://example.com/version.json."),
+        field: z.string().optional().describe('Where the commit is in the endpoint\'s JSON, as a dotted path (default: sha, commit, revision, version or git.sha).'),
+        liveAtField: z.string().optional().describe("Where the time it went live is in the endpoint's JSON (default: deployedAt, builtAt, time or timestamp)."),
+        liveAt: z.string().optional().describe("When this revision went live (ISO time), if the deploy step knows it."),
+        sources: z
+          .array(z.string())
+          .optional()
+          .describe('The order to try revision sources in. Built in: "value", "endpoint", "env"; host adapters add their own (the GitHub one adds "github-deployment").'),
+        environment: z.string().optional().describe('For a host adapter\'s deployment source: the environment name (GitHub: default "github-pages").'),
+      })
+      .prefault({}),
+    onMismatch: z
+      .enum(["refuse", "label"])
+      .default("refuse")
+      .describe("When the checkout isn't the live revision (another commit, or uncommitted changes): refuse to run, or run and label the report loudly."),
+    apps: z.record(z.string(), SurfaceSchema).optional().describe("Per app, where its live version is. Apps not listed are started from the checkout as before, and labelled."),
+    app: SurfaceSchema.optional().describe("Shorthand for every app without its own entry in `apps`."),
+    storybook: SurfaceSchema.optional().describe("Where the system's live Storybook is: a deployed URL or the built storybook-static folder."),
+  })
+  .describe("What is live in production. With this set, runs check the checkout against the live revision and screenshots come from the live site.");
+
+const HostSchema = z
+  .object({
+    adapter: z.string().default("generic").describe('Which host adapter turns the static dashboard\'s actions into requests: "generic" or "github" (add-ons may add more).'),
+    base: z.string().optional().describe('The sub-path the dashboard is served under, e.g. "/dsa/" (default "/"). Used by dsa serve; dsa publish writes relative links that work under any path.'),
+    url: z.string().optional().describe("Where people open the dashboard, e.g. https://example.com/dsa/. Shown in issues and messages."),
+    rescan: z
+      .object({
+        url: z.string().describe("Where Re-scan goes: a page that starts the scan job (opened in a new tab), or a webhook (POSTed to)."),
+        method: z.enum(["link", "post"]).default("link"),
+        label: z.string().optional(),
+      })
+      .optional()
+      .describe("The static dashboard's Re-scan button (generic adapter)."),
+    decisions: z
+      .object({
+        mode: z.enum(["export", "post", "issue", "pr"]).optional().describe("export: download a file; post: send it to `url`; issue / pr (the github adapter): file it as an issue that a workflow applies, committing it (issue) or opening a pull request (pr). Default: the adapter's (generic export, github issue)."),
+        url: z.string().optional().describe("For post: the webhook that receives the decisions file."),
+      })
+      .optional()
+      .describe("Where decisions made on the static dashboard go."),
+    github: z
+      .object({
+        repo: z.string().optional().describe('The repo "owner/name" whose workflow re-scans and receives decisions (default: github.defaultRepo).'),
+        workflow: z.string().default("dsa.yml").describe("The workflow file that runs the scan (needs a workflow_dispatch trigger)."),
+        ref: z.string().optional().describe("The branch the workflow runs on (default: the repo's default branch)."),
+        label: z.string().default("dsa-decisions").describe("The label on decision issues, which the apply workflow listens for."),
+        server: z.string().default("https://github.com").describe("GitHub's web address (GitHub Enterprise Server: your host)."),
+        api: z.string().optional().describe("GitHub's API address (default https://api.github.com, or <server>/api/v3 for a server)."),
+      })
+      .prefault({}),
+  })
+  .describe("How the dashboard is hosted: the sub-path, and what its Re-scan and decision buttons do when it is a static site.");
+
+const HistorySchema = z
+  .object({
+    adapter: z.string().default("local").describe('Where run history and the data folder persist between runs: "local" (stays in the data folder), "git-branch", or "command" (your own pull and push commands, e.g. for an object store).'),
+    branch: z.string().default("dsa-data").describe("git-branch: the branch that holds the data folder."),
+    remote: z.string().default("origin").describe("git-branch: the remote to fetch from and push to."),
+    keep: z.enum(["all", "latest"]).default("all").describe("git-branch: keep every push as a commit, or keep the branch at one commit (smaller; force-pushes the data branch)."),
+    pull: z.string().optional().describe("command: the shell command that restores the data folder ({dir} is filled in)."),
+    push: z.string().optional().describe("command: the shell command that saves it ({dir} is filled in)."),
+    exclude: z.array(z.string()).optional().describe("Data folder entries never persisted, on top of secrets.json, auth/, site/ and report/."),
+  })
+  .describe("Where run history (the DuckDB file) and the rest of the data folder persist between runs.");
+
 const SystemSchema = z
   .object({
     name: z.string().default("design-system").describe("Human name of the design system being measured."),
@@ -249,6 +344,9 @@ export const ConfigSchema = z
         timeZone: z.string().optional().describe('IANA time zone for dates in the report, e.g. "America/Los_Angeles".'),
       })
       .optional(),
+    live: LiveSchema.optional(),
+    host: HostSchema.optional(),
+    history: HistorySchema.optional(),
     settings: z.record(z.string(), z.unknown()).optional().describe("Rule settings on top of the metric catalog's defaults."),
     ratchet: z
       .object({

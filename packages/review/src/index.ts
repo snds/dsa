@@ -1,6 +1,8 @@
 import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import type { Command } from 'commander';
-import { defineAddon, type AddonApi, type EngineContext } from '@snds/dsa';
+import { defineAddon, liveGate, type AddonApi, type EngineContext } from '@snds/dsa';
 import { applyRenderedEvidence, logEvent, materializeRemotes, openStore, pagePlacementKey, reevaluateElements, resolveTargets, type Config } from '@snds/dsa/engine';
 import { detectApp, ensureBrowser, installAppDeps, linkCoreForChild } from './apps.js';
 import { renderIfStale, renderProposals, renderSignatures } from './rendered.js';
@@ -8,7 +10,7 @@ import { takeShots } from './shots.js';
 
 export { detectApp, discoverRoutes, ensureBrowser, freePort, installAppDeps, linkCoreForChild, startApp, type AppPlan, type RunningApp } from './apps.js';
 export { takeShots, captureSession, type ShotResult } from './shots.js';
-export { flowProblems, guardNetwork, runFlow, describeStep, NEVER, type Flow, type Step } from './flows.js';
+export { flowProblems, guardNetwork, routeUrl, runFlow, describeStep, NEVER, type Flow, type Step } from './flows.js';
 export { HARNESS, startProxy } from './sbproxy.js';
 export { READ_STYLE, argsParam, renderProposals, renderSignatures, renderIfStale, startStorybook, wantedProposals } from './rendered.js';
 
@@ -71,6 +73,35 @@ export async function setup(ctx: EngineContext, log: (m: string) => void) {
   log(`3. Screenshots now run with every scan (shots.auto in ${file}; --no-shots skips one run).`);
 }
 
+/**
+ * Open a visible browser at `url`, let a person sign in, and save the session (cookies and local
+ * storage, Playwright's storage state). It is saved as the person goes, so closing the window or
+ * pressing Enter both keep the signed-in state.
+ */
+export async function login(url: string, out: string, log: (m: string) => void): Promise<void> {
+  const pw = await ensureBrowser(log);
+  const browser = await pw.chromium.launch({ headless: false });
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await context.newPage();
+  let state: unknown = null;
+  const save = async () => { try { state = await context.storageState(); } catch { /* closing */ } };
+  const timer = setInterval(save, 1500);
+  await page.goto(url).catch(() => { /* the person can still navigate */ });
+  log('Sign in in the browser window. When the site shows you signed in, press Enter here or close the window.');
+  await new Promise<void>(done => {
+    const finish = () => { process.stdin.pause(); done(); };
+    browser.on('disconnected', finish);
+    page.on('close', finish);
+    if (process.stdin.isTTY) { process.stdin.resume(); process.stdin.once('data', finish); }
+  });
+  await save();
+  clearInterval(timer);
+  await browser.close().catch(() => {});
+  if (!state) throw new Error('No session was saved: the window closed before the page loaded.');
+  fs.mkdirSync(path.dirname(out), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(out, JSON.stringify(state, null, 1), { mode: 0o600 });
+}
+
 const firstLine = (e: any) => String(e?.message ?? e).split('\n')[0];
 
 function printShots(r: Awaited<ReturnType<typeof shotsAndEvidence>>, label: string, log: (m: string) => void) {
@@ -120,9 +151,11 @@ export default defineAddon({
       .option('--per-group <n>', 'examples per recommendation group')
       .option('--fresh', 'ignore cached screenshots')
       .option('--retry-missing', 'try again for elements not found last time')
-      .action(async (o: { target?: string; url?: string; routes?: string; perGroup?: string; fresh?: boolean; retryMissing?: boolean }, cmd: Command) => {
+      .option('--allow-unreleased', "take them even when the checkout isn't the live revision (labelled)")
+      .action(async (o: { target?: string; url?: string; routes?: string; perGroup?: string; fresh?: boolean; retryMissing?: boolean; allowUnreleased?: boolean }, cmd: Command) => {
         const ctx = await api.context(cmd);
         await api.requireStore('shots');
+        await liveGate(api.cwd, ctx, o, api.out);
         const r = await shotsAndEvidence(ctx, { url: o.url, routes: o.routes?.split(','), target: o.target, fresh: o.fresh, retryMissing: o.retryMissing, perGroup: o.perGroup ? Number(o.perGroup) : undefined }, api.out);
         printShots(r, ctx.profile.label, api.out);
       });
@@ -131,11 +164,27 @@ export default defineAddon({
       .command('render')
       .description("measure the system's components in its Storybook (computed height, padding, radius, colors, border, type per variant × size), and render each proposed replacement with its props")
       .option('--force', 're-measure every story')
-      .action(async (o: { force?: boolean }, cmd: Command) => {
+      .option('--allow-unreleased', "measure even when the checkout isn't the live revision (labelled)")
+      .action(async (o: { force?: boolean; allowUnreleased?: boolean }, cmd: Command) => {
         const ctx = await api.context(cmd);
+        await liveGate(api.cwd, ctx, o, api.out);
         const r = await renderSignatures({ root: ctx.root, config: ctx.config, dataDir: ctx.dataDir, force: Boolean(o.force), log: api.out });
         for (const n of r.notes.slice(0, 5)) api.out(`note: ${n}`);
         await renderProposals({ root: ctx.root, config: ctx.config, dataDir: ctx.dataDir, force: Boolean(o.force), log: api.out });
+      });
+
+    program
+      .command('login')
+      .argument('<url>', 'the live site (or Storybook) to sign in to')
+      .description('sign in to a private live site once, in a visible browser, and save the session for screenshots and renderings (live.app.auth, live.storybook.auth)')
+      .option('--out <file>', 'where to save it (default <data>/auth/<host>.json)')
+      .action(async (url: string, o: { out?: string }, cmd: Command) => {
+        const ctx = await api.context(cmd);
+        const out = o.out ? path.resolve(api.cwd, o.out) : path.join(ctx.dataDir, 'auth', `${new URL(url).hostname}.json`);
+        await login(url, out, api.out);
+        const rel = path.relative(ctx.root, out);
+        api.out(`Saved ${out}. Point live.app.auth (or live.storybook.auth) at "${rel}". It holds your session: keep it out of git and out of shared folders.`);
+        if (spawnSync('git', ['-C', ctx.root, 'check-ignore', '-q', out]).status === 1) api.out(`warning: ${rel} is not ignored by git. Add it to .gitignore.`);
       });
 
     program

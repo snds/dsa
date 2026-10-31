@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { readJson } from './paths.js';
 import type { ConsumerDef, LibraryDef } from './types.js';
+import type { DsaConfig } from '../config.js';
 
 /**
  * The engine's view of the config: the shape the analytics suite read, built from a dsa config and
@@ -60,6 +61,12 @@ export interface Config {
     editedWithinDays?: number | undefined;
     maxFiles?: number | undefined;
   };
+  /** What is live in production (src/deploy): the live revision, and where each app and the Storybook can be seen. */
+  live?: DsaConfig['live'];
+  /** How the dashboard is hosted and what its static actions do (src/deploy/host.ts). */
+  host?: DsaConfig['host'];
+  /** Where run history persists between runs (src/deploy/history.ts). */
+  history?: DsaConfig['history'];
   github?: {
     /** Repo that receives core and triage findings. */
     defaultRepo?: string | undefined;

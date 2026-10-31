@@ -1,5 +1,5 @@
 import * as React from "react"
-import { GearSixIcon, ArrowClockwiseIcon, SparkleIcon } from "@phosphor-icons/react"
+import { GearSixIcon, ArrowClockwiseIcon, SparkleIcon, WarningIcon } from "@phosphor-icons/react"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -24,6 +24,7 @@ import { Usage } from "@/views/Usage"
 import { AgentProvider, canChat, useAgent } from "@/agent/store"
 import { AgentPanel } from "@/agent/AgentPanel"
 import { cn } from "cn"
+import { ACTIONS, rescan as hostRescan } from "@/lib/host"
 
 type ViewId = "overview" | "queue" | "system" | "federation" | "elements" | "usage" | "readiness" | "design" | "trends" | "settings"
 
@@ -81,6 +82,19 @@ function AgentButton() {
   )
 }
 
+/** The revision the scan read and when it went live, or that it wasn't checked against production. */
+function LiveRevision() {
+  const l = D.live
+  const sha = String(l.head ?? l.revision?.sha ?? "").slice(0, 7)
+  const text = l.state === "live" ? `Live revision ${sha}${l.revision?.liveAt ? `, live since ${fmtD(l.revision.liveAt)}` : ""}` : l.state === "unchecked" ? `Checkout ${sha || "?"}, not checked against production` : `Not live: ${sha || "?"}`
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className={cn("cursor-default underline decoration-dotted underline-offset-4", l.unreleased && "font-medium text-destructive")} />}>{text}</TooltipTrigger>
+      <TooltipContent>{l.label}{l.revision?.liveAt ? ` · ${fmtDT(l.revision.liveAt)}` : ""}</TooltipContent>
+    </Tooltip>
+  )
+}
+
 function Shell() {
   const agent = useAgent()
   const [{ view, section }, setRoute] = React.useState(readHash)
@@ -100,6 +114,8 @@ function Shell() {
   }
 
   async function rerun() {
+    // A published page: the host adapter starts the scan job (a page in a new tab, or a POST).
+    if (!D.serve) { try { await hostRescan() } catch (e: any) { setScan({ busy: false, error: e.message }) } return }
     setScan({ busy: true })
     try {
       await api("/api/run", {})
@@ -125,12 +141,21 @@ function Shell() {
                   <TooltipContent>{fmtDT(D.run.takenAt)} · run {D.run.id}</TooltipContent>
                 </Tooltip>
               ) : "No scans yet"}
+              {D.live && <span> · <LiveRevision /></span>}
               {figma && <span> · {figma}</span>}
-              {!D.serve && <span> · Snapshot from {fmtD(D.generatedAt)}{D.published ? ". Read-only: review decisions are staged in your browser and exported; scans and the agent need dsa serve" : ""}</span>}
+              {!D.serve && <span> · Snapshot from {fmtD(D.generatedAt)}{D.published ? `. Static: review decisions are staged in your browser and ${ACTIONS?.decisions.kind === "issue" ? "filed as an issue" : ACTIONS?.decisions.kind === "post" ? "sent to the team" : "exported"}; the agent needs dsa serve` : ""}</span>}
             </p>
           </div>
           <div className="flex items-center gap-2">
             <RolePicker />
+          {!D.serve && D.published && ACTIONS && ACTIONS.rescan.kind !== "none" && (
+            <Tooltip>
+              <TooltipTrigger render={<Button onClick={rerun} />}>
+                <ArrowClockwiseIcon data-icon="inline-start" />{ACTIONS.rescan.label}
+              </TooltipTrigger>
+              <TooltipContent>{ACTIONS.rescan.help}</TooltipContent>
+            </Tooltip>
+          )}
           {D.serve && (
             <>
             <AgentButton />
@@ -163,6 +188,13 @@ function Shell() {
       </header>
 
       <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
+        {D.live?.unreleased && (
+          <Alert variant="destructive" className="mb-6">
+            <WarningIcon />
+            <AlertTitle>This scan is not what is live</AlertTitle>
+            <AlertDescription>{D.live.label} Numbers and screenshots here may include unreleased work.</AlertDescription>
+          </Alert>
+        )}
         {scan.busy && <Alert className="mb-6"><AlertTitle>Scanning</AlertTitle><AlertDescription>This usually takes 10–30 seconds. The page reloads when it's done.</AlertDescription></Alert>}
         {scan.error && (
           <Alert variant="destructive" className="mb-6">

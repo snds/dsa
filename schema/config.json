@@ -1118,6 +1118,326 @@
       },
       "additionalProperties": false
     },
+    "live": {
+      "type": "object",
+      "properties": {
+        "revision": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "description": "The deployed commit SHA, when the deploy step writes it into the config.",
+              "type": "string"
+            },
+            "env": {
+              "description": "Environment variables that hold the deployed commit (default: the common CI ones, such as GITHUB_SHA and CI_COMMIT_SHA). false: don't read them.",
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "boolean",
+                  "const": false
+                }
+              ]
+            },
+            "endpoint": {
+              "description": "A URL on the live site that reports its version (JSON or text), e.g. https://example.com/version.json.",
+              "type": "string"
+            },
+            "field": {
+              "description": "Where the commit is in the endpoint's JSON, as a dotted path (default: sha, commit, revision, version or git.sha).",
+              "type": "string"
+            },
+            "liveAtField": {
+              "description": "Where the time it went live is in the endpoint's JSON (default: deployedAt, builtAt, time or timestamp).",
+              "type": "string"
+            },
+            "liveAt": {
+              "description": "When this revision went live (ISO time), if the deploy step knows it.",
+              "type": "string"
+            },
+            "sources": {
+              "description": "The order to try revision sources in. Built in: \"value\", \"endpoint\", \"env\"; host adapters add their own (the GitHub one adds \"github-deployment\").",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "environment": {
+              "description": "For a host adapter's deployment source: the environment name (GitHub: default \"github-pages\").",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "onMismatch": {
+          "default": "refuse",
+          "description": "When the checkout isn't the live revision (another commit, or uncommitted changes): refuse to run, or run and label the report loudly.",
+          "type": "string",
+          "enum": [
+            "refuse",
+            "label"
+          ]
+        },
+        "apps": {
+          "description": "Per app, where its live version is. Apps not listed are started from the checkout as before, and labelled.",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "description": "The deployed URL, e.g. https://example.com/app/. Used as is: nothing is started.",
+                "type": "string"
+              },
+              "dir": {
+                "description": "The built output folder that is deployed (dist, storybook-static), relative to the config root. dsa serves it on localhost for the run.",
+                "type": "string"
+              },
+              "base": {
+                "description": "With `dir`: the path the folder is mounted at on the live site, e.g. \"/app/\" (default \"/\").",
+                "type": "string"
+              },
+              "auth": {
+                "description": "A saved sign-in (browser storage state) for `url`, made once with `dsa login <url>`. Relative to the config root. Never commit it.",
+                "type": "string"
+              },
+              "readApi": {
+                "description": "Let the screenshot crawler read (GET) the site's own /api/ routes, so signed-in pages load their data. Writes stay blocked. Default on for `url`, off for `dir`.",
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "app": {
+          "description": "Shorthand for every app without its own entry in `apps`.",
+          "type": "object",
+          "properties": {
+            "url": {
+              "description": "The deployed URL, e.g. https://example.com/app/. Used as is: nothing is started.",
+              "type": "string"
+            },
+            "dir": {
+              "description": "The built output folder that is deployed (dist, storybook-static), relative to the config root. dsa serves it on localhost for the run.",
+              "type": "string"
+            },
+            "base": {
+              "description": "With `dir`: the path the folder is mounted at on the live site, e.g. \"/app/\" (default \"/\").",
+              "type": "string"
+            },
+            "auth": {
+              "description": "A saved sign-in (browser storage state) for `url`, made once with `dsa login <url>`. Relative to the config root. Never commit it.",
+              "type": "string"
+            },
+            "readApi": {
+              "description": "Let the screenshot crawler read (GET) the site's own /api/ routes, so signed-in pages load their data. Writes stay blocked. Default on for `url`, off for `dir`.",
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "storybook": {
+          "description": "Where the system's live Storybook is: a deployed URL or the built storybook-static folder.",
+          "type": "object",
+          "properties": {
+            "url": {
+              "description": "The deployed URL, e.g. https://example.com/app/. Used as is: nothing is started.",
+              "type": "string"
+            },
+            "dir": {
+              "description": "The built output folder that is deployed (dist, storybook-static), relative to the config root. dsa serves it on localhost for the run.",
+              "type": "string"
+            },
+            "base": {
+              "description": "With `dir`: the path the folder is mounted at on the live site, e.g. \"/app/\" (default \"/\").",
+              "type": "string"
+            },
+            "auth": {
+              "description": "A saved sign-in (browser storage state) for `url`, made once with `dsa login <url>`. Relative to the config root. Never commit it.",
+              "type": "string"
+            },
+            "readApi": {
+              "description": "Let the screenshot crawler read (GET) the site's own /api/ routes, so signed-in pages load their data. Writes stay blocked. Default on for `url`, off for `dir`.",
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "revision",
+        "onMismatch"
+      ],
+      "additionalProperties": false,
+      "description": "What is live in production. With this set, runs check the checkout against the live revision and screenshots come from the live site."
+    },
+    "host": {
+      "type": "object",
+      "properties": {
+        "adapter": {
+          "default": "generic",
+          "description": "Which host adapter turns the static dashboard's actions into requests: \"generic\" or \"github\" (add-ons may add more).",
+          "type": "string"
+        },
+        "base": {
+          "description": "The sub-path the dashboard is served under, e.g. \"/dsa/\" (default \"/\"). Used by dsa serve; dsa publish writes relative links that work under any path.",
+          "type": "string"
+        },
+        "url": {
+          "description": "Where people open the dashboard, e.g. https://example.com/dsa/. Shown in issues and messages.",
+          "type": "string"
+        },
+        "rescan": {
+          "description": "The static dashboard's Re-scan button (generic adapter).",
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "Where Re-scan goes: a page that starts the scan job (opened in a new tab), or a webhook (POSTed to)."
+            },
+            "method": {
+              "default": "link",
+              "type": "string",
+              "enum": [
+                "link",
+                "post"
+              ]
+            },
+            "label": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "url",
+            "method"
+          ],
+          "additionalProperties": false
+        },
+        "decisions": {
+          "description": "Where decisions made on the static dashboard go.",
+          "type": "object",
+          "properties": {
+            "mode": {
+              "description": "export: download a file; post: send it to `url`; issue / pr (the github adapter): file it as an issue that a workflow applies, committing it (issue) or opening a pull request (pr). Default: the adapter's (generic export, github issue).",
+              "type": "string",
+              "enum": [
+                "export",
+                "post",
+                "issue",
+                "pr"
+              ]
+            },
+            "url": {
+              "description": "For post: the webhook that receives the decisions file.",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "github": {
+          "type": "object",
+          "properties": {
+            "repo": {
+              "description": "The repo \"owner/name\" whose workflow re-scans and receives decisions (default: github.defaultRepo).",
+              "type": "string"
+            },
+            "workflow": {
+              "default": "dsa.yml",
+              "description": "The workflow file that runs the scan (needs a workflow_dispatch trigger).",
+              "type": "string"
+            },
+            "ref": {
+              "description": "The branch the workflow runs on (default: the repo's default branch).",
+              "type": "string"
+            },
+            "label": {
+              "default": "dsa-decisions",
+              "description": "The label on decision issues, which the apply workflow listens for.",
+              "type": "string"
+            },
+            "server": {
+              "default": "https://github.com",
+              "description": "GitHub's web address (GitHub Enterprise Server: your host).",
+              "type": "string"
+            },
+            "api": {
+              "description": "GitHub's API address (default https://api.github.com, or <server>/api/v3 for a server).",
+              "type": "string"
+            }
+          },
+          "required": [
+            "workflow",
+            "label",
+            "server"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "adapter",
+        "github"
+      ],
+      "additionalProperties": false,
+      "description": "How the dashboard is hosted: the sub-path, and what its Re-scan and decision buttons do when it is a static site."
+    },
+    "history": {
+      "type": "object",
+      "properties": {
+        "adapter": {
+          "default": "local",
+          "description": "Where run history and the data folder persist between runs: \"local\" (stays in the data folder), \"git-branch\", or \"command\" (your own pull and push commands, e.g. for an object store).",
+          "type": "string"
+        },
+        "branch": {
+          "default": "dsa-data",
+          "description": "git-branch: the branch that holds the data folder.",
+          "type": "string"
+        },
+        "remote": {
+          "default": "origin",
+          "description": "git-branch: the remote to fetch from and push to.",
+          "type": "string"
+        },
+        "keep": {
+          "default": "all",
+          "description": "git-branch: keep every push as a commit, or keep the branch at one commit (smaller; force-pushes the data branch).",
+          "type": "string",
+          "enum": [
+            "all",
+            "latest"
+          ]
+        },
+        "pull": {
+          "description": "command: the shell command that restores the data folder ({dir} is filled in).",
+          "type": "string"
+        },
+        "push": {
+          "description": "command: the shell command that saves it ({dir} is filled in).",
+          "type": "string"
+        },
+        "exclude": {
+          "description": "Data folder entries never persisted, on top of secrets.json, auth/, site/ and report/.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "adapter",
+        "branch",
+        "remote",
+        "keep"
+      ],
+      "additionalProperties": false,
+      "description": "Where run history (the DuckDB file) and the rest of the data folder persist between runs."
+    },
     "settings": {
       "description": "Rule settings on top of the metric catalog's defaults.",
       "type": "object",
