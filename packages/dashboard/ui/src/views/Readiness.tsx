@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Code, Note, Panel, Pre, Stat } from "@/components/bits"
-import { D, SYS, fmtD, fmt } from "@/lib/dsa"
+import { D, SYS, fmtD, fmt, ratio } from "@/lib/dsa"
 import { AskAgent } from "@/agent/AskAgent"
 
 /**
@@ -79,7 +79,7 @@ function RepoCard({ r }: { r: any }) {
                 {rules.map(([k, n]) => (
                   <li key={k} className="grid grid-cols-[8rem_minmax(0,1fr)_3rem] items-center gap-2">
                     <Code className="truncate">{k}</Code>
-                    <span className="h-1.5 rounded-full bg-muted"><span className="block h-1.5 rounded-full bg-chart-3" style={{ width: `${(100 * n) / max}%` }} /></span>
+                    <span className="h-1.5 rounded-full bg-muted"><span className="block h-1.5 rounded-full bg-chart-3" style={{ width: `${ratio(n, max) ?? 0}%` }} /></span>
                     <span className="text-right tabular-nums">{n}</span>
                   </li>
                 ))}

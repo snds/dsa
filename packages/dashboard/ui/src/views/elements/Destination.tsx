@@ -4,7 +4,7 @@ import { CaretDownIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { D, api, say, SYS } from "@/lib/dsa"
+import { D, api, ratio, say, SYS } from "@/lib/dsa"
 import { ElementRow, desc, useEl } from "./shared"
 import { ReviewCard } from "./ReviewCard"
 import { KEEP, NO_HOME, type Destination as Dest, type Status, type Unit, styleName } from "./units"
@@ -37,7 +37,7 @@ export function Destination({ d, units, open, onOpenChange }: { d: Dest; units: 
         </span>
         {/* Where this destination's elements stand, as one bar (counts are in the line above). */}
         <span className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted" aria-hidden>
-          {statuses.map(s => <span key={s} className={STATUS_BAR[s]} style={{ width: `${(d.elements[s] / all) * 100}%` }} />)}
+          {statuses.map(s => <span key={s} className={STATUS_BAR[s]} style={{ width: `${ratio(d.elements[s], all) ?? 0}%` }} />)}
         </span>
         {ABOUT[d.home] && <span className="text-sm text-muted-foreground">{ABOUT[d.home]}</span>}
       </CollapsibleTrigger>

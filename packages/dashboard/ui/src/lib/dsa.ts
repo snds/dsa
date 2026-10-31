@@ -15,6 +15,14 @@ export const fmtD = (v: any) => T(v).toLocaleDateString(undefined, { timeZone: z
 export const fmt = (n: any) => (n == null ? "—" : Number(n).toLocaleString("en-US"))
 export const pct = (n: any) => (n == null ? "—" : `${Math.round(n * 10) / 10}%`)
 export const pct100 = (n: number) => `${Math.round(n * 100)}%`
+/**
+ * part / whole × scale, or null when it can't be measured: a whole of 0 (nothing was measured), or
+ * either side not a number. Counts can arrive as text ("0"), so both are read as numbers first.
+ */
+export function ratio(part: unknown, whole: unknown, scale = 100): number | null {
+  const p = Number(part), w = Number(whole)
+  return part == null || whole == null || !Number.isFinite(p) || !Number.isFinite(w) || w === 0 ? null : (scale * p) / w
+}
 
 /** "Just now", "12 minutes ago", "3 hours ago", then the date and time. */
 export function ago(v: any, now = Date.now()) {

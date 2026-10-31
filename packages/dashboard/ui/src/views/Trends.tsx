@@ -2,10 +2,10 @@ import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts"
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Code, Panel } from "@/components/bits"
-import { D, fmtD } from "@/lib/dsa"
+import { D, fmtD, ratio } from "@/lib/dsa"
 
 const SERIES: { key: string; name: string; unit: string; value: (r: any) => number | null }[] = [
-  { key: "current", name: "Consumers within one major", unit: "%", value: r => (r.consumers ? (100 * r.current_consumers) / r.consumers : null) },
+  { key: "current", name: "Consumers within one major", unit: "%", value: r => ratio(r.current_consumers, r.consumers) },
   { key: "correct", name: "Used as intended (avg)", unit: "%", value: r => r.correct_use },
   { key: "tokens", name: "Token compliance, new code (avg)", unit: "%", value: r => r.token_compliance },
   { key: "lookalikes", name: "Raw look-alikes", unit: "", value: r => r.lookalikes },
