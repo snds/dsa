@@ -10,7 +10,7 @@ import type { HistoryBackend, HistoryFactory, HostAdapter, HostContext, LiveChec
 export * from "./types.js";
 export { CI_REVISION_VARS, BUILTIN_REVISION_SOURCES, NotLiveError, authFiles, checkLive, compareTree, cookiesFor, describeCheck, endpointSource, envSource, resolveLiveRevision, valueSource, type CheckLiveOptions } from "./revision.js";
 export { appSurface, normalizeBase, openSurface, serveStatic } from "./surface.js";
-export { decisionsIn, genericHost, hostAdapter } from "./host.js";
+export { decisionsIn, genericHost, hostAdapter, hostOf } from "./host.js";
 export { NEVER_PERSIST, excluded, historyBackend, localHistory } from "./history.js";
 export { githubHost, issueNumber } from "./adapters/github.js";
 export { gitBranchHistory } from "./adapters/git-branch.js";

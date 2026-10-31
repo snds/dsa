@@ -1,7 +1,7 @@
 import * as React from "react"
-import { GearSixIcon, ArrowClockwiseIcon, SparkleIcon, WarningIcon } from "@phosphor-icons/react"
+import { GearSixIcon, ArrowClockwiseIcon, ArrowSquareOutIcon, PaperPlaneTiltIcon, SparkleIcon, WarningIcon } from "@phosphor-icons/react"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -82,6 +82,30 @@ function AgentButton() {
   )
 }
 
+/**
+ * A published page can't scan. Its Re-scan hands off to the host adapter's target, and says so: a link
+ * that opens that page in a new tab (GitHub's Run workflow page, a CI job), or a request sent to a
+ * webhook. Under it, where it goes and when this page will change, so it never looks like an in-page scan.
+ */
+function StaticRescan({ onPost }: { onPost: () => void }) {
+  const r = ACTIONS!.rescan
+  const target = (r.url ?? "").replace(/^https?:\/\//, "").replace(/\/$/, "")
+  return (
+    <div className="flex max-w-sm flex-col items-end gap-1">
+      {r.kind === "link" ? (
+        <a href={r.url} target="_blank" rel="noopener noreferrer" className={buttonVariants({ variant: "outline" })}>
+          <ArrowSquareOutIcon data-icon="inline-start" />{r.label}
+        </a>
+      ) : (
+        <Button variant="outline" onClick={onPost}><PaperPlaneTiltIcon data-icon="inline-start" />{r.label}</Button>
+      )}
+      <p className="text-right text-xs text-muted-foreground">
+        {r.help}{target && <> <span className="font-mono break-all" title={r.url}>{r.kind === "link" ? "Opens" : "Sends to"} {target}</span></>}
+      </p>
+    </div>
+  )
+}
+
 /** The revision the scan read and when it went live, or that it wasn't checked against production. */
 function LiveRevision() {
   const l = D.live
@@ -148,14 +172,7 @@ function Shell() {
           </div>
           <div className="flex items-center gap-2">
             <RolePicker />
-          {!D.serve && D.published && ACTIONS && ACTIONS.rescan.kind !== "none" && (
-            <Tooltip>
-              <TooltipTrigger render={<Button onClick={rerun} />}>
-                <ArrowClockwiseIcon data-icon="inline-start" />{ACTIONS.rescan.label}
-              </TooltipTrigger>
-              <TooltipContent>{ACTIONS.rescan.help}</TooltipContent>
-            </Tooltip>
-          )}
+          {!D.serve && D.published && ACTIONS && ACTIONS.rescan.kind !== "none" && <StaticRescan onPost={rerun} />}
           {D.serve && (
             <>
             <AgentButton />

@@ -81,13 +81,13 @@ export async function renderReport(root: string, config: Config, dataDir: string
       correctUse: mval('correct_use_rate', name),
       tokenCompliance: mval('token_compliance_new_code', name),
       deprecated: mval('deprecation_burndown', name) ?? 0,
-      instances: instByTarget.find(r => r.target === name)?.n ?? 0,
-      lookalikes: lookByTarget.find(r => r.target === name)?.n ?? 0,
+      instances: Number(instByTarget.find(r => r.target === name)?.n ?? 0),
+      lookalikes: Number(lookByTarget.find(r => r.target === name)?.n ?? 0),
       measures: appSettings(config, name),
       openFindings: findings.filter(f => f.status !== 'resolved' && f.affected.includes(name)).length,
     })).sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name) : a.role === 'child' ? -1 : 1));
 
-    const figma = await store.all<any>(`select library, component, sum(instances) instances, sum(lookalike_frames) frames, count(distinct file_key) files from figma_usage where run_id=$1 group by 1, 2 order by instances desc`, [runId]);
+    const figma = numeric(await store.all<any>(`select library, component, sum(instances) instances, sum(lookalike_frames) frames, count(distinct file_key) files from figma_usage where run_id=$1 group by 1, 2 order by instances desc`, [runId]), ['instances', 'frames', 'files']);
 
     // Trends across runs (one row per run).
     const runs = await store.all<any>(`
@@ -100,6 +100,8 @@ export async function renderReport(root: string, config: Config, dataDir: string
         (select count(*) from instances i where i.run_id=r.run_id) instances
       from runs r order by r.taken_at`);
     for (const r of runs) { try { r.sources = typeof r.sources === 'string' ? JSON.parse(r.sources) : r.sources; } catch { r.sources = null; } }
+    // DuckDB hands counts back as text ("0"), which a ratio would turn into NaN: make them numbers.
+    numeric(runs, ['consumers', 'current_consumers', 'correct_use', 'token_compliance', 'lookalikes', 'instances']);
     const openAt = await store.all<any>(`select run_id, count(*) filter (where event in ('opened','reopened')) opened, count(*) filter (where event='resolved') resolved from finding_events where run_id is not null group by 1`);
 
     const settingsLog = await store.all<any>(`select ts as at, key, old_value, new_value, note from settings_log order by ts desc limit 50`);
@@ -236,6 +238,7 @@ export async function renderReport(root: string, config: Config, dataDir: string
       published: Boolean(opts.site),
       // What the scan read: the live revision and when it went live, or why it isn't the live one.
       live: liveOf(run),
+      coverage: coverageOf(run, targets),
       ...hostOpts(opts),
     };
     return shell(root, config, payload);
@@ -249,6 +252,27 @@ function liveOf(run: any) {
   const src = typeof run?.sources === 'string' ? JSON.parse(run.sources) : run?.sources;
   const l = src?.live;
   return l ? { state: l.state, ok: l.ok, unreleased: Boolean(l.unreleased), label: l.label, head: l.head ?? null, revision: l.revision ?? null } : null;
+}
+
+/** Rows' count columns as numbers (null stays null). */
+function numeric<T extends Record<string, any>>(rows: T[], keys: string[]): T[] {
+  for (const r of rows) for (const k of keys) if (r[k] != null) (r as any)[k] = Number(r[k]);
+  return rows;
+}
+
+/**
+ * Which apps the run read and which it skipped (a repo it couldn't fetch). Runs from before the run
+ * recorded it: the apps in the scan, and the skips from the run's notes.
+ */
+function coverageOf(run: any, targets: { name: string; role: string }[]) {
+  const src = typeof run?.sources === 'string' ? JSON.parse(run.sources) : run?.sources;
+  const apps = src?.apps;
+  const notes: string[] = Array.isArray(src?.notes) ? src.notes : [];
+  const scanned: string[] = Array.isArray(apps?.scanned) ? apps.scanned : targets.filter(t => t.role !== 'core').map(t => t.name);
+  const skipped: { name: string; url: string; why: string }[] = Array.isArray(apps?.skipped) ? apps.skipped
+    : notes.map(n => n.match(/^Could not fetch (.+?) from (\S+) \((.*)\)\. Skipped it this run/)).filter((m): m is RegExpMatchArray => Boolean(m)).map(m => ({ name: m[1]!, url: m[2]!, why: m[3]! }));
+  const noConsumers = notes.find(n => n.startsWith('No consumers found')) ?? null;
+  return { scanned, skipped, none: scanned.length === 0, reason: scanned.length ? null : skipped.length ? null : noConsumers };
 }
 
 /** Where the page's requests go (serve) and what its static buttons do (publish). */

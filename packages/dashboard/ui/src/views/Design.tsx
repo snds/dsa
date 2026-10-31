@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Panel, StatusDot } from "@/components/bits"
-import { D, band, fmt, pct } from "@/lib/dsa"
+import { D, band, fmt, pct, ratio } from "@/lib/dsa"
 
 const ST: Record<string, string> = { crawled: "Crawled", stale: "Not edited recently", library: "Library file (skipped)", capped: "Over max files", error: "Unreadable" }
 
@@ -23,7 +23,7 @@ export function Design({ onSettings }: { onSettings: () => void }) {
         <Panel title="Library usage in recently edited design files" description="Look-alike frames are a name-based detach proxy (sampled)" contentClassName="px-0">
           <Table>
             <TableHeader><TableRow><TableHead className="pl-4">Component</TableHead><TableHead>Library</TableHead><TableHead className="text-right">Instances</TableHead><TableHead className="text-right">Look-alike frames</TableHead><TableHead className="text-right">Share rebuilt</TableHead><TableHead className="pr-4 text-right">Files</TableHead></TableRow></TableHeader>
-            <TableBody>{D.figma.map((r: any) => { const share = r.instances + r.frames ? (100 * r.frames) / (r.instances + r.frames) : 0; return (
+            <TableBody>{D.figma.map((r: any) => { const share = ratio(r.frames, Number(r.instances) + Number(r.frames)); return (
               <TableRow key={r.library + r.component}><TableCell className="pl-4 font-medium">{r.component}</TableCell><TableCell>{r.library}</TableCell><TableCell className="text-right">{fmt(r.instances)}</TableCell><TableCell className="text-right">{fmt(r.frames)}</TableCell><TableCell className="text-right"><span className="inline-flex items-center gap-2">{pct(share)}<StatusDot band={band(share, 10, 25, false)} /></span></TableCell><TableCell className="pr-4 text-right">{fmt(r.files)}</TableCell></TableRow>) })}</TableBody>
           </Table>
         </Panel>

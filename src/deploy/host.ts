@@ -16,7 +16,9 @@ export const genericHost: HostAdapter = {
     return {
       host: "generic",
       rescan: r
-        ? { kind: r.method, url: r.url, label: r.label ?? "Re-scan", help: r.method === "post" ? "Asks the scan job to run. The page shows the new scan once it is published." : "Opens the page that starts the scan job." }
+        ? r.method === "post"
+          ? { kind: "post", url: r.url, label: r.label ?? "Request a re-scan", help: `Asks the scan job at ${hostOf(r.url)} to run. This page doesn't change by itself: the new scan shows after the job publishes it.` }
+          : { kind: "link", url: r.url, label: r.label ?? `Re-scan on ${hostOf(r.url)}`, help: `Opens ${hostOf(r.url)} in a new tab, where you start the scan job. This page updates after the job publishes the new scan.` }
         : { kind: "none", label: "Re-scan", help: "This dashboard is rebuilt by the scan job on each deploy. Set host.rescan to add a button that starts it." },
       decisions:
         d?.mode === "post" && d.url
@@ -34,6 +36,15 @@ export const genericHost: HostAdapter = {
     return JSON.parse(text);
   },
 };
+
+/** "ci.example.com" from a URL, for button text; the URL itself if it doesn't parse. */
+export function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
 
 /**
  * Pick the adapter the config names (host.adapter, default "generic") from the built-ins and any an

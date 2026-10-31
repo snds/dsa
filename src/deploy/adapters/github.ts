@@ -75,8 +75,8 @@ export const githubHost: HostAdapter = {
         : {
             kind: "link",
             url: `${s.server}/${s.repo}/actions/workflows/${encodeURIComponent(s.workflow)}`,
-            label: "Re-scan",
-            help: `Opens the ${s.workflow} workflow on GitHub. Press Run workflow${s.ref ? ` on ${s.ref}` : ""}; the dashboard updates when it finishes.`,
+            label: "Re-scan on GitHub",
+            help: `Opens the ${s.workflow} workflow's page on GitHub in a new tab. Press Run workflow there${s.ref ? ` (branch ${s.ref})` : ""}. This page updates after that run finishes deploying, usually a few minutes later.`,
           },
       decisions:
         mode === "issue" || mode === "pr"

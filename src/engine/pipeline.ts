@@ -125,7 +125,7 @@ async function runStages(stages: PipelineStage[] | undefined, phase: PipelineSta
 export async function runPipeline(opts: RunOptions): Promise<RunResult> {
   const log = opts.log ?? (() => {});
   const now = opts.now ?? new Date();
-  const { config, notes: remoteNotes } = materializeRemotes(opts.config, opts.root, opts.dataDir, opts.remote, log);
+  const { config, notes: remoteNotes, skipped } = materializeRemotes(opts.config, opts.root, opts.dataDir, opts.remote, log);
   const catalog = withMetrics(loadCatalog(), opts.profile.metrics);
   const settings = effectiveSettings(catalog, config, opts.dataDir);
   const excludes = [...defaultExcludes(opts.root), ...(config.exclude ?? []).map(e => path.resolve(opts.root, e))];
@@ -220,7 +220,8 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
   }
 
   // Add-on stages (a Figma crawl) add to the scan before metrics. A stage's problem never costs the code scan.
-  const sources: Record<string, unknown> = { ...(opts.sources ?? {}) };
+  // Which apps this run read, and which it couldn't reach: the report says so when none were read.
+  const sources: Record<string, unknown> = { ...(opts.sources ?? {}), apps: { scanned: [...new Set(targets.filter(t => t.role !== 'core').map(t => t.name))], skipped } };
   const stageCtx: StageContext = { root: opts.root, dataDir: opts.dataDir, config, profile: opts.profile, data, metrics: [], previous: new Map(), sources, notes, now, log, options: opts.stageOptions ?? {} };
   await runStages(opts.stages, 'scan', stageCtx);
 

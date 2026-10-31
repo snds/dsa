@@ -5,7 +5,8 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Note, Panel, StatusDot } from "@/components/bits"
-import { D, SYS, band, fmt, fmtDT, threshold, type Band } from "@/lib/dsa"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { D, SYS, band, fmt, fmtDT, ratio, threshold, type Band } from "@/lib/dsa"
 import { CERTAINTY, ROLES, classify, forRole, useRole, type Certainty } from "@/lib/insight"
 
 /**
@@ -23,7 +24,7 @@ export function Overview({ go }: { go: (view: string) => void }) {
   const definite = mine.filter((i) => classify(i.rule).certainty === "definite")
   const decide = mine.filter((i) => classify(i.rule).certainty === "recommendation")
   const cu = threshold("correct_use_rate"), tc = threshold("token_compliance_new_code")
-  const currentShare = (r: any) => (r?.consumers ? (100 * r.current_consumers) / r.consumers : null)
+  const currentShare = (r: any) => ratio(r?.current_consumers, r?.consumers)
 
   const kpis: Kpi[] = [
     { label: "Used as intended", value: last?.correct_use, prev: prev?.correct_use, unit: "%", up: true, band: band(last?.correct_use, cu?.watch ?? 90, cu?.act ?? 75), how: "measured",
@@ -38,6 +39,7 @@ export function Overview({ go }: { go: (view: string) => void }) {
 
   return (
     <div className="flex flex-col gap-6">
+      <Coverage />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {kpis.map((k) => <KpiCard key={k.label} k={k} onOpen={() => go(k.to)} since={prev?.taken_at} />)}
         <ActionsCard definite={definite.length} decide={decide.length} role={role} onOpen={() => go("queue")} />
@@ -58,9 +60,41 @@ export function Overview({ go }: { go: (view: string) => void }) {
 
 interface Kpi { label: string; value: number | null | undefined; prev: number | null | undefined; unit: string; up: boolean; band: Band; how: "measured" | "estimated"; means: string; to: string }
 
+/** A number to show, or null for "not measured": missing, or not a number at all (0/0, a stray string). */
+const measured = (x: unknown) => (x == null || !Number.isFinite(Number(x)) ? null : Number(x))
+
+/**
+ * When the scan couldn't read the apps it measures: none at all (every repo failed to fetch, or none
+ * was found), or some. Without this the tiles below just look empty.
+ */
+function Coverage() {
+  const c = D.coverage
+  if (!c || !D.run) return null
+  const skipped = (c.skipped ?? []).map((s: any) => `${s.name}: couldn't fetch ${s.url} (${s.why})`)
+  if (c.none) return (
+    <Alert variant="destructive">
+      <WarningIcon />
+      <AlertTitle>No apps were scanned{skipped.length ? `: ${c.skipped.length === 1 ? "the app's repo" : `all ${c.skipped.length} app repos`} failed to fetch` : ""}</AlertTitle>
+      <AlertDescription>
+        {skipped.length ? <ul className="list-disc pl-4">{skipped.map((s: string) => <li key={s}>{s}</li>)}</ul> : <p>{c.reason ?? "The scan found no apps that use the system."}</p>}
+        <p>The numbers below are empty because nothing was measured, not because usage is zero. {skipped.length ? "Check the scan job's git credentials for those URLs, then re-scan." : "Add consumers to dsa.config.json, then re-scan."}</p>
+      </AlertDescription>
+    </Alert>
+  )
+  if (skipped.length) return (
+    <Alert>
+      <WarningIcon />
+      <AlertTitle>{skipped.length} of {skipped.length + c.scanned.length} apps weren't scanned</AlertTitle>
+      <AlertDescription><ul className="list-disc pl-4">{skipped.map((s: string) => <li key={s}>{s}</li>)}</ul><p>The numbers below leave them out.</p></AlertDescription>
+    </Alert>
+  )
+  return null
+}
+
 function KpiCard({ k, onOpen, since }: { k: Kpi; onOpen: () => void; since?: string }) {
-  const v = k.value == null ? null : Math.round(Number(k.value) * 10) / 10
-  const d = v == null || k.prev == null ? null : Math.round((v - Number(k.prev)) * 10) / 10
+  const m = measured(k.value), pm = measured(k.prev)
+  const v = m == null ? null : Math.round(m * 10) / 10
+  const d = v == null || pm == null ? null : Math.round((v - pm) * 10) / 10
   const better = d == null || d === 0 ? null : (d > 0) === k.up
   return (
     <button type="button" onClick={onOpen} className="flex min-w-0 flex-col gap-1.5 rounded-lg border bg-card p-4 text-left transition-colors hover:bg-muted/60">
