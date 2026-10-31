@@ -72,11 +72,52 @@ export interface OpenSurface {
   stop(): void;
 }
 
+/**
+ * How a page starts a scan and follows it, without a server of its own. The dashboard's browser code
+ * has one runner per `type` (packages/dashboard/ui/src/lib/scan.ts), each with the same contract:
+ * trigger() → a run, status(run id) → where it stands, listActive() → runs already going (a
+ * scheduled one included).
+ */
+export type RunnerSpec =
+  | {
+      type: "github";
+      /** API and web addresses (GitHub Enterprise Server differs). */
+      api: string;
+      server: string;
+      repo: string;
+      /** The workflow file that scans and deploys; it needs a workflow_dispatch trigger. */
+      workflow: string;
+      /** Branch to run on; the repo's default branch when unset. */
+      ref?: string | undefined;
+      /** A page that creates a fine-grained token, filled in as far as GitHub allows. */
+      tokenUrl: string;
+    }
+  | {
+      type: "webhook";
+      /** POSTed to start a scan. It may answer { id, url } for the run. */
+      trigger: string;
+      /** GET for one run; {id} is filled in. Answers { status, steps?, url?, startedAt?, error? }. */
+      status?: string | undefined;
+      /** GET for runs going now; answers { runs: [...] } in the same shape. */
+      active?: string | undefined;
+    };
+
 /** What the static dashboard's live buttons do. Embedded in the published page as `D.actions`. */
 export interface PageActions {
   /** The adapter that made them, for the page's wording. */
   host: string;
-  rescan: { kind: "link" | "post" | "none"; url?: string | undefined; label: string; help: string };
+  rescan: {
+    /** run: the page starts the scan and shows its progress (needs `runner`); link: opens a page; post: sends a request and can't follow it; none: no button. */
+    kind: "run" | "link" | "post" | "none";
+    url?: string | undefined;
+    label: string;
+    help: string;
+    runner?: RunnerSpec | undefined;
+    /** Where to start a scan by hand when the page can't (no credential). */
+    fallbackUrl?: string | undefined;
+    /** How long a scan usually takes, from earlier runs (the page fills in better when the host knows). */
+    estimateSeconds?: number | null | undefined;
+  };
   decisions: {
     kind: "export" | "post" | "issue";
     /** post: the webhook. issue: the new-issue page (title, label and body are added by the page). */

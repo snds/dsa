@@ -21,7 +21,7 @@ import { DEFAULT_THRESHOLD, type ElementEval } from "./engine/elements.js";
 import { mapInstance } from "./engine/mapping.js";
 import { useSystem } from "./engine/system.js";
 import type { Finding } from "./engine/types.js";
-import { deployFor, NotLiveError, type Deploy, type LiveCheck } from "./deploy/index.js";
+import { deployFor, NotLiveError, recordScanTime, type Deploy, type LiveCheck } from "./deploy/index.js";
 
 export interface EngineGlobals {
   config?: string;
@@ -170,6 +170,7 @@ export function addEngineCommands(program: Command, io: CliIo): void {
       const ctx = await context(io, g(cmd));
       requirePackages(ctx);
       await storeFor(io, "run");
+      const started = Date.now();
       const deploy = await deployOf(io.cwd, ctx, io.out);
       const live = await liveGate(io.cwd, ctx, o, io.out);
       if (o.history !== false) io.out(await deploy.history.pull(ctx.dataDir));
@@ -202,6 +203,8 @@ export function addEngineCommands(program: Command, io: CliIo): void {
       await runAfterHooks(addons, { kind: "run", ctx, options: o, store: (d) => openStore(d), notes: after, log: (m) => io.out(m) });
       for (const n of after) io.out(`note: ${n}`);
       if (o.drafts !== false) io.out(`Issue drafts: ${await draftIssues(ctx.dataDir)} in ${path.join(ctx.dataDir, "issues")}`);
+      // How long a whole run takes, so a page can estimate the next one.
+      recordScanTime(ctx.dataDir, Date.now() - started);
       if (o.history !== false) io.out(await deploy.history.push(ctx.dataDir, `dsa run ${res.runId} at ${live.head?.slice(0, 7) ?? "?"}`));
     });
 

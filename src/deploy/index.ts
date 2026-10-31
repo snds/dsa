@@ -12,7 +12,8 @@ export { CI_REVISION_VARS, BUILTIN_REVISION_SOURCES, NotLiveError, authFiles, ch
 export { appSurface, normalizeBase, openSurface, serveStatic } from "./surface.js";
 export { decisionsIn, genericHost, hostAdapter, hostOf } from "./host.js";
 export { NEVER_PERSIST, excluded, historyBackend, localHistory } from "./history.js";
-export { githubHost, issueNumber } from "./adapters/github.js";
+export { githubHost, issueNumber, tokenUrl } from "./adapters/github.js";
+export { readTimes, recordScanTime, scanEstimate } from "./timing.js";
 export { gitBranchHistory } from "./adapters/git-branch.js";
 export { commandHistory } from "./adapters/command.js";
 
@@ -45,7 +46,7 @@ export interface Deploy {
 export function deployFor(o: DeployOptions): Deploy {
   const env = o.env ?? process.env;
   const get = o.fetch ?? fetch;
-  const hostCfg = o.config.host ?? { adapter: "generic", github: { workflow: "dsa.yml", label: "dsa-decisions", server: "https://github.com" } };
+  const hostCfg = o.config.host ?? { adapter: "generic", github: { workflow: "dsa.yml", dispatch: true, label: "dsa-decisions", server: "https://github.com" } };
   const host = hostAdapter(hostCfg.adapter, [...BUILTIN_HOSTS, ...(o.hosts ?? [])]);
   const hostContext: HostContext = { root: o.root, host: hostCfg, config: { github: o.config.github }, env, fetch: get };
   const history = historyBackend({ root: o.root, history: o.config.history ?? { adapter: "local", branch: "dsa-data", remote: "origin", keep: "all" }, log: o.log ?? (() => {}) }, [...BUILTIN_HISTORIES, ...(o.histories ?? [])]);

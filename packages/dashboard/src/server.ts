@@ -1,7 +1,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { discoverSources, NotLiveError, runAfterHooks, type Deploy, type DsaAddon, type EngineContext, type ServeRequest } from '@snds/dsa';
+import { discoverSources, NotLiveError, recordScanTime, runAfterHooks, type Deploy, type DsaAddon, type EngineContext, type ServeRequest } from '@snds/dsa';
 import { MEASURES, appSettings, clearEvents, clearMappingCache, computeFit, decideMany, effectiveSettings, figmaToken, githubToken, latestEvals, loadCatalog, logEvent, mapInstance, mask, materializeRemotes, openStore, parseFigmaUrl, readRendered, readSource, resolveTargets, runPipeline, setSetting, targetRelative, undecide, withMetrics, writeSecrets, type AppSettings, type Config } from '@snds/dsa/engine';
 import { renderReport } from './report.js';
 import { buildQueue, createIssues, syncLinks } from './queue.js';
@@ -47,6 +47,17 @@ export interface ServeOptions {
 
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1']);
 
+interface Job { id: string; status: 'running' | 'done' | 'failed'; startedAt: string; finishedAt?: string; steps: string[]; done: number; log: string[]; error?: string; runId?: string; summary?: unknown; notes?: string[] }
+
+/** A scan as every Re-scan runner reports it (packages/dashboard/ui/src/lib/scan.ts). */
+function jobView(j: Job) {
+  return {
+    id: j.id, status: j.status, event: 'manual', startedAt: j.startedAt, finishedAt: j.finishedAt ?? null,
+    steps: { done: j.status === 'done' ? j.steps.length : Math.min(j.done, j.steps.length), total: j.steps.length, current: j.status === 'running' ? j.steps[j.done] ?? null : null },
+    error: j.error ?? null, runId: j.runId ?? null, log: j.log.slice(-8),
+  };
+}
+
 /** Start the server; resolves once it listens. `serve` keeps it running. */
 export async function startServer(opts: ServeOptions): Promise<{ url: string; close: () => Promise<void> }> {
   const first = await opts.load();
@@ -56,7 +67,8 @@ export async function startServer(opts: ServeOptions): Promise<{ url: string; cl
   const loadConfig = async (_root?: string) => opts.load();
   const review = await optional<Review>('@snds/dsa-review');
   const figma = await optional<Figma>('@snds/dsa-figma');
-  let running = false;
+  // The scan this server is running, or ran last.
+  let job: Job | null = null;
   const bind = opts.host ?? '127.0.0.1';
   const base = opts.base ?? '/';
   if (!LOOPBACK.has(bind) && !(opts.allowHosts ?? []).length) throw new Error(`Listening on ${bind} needs --allow-host <public name>: the Host check is what stops other sites from reaching this server through DNS tricks.`);
@@ -272,34 +284,52 @@ export async function startServer(opts: ServeOptions): Promise<{ url: string; cl
         const j: any = await r.json();
         return send(200, { login: j.login });
       }
+      // Scans: started here, run in the background, followed through /api/run/status and /api/run/active
+      // (the same shape every Re-scan runner reports). Without ?async=1 the request waits for the result.
+      if (req.method === 'GET' && url.pathname === '/api/run/active') return send(200, { runs: job && job.status === 'running' ? [jobView(job)] : [] });
+      if (req.method === 'GET' && url.pathname === '/api/run/status') {
+        const id = url.searchParams.get('id');
+        return job && job.id === id ? send(200, jobView(job)) : send(404, { error: 'No such scan.' });
+      }
       if (req.method === 'POST' && url.pathname === '/api/run') {
-        if (running) return send(409, { error: 'A run is already in progress.' });
-        running = true;
-        const lines: string[] = [];
-        try {
-          const ctx = await loadConfig(root);
-          // The same live check as dsa run: a checkout that isn't the live revision isn't scanned.
-          const deploy = opts.deploy ? await opts.deploy(ctx) : null;
-          let live: unknown;
-          try { live = deploy ? await deploy.check() : undefined; } catch (e) {
-            if (e instanceof NotLiveError) return send(409, { error: e.check.label, log: [e.message] });
-            throw e;
-          }
-          const r = await runPipeline({
-            root: ctx.root, dataDir: ctx.dataDir, config: ctx.config, profile: ctx.profile, configDir: ctx.configDir, dsaConfig: ctx.loaded.config,
-            store: d => openStore(d), stages: addons.flatMap(a => a.stages ?? []), log: m => { lines.push(m); }, ...(live ? { sources: { live } } : {}),
-          });
-          // Screenshots (when shots.auto is on), the report, and the agent snapshot.
-          await runAfterHooks(addons, { kind: 'run', ctx, options: { from: 'serve' }, store: d => openStore(d), notes: r.notes, log: m => lines.push(m) });
-          if (deploy && deploy.history.id !== 'local') lines.push(await deploy.history.push(dataDir, `dsa serve run ${r.runId}`).catch(e => `History not saved: ${errText(e)}`));
-          return send(200, { runId: r.runId, summary: r.summary, notes: r.notes, log: lines });
-        } catch (e: any) {
-          logEvent(dataDir, { level: 'error', source: 'Scan', message: `The scan failed: ${String(e.message).split('\n')[0]}`, detail: lines.slice(-12).join('\n') });
-          console.error(`Scan failed: ${errText(e)}`);
-          return send(500, { error: 'The scan failed; the terminal running dsa serve has the details.', log: lines });
-        } finally {
-          running = false;
+        if (job?.status === 'running') return send(409, { error: 'A scan is already running.', run: jobView(job) });
+        const ctx = await loadConfig(root);
+        // The same live check as dsa run: a checkout that isn't the live revision isn't scanned.
+        const deploy = opts.deploy ? await opts.deploy(ctx) : null;
+        let live: unknown;
+        try { live = deploy ? await deploy.check() : undefined; } catch (e) {
+          if (e instanceof NotLiveError) return send(409, { error: e.check.label, log: [e.message] });
+          throw e;
         }
+        const saves = Boolean(deploy && deploy.history.id !== 'local');
+        const steps = ['Checking the live revision', 'Scanning the code', 'Screenshots, report and snapshot', ...(saves ? ['Saving history'] : [])];
+        const j: Job = { id: `S-${Date.now().toString(36)}`, status: 'running', startedAt: new Date().toISOString(), steps, done: 1, log: [] };
+        job = j;
+        const work = (async () => {
+          const t0 = Date.now();
+          try {
+            const r = await runPipeline({
+              root: ctx.root, dataDir: ctx.dataDir, config: ctx.config, profile: ctx.profile, configDir: ctx.configDir, dsaConfig: ctx.loaded.config,
+              store: d => openStore(d), stages: addons.flatMap(a => a.stages ?? []), log: m => { j.log.push(m); }, ...(live ? { sources: { live } } : {}),
+            });
+            j.done = 2;
+            // Screenshots (when shots.auto is on), the report, and the agent snapshot.
+            await runAfterHooks(addons, { kind: 'run', ctx, options: { from: 'serve' }, store: d => openStore(d), notes: r.notes, log: m => j.log.push(m) });
+            j.done = 3;
+            if (saves) { j.log.push(await deploy!.history.push(dataDir, `dsa serve run ${r.runId}`).catch(e => `History not saved: ${errText(e)}`)); j.done = 4; }
+            recordScanTime(dataDir, Date.now() - t0);
+            Object.assign(j, { status: 'done', runId: r.runId, summary: r.summary, notes: r.notes, finishedAt: new Date().toISOString() });
+          } catch (e: any) {
+            logEvent(dataDir, { level: 'error', source: 'Scan', message: `The scan failed: ${String(e.message).split('\n')[0]}`, detail: j.log.slice(-12).join('\n') });
+            console.error(`Scan failed: ${errText(e)}`);
+            Object.assign(j, { status: 'failed', error: `The scan failed: ${errText(e)}`, finishedAt: new Date().toISOString() });
+          }
+        })();
+        if (url.searchParams.get('async') === '1') return send(202, jobView(j));
+        await work;
+        return j.status === 'done'
+          ? send(200, { runId: j.runId, summary: j.summary, notes: j.notes, log: j.log })
+          : send(500, { error: 'The scan failed; the terminal running dsa serve has the details.', log: j.log });
       }
       return send(404, { error: 'Not found.' });
     } catch (e: any) {

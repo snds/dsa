@@ -25,6 +25,8 @@ import { AgentProvider, canChat, useAgent } from "@/agent/store"
 import { AgentPanel } from "@/agent/AgentPanel"
 import { cn } from "cn"
 import { ACTIONS, rescan as hostRescan } from "@/lib/host"
+import { ScanBanner, ScanButton, ScanDialog, TokenDialog } from "@/components/scan"
+import { canRun, detectRunning } from "@/lib/useScan"
 
 type ViewId = "overview" | "queue" | "system" | "federation" | "elements" | "usage" | "readiness" | "design" | "trends" | "settings"
 
@@ -137,17 +139,12 @@ function Shell() {
     window.scrollTo({ top: 0 })
   }
 
+  // A published page whose host can't run a scan from here (a link, a fire-and-forget webhook).
   async function rerun() {
-    // A published page: the host adapter starts the scan job (a page in a new tab, or a POST).
-    if (!D.serve) { try { await hostRescan() } catch (e: any) { setScan({ busy: false, error: e.message }) } return }
-    setScan({ busy: true })
-    try {
-      await api("/api/run", {})
-      location.reload()
-    } catch (e: any) {
-      setScan({ busy: false, error: e.message, log: e.data?.log })
-    }
+    try { await hostRescan() } catch (e: any) { setScan({ busy: false, error: e.message }) }
   }
+  // A scan already going when the page opens (scheduled, or started elsewhere) shows in the banner.
+  React.useEffect(() => { void detectRunning() }, [])
 
   const figma = D.modules?.figma && D.run ? (() => { const g = D.run.sources?.figmaDiag; return g?.error ? "Figma crawl failed" : !D.run.sources?.figma ? "Figma not crawled" : g ? `${g.crawled} Figma file${g.crawled === 1 ? "" : "s"} crawled` : "Figma crawled" })() : null
 
@@ -172,16 +169,8 @@ function Shell() {
           </div>
           <div className="flex items-center gap-2">
             <RolePicker />
-          {!D.serve && D.published && ACTIONS && ACTIONS.rescan.kind !== "none" && <StaticRescan onPost={rerun} />}
-          {D.serve && (
-            <>
-            <AgentButton />
-            <Button onClick={rerun} disabled={scan.busy}>
-              <ArrowClockwiseIcon className={scan.busy ? "animate-spin" : ""} data-icon="inline-start" />
-              {scan.busy ? "Scanning…" : D.run ? "Re-run Scan" : "Run First Scan"}
-            </Button>
-            </>
-          )}
+          {D.serve && <AgentButton />}
+          {canRun() ? <ScanButton /> : !D.serve && D.published && ACTIONS && ACTIONS.rescan.kind !== "none" && <StaticRescan onPost={rerun} />}
           </div>
         </div>
         <div className="mx-auto mt-3 max-w-[1400px] px-4 sm:px-6">
@@ -212,11 +201,13 @@ function Shell() {
             <AlertDescription>{D.live.label} Numbers and screenshots here may include unreleased work.</AlertDescription>
           </Alert>
         )}
-        {scan.busy && <Alert className="mb-6"><AlertTitle>Scanning</AlertTitle><AlertDescription>This usually takes 10–30 seconds. The page reloads when it's done.</AlertDescription></Alert>}
+        <ScanBanner />
+        <ScanDialog />
+        <TokenDialog />
         {scan.error && (
           <Alert variant="destructive" className="mb-6">
-            <AlertTitle>The scan failed</AlertTitle>
-            <AlertDescription>{scan.error} It's also in Settings › Notes.{scan.log?.length ? <Pre className="mt-2 max-h-60">{scan.log.join("\n")}</Pre> : null}</AlertDescription>
+            <AlertTitle>The scan request didn't go through</AlertTitle>
+            <AlertDescription>{scan.error}</AlertDescription>
           </Alert>
         )}
         {view === "settings" ? (

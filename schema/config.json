@@ -1311,6 +1311,19 @@
             },
             "label": {
               "type": "string"
+            },
+            "status": {
+              "description": "With method \"post\": a URL that reports one run ({id} is filled in), so the page can show its progress. Answers { status: \"queued\"|\"running\"|\"done\"|\"failed\", steps?: { done, total, current }, url?, startedAt?, error? }.",
+              "type": "string"
+            },
+            "active": {
+              "description": "With method \"post\": a URL that lists the runs going now ({ runs: [...] }, same shape), so the page can show a scan that started elsewhere.",
+              "type": "string"
+            },
+            "estimateSeconds": {
+              "description": "How long a scan usually takes, when earlier runs can't tell.",
+              "type": "number",
+              "minimum": 0
             }
           },
           "required": [
@@ -1352,6 +1365,11 @@
               "description": "The workflow file that runs the scan (needs a workflow_dispatch trigger).",
               "type": "string"
             },
+            "dispatch": {
+              "default": true,
+              "description": "Re-scan starts the workflow from the page (with the viewer's own token) and shows its progress. false: Re-scan only opens the workflow's page.",
+              "type": "boolean"
+            },
             "ref": {
               "description": "The branch the workflow runs on (default: the repo's default branch).",
               "type": "string"
@@ -1373,6 +1391,7 @@
           },
           "required": [
             "workflow",
+            "dispatch",
             "label",
             "server"
           ],

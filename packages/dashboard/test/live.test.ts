@@ -68,7 +68,8 @@ test('publish: the static site carries the host adapter\'s buttons and the revis
   const payload = payloadOf(fs.readFileSync(path.join(out, 'index.html'), 'utf8'));
   assert.equal(payload.serve, false);
   assert.equal(payload.base, null, 'a published page uses relative links, so it works under any sub-path');
-  assert.equal(payload.actions.rescan.url, 'https://github.com/acme/site/actions/workflows/dsa.yml');
+  assert.equal(payload.actions.rescan.kind, 'run');
+  assert.equal(payload.actions.rescan.fallbackUrl, 'https://github.com/acme/site/actions/workflows/dsa.yml');
   assert.equal(payload.actions.decisions.kind, 'issue');
   assert.deepEqual(payload.live, { state: 'live', ok: true, unreleased: false, label: LIVE.label, head: LIVE.head, revision: LIVE.revision });
 
@@ -77,4 +78,17 @@ test('publish: the static site carries the host adapter\'s buttons and the revis
   await runPipeline({ root: ACME_ROOT, dataDir: data2, git: false, now: NOW, sources: { live: { ...LIVE, state: 'other-commit', ok: false, unreleased: true, label: 'NOT LIVE: …' } } });
   await publish(ACME_ROOT, config as never, data2, ACME_PROFILE, out, actions);
   assert.equal(payloadOf(fs.readFileSync(path.join(out, 'index.html'), 'utf8')).live.unreleased, true);
+});
+
+test('the page carries how long a scan usually takes, from recorded scans', async () => {
+  const { recordScanTime } = await import('@snds/dsa');
+  const data = tmp();
+  await runPipeline({ root: ACME_ROOT, dataDir: data, git: false, now: NOW });
+  for (const s of [100, 300, 200]) recordScanTime(data, s * 1000);
+  const config = { ...loadConfig(ACME_ROOT).config, ...parseConfig({ host: { adapter: 'github', github: { repo: 'acme/site' } } }) };
+  const out = path.join(tmp(), 'site');
+  await publish(ACME_ROOT, config as never, data, ACME_PROFILE, out, deployFor({ root: ACME_ROOT, config: config as never, env: {} }).actions());
+  const payload = payloadOf(fs.readFileSync(path.join(out, 'index.html'), 'utf8'));
+  assert.equal(payload.actions.rescan.estimateSeconds, 200, 'the median of the recorded scans');
+  assert.equal(payload.scanEstimate, 200);
 });
