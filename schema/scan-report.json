@@ -1305,6 +1305,13 @@
                   "description": "Where people open the dashboard, e.g. https://example.com/dsa/. Shown in issues and messages.",
                   "type": "string"
                 },
+                "schedule": {
+                  "description": "When scans run by themselves, as cron lines in UTC (\"47 9 * * 1-5\"), so the dashboard can show the next one. The github adapter reads them from the workflow file when this is unset.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
                 "rescan": {
                   "description": "The static dashboard's Re-scan button (generic adapter).",
                   "type": "object",

@@ -12,6 +12,10 @@ export const T = (v: any) => new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(String(v)) ? v
 const zone = () => D.timeZone || undefined
 export const fmtDT = (v: any) => T(v).toLocaleString(undefined, { timeZone: zone(), year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" })
 export const fmtD = (v: any) => T(v).toLocaleDateString(undefined, { timeZone: zone(), year: "numeric", month: "short", day: "numeric" })
+/** "Mon, Nov 2, 1:47 AM PST": a scheduled time, in the report's time zone (or the viewer's). */
+export const fmtWhen = (v: any) => T(v).toLocaleString(undefined, { timeZone: zone(), weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" })
+/** A finite number, or null for anything that isn't one (missing, "", NaN, text). */
+export const num = (x: unknown): number | null => (x == null || x === "" || !Number.isFinite(Number(x)) ? null : Number(x))
 export const fmt = (n: any) => (n == null ? "—" : Number(n).toLocaleString("en-US"))
 export const pct = (n: any) => (n == null ? "—" : `${Math.round(n * 10) / 10}%`)
 export const pct100 = (n: number) => `${Math.round(n * 100)}%`

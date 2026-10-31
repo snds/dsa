@@ -133,6 +133,10 @@ const HostSchema = z
     adapter: z.string().default("generic").describe('Which host adapter turns the static dashboard\'s actions into requests: "generic" or "github" (add-ons may add more).'),
     base: z.string().optional().describe('The sub-path the dashboard is served under, e.g. "/dsa/" (default "/"). Used by dsa serve; dsa publish writes relative links that work under any path.'),
     url: z.string().optional().describe("Where people open the dashboard, e.g. https://example.com/dsa/. Shown in issues and messages."),
+    schedule: z
+      .array(z.string())
+      .optional()
+      .describe('When scans run by themselves, as cron lines in UTC ("47 9 * * 1-5"), so the dashboard can show the next one. The github adapter reads them from the workflow file when this is unset.'),
     rescan: z
       .object({
         url: z.string().describe("Where Re-scan goes: a page that starts the scan job (opened in a new tab), or a webhook (POSTed to)."),

@@ -131,7 +131,8 @@ export async function startServer(opts: ServeOptions): Promise<{ url: string; cl
 
       if (req.method === 'GET' && url.pathname === '/') {
         const { config, profile } = await loadConfig(root);
-        return send(200, await renderReport(root, config, dataDir, profile, { serve: true, base }), 'text/html; charset=utf-8');
+        const schedule = opts.deploy ? (await opts.deploy(await loadConfig(root))).schedule() : [];
+        return send(200, await renderReport(root, config, dataDir, profile, { serve: true, base, schedule }), 'text/html; charset=utf-8');
       }
       if (req.method === 'GET' && url.pathname === '/api/settings') return send(200, readView(await loadConfig(root)));
       // Add-on routes: the agent workbench's sessions, proposals, handoff and settings.

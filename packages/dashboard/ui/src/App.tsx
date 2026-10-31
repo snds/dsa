@@ -25,7 +25,7 @@ import { AgentProvider, canChat, useAgent } from "@/agent/store"
 import { AgentPanel } from "@/agent/AgentPanel"
 import { cn } from "cn"
 import { ACTIONS, rescan as hostRescan } from "@/lib/host"
-import { ScanBanner, ScanButton, ScanDialog, TokenDialog } from "@/components/scan"
+import { NextScan, ScanBanner, ScanButton, ScanDialog, TokenDialog } from "@/components/scan"
 import { canRun, detectRunning } from "@/lib/useScan"
 
 type ViewId = "overview" | "queue" | "system" | "federation" | "elements" | "usage" | "readiness" | "design" | "trends" | "settings"
@@ -101,6 +101,7 @@ function StaticRescan({ onPost }: { onPost: () => void }) {
       ) : (
         <Button variant="outline" onClick={onPost}><PaperPlaneTiltIcon data-icon="inline-start" />{r.label}</Button>
       )}
+      <NextScan prefix="Next scheduled scan" className="text-xs text-muted-foreground" />
       <p className="text-right text-xs text-muted-foreground">
         {r.help}{target && <> <span className="font-mono break-all" title={r.url}>{r.kind === "link" ? "Opens" : "Sends to"} {target}</span></>}
       </p>
@@ -163,6 +164,7 @@ function Shell() {
                 </Tooltip>
               ) : "No scans yet"}
               {D.live && <span> · <LiveRevision /></span>}
+              {D.schedule?.length > 0 && <span> · <NextScan /></span>}
               {figma && <span> · {figma}</span>}
               {!D.serve && <span> · Snapshot from {fmtD(D.generatedAt)}{D.published ? `. Static: review decisions are staged in your browser and ${ACTIONS?.decisions.kind === "issue" ? "filed as an issue" : ACTIONS?.decisions.kind === "post" ? "sent to the team" : "exported"}; the agent needs dsa serve` : ""}</span>}
             </p>

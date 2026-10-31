@@ -106,6 +106,8 @@ export type RunnerSpec =
 export interface PageActions {
   /** The adapter that made them, for the page's wording. */
   host: string;
+  /** When scans run by themselves (cron lines, UTC), so the page can show the next one. */
+  schedule?: string[] | undefined;
   rescan: {
     /** run: the page starts the scan and shows its progress (needs `runner`); link: opens a page; post: sends a request and can't follow it; none: no button. */
     kind: "run" | "link" | "post" | "none";
@@ -153,6 +155,8 @@ export interface HostAdapter {
   readDecisions(ref: string, c: HostContext): Promise<unknown>;
   /** After decisions from `ref` are applied: close the issue, comment. Optional. */
   applied?(ref: string, summary: string, c: HostContext): Promise<void>;
+  /** When scans run by themselves, as cron lines in UTC. Default: host.schedule. */
+  schedule?(c: HostContext): string[];
   /** Ways to learn the live revision this host offers, for this run's settings (a deployments API). */
   revisionSources?(c: HostContext): RevisionSource[];
 }

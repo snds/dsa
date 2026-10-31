@@ -14,6 +14,13 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   as a background job). The page shows Starting…, a banner while a scan runs (one found on load
   too, scheduled ones included), a progress dialog for scans over a minute (steps, time left from
   recent runs), Load the new report once it is deployed, and plain errors with a link to the run.
+- The next scheduled scan, in the header and under Re-scan: `host.schedule` (cron, UTC), or read
+  from the GitHub workflow's `on.schedule`.
+
+### Fixed
+
+- Overview deltas: a value the earlier scan didn't measure reads "First measurement", an unchanged
+  one "No change" (never "NaN pts" or "−0 pts"); Trends leave a gap instead of plotting NaN.
 
 - Running where the product is deployed ([docs/deploy.md](docs/deploy.md)). Three new config
   sections, each picking an adapter by name behind interfaces in `src/deploy/` (the core names no

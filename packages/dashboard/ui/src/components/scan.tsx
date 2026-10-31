@@ -6,7 +6,8 @@ import { Button, buttonVariants } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { D } from "@/lib/dsa"
+import { D, fmtWhen } from "@/lib/dsa"
+import { nextScheduled } from "@/lib/cron"
 import { aboutTime, looksLikeToken, progress, type ScanRun } from "@/lib/scan"
 import { canRun, closeAsk, dismiss, saveToken, showDialog, startScan, useScan } from "@/lib/useScan"
 
@@ -30,16 +31,27 @@ function useTick(ms = 5000) {
   React.useEffect(() => { const i = setInterval(() => t(x => x + 1), ms); return () => clearInterval(i) }, [ms])
 }
 
+/** "Next scan: Mon, Nov 2, 1:47 AM PST", from the schedule the host declared; nothing without one. */
+export function NextScan({ prefix = "Next scan", className }: { prefix?: string; className?: string }) {
+  useTick(60000)
+  const next = nextScheduled(D.schedule)
+  if (!next) return null
+  return <span className={className} title={`Scheduled: ${(D.schedule as string[]).join(" · ")} (cron, UTC)`}>{prefix}: <time dateTime={next.toISOString()}>{fmtWhen(next.toISOString())}</time></span>
+}
+
 export function ScanButton() {
   const s = useScan()
   if (!canRun()) return null
   const busy = s.phase === "starting" || s.phase === "running" || s.phase === "deploying"
   const text = s.phase === "starting" ? "Starting…" : s.phase === "running" ? `Scanning… ${stepText(s.run)}`.trim() : s.phase === "deploying" ? "Publishing…" : D.run ? (D.serve ? "Re-run Scan" : "Re-scan") : "Run First Scan"
   return (
-    <Button onClick={() => (busy ? showDialog(true) : startScan())} aria-live="polite" title={busy ? "Show the scan's progress" : D.actions?.rescan?.help}>
-      {busy ? <CircleNotchIcon className="animate-spin" data-icon="inline-start" /> : <ArrowClockwiseIcon data-icon="inline-start" />}
-      {text}
-    </Button>
+    <span className="flex flex-col items-end gap-1">
+      <Button onClick={() => (busy ? showDialog(true) : startScan())} aria-live="polite" title={busy ? "Show the scan's progress" : D.actions?.rescan?.help}>
+        {busy ? <CircleNotchIcon className="animate-spin" data-icon="inline-start" /> : <ArrowClockwiseIcon data-icon="inline-start" />}
+        {text}
+      </Button>
+      <NextScan prefix="Next scheduled scan" className="text-xs text-muted-foreground" />
+    </span>
   )
 }
 

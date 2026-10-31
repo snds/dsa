@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+import { parse as parseYaml } from "yaml";
 import { decisionsIn, genericHost } from "../host.js";
 import type { HostAdapter, HostContext, PageActions, RevisionSource } from "../types.js";
 
@@ -40,6 +43,21 @@ export function tokenUrl(server: string, repo: string): string {
 }
 
 const isIssueRef = (ref: string) => /^#?\d+$|\/issues\/\d+\/?$/.test(ref.trim());
+
+/** The cron lines in a workflow file of the measured repo, or none. */
+export function workflowCrons(root: string, workflow: string): string[] {
+  for (const dir of [".github/workflows"]) {
+    const f = path.join(root, dir, workflow);
+    if (!fs.existsSync(f)) continue;
+    try {
+      const doc = parseYaml(fs.readFileSync(f, "utf8")) as { on?: { schedule?: { cron?: unknown }[] } } | null;
+      return (doc?.on?.schedule ?? []).map((s) => s?.cron).filter((c): c is string => typeof c === "string");
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
 
 /** "12", "#12" or an issue URL → 12. */
 export function issueNumber(ref: string): number {
@@ -133,4 +151,6 @@ export const githubHost: HostAdapter = {
     await gh(c, "PATCH", `/repos/${s.repo}/issues/${n}`, { state: "closed", state_reason: "completed" });
   },
   revisionSources: (c) => [deploymentSource(c)],
+  // The workflow's own schedule (on.schedule[].cron, always UTC on GitHub), unless the config says otherwise.
+  schedule: (c) => c.host.schedule ?? workflowCrons(c.root, settings(c).workflow),
 };

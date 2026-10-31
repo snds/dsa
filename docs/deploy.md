@@ -139,6 +139,10 @@ adapter names. The page shows the same feedback whatever the runner:
 - When the run has finished and the deployed page carries the new report, **Load the new report**.
 - Errors say what went wrong, with a link to the run.
 
+**The next scheduled scan** shows in the header and under Re-scan, in the report's time zone (or the
+viewer's). Declare it with `host.schedule`, as cron lines in UTC (`["47 9 * * 1-5"]`). The github
+adapter reads `on.schedule` from its workflow file when that is unset.
+
 The estimate is the median of recent successful runs (from GitHub) or of recorded scans
 (`<data>/scan-times.json`, which `dsa run` and `dsa serve` write). For a webhook, set
 `host.rescan.estimateSeconds` if neither knows.

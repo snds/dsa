@@ -30,6 +30,8 @@ export interface ReportOptions {
   base?: string;
   /** What a published page's Re-scan and decision buttons do (the host adapter's actions). */
   actions?: PageActions | null;
+  /** When scans run by themselves (cron lines, UTC); a published page takes it from `actions`. */
+  schedule?: string[] | undefined;
 }
 
 export async function renderReport(root: string, config: Config, dataDir: string, profile: ResolvedProfile, opts: ReportOptions = {}): Promise<string> {
@@ -282,7 +284,7 @@ function coverageOf(run: any, targets: { name: string; role: string }[]) {
 function hostOpts(opts: ReportOptions, dataDir: string) {
   const estimate = scanEstimate(dataDir);
   const actions = opts.site && opts.actions ? { ...opts.actions, rescan: { ...opts.actions.rescan, estimateSeconds: opts.actions.rescan.estimateSeconds ?? estimate } } : null;
-  return { base: opts.serve ? opts.base ?? '/' : null, actions, scanEstimate: estimate };
+  return { base: opts.serve ? opts.base ?? '/' : null, actions, scanEstimate: estimate, schedule: opts.schedule ?? opts.actions?.schedule ?? [] };
 }
 
 function displayOpts(root: string, config: Config, profile: ResolvedProfile, serve?: boolean) {

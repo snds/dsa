@@ -12,7 +12,7 @@ export { CI_REVISION_VARS, BUILTIN_REVISION_SOURCES, NotLiveError, authFiles, ch
 export { appSurface, normalizeBase, openSurface, serveStatic } from "./surface.js";
 export { decisionsIn, genericHost, hostAdapter, hostOf } from "./host.js";
 export { NEVER_PERSIST, excluded, historyBackend, localHistory } from "./history.js";
-export { githubHost, issueNumber, tokenUrl } from "./adapters/github.js";
+export { githubHost, issueNumber, tokenUrl, workflowCrons } from "./adapters/github.js";
 export { readTimes, recordScanTime, scanEstimate } from "./timing.js";
 export { gitBranchHistory } from "./adapters/git-branch.js";
 export { commandHistory } from "./adapters/command.js";
@@ -38,6 +38,8 @@ export interface Deploy {
   history: HistoryBackend;
   /** What the static dashboard's buttons do. */
   actions(): PageActions;
+  /** When scans run by themselves (cron lines, UTC). */
+  schedule(): string[];
   /** Check the checkout against the live revision (throws NotLiveError when it must refuse). */
   check(o?: { allowUnreleased?: boolean }): Promise<LiveCheck>;
 }
@@ -49,12 +51,14 @@ export function deployFor(o: DeployOptions): Deploy {
   const hostCfg = o.config.host ?? { adapter: "generic", github: { workflow: "dsa.yml", dispatch: true, label: "dsa-decisions", server: "https://github.com" } };
   const host = hostAdapter(hostCfg.adapter, [...BUILTIN_HOSTS, ...(o.hosts ?? [])]);
   const hostContext: HostContext = { root: o.root, host: hostCfg, config: { github: o.config.github }, env, fetch: get };
+  const scheduleOf = () => { try { return host.schedule?.(hostContext) ?? hostCfg.schedule ?? []; } catch { return hostCfg.schedule ?? []; } };
   const history = historyBackend({ root: o.root, history: o.config.history ?? { adapter: "local", branch: "dsa-data", remote: "origin", keep: "all" }, log: o.log ?? (() => {}) }, [...BUILTIN_HISTORIES, ...(o.histories ?? [])]);
   return {
     host,
     hostContext,
     history,
-    actions: () => host.actions(hostContext),
+    actions: () => ({ ...host.actions(hostContext), schedule: scheduleOf() }),
+    schedule: () => scheduleOf(),
     check: (c = {}) =>
       checkLive({
         root: o.root,
