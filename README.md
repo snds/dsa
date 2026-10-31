@@ -114,6 +114,11 @@ that it is listed for a person to confirm: `dsa sources --pin <folder>` or, in `
 Settings → Sources → tick the folder. Pinned folders (`system.path` or `system.sources`) always win;
 `--unpin` or Find again goes back to finding them.
 
+A system read from another checkout (a repo that vendors it) usually spans several packages: its
+components and its tokens. List them all in `system.sources`, as folders or as a glob of package
+folders: `"sources": ["../vendor/acme-ui/packages/*"]`. A glob keeps folders with a `package.json`.
+With `system.git`, the sources are folders inside the clone.
+
 ### `dsa patterns [dir] [--all] [--ignore <id>]`
 
 Pattern-candidate suggestion records → `.dsa/patterns.json`. Real output on
