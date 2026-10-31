@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+import { parse as parseYaml } from "yaml";
 import { decisionsIn, genericHost } from "../host.js";
 import type { HostAdapter, HostContext, PageActions, RevisionSource } from "../types.js";
 
@@ -15,7 +18,7 @@ function settings(c: Pick<HostContext, "host" | "config" | "env">) {
   const server = (g?.server ?? "https://github.com").replace(/\/+$/, "");
   const api = (g?.api ?? (server === "https://github.com" ? "https://api.github.com" : `${server}/api/v3`)).replace(/\/+$/, "");
   const repo = g?.repo ?? c.config.github?.defaultRepo ?? c.env.GITHUB_REPOSITORY;
-  return { server, api, repo, workflow: g?.workflow ?? "dsa.yml", ref: g?.ref, label: g?.label ?? "dsa-decisions" };
+  return { server, api, repo, workflow: g?.workflow ?? "dsa.yml", ref: g?.ref, label: g?.label ?? "dsa-decisions", dispatch: g?.dispatch ?? true };
 }
 
 async function gh(c: HostContext, method: string, pathname: string, body?: unknown): Promise<any> {
@@ -29,7 +32,32 @@ async function gh(c: HostContext, method: string, pathname: string, body?: unkno
   return r.status === 204 ? null : r.json();
 }
 
+/**
+ * GitHub's page for a new fine-grained token, filled in where it allows: a name, a short expiry,
+ * the repo's owner and Actions read and write. The viewer still picks "Only select repositories".
+ */
+export function tokenUrl(server: string, repo: string): string {
+  const owner = repo.split("/")[0] ?? "";
+  const q = new URLSearchParams({ name: `dsa re-scan ${repo}`.slice(0, 40), description: `Starts and follows the scan workflow in ${repo} from the dsa dashboard.`, target_name: owner, expires_in: "30", actions: "write" });
+  return `${server}/settings/personal-access-tokens/new?${q}`;
+}
+
 const isIssueRef = (ref: string) => /^#?\d+$|\/issues\/\d+\/?$/.test(ref.trim());
+
+/** The cron lines in a workflow file of the measured repo, or none. */
+export function workflowCrons(root: string, workflow: string): string[] {
+  for (const dir of [".github/workflows"]) {
+    const f = path.join(root, dir, workflow);
+    if (!fs.existsSync(f)) continue;
+    try {
+      const doc = parseYaml(fs.readFileSync(f, "utf8")) as { on?: { schedule?: { cron?: unknown }[] } } | null;
+      return (doc?.on?.schedule ?? []).map((s) => s?.cron).filter((c): c is string => typeof c === "string");
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
 
 /** "12", "#12" or an issue URL → 12. */
 export function issueNumber(ref: string): number {
@@ -72,6 +100,15 @@ export const githubHost: HostAdapter = {
       host: "github",
       rescan: c.host.rescan
         ? generic.rescan
+        : s.dispatch
+        ? {
+            kind: "run",
+            label: "Re-scan",
+            help: `Starts the ${s.workflow} workflow on GitHub with your own token and shows its progress here. The new report loads when that run has deployed.`,
+            runner: { type: "github", api: s.api, server: s.server, repo: s.repo, workflow: s.workflow, ref: s.ref, tokenUrl: tokenUrl(s.server, s.repo) },
+            fallbackUrl: `${s.server}/${s.repo}/actions/workflows/${encodeURIComponent(s.workflow)}`,
+            estimateSeconds: null,
+          }
         : {
             kind: "link",
             url: `${s.server}/${s.repo}/actions/workflows/${encodeURIComponent(s.workflow)}`,
@@ -114,4 +151,6 @@ export const githubHost: HostAdapter = {
     await gh(c, "PATCH", `/repos/${s.repo}/issues/${n}`, { state: "closed", state_reason: "completed" });
   },
   revisionSources: (c) => [deploymentSource(c)],
+  // The workflow's own schedule (on.schedule[].cron, always UTC on GitHub), unless the config says otherwise.
+  schedule: (c) => c.host.schedule ?? workflowCrons(c.root, settings(c).workflow),
 };

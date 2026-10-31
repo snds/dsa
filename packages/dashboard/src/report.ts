@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DEFAULT_THRESHOLD, openStore, withMetrics, appSettings, closestRendered, compareRendered, computeFit, effectiveSettings, familyKey, figmaEnabled, homeOf, loadCatalog, patterns as stylePatterns, pushedThisWeek, questions, readEvents, readProposals, readRendered, renderIssue, renderedFor as composeRendered, resolveTargets, rowToFinding, sourceExcerpts, titleOf, type Config } from '@snds/dsa/engine';
 
-import type { PageActions, ResolvedProfile } from '@snds/dsa';
+import { scanEstimate, type PageActions, type ResolvedProfile } from '@snds/dsa';
 import { buildQueue, PKG_DIR } from './queue.js';
 
 /**
@@ -30,6 +30,8 @@ export interface ReportOptions {
   base?: string;
   /** What a published page's Re-scan and decision buttons do (the host adapter's actions). */
   actions?: PageActions | null;
+  /** When scans run by themselves (cron lines, UTC); a published page takes it from `actions`. */
+  schedule?: string[] | undefined;
 }
 
 export async function renderReport(root: string, config: Config, dataDir: string, profile: ResolvedProfile, opts: ReportOptions = {}): Promise<string> {
@@ -38,7 +40,7 @@ export async function renderReport(root: string, config: Config, dataDir: string
   const store = await openStore(dataDir, 'report');
   try {
     const runId = await store.latestRunId();
-    if (!runId) return shell(root, config, { ...emptyPayload(root, config, profile, opts.serve), ...hostOpts(opts) });
+    if (!runId) return shell(root, config, { ...emptyPayload(root, config, profile, opts.serve), ...hostOpts(opts, dataDir) });
     const catalog = withMetrics(loadCatalog(), profile.metrics);
     const settings = effectiveSettings(catalog, config, dataDir);
     const [run] = await store.all<any>('select * from runs where run_id=$1', [runId]);
@@ -239,7 +241,7 @@ export async function renderReport(root: string, config: Config, dataDir: string
       // What the scan read: the live revision and when it went live, or why it isn't the live one.
       live: liveOf(run),
       coverage: coverageOf(run, targets),
-      ...hostOpts(opts),
+      ...hostOpts(opts, dataDir),
     };
     return shell(root, config, payload);
   } finally {
@@ -275,9 +277,14 @@ function coverageOf(run: any, targets: { name: string; role: string }[]) {
   return { scanned, skipped, none: scanned.length === 0, reason: scanned.length ? null : skipped.length ? null : noConsumers };
 }
 
-/** Where the page's requests go (serve) and what its static buttons do (publish). */
-function hostOpts(opts: ReportOptions) {
-  return { base: opts.serve ? opts.base ?? '/' : null, actions: opts.site ? opts.actions ?? null : null };
+/**
+ * Where the page's requests go (serve), what its static buttons do (publish), and how long a scan
+ * usually takes (the median of recorded scans), which decides whether a progress dialog opens.
+ */
+function hostOpts(opts: ReportOptions, dataDir: string) {
+  const estimate = scanEstimate(dataDir);
+  const actions = opts.site && opts.actions ? { ...opts.actions, rescan: { ...opts.actions.rescan, estimateSeconds: opts.actions.rescan.estimateSeconds ?? estimate } } : null;
+  return { base: opts.serve ? opts.base ?? '/' : null, actions, scanEstimate: estimate, schedule: opts.schedule ?? opts.actions?.schedule ?? [] };
 }
 
 function displayOpts(root: string, config: Config, profile: ResolvedProfile, serve?: boolean) {

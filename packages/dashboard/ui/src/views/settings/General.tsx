@@ -1,4 +1,5 @@
 import * as React from "react"
+import { forgetToken, token } from "@/lib/useScan"
 import { TrashIcon, PlusIcon } from "@phosphor-icons/react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -72,11 +73,14 @@ export function General({ onTitle }: { onTitle: (t: string) => void }) {
   React.useEffect(() => { if (D.serve) api("/api/settings").then(setV, e => setErr(e.message)) }, [])
 
   if (!D.serve) return (
+    <div className="flex flex-col gap-6">
+    <BrowserToken />
     <Panel title="Settings are edited in the live view">
       <Note>This file is a snapshot. To change tokens, Figma links, the time zone, sources, or rule settings, start the live view and open it in your browser:</Note>
       <Pre className="my-3">dsa serve</Pre>
       <Note>Then go to http://localhost:4319. Tokens are stored in .dsa/secrets.json (never in dsa.config.json), so the config stays safe to commit.</Note>
     </Panel>
+    </div>
   )
   if (err) return <Panel><Note>Couldn't load settings: {err}</Note></Panel>
   if (!v) return <div className="flex flex-col gap-4"><Skeleton className="h-40" /><Skeleton className="h-64" /></div>
@@ -265,5 +269,22 @@ function TokenField({ id, label, token, fromEnv, save, testUrl, onView }: { id: 
       </div>
       <FieldDescription>{label}{fromEnv ? " An environment variable is set and takes priority." : ""}{check ? ` ${check}` : ""}</FieldDescription>
     </Field>
+  )
+}
+
+/** The GitHub token Re-scan uses on a published page: kept only in this browser, forgotten here. */
+function BrowserToken() {
+  const spec = D.actions?.rescan?.runner?.type === "github" ? D.actions.rescan.runner : null
+  const [has, setHas] = React.useState(() => Boolean(token()?.get()))
+  if (!spec) return null
+  return (
+    <Panel title="This browser" description={`Re-scan starts the ${spec.workflow} workflow in ${spec.repo} with a GitHub token you give it.`}>
+      {has ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Note>A token is saved in this browser only (local storage for this site). It isn't in the report or anywhere else.</Note>
+          <Button variant="outline" onClick={() => { forgetToken(); setHas(false); say("Token forgotten. Revoke it on GitHub too if you no longer need it.") }}>Forget token</Button>
+        </div>
+      ) : <Note>No token saved. Re-scan asks for one the first time.</Note>}
+    </Panel>
   )
 }
