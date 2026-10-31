@@ -33,7 +33,11 @@ export function Elements() {
   const refresh = () => bump(x => x + 1)
   const byId = React.useMemo(() => new Map<string, any>(E.evals.map((e: any) => [e.id, e])), [E])
   const targets = [...new Set<string>(E.evals.map((e: any) => e.target))]
-  const [target, setTarget] = React.useState<string>(() => targets.find(t => E.evals.some((e: any) => e.target === t && e.needsHuman)) ?? targets[0])
+  // Open on the app with the most questions for a human (an app whose only open elements sit in unused files has none).
+  const [target, setTarget] = React.useState<string>(() => {
+    const asks = (t: string) => E.questions.filter((q: any) => E.evals.find((e: any) => e.id === q.ids[0])?.target === t).length
+    return [...targets].sort((a, b) => asks(b) - asks(a))[0] ?? targets[0]
+  })
   const [picker, setPicker] = React.useState<{ ids: string[]; pattern?: string | null } | null>(null)
   const [lb, setLb] = React.useState<{ ids: string[]; i: number } | null>(null)
   const [code, setCode] = React.useState<string | null>(null)

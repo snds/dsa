@@ -94,7 +94,7 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
   const misses = index.misses;
   const plan = (mine: ElementEval[]) => {
     const cached = new Set(mine.filter(e => fresh(index.shots[e.id], e) && fs.existsSync(path.join(dir, index.shots[e.id].file))).map(e => e.id));
-    const picked = pickExamples(mine, perGroup, cached);
+    const picked = pickExamples(mine, perGroup, cached, opts.config.shots?.perQuestion ?? 40);
     const need = picked.filter(e => !cached.has(e.id) && !freshMiss(misses[e.id], e));
     return { picked, need, cached: picked.filter(e => cached.has(e.id)).length };
   };
@@ -315,7 +315,8 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
         await sweep();
         if (remaining.length) await explore(next.u, sweep);
       } catch (e: any) {
-        if (!/closed|crash|Target/i.test(String(e?.message))) throw e;
+        // One page that won't load (an aborted navigation, a timeout) costs that page, not the run's screenshots.
+        if (!/closed|crash|Target/i.test(String(e?.message))) { o.log(`  skip ${next.u}: ${String(e?.message).split('\n')[0]}`); continue; }
         await relaunch();
       }
     }
@@ -523,12 +524,17 @@ const PLACE_IN_PAGE = `(el) => {
   return { regions, attrs, parentRole, siblings, geometry };
 }`;
 
-/** A few per group, spread across files; everything that needs a human first. */
-export function pickExamples(evals: ElementEval[], perGroup: number, prefer: Set<string> = new Set()): ElementEval[] {
+/**
+ * Which elements to photograph. A group that needs a human decision gets every case (up to perQuestion), so
+ * the reviewer can see they really look the same before one answer covers them all. A group the scanner is
+ * already sure of gets a few, spread across files.
+ */
+export function pickExamples(evals: ElementEval[], perGroup: number, prefer: Set<string> = new Set(), perQuestion = 40): ElementEval[] {
   const groups = new Map<string, ElementEval[]>();
   for (const e of evals.filter(x => !x.exception)) groups.set(groupKey(e), [...(groups.get(groupKey(e)) ?? []), e]);
   const out: ElementEval[] = [];
   for (const items of groups.values()) {
+    const cap = items.some(e => e.needsHuman) ? Math.max(perGroup, perQuestion) : perGroup;
     // Findable first (text or aria-label), needs-human first, then one per file.
     const sorted = [...items].sort((a, b) => Number(prefer.has(b.id)) - Number(prefer.has(a.id)) || Number(b.needsHuman) - Number(a.needsHuman) || Number(Boolean(b.match.text || b.match.ariaLabel)) - Number(Boolean(a.match.text || a.match.ariaLabel)));
     // One example per look first (elements with the same classes render the same), so the review can show
@@ -537,17 +543,22 @@ export function pickExamples(evals: ElementEval[], perGroup: number, prefer: Set
     for (const e of sorted) {
       const k = e.styleSig ?? e.styleKey ?? e.id;
       if (looks.has(k)) continue;
-      if (looks.size >= perGroup + 5) break;
+      if (looks.size >= cap + 5) break;
       looks.add(k);
       out.push(e);
     }
     const files = new Set<string>(out.filter(o => groupKey(o) === groupKey(sorted[0])).map(o => o.file));
     for (const e of sorted) {
       if (out.includes(e)) continue;
-      if (out.filter(o => groupKey(o) === groupKey(e)).length >= perGroup) break;
+      if (out.filter(o => groupKey(o) === groupKey(e)).length >= cap) break;
       if (files.has(e.file) && sorted.some(x => !files.has(x.file) && !out.includes(x))) continue;
       files.add(e.file);
       out.push(e);
+    }
+    // Spreading across files skips cases in a file already shown; a group a human decides gets them too.
+    if (cap > perGroup) {
+      let n = out.filter(o => groupKey(o) === groupKey(sorted[0]!)).length;
+      for (const e of sorted) { if (n >= cap) break; if (!out.includes(e)) { out.push(e); n++; } }
     }
   }
   return out;

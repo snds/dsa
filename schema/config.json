@@ -937,6 +937,11 @@
           "minimum": 0,
           "maximum": 9007199254740991
         },
+        "perQuestion": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
         "maxPages": {
           "type": "integer",
           "minimum": 1,

@@ -201,6 +201,7 @@ export const ConfigSchema = z
         auto: z.boolean().optional().describe("Take screenshots on every run."),
         reveal: z.boolean().optional().describe("Open menus, tabs and sheets to find hidden elements (default on)."),
         perGroup: z.number().int().min(0).optional(),
+        perQuestion: z.number().int().min(0).optional(),
         maxPages: z.number().int().min(1).optional(),
         maxActions: z.number().int().min(0).optional(),
         maxDepth: z.number().int().min(0).optional(),
