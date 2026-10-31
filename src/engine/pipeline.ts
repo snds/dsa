@@ -76,6 +76,8 @@ export interface RunOptions {
   stages?: PipelineStage[] | undefined;
   /** Passed to stages as ctx.options. */
   stageOptions?: Record<string, unknown> | undefined;
+  /** Recorded in the run's `sources` (the live revision check, from src/deploy). */
+  sources?: Record<string, unknown> | undefined;
   registry?: boolean | undefined;
   /** Always use git clones for targets that declare a git source, even when a local path exists. */
   remote?: boolean | undefined;
@@ -218,7 +220,7 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
   }
 
   // Add-on stages (a Figma crawl) add to the scan before metrics. A stage's problem never costs the code scan.
-  const sources: Record<string, unknown> = {};
+  const sources: Record<string, unknown> = { ...(opts.sources ?? {}) };
   const stageCtx: StageContext = { root: opts.root, dataDir: opts.dataDir, config, profile: opts.profile, data, metrics: [], previous: new Map(), sources, notes, now, log, options: opts.stageOptions ?? {} };
   await runStages(opts.stages, 'scan', stageCtx);
 

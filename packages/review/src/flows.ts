@@ -73,7 +73,17 @@ export const describeStep = (s: Step): string => {
 export const TEST_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
 
 /** Block everything that could change state off the page. Returns a counter of blocked requests. */
-export async function guardNetwork(page: any, origin: string): Promise<{ blocked: number; last: string[] }> {
+/**
+ * A route under the app's URL. Routes come from the app's own source, so "/materials" is relative to
+ * where the app is mounted: https://example.com/app/ + /materials → https://example.com/app/materials.
+ */
+export function routeUrl(route: string, base: URL): string {
+  const mount = base.pathname.endsWith('/') ? base.pathname : base.pathname.replace(/[^/]*$/, '');
+  if (route.startsWith('/') && mount !== '/' && !route.startsWith(mount)) return new URL(mount + route.slice(1), base).toString();
+  return new URL(route, base).toString();
+}
+
+export async function guardNetwork(page: any, origin: string, opts: { readApi?: boolean } = {}): Promise<{ blocked: number; last: string[] }> {
   const stats = { blocked: 0, last: [] as string[] };
   await page.route('**/*', (route: any) => {
     const r = route.request();
@@ -82,7 +92,8 @@ export async function guardNetwork(page: any, origin: string): Promise<{ blocked
     const method = r.method();
     const local = !u || u.origin === origin || /^(data|blob):$/.test(u.protocol);
     const passive = ['image', 'font', 'stylesheet', 'media'].includes(r.resourceType());
-    const ok = (method === 'GET' || method === 'HEAD') && (local ? !(u && u.pathname.startsWith('/api/')) : passive);
+    // A live, signed-in site loads its data from its own API: reads may pass (readApi), writes never do.
+    const ok = (method === 'GET' || method === 'HEAD') && (local ? opts.readApi || !(u && u.pathname.startsWith('/api/')) : passive);
     if (ok) return route.continue();
     stats.blocked++;
     stats.last = [...stats.last.slice(-4), `${method} ${u ? u.origin + u.pathname : r.url().slice(0, 40)}`];
@@ -141,7 +152,7 @@ export async function runFlow(page: any, f: Flow, opts: { base: URL; waitMs: num
   // A fresh document every time: going #/a → #/b only changes the hash, so an app keeps whatever the last
   // flow left open (a modal's overlay then swallows every click).
   await page.goto('about:blank').catch(() => {});
-  await page.goto(new URL(f.route, opts.base).toString(), { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto(routeUrl(f.route, opts.base), { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
   await page.waitForTimeout(opts.waitMs);
   const path: string[] = [];

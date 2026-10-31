@@ -47,7 +47,7 @@ export function engineConfig(c: DsaConfig, profile: ResolvedProfile = NEUTRAL_PR
   }
   const exclude = engineExcludes(c.scan.exclude);
   if (exclude.length) out.exclude = exclude;
-  for (const k of ['apps', 'rendered', 'shots', 'modules', 'figma', 'github', 'agents', 'report', 'settings'] as const) {
+  for (const k of ['apps', 'rendered', 'shots', 'modules', 'figma', 'github', 'agents', 'report', 'settings', 'live', 'host', 'history'] as const) {
     if (c[k] !== undefined) (out as unknown as Record<string, unknown>)[k] = c[k];
   }
   return out;

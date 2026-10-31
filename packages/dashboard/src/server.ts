@@ -1,7 +1,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { discoverSources, runAfterHooks, type DsaAddon, type EngineContext, type ServeRequest } from '@snds/dsa';
+import { discoverSources, NotLiveError, runAfterHooks, type Deploy, type DsaAddon, type EngineContext, type ServeRequest } from '@snds/dsa';
 import { MEASURES, appSettings, clearEvents, clearMappingCache, computeFit, decideMany, effectiveSettings, figmaToken, githubToken, latestEvals, loadCatalog, logEvent, mapInstance, mask, materializeRemotes, openStore, parseFigmaUrl, readRendered, readSource, resolveTargets, runPipeline, setSetting, targetRelative, undecide, withMetrics, writeSecrets, type AppSettings, type Config } from '@snds/dsa/engine';
 import { renderReport } from './report.js';
 import { buildQueue, createIssues, syncLinks } from './queue.js';
@@ -14,9 +14,12 @@ type Review = typeof import('@snds/dsa-review');
 type Figma = typeof import('@snds/dsa-figma');
 
 /**
- * `dsa serve`: the report plus a live Settings view, on localhost only.
- * - Binds 127.0.0.1, checks the Host header (DNS-rebinding guard), and requires an
+ * `dsa serve`: the report plus a live Settings view.
+ * - Binds 127.0.0.1 by default. On a server (--host 0.0.0.0) it must sit behind the organization's
+ *   sign-in proxy: it has no accounts of its own, and its writes change the repo.
+ * - Checks the Host header (DNS-rebinding guard; --allow-host adds the public name), and requires an
  *   `X-DSA: 1` header on writes (a cross-site form can't set it).
+ * - Serves under a sub-path when asked (--base /dsa/), so a proxy can mount it at <site>/dsa/.
  * - Tokens go to <data>/secrets.json and are only ever shown masked.
  * - Everything else is written to dsa.config.json, which stays safe to commit.
  */
@@ -32,7 +35,17 @@ export interface ServeOptions {
   /** Installed add-ons: their routes, run stages and after-run hooks. */
   addons: DsaAddon[];
   log?: (m: string) => void;
+  /** Address to listen on (default 127.0.0.1). */
+  host?: string | undefined;
+  /** Sub-path the dashboard is mounted at, normalized ("/dsa/"). Default "/". */
+  base?: string | undefined;
+  /** Host header names accepted besides localhost (the public name behind a proxy). */
+  allowHosts?: string[] | undefined;
+  /** The run's host adapter, history backend and live check; the Run button refuses a checkout that isn't live. */
+  deploy?: ((ctx: EngineContext) => Promise<Deploy>) | undefined;
 }
+
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1']);
 
 /** Start the server; resolves once it listens. `serve` keeps it running. */
 export async function startServer(opts: ServeOptions): Promise<{ url: string; close: () => Promise<void> }> {
@@ -44,7 +57,14 @@ export async function startServer(opts: ServeOptions): Promise<{ url: string; cl
   const review = await optional<Review>('@snds/dsa-review');
   const figma = await optional<Figma>('@snds/dsa-figma');
   let running = false;
-  const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
+  const bind = opts.host ?? '127.0.0.1';
+  const base = opts.base ?? '/';
+  if (!LOOPBACK.has(bind) && !(opts.allowHosts ?? []).length) throw new Error(`Listening on ${bind} needs --allow-host <public name>: the Host check is what stops other sites from reaching this server through DNS tricks.`);
+  const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`, ...(opts.allowHosts ?? []).flatMap(h => [h, `${h}:${port}`])]);
+  // A server that keeps history elsewhere (a git branch) starts from it.
+  if (opts.deploy) {
+    try { const d = await opts.deploy(first); if (d.history.id !== 'local') say(await d.history.pull(dataDir)); } catch (e) { say(`History not restored: ${errText(e)}`); }
+  }
 
   type SB = { url: string; stop: () => void; harness: string | null };
   let storybook: SB | null = null;
@@ -89,11 +109,17 @@ export async function startServer(opts: ServeOptions): Promise<{ url: string; cl
     try {
       if (!allowedHosts.has(String(req.headers.host))) return send(403, { error: 'Unexpected host.' });
       const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
+      // Mounted under a sub-path: /dsa → /dsa/, /dsa/api/run → /api/run, anything else isn't ours.
+      if (base !== '/') {
+        if (url.pathname === base.slice(0, -1)) { res.writeHead(301, { Location: base + url.search }); return res.end(); }
+        if (!url.pathname.startsWith(base)) return send(404, { error: 'Not found.' });
+        url.pathname = url.pathname.slice(base.length - 1);
+      }
       if (req.method === 'POST' && req.headers['x-dsa'] !== '1') return send(403, { error: 'Missing X-DSA header.' });
 
       if (req.method === 'GET' && url.pathname === '/') {
         const { config, profile } = await loadConfig(root);
-        return send(200, await renderReport(root, config, dataDir, profile, { serve: true }), 'text/html; charset=utf-8');
+        return send(200, await renderReport(root, config, dataDir, profile, { serve: true, base }), 'text/html; charset=utf-8');
       }
       if (req.method === 'GET' && url.pathname === '/api/settings') return send(200, readView(await loadConfig(root)));
       // Add-on routes: the agent workbench's sessions, proposals, handoff and settings.
@@ -252,12 +278,20 @@ export async function startServer(opts: ServeOptions): Promise<{ url: string; cl
         const lines: string[] = [];
         try {
           const ctx = await loadConfig(root);
+          // The same live check as dsa run: a checkout that isn't the live revision isn't scanned.
+          const deploy = opts.deploy ? await opts.deploy(ctx) : null;
+          let live: unknown;
+          try { live = deploy ? await deploy.check() : undefined; } catch (e) {
+            if (e instanceof NotLiveError) return send(409, { error: e.check.label, log: [e.message] });
+            throw e;
+          }
           const r = await runPipeline({
             root: ctx.root, dataDir: ctx.dataDir, config: ctx.config, profile: ctx.profile, configDir: ctx.configDir, dsaConfig: ctx.loaded.config,
-            store: d => openStore(d), stages: addons.flatMap(a => a.stages ?? []), log: m => { lines.push(m); },
+            store: d => openStore(d), stages: addons.flatMap(a => a.stages ?? []), log: m => { lines.push(m); }, ...(live ? { sources: { live } } : {}),
           });
           // Screenshots (when shots.auto is on), the report, and the agent snapshot.
           await runAfterHooks(addons, { kind: 'run', ctx, options: { from: 'serve' }, store: d => openStore(d), notes: r.notes, log: m => lines.push(m) });
+          if (deploy && deploy.history.id !== 'local') lines.push(await deploy.history.push(dataDir, `dsa serve run ${r.runId}`).catch(e => `History not saved: ${errText(e)}`));
           return send(200, { runId: r.runId, summary: r.summary, notes: r.notes, log: lines });
         } catch (e: any) {
           logEvent(dataDir, { level: 'error', source: 'Scan', message: `The scan failed: ${String(e.message).split('\n')[0]}`, detail: lines.slice(-12).join('\n') });
@@ -274,8 +308,9 @@ export async function startServer(opts: ServeOptions): Promise<{ url: string; cl
     }
   });
 
-  await new Promise<void>((ok, fail) => { server.once('error', fail); server.listen(port, '127.0.0.1', () => ok()); });
-  say(`dsa dashboard: http://localhost:${port}  (Ctrl+C to stop)`);
+  await new Promise<void>((ok, fail) => { server.once('error', fail); server.listen(port, bind, () => ok()); });
+  say(`dsa dashboard: http://localhost:${port}${base}  (Ctrl+C to stop)`);
+  if (!LOOPBACK.has(bind)) say(`Listening on ${bind} for ${[...(opts.allowHosts ?? [])].join(', ')}. dsa has no sign-in of its own: only expose it behind your organization's sign-in proxy.`);
   // Warm Storybook now, unless turned off (rendered.autoStart: false) or there's no Storybook to start.
   try {
     const { config } = await loadConfig(root);
@@ -289,7 +324,7 @@ export async function startServer(opts: ServeOptions): Promise<{ url: string; cl
     }
   } catch { /* config errors surface elsewhere */ }
   return {
-    url: `http://localhost:${port}`,
+    url: `http://localhost:${port}${base}`,
     close: () => new Promise<void>(ok => { storybook?.stop(); process.off('exit', onExit); process.off('SIGINT', onInt); server.close(() => ok()); server.closeAllConnections?.(); }),
   };
 }

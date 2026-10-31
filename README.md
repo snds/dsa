@@ -301,12 +301,13 @@ Install them from the release (see [Install](#install)).
 
 | Command | Add-on | What it does |
 |---|---|---|
-| `dsa serve [--port 4319]` | dashboard | The dashboard on localhost: findings, element review, the action queue, trends, live Settings and a Run button. |
+| `dsa serve [--port 4319] [--host] [--base /dsa/] [--allow-host]` | dashboard | The live dashboard: findings, element review, the action queue, trends, live Settings and a Run button. On localhost by default; on a server under a sub-path, behind your sign-in proxy. |
 | `dsa report` | dashboard | Rebuilds the single-file report in `<data>/report/index.html`. `dsa run` writes it too (`--no-report` skips it). |
-| `dsa publish [--out <dir>]` | dashboard | The dashboard as a static folder (default `<data>/site`), with only the images it shows. Read-only. |
+| `dsa publish [--out <dir>]` | dashboard | The dashboard as a static folder (default `<data>/site`), with only the images it shows. Works under any sub-path; Re-scan and decisions go where the host adapter says. |
 | `dsa shots [--target] [--url] [--routes a,b] [--per-group 3] [--fresh] [--retry-missing]` | review | Screenshots example elements. It starts each app itself, visits its routes, and stops it. |
 | `dsa render [--force]` | review | Measures the system's components in its Storybook (height, padding, radius, colors, border, type). |
 | `dsa setup` | review | One time: installs the headless browser and app dependencies, and turns screenshots on for every run. |
+| `dsa login <url> [--out <file>]` | review | Signs in to a private live site once, in a visible browser, and saves the session for screenshots and renderings. |
 | `dsa run --figma \| --no-figma` | figma | Forces or skips the Figma crawl. It runs by itself when `modules.figma` is on and a token and a library are set. |
 | `dsa mcp [--session] [--repo]` | agent | The scan as MCP tools over stdio, for Claude Code, Cursor or any MCP client. |
 | `dsa agent brief [E-id,… \| F-id \| A-id \| R:<repo>]` | agent | Prints the brief an agent gets for a review group, a queue item or a repo. |
@@ -314,6 +315,20 @@ Install them from the release (see [Install](#install)).
 With the review add-on, `dsa run --shots` (or `shots.auto`) takes screenshots
 after the run; `--no-shots` skips them. The system's name, its agent tools and
 its usage data come from its profile, never from dsa.
+
+### Running where the product is deployed
+
+A run can check that it scans only what is live, take screenshots from the deployed site or the
+built folder that ships, and keep its history between CI jobs. Three config sections do it:
+`live` (the live revision and where to see it), `host` (sub-path and what a static dashboard's
+buttons do) and `history` (where the data folder persists). [docs/deploy.md](docs/deploy.md) has
+the details and one example per environment: a server, CI with any static host, and GitHub Pages.
+
+| Command | What it does |
+|---|---|
+| `dsa live` | Checks the checkout against the live revision. A run refuses a checkout that isn't live unless `--allow-unreleased` (or `live.onMismatch: "label"`), and then labels the report. |
+| `dsa apply-decisions --file <f> \| --url <u> \| --issue <n> [--close]` | Applies decisions sent from the static dashboard, exactly as `dsa serve` would. |
+| `dsa history pull \| push` | Restores or saves the data folder through `history.adapter` (`dsa run` does both by itself). |
 
 ## Configuration
 

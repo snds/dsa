@@ -153,6 +153,7 @@ An add-on is a package named `@snds/dsa-<name>` whose `package.json` has
   results, in order: screenshots (10), the report (50), the agent snapshot (90).
   The dashboard's Run button runs the same hooks.
 - `routes` are mounted by `dsa serve` (the agent workbench's API).
+- `hosts` and `histories` add host adapters and history backends ([Where it is deployed](#where-it-is-deployed)).
 - `commands(program, api)` adds commands to the one CLI, or options to the
   core's (`run --shots`). `api.context(cmd)` loads config and profile from the
   global options, the way core commands do.
@@ -171,6 +172,22 @@ component entries, MCP server, checker, and folders a sandbox links).
 
 The CLI finds add-ons in `node_modules/@snds` next to the repo it runs on and next
 to dsa, and in this checkout's `packages/`.
+
+## Where it is deployed
+
+A run can measure the product where it is deployed. Three seams, all interfaces in
+`src/deploy/types.ts`, each picked by name from the config ([deploy.md](deploy.md)):
+
+- `RevisionSource`: which commit is live (`live.revision`). `checkLive` compares it with the
+  checkout and refuses, or labels, anything else; every run records the result in its `sources`.
+- `HostAdapter`: what a static dashboard's Re-scan and decision buttons do, and where
+  `dsa apply-decisions` reads decisions from (`host.adapter`).
+- `HistoryBackend`: where the data folder persists between runs (`history.adapter`).
+
+Live surfaces (`live.app`, `live.apps`, `live.storybook`) are a deployed URL or a built folder
+served on localhost; the review add-on opens them instead of starting a dev server. The generic and
+GitHub hosts and the local, git-branch and command histories ship in `src/deploy/`; add-ons add
+more with `hosts` and `histories`. Core code reaches all of them only through the interfaces.
 
 ## Parity with the suite
 

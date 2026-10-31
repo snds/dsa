@@ -27,7 +27,7 @@ export interface MigrateOptions {
 export const CONFIG_SCHEMA_URL = "https://raw.githubusercontent.com/snds/dsa/main/schema/config.json";
 
 /** Keys that keep their name and shape. */
-const SAME = ["consumers", "extraRepos", "internalConsumers", "tailwind", "apps", "rendered", "shots", "modules", "figma", "github", "agents", "report", "settings"] as const;
+const SAME = ["consumers", "extraRepos", "internalConsumers", "tailwind", "apps", "rendered", "shots", "modules", "figma", "github", "agents", "report", "settings", "live", "host", "history"] as const;
 
 /** Fields of a suite library def and where each lands on a dsa library. */
 const LIBRARY_FIELDS = ["packages", "tagPrefixes", "path", "sources", "git", "aliases", "exclude", "pin", "owner", "repo"] as const;

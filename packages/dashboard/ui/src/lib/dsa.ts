@@ -35,8 +35,13 @@ export const band = (v: number | null | undefined, good: number, warn: number, u
   v == null ? "" : up ? (v >= good ? "good" : v >= warn ? "warn" : "crit") : v <= good ? "good" : v <= warn ? "warn" : "crit"
 export const threshold = (id: string) => D.thresholds?.find((t: any) => t.id === id)?.thresholds
 
+/** Where `dsa serve` is mounted ("/dsa/" behind a proxy); "/" on localhost. */
+export const BASE: string = D.base || "/"
+/** A server path ("/api/run") under the mount point. */
+export const at = (url: string) => (url.startsWith("/") ? BASE + url.slice(1) : url)
+
 export async function api(url: string, body?: unknown) {
-  const r = await fetch(url, { method: body ? "POST" : "GET", headers: { "Content-Type": "application/json", "X-DSA": "1" }, body: body ? JSON.stringify(body) : undefined })
+  const r = await fetch(at(url), { method: body ? "POST" : "GET", headers: { "Content-Type": "application/json", "X-DSA": "1" }, body: body ? JSON.stringify(body) : undefined })
   const j: any = await r.json().catch(() => ({}))
   if (!r.ok) throw Object.assign(new Error(j.error || (j.errors || []).join(" ") || r.statusText), { data: j })
   return j

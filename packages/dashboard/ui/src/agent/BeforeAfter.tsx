@@ -4,6 +4,7 @@ import { cn } from "cn"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { at } from "@/lib/dsa"
 import { useAgent, type Pair, type Shot } from "./store"
 
 /**
@@ -78,7 +79,7 @@ function PairView({ p, session }: { p: Pair; session: string }) {
 }
 
 function Picture({ shot, session, label }: { shot: Shot; session: string; label: string }) {
-  const src = shot.file ? `/api/agent/visual/img?id=${encodeURIComponent(session)}&f=${encodeURIComponent(shot.file)}` : null
+  const src = shot.file ? at(`/api/agent/visual/img?id=${encodeURIComponent(session)}&f=${encodeURIComponent(shot.file)}`) : null
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <span className="text-xs font-medium text-muted-foreground">{label}</span>

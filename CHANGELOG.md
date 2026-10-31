@@ -8,6 +8,27 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- Running where the product is deployed ([docs/deploy.md](docs/deploy.md)). Three new config
+  sections, each picking an adapter by name behind interfaces in `src/deploy/` (the core names no
+  hosting service; add-ons add adapters with `hosts` and `histories`):
+  - `live`: the live revision (a config value, a version endpoint on the live site, CI variables
+    outside pull-request builds, or a host adapter's deployments) and where to see the product (a
+    deployed `url` with a saved sign-in from `dsa login`, or the built `dir` that ships, served on
+    localhost). `dsa run`, `shots`, `render` and the dashboard's Run button refuse a checkout that
+    isn't the live revision, or run labelled with `--allow-unreleased` / `onMismatch: "label"`. Each
+    run records the check; the dashboard shows the scanned revision and when it went live, and a red
+    banner when it isn't live. `dsa live` runs the check alone.
+  - `host`: `dsa serve --host --base /dsa/ --allow-host` mounts the live dashboard under a sub-path
+    behind a proxy. A published page's Re-scan and decisions go through the host adapter: `generic`
+    (a link or webhook; a downloaded file or a POST) or `github` (the scan workflow's
+    `workflow_dispatch` page; decisions filed as a labelled issue that a workflow applies, committing
+    or opening a pull request). `dsa apply-decisions --file | --url | --issue [--close]` applies them.
+  - `history`: the data folder persists between runs through `local` (default), `git-branch` (a
+    branch of the measured repo, through a throwaway index) or `command` (your own pull and push
+    commands, for an object store). Secrets and saved sign-ins are never persisted.
+    `dsa history pull | push` for separate jobs.
+- Screenshots resolve routes under the app's mount path (`https://example.com/app/` + `/orders`).
+
 - Name-free archetypes (`data/archetypes.json`) for twelve core kinds: button, text
   input, checkbox, select, dialog, tabs, card, alert, badge or tag, tooltip, menu, table.
   Each holds preferred and alternative names, false friends, native elements, ARIA

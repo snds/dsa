@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DEFAULT_THRESHOLD, openStore, withMetrics, appSettings, closestRendered, compareRendered, computeFit, effectiveSettings, familyKey, figmaEnabled, homeOf, loadCatalog, patterns as stylePatterns, pushedThisWeek, questions, readEvents, readProposals, readRendered, renderIssue, renderedFor as composeRendered, resolveTargets, rowToFinding, sourceExcerpts, titleOf, type Config } from '@snds/dsa/engine';
 
-import type { ResolvedProfile } from '@snds/dsa';
+import type { PageActions, ResolvedProfile } from '@snds/dsa';
 import { buildQueue, PKG_DIR } from './queue.js';
 
 /**
@@ -23,7 +23,14 @@ export async function buildReport(root: string, config: Config, dataDir: string,
  * `serve`: the live dashboard (assets from the server). `site`: a published copy (dsa publish), with its
  * images next to the page. Neither: a single file opened from <data>/report.
  */
-export interface ReportOptions { serve?: boolean; site?: boolean }
+export interface ReportOptions {
+  serve?: boolean;
+  site?: boolean;
+  /** `serve` under a sub-path (host.base, e.g. "/dsa/"): where the page's API calls and images go. Default "/". */
+  base?: string;
+  /** What a published page's Re-scan and decision buttons do (the host adapter's actions). */
+  actions?: PageActions | null;
+}
 
 export async function renderReport(root: string, config: Config, dataDir: string, profile: ResolvedProfile, opts: ReportOptions = {}): Promise<string> {
   // Built before the store opens below: it opens its own connection, and DuckDB allows one per file.
@@ -31,7 +38,7 @@ export async function renderReport(root: string, config: Config, dataDir: string
   const store = await openStore(dataDir, 'report');
   try {
     const runId = await store.latestRunId();
-    if (!runId) return shell(root, config, emptyPayload(root, config, profile, opts.serve));
+    if (!runId) return shell(root, config, { ...emptyPayload(root, config, profile, opts.serve), ...hostOpts(opts) });
     const catalog = withMetrics(loadCatalog(), profile.metrics);
     const settings = effectiveSettings(catalog, config, dataDir);
     const [run] = await store.all<any>('select * from runs where run_id=$1', [runId]);
@@ -105,9 +112,10 @@ export async function renderReport(root: string, config: Config, dataDir: string
     const evals = evalRows.map(r => (typeof r.data === 'string' ? JSON.parse(r.data) : r.data));
     const shotsFile = path.join(dataDir, 'shots', 'index.json');
     const shotIdx = fs.existsSync(shotsFile) ? JSON.parse(fs.readFileSync(shotsFile, 'utf8')) : { shots: {} };
-    const shotUrl = (f: string) => (opts.serve ? `/shots/${f}` : opts.site ? `shots/${f}` : `../shots/${f}`);
+    const base = opts.base ?? '/';
+    const shotUrl = (f: string) => (opts.serve ? `${base}shots/${f}` : opts.site ? `shots/${f}` : `../shots/${f}`);
     const renderedSet = readRendered(dataDir);
-    const renderedUrl = (f: string) => (opts.serve ? `/rendered/${f}` : opts.site ? `rendered/${f}` : `../rendered/${f}`);
+    const renderedUrl = (f: string) => (opts.serve ? `${base}rendered/${f}` : opts.site ? `rendered/${f}` : `../rendered/${f}`);
     // Element (as rendered in the app) vs the recommended system variant/size (as rendered in Storybook).
     const renderedFor = (e: any) => {
       const st = shotIdx.shots[e.id]?.styles;
@@ -226,11 +234,26 @@ export async function renderReport(root: string, config: Config, dataDir: string
       model: readJson(path.join(dataDir, 'model-summary.json')),
       ...displayOpts(root, config, profile, opts.serve),
       published: Boolean(opts.site),
+      // What the scan read: the live revision and when it went live, or why it isn't the live one.
+      live: liveOf(run),
+      ...hostOpts(opts),
     };
     return shell(root, config, payload);
   } finally {
     store.close();
   }
+}
+
+/** The run's live check (dsa run records it in the run's sources). Runs from before it existed have none. */
+function liveOf(run: any) {
+  const src = typeof run?.sources === 'string' ? JSON.parse(run.sources) : run?.sources;
+  const l = src?.live;
+  return l ? { state: l.state, ok: l.ok, unreleased: Boolean(l.unreleased), label: l.label, head: l.head ?? null, revision: l.revision ?? null } : null;
+}
+
+/** Where the page's requests go (serve) and what its static buttons do (publish). */
+function hostOpts(opts: ReportOptions) {
+  return { base: opts.serve ? opts.base ?? '/' : null, actions: opts.site ? opts.actions ?? null : null };
 }
 
 function displayOpts(root: string, config: Config, profile: ResolvedProfile, serve?: boolean) {

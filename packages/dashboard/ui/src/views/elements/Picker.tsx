@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Code, Note, Pre } from "@/components/bits"
-import { D, api, pct100, say, short } from "@/lib/dsa"
+import { D, api, at, pct100, say, short } from "@/lib/dsa"
 import { desc, useEl } from "./shared"
 
 /**
@@ -430,7 +430,7 @@ export function preloadIconFont() {
   if (fontState === "loading" || fontState === "ok" || !D.serve) return
   fontState = "loading"
   const done = (s: FontState) => { fontState = s; fontSubs.forEach(f => f(s)) }
-  const local = new FontFace("DSA Icons", "url(/fonts/icons.woff2)", { display: "block" })
+  const local = new FontFace("DSA Icons", `url(${at("/fonts/icons.woff2")})`, { display: "block" })
   local.load().then(f => { (document.fonts as any).add(f); done("ok") }, () => {
     // Google Fonts: the same Material Symbols font, by its own family name.
     const fallback = () => document.fonts.load('24px "Material Symbols Outlined"', "home").then(f => done(f.length ? "ok" : "fail"), () => done("fail"))

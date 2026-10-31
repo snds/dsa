@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type { Command } from "commander";
 import pc from "picocolors";
@@ -20,6 +21,7 @@ import { DEFAULT_THRESHOLD, type ElementEval } from "./engine/elements.js";
 import { mapInstance } from "./engine/mapping.js";
 import { useSystem } from "./engine/system.js";
 import type { Finding } from "./engine/types.js";
+import { deployFor, NotLiveError, type Deploy, type LiveCheck } from "./deploy/index.js";
 
 export interface EngineGlobals {
   config?: string;
@@ -63,6 +65,20 @@ async function context(io: CliIo, g: EngineGlobals): Promise<EngineContext> {
   const ctx = await loadEngineContext(o);
   useSystem(ctx.profile, [ctx.config.designSystem.core, ...(ctx.config.designSystem.children ?? [])].flatMap((l) => l.packages));
   return ctx;
+}
+
+/** The host adapter, history backend and live check for a run, with any adapters add-ons offer. */
+export async function deployOf(cwd: string, ctx: EngineContext, log: (m: string) => void = () => {}): Promise<Deploy> {
+  const { addons } = await useAddons(cwd);
+  return deployFor({ root: ctx.root, config: ctx.config, hosts: addons.flatMap((a) => a.hosts ?? []), histories: addons.flatMap((a) => a.histories ?? []), log });
+}
+
+/** Check the checkout against production before a command reads code or takes screenshots; print what it found. */
+export async function liveGate(cwd: string, ctx: EngineContext, o: { allowUnreleased?: boolean }, out: (m: string) => void): Promise<LiveCheck> {
+  const d = await deployOf(cwd, ctx);
+  const check = await d.check(o.allowUnreleased ? { allowUnreleased: true } : {});
+  out(check.unreleased ? pc.red(pc.bold(check.label)) : check.state === "unchecked" ? pc.dim(check.label) : check.label);
+  return check;
 }
 
 async function storeFor(io: CliIo, command: string) {
@@ -148,10 +164,15 @@ export function addEngineCommands(program: Command, io: CliIo): void {
     .option("--no-readiness", "skip the profile's agent-readiness provider")
     .option("--no-drafts", "don't write issue drafts")
     .option("--now <iso>", "the run's timestamp (for reproducible runs)")
-    .action(async (o: { registry?: boolean; remote?: boolean; git?: boolean; readiness?: boolean; drafts?: boolean; now?: string }, cmd: Command) => {
+    .option("--allow-unreleased", "run even when the checkout isn't the live revision; the report says so on every page")
+    .option("--no-history", "don't pull or push the data folder (history.adapter)")
+    .action(async (o: { registry?: boolean; remote?: boolean; git?: boolean; readiness?: boolean; drafts?: boolean; now?: string; allowUnreleased?: boolean; history?: boolean }, cmd: Command) => {
       const ctx = await context(io, g(cmd));
       requirePackages(ctx);
       await storeFor(io, "run");
+      const deploy = await deployOf(io.cwd, ctx, io.out);
+      const live = await liveGate(io.cwd, ctx, o, io.out);
+      if (o.history !== false) io.out(await deploy.history.pull(ctx.dataDir));
       const { addons, notes: addonNotes } = await useAddons(io.cwd);
       const stages: PipelineStage[] = addons.flatMap((a) => a.stages ?? []);
       for (const n of [...(ctx.loaded.migrated ? [`${ctx.loaded.configPath} is an analytics-suite config; read it converted. "dsa config migrate" writes the new format.`] : []), ...addonNotes]) io.out(`note: ${n}`);
@@ -169,6 +190,7 @@ export function addEngineCommands(program: Command, io: CliIo): void {
         git: o.git !== false,
         readiness: o.readiness !== false,
         dsaConfig: ctx.loaded.config,
+        sources: { live },
         ...(o.now ? { now: new Date(o.now) } : {}),
         log: (m) => io.out(m),
       });
@@ -180,6 +202,71 @@ export function addEngineCommands(program: Command, io: CliIo): void {
       await runAfterHooks(addons, { kind: "run", ctx, options: o, store: (d) => openStore(d), notes: after, log: (m) => io.out(m) });
       for (const n of after) io.out(`note: ${n}`);
       if (o.drafts !== false) io.out(`Issue drafts: ${await draftIssues(ctx.dataDir)} in ${path.join(ctx.dataDir, "issues")}`);
+      if (o.history !== false) io.out(await deploy.history.push(ctx.dataDir, `dsa run ${res.runId} at ${live.head?.slice(0, 7) ?? "?"}`));
+    });
+
+  program
+    .command("live")
+    .description("check the checkout against the live revision (what a run would scan), without running")
+    .option("--allow-unreleased", "report a mismatch instead of failing")
+    .action(async (o: { allowUnreleased?: boolean }, cmd: Command) => {
+      const ctx = await context(io, g(cmd));
+      try {
+        const check = await (await deployOf(io.cwd, ctx)).check(o.allowUnreleased ? { allowUnreleased: true } : {});
+        io.out(g(cmd).json ? JSON.stringify(check, null, 2) : check.label);
+      } catch (e) {
+        if (e instanceof NotLiveError && g(cmd).json) io.out(JSON.stringify(e.check, null, 2));
+        throw e;
+      }
+    });
+
+  const history = program.command("history").description("the data folder's persistence between runs (history.adapter)");
+  history
+    .command("pull")
+    .description("restore the data folder (before a job that reads it, such as publish or apply-decisions)")
+    .action(async (_o: unknown, cmd: Command) => {
+      const ctx = await context(io, g(cmd));
+      io.out(await (await deployOf(io.cwd, ctx, io.out)).history.pull(ctx.dataDir));
+    });
+  history
+    .command("push")
+    .description("save the data folder")
+    .option("-m, --message <text>", "commit message (git-branch)", "dsa data")
+    .action(async (o: { message: string }, cmd: Command) => {
+      const ctx = await context(io, g(cmd));
+      io.out(await (await deployOf(io.cwd, ctx, io.out)).history.push(ctx.dataDir, o.message));
+    });
+
+  program
+    .command("apply-decisions")
+    .description("apply decisions sent from the static dashboard: a file, a URL, or what the host adapter reads (github: an issue)")
+    .option("--file <path>", "a decisions file (- for stdin)")
+    .option("--url <url>", "a decisions file at a URL")
+    .option("--issue <number>", "an issue the dashboard filed (host adapter github)")
+    .option("--who <name>", "who decided (default: what the file says)")
+    .option("--close", "tell the source it was applied: comment on and close the issue")
+    .option("--no-history", "don't pull or push the data folder (history.adapter)")
+    .action(async (o: { file?: string; url?: string; issue?: string; who?: string; close?: boolean; history?: boolean }, cmd: Command) => {
+      const ref = o.file ?? o.url ?? o.issue;
+      if (!ref || [o.file, o.url, o.issue].filter(Boolean).length > 1) throw new Error("Give one of --file, --url or --issue.");
+      const ctx = await context(io, g(cmd));
+      await storeFor(io, "apply-decisions");
+      const deploy = await deployOf(io.cwd, ctx, io.out);
+      if (o.history !== false) io.out(await deploy.history.pull(ctx.dataDir));
+      const data = await deploy.host.readDecisions(o.file && o.file !== "-" ? path.resolve(io.cwd, o.file) : ref, deploy.hostContext);
+      const tmp = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "dsa-decisions-")), "decisions.json");
+      fs.writeFileSync(tmp, JSON.stringify(data));
+      let applied: Awaited<ReturnType<typeof applyDecisionFile>>;
+      try {
+        applied = await applyDecisionFile(ctx.root, ctx.config, ctx.dataDir, tmp, o.who);
+      } finally {
+        fs.rmSync(path.dirname(tmp), { recursive: true, force: true });
+      }
+      for (const a of applied) io.out(`Recorded for ${a.elements} element(s): ${a.pattern ? `pattern ${a.pattern}` : `${a.ids?.length} id(s)`}`);
+      const summary = `Applied ${applied.length} decision(s) covering ${applied.reduce((n, a) => n + a.elements, 0)} element(s). They take effect on the next scan.`;
+      io.out(summary);
+      if (o.close && deploy.host.applied) await deploy.host.applied(ref, summary, deploy.hostContext);
+      if (o.history !== false) io.out(await deploy.history.push(ctx.dataDir, `dsa apply-decisions ${ref.length > 60 ? "file" : ref}`));
     });
 
   program
