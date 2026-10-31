@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import fg from "fast-glob";
 import type { DsaConfig } from "../config.js";
+import { expandSources } from "../engine/paths.js";
 import { discoverWorkspaces } from "../engine/workspaces.js";
 import { dsSourceDirs } from "../graph/index.js";
 
@@ -80,7 +81,8 @@ export function discoverSources(root: string, config: DsaConfig, options: { thre
   const threshold = options.threshold ?? (config as any).discovery?.threshold ?? 0.9;
   const sys = config.system as DsaConfig["system"] & { path?: string; sources?: string[] };
   if (sys.path || sys.sources?.length) {
-    const dirs = sys.path ? [sys.path] : sys.sources!;
+    // Pinned: the path and every source, globs expanded (a vendored copy's packages/*), as written relative to the root.
+    const dirs = [...new Set([...(sys.path ? [sys.path] : []), ...expandSources(root, sys.sources ?? []).map((d) => path.relative(root, d).split(path.sep).join("/") || ".")])];
     return { accepted: dirs, how: "pinned", threshold, candidates: dirs.map((dir) => ({ dir, confidence: 1, expected: true, because: "pinned in the config", signals: [] })) };
   }
   const { facts, packages } = scanRepo(root);

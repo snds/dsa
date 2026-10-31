@@ -2,7 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { discoverSources, NotLiveError, recordScanTime, runAfterHooks, type Deploy, type DsaAddon, type EngineContext, type ServeRequest } from '@snds/dsa';
-import { MEASURES, appSettings, clearEvents, clearMappingCache, computeFit, decideMany, effectiveSettings, figmaToken, githubToken, latestEvals, loadCatalog, logEvent, mapInstance, mask, materializeRemotes, openStore, parseFigmaUrl, readRendered, readSource, resolveTargets, runPipeline, setSetting, targetRelative, undecide, withMetrics, writeSecrets, type AppSettings, type Config } from '@snds/dsa/engine';
+import { MEASURES, appSettings, expandSources, isGlob, clearEvents, clearMappingCache, computeFit, decideMany, effectiveSettings, figmaToken, githubToken, latestEvals, loadCatalog, logEvent, mapInstance, mask, materializeRemotes, openStore, parseFigmaUrl, readRendered, readSource, resolveTargets, runPipeline, setSetting, targetRelative, undecide, withMetrics, writeSecrets, type AppSettings, type Config } from '@snds/dsa/engine';
 import { renderReport } from './report.js';
 import { buildQueue, createIssues, syncLinks } from './queue.js';
 
@@ -495,7 +495,10 @@ export async function saveView(ctx: EngineContext, body: any): Promise<{ saved: 
     // The folders the user points at as the system's code. An empty list goes back to finding them.
     if (Array.isArray(body.sources.pinned)) {
       const dirs = body.sources.pinned.map((d: unknown) => String(d ?? '').trim().replace(/\/+$/, '')).filter(Boolean);
-      for (const d of dirs) if (!fs.existsSync(path.resolve(ctx.root, d)) || !fs.statSync(path.resolve(ctx.root, d)).isDirectory()) errors.push(`"${d}" isn't a folder in ${ctx.root}.`);
+      for (const d of dirs) {
+        if (isGlob(d)) { if (!expandSources(ctx.root, [d]).length) errors.push(`"${d}" matches no package folder from ${ctx.root}.`); continue; }
+        if (!fs.existsSync(path.resolve(ctx.root, d)) || !fs.statSync(path.resolve(ctx.root, d)).isDirectory()) errors.push(`"${d}" isn't a folder from ${ctx.root}.`);
+      }
       const target = raw.designSystem ? (raw.designSystem.core ??= {}) : (raw.system ??= {});
       delete target.path;
       if (dirs.length) target.sources = [...new Set(dirs)]; else delete target.sources;

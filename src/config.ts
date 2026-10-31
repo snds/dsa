@@ -14,7 +14,10 @@ const nonNegativeInt = (fallback: number) => z.number().int().min(0).default(fal
 /** Where a library's or consumer's code lives, and who owns it. Shared by `system`, `system.children`, `consumers`, `extraRepos`. */
 const sourceFields = {
   path: z.string().optional().describe("Folder of its code, relative to the config root (another checkout may be outside it, e.g. ../prototype)."),
-  sources: z.array(z.string()).optional().describe("Folders of its code, when there are several (set by `dsa sources --pin` or Settings → Sources). Without `path` or `sources`, dsa finds them."),
+  sources: z
+    .array(z.string())
+    .optional()
+    .describe('Folders of its code, when there are several: inside the repo or in another checkout ("../vendor/ds/packages/ui"), or a glob of package folders ("../vendor/ds/packages/*", which also picks up its tokens package). With `git`, folders inside the clone. Set by `dsa sources --pin` or Settings → Sources. Without `path` or `sources`, dsa finds them.'),
   git: z
     .object({ url: z.string(), ref: z.string().optional() })
     .optional()
