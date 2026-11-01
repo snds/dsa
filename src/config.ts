@@ -133,11 +133,18 @@ const HostSchema = z
     adapter: z.string().default("generic").describe('Which host adapter turns the static dashboard\'s actions into requests: "generic" or "github" (add-ons may add more).'),
     base: z.string().optional().describe('The sub-path the dashboard is served under, e.g. "/dsa/" (default "/"). Used by dsa serve; dsa publish writes relative links that work under any path.'),
     url: z.string().optional().describe("Where people open the dashboard, e.g. https://example.com/dsa/. Shown in issues and messages."),
+    schedule: z
+      .array(z.string())
+      .optional()
+      .describe('When scans run by themselves, as cron lines in UTC ("47 9 * * 1-5"), so the dashboard can show the next one. The github adapter reads them from the workflow file when this is unset.'),
     rescan: z
       .object({
         url: z.string().describe("Where Re-scan goes: a page that starts the scan job (opened in a new tab), or a webhook (POSTed to)."),
         method: z.enum(["link", "post"]).default("link"),
         label: z.string().optional(),
+        status: z.string().optional().describe('With method "post": a URL that reports one run ({id} is filled in), so the page can show its progress. Answers { status: "queued"|"running"|"done"|"failed", steps?: { done, total, current }, url?, startedAt?, error? }.'),
+        active: z.string().optional().describe('With method "post": a URL that lists the runs going now ({ runs: [...] }, same shape), so the page can show a scan that started elsewhere.'),
+        estimateSeconds: z.number().min(0).optional().describe("How long a scan usually takes, when earlier runs can't tell."),
       })
       .optional()
       .describe("The static dashboard's Re-scan button (generic adapter)."),
@@ -152,6 +159,7 @@ const HostSchema = z
       .object({
         repo: z.string().optional().describe('The repo "owner/name" whose workflow re-scans and receives decisions (default: github.defaultRepo).'),
         workflow: z.string().default("dsa.yml").describe("The workflow file that runs the scan (needs a workflow_dispatch trigger)."),
+        dispatch: z.boolean().default(true).describe("Re-scan starts the workflow from the page (with the viewer's own token) and shows its progress. false: Re-scan only opens the workflow's page."),
         ref: z.string().optional().describe("The branch the workflow runs on (default: the repo's default branch)."),
         label: z.string().default("dsa-decisions").describe("The label on decision issues, which the apply workflow listens for."),
         server: z.string().default("https://github.com").describe("GitHub's web address (GitHub Enterprise Server: your host)."),

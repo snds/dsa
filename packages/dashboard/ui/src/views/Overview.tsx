@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Note, Panel, StatusDot } from "@/components/bits"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { D, SYS, band, fmt, fmtDT, ratio, threshold, type Band } from "@/lib/dsa"
+import { D, SYS, band, fmt, fmtDT, num, ratio, threshold, type Band } from "@/lib/dsa"
 import { CERTAINTY, ROLES, classify, forRole, useRole, type Certainty } from "@/lib/insight"
 
 /**
@@ -60,8 +60,6 @@ export function Overview({ go }: { go: (view: string) => void }) {
 
 interface Kpi { label: string; value: number | null | undefined; prev: number | null | undefined; unit: string; up: boolean; band: Band; how: "measured" | "estimated"; means: string; to: string }
 
-/** A number to show, or null for "not measured": missing, or not a number at all (0/0, a stray string). */
-const measured = (x: unknown) => (x == null || !Number.isFinite(Number(x)) ? null : Number(x))
 
 /**
  * When the scan couldn't read the apps it measures: none at all (every repo failed to fetch, or none
@@ -92,9 +90,11 @@ function Coverage() {
 }
 
 function KpiCard({ k, onOpen, since }: { k: Kpi; onOpen: () => void; since?: string }) {
-  const m = measured(k.value), pm = measured(k.prev)
+  // A value missing from the earlier scan is a first measurement, not a number to subtract from.
+  const m = num(k.value), pm = num(k.prev)
   const v = m == null ? null : Math.round(m * 10) / 10
-  const d = v == null || pm == null ? null : Math.round((v - pm) * 10) / 10
+  // Rounded to a tenth, with -0 read as 0 (no change), never shown as "−0".
+  const d = v == null || pm == null ? null : Math.round((v - pm) * 10) / 10 || 0
   const better = d == null || d === 0 ? null : (d > 0) === k.up
   return (
     <button type="button" onClick={onOpen} className="flex min-w-0 flex-col gap-1.5 rounded-lg border bg-card p-4 text-left transition-colors hover:bg-muted/60">
@@ -107,11 +107,11 @@ function KpiCard({ k, onOpen, since }: { k: Kpi; onOpen: () => void; since?: str
       </span>
       <span className="font-heading text-3xl font-semibold tabular-nums">{v == null ? "—" : fmt(v)}{v != null && k.unit}</span>
       <span className="flex items-center gap-1 text-xs text-muted-foreground">
-        {v == null ? <span>Not measured in this scan</span> : d == null ? <span>No earlier scan to compare</span> : (
+        {v == null ? <span>Not measured in this scan</span> : d == null || !Number.isFinite(d) ? <span>{since ? "First measurement" : "No earlier scan to compare"}</span> : (
           <>
             <span className={cn("inline-flex items-center gap-0.5 font-medium", better === true && "text-success-soft-foreground", better === false && "text-destructive")}>
               {d > 0 ? <ArrowUpIcon className="size-3" /> : d < 0 ? <ArrowDownIcon className="size-3" /> : <MinusIcon className="size-3" />}
-              {d > 0 ? "+" : ""}{fmt(d)}{k.unit === "%" ? " pts" : ""}
+              {d === 0 ? "No change" : <>{d > 0 ? "+" : ""}{fmt(d)}{k.unit === "%" ? " pts" : ""}</>}
             </span>
             <span>vs scan of {since ? fmtDT(since) : "before"}</span>
           </>

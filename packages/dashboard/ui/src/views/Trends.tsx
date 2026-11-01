@@ -2,7 +2,7 @@ import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts"
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Code, Panel } from "@/components/bits"
-import { D, fmtD, ratio } from "@/lib/dsa"
+import { D, fmtD, num, ratio } from "@/lib/dsa"
 
 const SERIES: { key: string; name: string; unit: string; value: (r: any) => number | null }[] = [
   { key: "current", name: "Consumers within one major", unit: "%", value: r => ratio(r.current_consumers, r.consumers) },
@@ -17,7 +17,8 @@ export function Trends() {
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       {SERIES.map(s => {
-        const data = D.runs.map((r: any) => ({ at: fmtD(r.taken_at), v: s.value(r) == null ? null : Math.round(s.value(r)! * 10) / 10 }))
+        // A run that didn't measure this leaves a gap, never NaN.
+        const data = D.runs.map((r: any) => { const v = num(s.value(r)); return { at: fmtD(r.taken_at), v: v == null ? null : Math.round(v * 10) / 10 } })
         const last = [...data].reverse().find((d: any) => d.v != null)?.v
         const config: ChartConfig = { v: { label: s.name, color: "var(--chart-3)" } }
         return (

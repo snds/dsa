@@ -82,7 +82,7 @@ test('runs from before coverage was recorded: skips are read from the notes', as
 
 test('Re-scan names where it goes and when the page changes', () => {
   const ctx = (host: unknown): HostContext => ({ root: '/', host: parseConfig({ host }).host!, config: {}, env: {}, fetch });
-  const gh = githubHost.actions(ctx({ adapter: 'github', github: { repo: 'acme/site', workflow: 'pages.yml' } })).rescan;
+  const gh = githubHost.actions(ctx({ adapter: 'github', github: { repo: 'acme/site', workflow: 'pages.yml', dispatch: false } })).rescan;
   assert.equal(gh.label, 'Re-scan on GitHub');
   assert.match(gh.help, /pages\.yml workflow's page on GitHub in a new tab/);
   assert.match(gh.help, /Run workflow/);

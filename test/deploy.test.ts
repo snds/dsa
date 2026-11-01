@@ -231,6 +231,10 @@ describe("host adapters", () => {
     expect(a.rescan).toMatchObject({ kind: "post", url: "https://ci.test/hook" });
     expect(a.decisions).toMatchObject({ kind: "post", url: "https://ci.test/decisions" });
     expect(genericHost.actions(hostCtx({ rescan: { url: "https://ci.test/run" } })).rescan.kind).toBe("link");
+    // A webhook with a status URL runs from the page, with progress.
+    expect(genericHost.actions(hostCtx({ rescan: { url: "https://ci.test/hook", method: "post", status: "https://ci.test/runs/{id}", active: "https://ci.test/runs", estimateSeconds: 240 } })).rescan).toMatchObject({
+      kind: "run", runner: { type: "webhook", trigger: "https://ci.test/hook", status: "https://ci.test/runs/{id}", active: "https://ci.test/runs" }, estimateSeconds: 240,
+    });
   });
 
   it("generic: reads decisions from a file or a URL", async () => {
@@ -257,12 +261,22 @@ describe("host adapters", () => {
     expect(issueNumber("https://github.com/o/r/issues/34")).toBe(34);
   });
 
-  it("github: Re-scan opens the workflow, decisions become a labelled issue; the repo comes from config, then GITHUB_REPOSITORY", () => {
+  it("github: Re-scan runs the workflow from the page, decisions become a labelled issue; the repo comes from config, then GITHUB_REPOSITORY", () => {
     const a = githubHost.actions(hostCtx({ adapter: "github", github: { repo: "acme/site", workflow: "scan.yml", ref: "main" } }));
-    expect(a.rescan).toMatchObject({ kind: "link", url: "https://github.com/acme/site/actions/workflows/scan.yml" });
+    expect(a.rescan).toMatchObject({
+      kind: "run",
+      runner: { type: "github", api: "https://api.github.com", server: "https://github.com", repo: "acme/site", workflow: "scan.yml", ref: "main" },
+      fallbackUrl: "https://github.com/acme/site/actions/workflows/scan.yml",
+    });
+    // The token page is filled in: Actions write, the owner, a short expiry.
+    const t = new URL(a.rescan.runner!.type === "github" ? a.rescan.runner!.tokenUrl : "");
+    expect([t.pathname, t.searchParams.get("actions"), t.searchParams.get("target_name"), t.searchParams.get("expires_in")]).toEqual(["/settings/personal-access-tokens/new", "write", "acme", "30"]);
+    // dispatch: false keeps the plain link to the workflow page.
+    expect(githubHost.actions(hostCtx({ adapter: "github", github: { repo: "acme/site", dispatch: false } })).rescan).toMatchObject({ kind: "link", label: "Re-scan on GitHub", url: "https://github.com/acme/site/actions/workflows/dsa.yml" });
     expect(a.decisions).toMatchObject({ kind: "issue", url: "https://github.com/acme/site/issues/new", labels: ["dsa-decisions"], apply: "dsa apply-decisions --issue <number>" });
     const ghes = githubHost.actions(hostCtx({ adapter: "github", github: { server: "https://git.corp.test/" }, decisions: { mode: "pr" } }, { env: { GITHUB_REPOSITORY: "team/app" } }));
-    expect(ghes.rescan.url).toBe("https://git.corp.test/team/app/actions/workflows/dsa.yml");
+    expect(ghes.rescan.fallbackUrl).toBe("https://git.corp.test/team/app/actions/workflows/dsa.yml");
+    expect(ghes.rescan.runner).toMatchObject({ api: "https://git.corp.test/api/v3", server: "https://git.corp.test" });
     expect(ghes.decisions.help).toMatch(/pull request/);
     expect(githubHost.actions(hostCtx({ adapter: "github" }, { config: { github: { defaultRepo: "x/y" } } })).decisions.url).toBe("https://github.com/x/y/issues/new");
     // No repo anywhere: the generic buttons, with a note.
@@ -386,7 +400,7 @@ describe("deployFor", () => {
     const d = deployFor({ root: dir, config, env: {} });
     expect(d.host.id).toBe("github");
     expect(d.history.id).toBe("git-branch");
-    expect(d.actions().rescan.url).toBe("https://github.com/a/b/actions/workflows/dsa.yml");
+    expect(d.actions().rescan.fallbackUrl).toBe("https://github.com/a/b/actions/workflows/dsa.yml");
     expect((await d.check()).state).toBe("live");
     const custom = { id: "custom", create: () => ({ id: "custom", pull: async () => "p", push: async () => "q" }) };
     const withAddon = deployFor({ root: dir, config: { designSystem: { core: { name: "c", packages: [] } }, history: { adapter: "custom" } } as never, histories: [custom] });

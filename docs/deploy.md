@@ -121,9 +121,45 @@ says:
 
 | | `generic` adapter | `github` adapter |
 |---|---|---|
-| Re-scan | `host.rescan.url`: a page that starts the scan job (`method: "link"`), or a webhook dsa POSTs to (`"post"`). No button without it. | Opens the scan workflow's page (`host.github.workflow`), where Run workflow is `workflow_dispatch`. |
+| Re-scan | `host.rescan.url`: a page that starts the scan job (`method: "link"`), or a webhook dsa POSTs to (`"post"`). Add `status` (and `active`) URLs and the page follows the run. No button without `rescan`. | Starts the scan workflow (`host.github.workflow`) from the page through `workflow_dispatch`, with the viewer's own token, and follows it. `dispatch: false` only opens the workflow's page. |
 | Decisions | `host.decisions.mode`: `export` downloads a file; `post` sends it to `host.decisions.url`. | `issue` (default) opens a new issue with the decisions in a `json` block and a label. A workflow applies it and commits. `pr` is the same, but the workflow opens a pull request. |
 | Applying | `dsa apply-decisions --file <file>` (or `--url`, or `-` for stdin) | `dsa apply-decisions --issue <n> --close` |
+
+### Re-scan from the page
+
+Every host gets a runner with the same three calls: `trigger()` starts a scan, `status(id)` says
+where a run stands (queued, step n of m, done, failed), and `listActive()` lists runs already going,
+scheduled ones included. `dsa serve` runs the scan itself; a published page uses the runner its host
+adapter names. The page shows the same feedback whatever the runner:
+
+- **Starting…** as soon as Re-scan is pressed, then a banner while it runs.
+- A scan already going when the page opens (a schedule, a teammate) shows in the banner too.
+- When scans usually take over a minute, a progress dialog opens: completed steps, time left. Hide it
+  and the banner stays.
+- When the run has finished and the deployed page carries the new report, **Load the new report**.
+- Errors say what went wrong, with a link to the run.
+
+**The next scheduled scan** shows in the header and under Re-scan, in the report's time zone (or the
+viewer's). Declare it with `host.schedule`, as cron lines in UTC (`["47 9 * * 1-5"]`). The github
+adapter reads `on.schedule` from its workflow file when that is unset.
+
+The estimate is the median of recent successful runs (from GitHub) or of recorded scans
+(`<data>/scan-times.json`, which `dsa run` and `dsa serve` write). For a webhook, set
+`host.rescan.estimateSeconds` if neither knows.
+
+**The GitHub runner and tokens.** A static site has no server, so starting a workflow needs the
+viewer's own credential. The first Re-scan asks for a fine-grained token: only the one repo, only
+**Actions: read and write**, a short expiry (the dialog links to GitHub's form, filled in). The token
+stays in that browser's local storage for the report's site, is sent only to GitHub's API, and never
+goes into the report, history, logs or the repo. Settings → **Forget token** removes it. A viewer who
+declines gets the workflow page instead, with what to press there. What the token allows: start,
+re-run and cancel workflows in that repo and read their runs and logs; not the code, issues or
+settings. Anyone with access to that browser profile, or script running on the report's site, could
+use it, so keep the site's content to dsa's own page and the expiry short.
+
+A webhook's `status` URL answers one run as `{ "status": "queued" | "running" | "done" | "failed", "steps": { "done", "total", "current" }, "url", "startedAt", "error" }`
+(`{id}` in the URL is filled in); `active` answers `{ "runs": [ … ] }`. The trigger may answer
+`{ "id", "url" }`. Requests carry the browser's cookies, for a sign-in in front of the hook.
 
 `dsa apply-decisions` records each decision exactly as `dsa serve` would, in the app's decisions
 file in the repo. Commit that file, or open a pull request with it. The next published scan shows
@@ -226,7 +262,8 @@ instead.
 
 The product deploys to GitHub Pages from a workflow. CI can't load a private Pages site, so the
 built folder is the live source. The dashboard goes into the same Pages artifact at `/dsa/`.
-Re-scan re-runs the deploy workflow; decisions come back as issues.
+Re-scan starts the deploy workflow from the page and shows its progress; decisions come back as
+issues.
 
 ```jsonc
 // dsa.config.json
@@ -249,7 +286,7 @@ Add the dsa steps to the Pages workflow, between the build and the upload:
 name: pages
 on:
   push: { branches: [main] }
-  workflow_dispatch:            # the dashboard's Re-scan button opens this
+  workflow_dispatch:            # the dashboard's Re-scan button starts this
 permissions:
   contents: write               # push the dsa-data branch
   pages: write

@@ -16,7 +16,9 @@ export const genericHost: HostAdapter = {
     return {
       host: "generic",
       rescan: r
-        ? r.method === "post"
+        ? r.method === "post" && r.status
+          ? { kind: "run", url: r.url, label: r.label ?? "Re-scan", help: `Starts the scan job at ${hostOf(r.url)} and shows its progress here. The new report loads when the job has published it.`, runner: { type: "webhook", trigger: r.url, status: r.status, active: r.active }, estimateSeconds: r.estimateSeconds ?? null }
+          : r.method === "post"
           ? { kind: "post", url: r.url, label: r.label ?? "Request a re-scan", help: `Asks the scan job at ${hostOf(r.url)} to run. This page doesn't change by itself: the new scan shows after the job publishes it.` }
           : { kind: "link", url: r.url, label: r.label ?? `Re-scan on ${hostOf(r.url)}`, help: `Opens ${hostOf(r.url)} in a new tab, where you start the scan job. This page updates after the job publishes the new scan.` }
         : { kind: "none", label: "Re-scan", help: "This dashboard is rebuilt by the scan job on each deploy. Set host.rescan to add a button that starts it." },
