@@ -1,5 +1,5 @@
 import * as React from "react"
-import { forgetToken, token } from "@/lib/useScan"
+import { relayUrl, relayWho, signIn, signOut } from "@/lib/useScan"
 import { TrashIcon, PlusIcon } from "@phosphor-icons/react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -74,7 +74,7 @@ export function General({ onTitle }: { onTitle: (t: string) => void }) {
 
   if (!D.serve) return (
     <div className="flex flex-col gap-6">
-    <BrowserToken />
+    <RelaySignIn />
     <Panel title="Settings are edited in the live view">
       <Note>This file is a snapshot. To change tokens, Figma links, the time zone, sources, or rule settings, start the live view and open it in your browser:</Note>
       <Pre className="my-3">dsa serve</Pre>
@@ -272,19 +272,28 @@ function TokenField({ id, label, token, fromEnv, save, testUrl, onView }: { id: 
   )
 }
 
-/** The GitHub token Re-scan uses on a published page: kept only in this browser, forgotten here. */
-function BrowserToken() {
-  const spec = D.actions?.rescan?.runner?.type === "github" ? D.actions.rescan.runner : null
-  const [has, setHas] = React.useState(() => Boolean(token()?.get()))
-  if (!spec) return null
+/** Who this tab is signed in as at the scan relay, and signing out. No token of the viewer's is kept anywhere. */
+function RelaySignIn() {
+  const relay = relayUrl()
+  const [who, setWho] = React.useState<Awaited<ReturnType<typeof relayWho>> | undefined>(undefined)
+  React.useEffect(() => { if (relay) void relayWho().then(setWho) }, [relay])
+  if (!relay) return null
+  const host = new URL(relay).host
   return (
-    <Panel title="This browser" description={`Re-scan starts the ${spec.workflow} workflow in ${spec.repo} with a GitHub token you give it.`}>
-      {has ? (
+    <Panel title="Re-scan sign-in" description={`Re-scan goes through the scan relay at ${host}, which holds the credential that starts scans. You only sign in.`}>
+      {who === undefined ? <Skeleton className="h-8 w-64" /> : who === null ? (
+        <Note>The relay at {host} didn't answer. Re-scan will say what's wrong when you try it.</Note>
+      ) : who.signedIn ? (
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <Note>A token is saved in this browser only (local storage for this site). It isn't in the report or anywhere else.</Note>
-          <Button variant="outline" onClick={() => { forgetToken(); setHas(false); say("Token forgotten. Revoke it on GitHub too if you no longer need it.") }}>Forget token</Button>
+          <Note>Signed in as <b>{who.login}</b> ({who.permission} access to {who.resource}){who.canScan ? "." : `. Re-scan needs ${who.minPermission} access.`} The sign-in lasts until you close this tab or a few hours pass.</Note>
+          <Button variant="outline" onClick={async () => { await signOut(); setWho({ ...who, signedIn: false, login: null, permission: null, canScan: false }); say("Signed out of the scan relay.") }}>Sign out</Button>
         </div>
-      ) : <Note>No token saved. Re-scan asks for one the first time.</Note>}
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Note>Not signed in. Re-scan asks you to sign in with {who.provider} first; it needs {who.minPermission} access to {who.resource}.</Note>
+          <Button variant="outline" onClick={() => signIn()}>Sign in with {who.provider}</Button>
+        </div>
+      )}
     </Panel>
   )
 }

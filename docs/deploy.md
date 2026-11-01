@@ -121,7 +121,7 @@ says:
 
 | | `generic` adapter | `github` adapter |
 |---|---|---|
-| Re-scan | `host.rescan.url`: a page that starts the scan job (`method: "link"`), or a webhook dsa POSTs to (`"post"`). Add `status` (and `active`) URLs and the page follows the run. No button without `rescan`. | Starts the scan workflow (`host.github.workflow`) from the page through `workflow_dispatch`, with the viewer's own token, and follows it. `dispatch: false` only opens the workflow's page. |
+| Re-scan | `host.relay.url` (either adapter): the [scan relay](relay.md) signs the viewer in, starts the scan with its own credential and reports progress. Without a relay: `host.rescan.url`, a page that starts the scan job (`method: "link"`) or a webhook dsa POSTs to (`"post"`; add `status` and `active` URLs and the page follows the run). Neither: no button, and the page says how to add one. | Through the scan relay, which starts the scan workflow (`host.github.workflow`) with `workflow_dispatch`. No relay: no button, and the page says how to add one. |
 | Decisions | `host.decisions.mode`: `export` downloads a file; `post` sends it to `host.decisions.url`. | `issue` (default) opens a new issue with the decisions in a `json` block and a label. A workflow applies it and commits. `pr` is the same, but the workflow opens a pull request. |
 | Applying | `dsa apply-decisions --file <file>` (or `--url`, or `-` for stdin) | `dsa apply-decisions --issue <n> --close` |
 
@@ -147,15 +147,11 @@ The estimate is the median of recent successful runs (from GitHub) or of recorde
 (`<data>/scan-times.json`, which `dsa run` and `dsa serve` write). For a webhook, set
 `host.rescan.estimateSeconds` if neither knows.
 
-**The GitHub runner and tokens.** A static site has no server, so starting a workflow needs the
-viewer's own credential. The first Re-scan asks for a fine-grained token: only the one repo, only
-**Actions: read and write**, a short expiry (the dialog links to GitHub's form, filled in). The token
-stays in that browser's local storage for the report's site, is sent only to GitHub's API, and never
-goes into the report, history, logs or the repo. Settings → **Forget token** removes it. A viewer who
-declines gets the workflow page instead, with what to press there. What the token allows: start,
-re-run and cancel workflows in that repo and read their runs and logs; not the code, issues or
-settings. Anyone with access to that browser profile, or script running on the report's site, could
-use it, so keep the site's content to dsa's own page and the expiry short.
+**Re-scan on a published page goes through the scan relay.** A static page has no server, and
+starting a workflow needs a credential. The relay holds that credential as its own secret, signs
+viewers in with GitHub, and checks they can write to the repo before it starts a scan. Viewers never
+handle a token. Setup, the secrets to set, the callback URL and where to host it:
+[docs/relay.md](relay.md).
 
 A webhook's `status` URL answers one run as `{ "status": "queued" | "running" | "done" | "failed", "steps": { "done", "total", "current" }, "url", "startedAt", "error" }`
 (`{id}` in the URL is filled in); `active` answers `{ "runs": [ … ] }`. The trigger may answer
@@ -262,8 +258,8 @@ instead.
 
 The product deploys to GitHub Pages from a workflow. CI can't load a private Pages site, so the
 built folder is the live source. The dashboard goes into the same Pages artifact at `/dsa/`.
-Re-scan starts the deploy workflow from the page and shows its progress; decisions come back as
-issues.
+Re-scan goes through the [scan relay](relay.md), which starts the deploy workflow and shows its
+progress; decisions come back as issues.
 
 ```jsonc
 // dsa.config.json
@@ -274,7 +270,7 @@ issues.
     "app": { "dir": "dist", "base": "/" },
     "storybook": { "dir": "packages/ui/storybook-static" }
   },
-  "host": { "adapter": "github", "github": { "workflow": "pages.yml" }, "decisions": { "mode": "pr" } },
+  "host": { "adapter": "github", "github": { "workflow": "pages.yml" }, "relay": { "url": "https://relay.example.com/" }, "decisions": { "mode": "pr" } },
   "history": { "adapter": "git-branch" }
 }
 ```
@@ -286,7 +282,7 @@ Add the dsa steps to the Pages workflow, between the build and the upload:
 name: pages
 on:
   push: { branches: [main] }
-  workflow_dispatch:            # the dashboard's Re-scan button starts this
+  workflow_dispatch:            # the scan relay starts this when someone presses Re-scan
 permissions:
   contents: write               # push the dsa-data branch
   pages: write
@@ -368,6 +364,8 @@ Every seam is an interface in [`src/deploy/types.ts`](../src/deploy/types.ts):
 - `HostAdapter`: `actions()` (what the static page's buttons do), `readDecisions(ref)` (where
   `dsa apply-decisions` reads from), `applied()` (close the loop, optional).
 - `HistoryFactory` / `HistoryBackend`: `pull(dir)` and `push(dir, message)`.
+- `ScanRunner` ([`src/relay/runners.ts`](../src/relay/runners.ts)): `trigger()`, `status(id)`,
+  `listActive()`, for the scan relay. Built in: `github` (`workflow_dispatch`) and `webhook`.
 
 An add-on offers more with `defineAddon({ hosts: [...], histories: [...] })`. The config picks one
 by name, and a later adapter with the same name wins over a built-in one. An unknown name is an

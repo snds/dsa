@@ -15,13 +15,15 @@ export const genericHost: HostAdapter = {
     const apply = "dsa apply-decisions --file <dsa-decisions.json>";
     return {
       host: "generic",
-      rescan: r
+      rescan: host.relay?.url
+        ? relayRescan(host.relay.url, host.relay.label, r?.estimateSeconds)
+        : r
         ? r.method === "post" && r.status
           ? { kind: "run", url: r.url, label: r.label ?? "Re-scan", help: `Starts the scan job at ${hostOf(r.url)} and shows its progress here. The new report loads when the job has published it.`, runner: { type: "webhook", trigger: r.url, status: r.status, active: r.active }, estimateSeconds: r.estimateSeconds ?? null }
           : r.method === "post"
           ? { kind: "post", url: r.url, label: r.label ?? "Request a re-scan", help: `Asks the scan job at ${hostOf(r.url)} to run. This page doesn't change by itself: the new scan shows after the job publishes it.` }
           : { kind: "link", url: r.url, label: r.label ?? `Re-scan on ${hostOf(r.url)}`, help: `Opens ${hostOf(r.url)} in a new tab, where you start the scan job. This page updates after the job publishes the new scan.` }
-        : { kind: "none", label: "Re-scan", help: "This dashboard is rebuilt by the scan job on each deploy. Set host.rescan to add a button that starts it." },
+        : { kind: "none", label: "Re-scan", help: NO_RELAY },
       decisions:
         d?.mode === "post" && d.url
           ? { kind: "post", url: d.url, label: "Send decisions", help: "Sends the staged decisions to the team's webhook, which applies them.", apply }
@@ -38,6 +40,15 @@ export const genericHost: HostAdapter = {
     return JSON.parse(text);
   },
 };
+
+/** What the page says when nothing can start a scan from it. */
+export const NO_RELAY = "Re-scan isn't set up for this dashboard. It's rebuilt by the scan job on its schedule and on each deploy. To add a Re-scan button, the team that runs it deploys the dsa scan relay and publishes with its address (host.relay.url or dsa publish --relay <url>); see docs/relay.md.";
+
+/** Re-scan through a scan relay: viewers sign in there, and it starts and follows the scan. */
+export function relayRescan(url: string, label?: string, estimateSeconds?: number | null): PageActions["rescan"] {
+  const u = url.endsWith("/") ? url : `${url}/`;
+  return { kind: "relay", url: u, label: label ?? "Re-scan", help: `Starts a new scan through the scan relay at ${hostOf(u)} and shows its progress here. You sign in first; the new report loads once it's published.`, estimateSeconds: estimateSeconds ?? null };
+}
 
 /** "ci.example.com" from a URL, for button text; the URL itself if it doesn't parse. */
 export function hostOf(url: string): string {

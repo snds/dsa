@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type { Command } from 'commander';
 import { defineAddon, deployOf, normalizeBase, type AddonApi } from '@snds/dsa';
+import { createRelay, relayEnvProblems, relayOptionsFromEnv } from '@snds/dsa/relay';
 import { buildReport } from './report.js';
 import { publish } from './publish.js';
 import { serve } from './server.js';
@@ -44,7 +45,14 @@ export default defineAddon({
       .option('--allow-host <names...>', 'Host headers to accept besides localhost (the public name, e.g. example.com); required with --host')
       .action(async (o: { port: string; host?: string; base?: string; allowHost?: string[] }, cmd: Command) => {
         const ctx = await api.context(cmd); // fail early on a bad config or profile
-        await serve({ load: () => api.context(cmd), port: Number(o.port), addons: await api.addons(), log: api.out, host: o.host, base: normalizeBase(o.base ?? ctx.config.host?.base), allowHosts: o.allowHost ?? [], deploy: c => deployOf(api.cwd, c) });
+        // The scan relay rides along when its settings are in the environment (docs/relay.md).
+        let relay;
+        if (process.env.DSA_RELAY_URL) {
+          const problems = relayEnvProblems(process.env);
+          if (problems.length) api.out(`Scan relay off: ${problems.join(' ')}`);
+          else { const ro = relayOptionsFromEnv(process.env, { log: api.out }); relay = { handler: createRelay(ro), publicUrl: ro.publicUrl }; api.out(`Scan relay on at ${ro.publicUrl}`); }
+        }
+        await serve({ relay, load: () => api.context(cmd), port: Number(o.port), addons: await api.addons(), log: api.out, host: o.host, base: normalizeBase(o.base ?? ctx.config.host?.base), allowHosts: o.allowHost ?? [], deploy: c => deployOf(api.cwd, c) });
       });
 
     program
@@ -58,12 +66,15 @@ export default defineAddon({
 
     program
       .command('publish')
-      .description('the dashboard as a static folder for any static host, mountable under a sub-path such as /dsa/ (default <data>/site); Re-scan and decisions go where host.adapter says')
+      .description('the dashboard as a static folder for any static host, mountable under a sub-path such as /dsa/ (default <data>/site); Re-scan goes through the scan relay, decisions where host.adapter says')
       .option('--out <dir>', 'where to write the site')
-      .action(async (o: { out?: string }, cmd: Command) => {
+      .option('--relay <url>', 'the scan relay Re-scan goes through (default host.relay.url); docs/relay.md')
+      .action(async (o: { out?: string; relay?: string }, cmd: Command) => {
         const ctx = await api.context(cmd);
         await api.requireStore('publish');
-        const actions = (await deployOf(api.cwd, ctx)).actions();
+        if (o.relay && !/^https?:\/\//.test(o.relay)) throw new Error(`--relay needs the relay's full address (https://…), not "${o.relay}".`);
+        const withRelay = o.relay ? { ...ctx, config: { ...ctx.config, host: { ...(ctx.config.host ?? { adapter: 'generic', github: { workflow: 'dsa.yml', label: 'dsa-decisions', server: 'https://github.com' } }), relay: { ...ctx.config.host?.relay, url: o.relay } } } } : ctx;
+        const actions = (await deployOf(api.cwd, withRelay as typeof ctx)).actions();
         const r = await publish(ctx.root, ctx.config, ctx.dataDir, ctx.profile, o.out ? path.resolve(api.cwd, o.out) : undefined, actions);
         api.out(`Published ${r.dir}: ${r.shots} screenshots, ${r.rendered} ${ctx.profile.label} renderings, ${(r.bytes / 1e6).toFixed(1)} MB.`);
       });

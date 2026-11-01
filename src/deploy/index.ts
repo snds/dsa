@@ -10,9 +10,9 @@ import type { HistoryBackend, HistoryFactory, HostAdapter, HostContext, LiveChec
 export * from "./types.js";
 export { CI_REVISION_VARS, BUILTIN_REVISION_SOURCES, NotLiveError, authFiles, checkLive, compareTree, cookiesFor, describeCheck, endpointSource, envSource, resolveLiveRevision, valueSource, type CheckLiveOptions } from "./revision.js";
 export { appSurface, normalizeBase, openSurface, serveStatic } from "./surface.js";
-export { decisionsIn, genericHost, hostAdapter, hostOf } from "./host.js";
+export { NO_RELAY, decisionsIn, genericHost, hostAdapter, hostOf, relayRescan } from "./host.js";
 export { NEVER_PERSIST, excluded, historyBackend, localHistory } from "./history.js";
-export { githubHost, issueNumber, tokenUrl, workflowCrons } from "./adapters/github.js";
+export { githubHost, issueNumber, workflowCrons } from "./adapters/github.js";
 export { readTimes, recordScanTime, scanEstimate } from "./timing.js";
 export { gitBranchHistory } from "./adapters/git-branch.js";
 export { commandHistory } from "./adapters/command.js";
@@ -48,7 +48,7 @@ export interface Deploy {
 export function deployFor(o: DeployOptions): Deploy {
   const env = o.env ?? process.env;
   const get = o.fetch ?? fetch;
-  const hostCfg = o.config.host ?? { adapter: "generic", github: { workflow: "dsa.yml", dispatch: true, label: "dsa-decisions", server: "https://github.com" } };
+  const hostCfg = o.config.host ?? { adapter: "generic", github: { workflow: "dsa.yml", label: "dsa-decisions", server: "https://github.com" } };
   const host = hostAdapter(hostCfg.adapter, [...BUILTIN_HOSTS, ...(o.hosts ?? [])]);
   const hostContext: HostContext = { root: o.root, host: hostCfg, config: { github: o.config.github }, env, fetch: get };
   const scheduleOf = () => { try { return host.schedule?.(hostContext) ?? hostCfg.schedule ?? []; } catch { return hostCfg.schedule ?? []; } };

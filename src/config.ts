@@ -151,6 +151,13 @@ const HostSchema = z
       })
       .optional()
       .describe("The static dashboard's Re-scan button (generic adapter)."),
+    relay: z
+      .object({
+        url: z.string().describe("The scan relay's address (https://relay.example.com/, or <dsa serve>/relay/). The published page signs viewers in there and Re-scan starts the scan through it. See docs/relay.md."),
+        label: z.string().optional(),
+      })
+      .optional()
+      .describe("Where the published dashboard's Re-scan goes: a scan relay that holds the runner credential, so viewers only sign in. Also `dsa publish --relay <url>`."),
     decisions: z
       .object({
         mode: z.enum(["export", "post", "issue", "pr"]).optional().describe("export: download a file; post: send it to `url`; issue / pr (the github adapter): file it as an issue that a workflow applies, committing it (issue) or opening a pull request (pr). Default: the adapter's (generic export, github issue)."),
@@ -162,7 +169,7 @@ const HostSchema = z
       .object({
         repo: z.string().optional().describe('The repo "owner/name" whose workflow re-scans and receives decisions (default: github.defaultRepo).'),
         workflow: z.string().default("dsa.yml").describe("The workflow file that runs the scan (needs a workflow_dispatch trigger)."),
-        dispatch: z.boolean().default(true).describe("Re-scan starts the workflow from the page (with the viewer's own token) and shows its progress. false: Re-scan only opens the workflow's page."),
+        dispatch: z.boolean().optional().describe("No longer used: Re-scan goes through the scan relay (host.relay). Kept so older configs still load."),
         ref: z.string().optional().describe("The branch the workflow runs on (default: the repo's default branch)."),
         label: z.string().default("dsa-decisions").describe("The label on decision issues, which the apply workflow listens for."),
         server: z.string().default("https://github.com").describe("GitHub's web address (GitHub Enterprise Server: your host)."),

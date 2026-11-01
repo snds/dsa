@@ -73,10 +73,10 @@ export interface OpenSurface {
 }
 
 /**
- * How a page starts a scan and follows it, without a server of its own. The dashboard's browser code
- * has one runner per `type` (packages/dashboard/ui/src/lib/scan.ts), each with the same contract:
+ * What starts a scan and follows it. Each `type` has a runner with the same contract (src/relay/runners.ts):
  * trigger() → a run, status(run id) → where it stands, listActive() → runs already going (a
- * scheduled one included).
+ * scheduled one included). The scan relay (src/relay/) runs them with its own credential; a webhook
+ * runner may also be called straight from the page when it needs no secret.
  */
 export type RunnerSpec =
   | {
@@ -89,8 +89,6 @@ export type RunnerSpec =
       workflow: string;
       /** Branch to run on; the repo's default branch when unset. */
       ref?: string | undefined;
-      /** A page that creates a fine-grained token, filled in as far as GitHub allows. */
-      tokenUrl: string;
     }
   | {
       type: "webhook";
@@ -109,14 +107,16 @@ export interface PageActions {
   /** When scans run by themselves (cron lines, UTC), so the page can show the next one. */
   schedule?: string[] | undefined;
   rescan: {
-    /** run: the page starts the scan and shows its progress (needs `runner`); link: opens a page; post: sends a request and can't follow it; none: no button. */
-    kind: "run" | "link" | "post" | "none";
+    /**
+     * relay: the page signs the viewer in at the scan relay (`url`), which starts the scan and reports its progress;
+     * run: the page calls a webhook runner itself (`runner`); link: opens a page; post: sends a request and can't
+     * follow it; none: no button (`help` says how to enable one).
+     */
+    kind: "relay" | "run" | "link" | "post" | "none";
     url?: string | undefined;
     label: string;
     help: string;
     runner?: RunnerSpec | undefined;
-    /** Where to start a scan by hand when the page can't (no credential). */
-    fallbackUrl?: string | undefined;
     /** How long a scan usually takes, from earlier runs (the page fills in better when the host knows). */
     estimateSeconds?: number | null | undefined;
   };

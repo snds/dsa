@@ -82,11 +82,10 @@ test('runs from before coverage was recorded: skips are read from the notes', as
 
 test('Re-scan names where it goes and when the page changes', () => {
   const ctx = (host: unknown): HostContext => ({ root: '/', host: parseConfig({ host }).host!, config: {}, env: {}, fetch });
-  const gh = githubHost.actions(ctx({ adapter: 'github', github: { repo: 'acme/site', workflow: 'pages.yml', dispatch: false } })).rescan;
-  assert.equal(gh.label, 'Re-scan on GitHub');
-  assert.match(gh.help, /pages\.yml workflow's page on GitHub in a new tab/);
-  assert.match(gh.help, /Run workflow/);
-  assert.match(gh.help, /updates after that run finishes deploying/);
+  const gh = githubHost.actions(ctx({ adapter: 'github', github: { repo: 'acme/site', workflow: 'pages.yml' }, relay: { url: 'https://relay.example.test/' } })).rescan;
+  assert.equal(gh.label, 'Re-scan');
+  assert.match(gh.help, /pages\.yml workflow in acme\/site through the scan relay at relay\.example\.test/);
+  assert.match(gh.help, /new report loads once that run has deployed/);
   const link = genericHost.actions(ctx({ rescan: { url: 'https://ci.example.test/pipelines/new' } })).rescan;
   assert.equal(link.label, 'Re-scan on ci.example.test');
   assert.match(link.help, /new tab/);

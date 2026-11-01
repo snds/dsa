@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { discoverSources, NotLiveError, recordScanTime, runAfterHooks, type Deploy, type DsaAddon, type EngineContext, type ServeRequest } from '@snds/dsa';
 import { MEASURES, appSettings, expandSources, isGlob, clearEvents, clearMappingCache, computeFit, decideMany, effectiveSettings, figmaToken, githubToken, latestEvals, loadCatalog, logEvent, mapInstance, mask, materializeRemotes, openStore, parseFigmaUrl, readRendered, readSource, resolveTargets, runPipeline, setSetting, targetRelative, undecide, withMetrics, writeSecrets, type AppSettings, type Config } from '@snds/dsa/engine';
+import { toNodeListener } from '@snds/dsa/relay/node';
+import type { RelayHandler } from '@snds/dsa/relay';
 import { renderReport } from './report.js';
 import { buildQueue, createIssues, syncLinks } from './queue.js';
 
@@ -43,6 +45,8 @@ export interface ServeOptions {
   allowHosts?: string[] | undefined;
   /** The run's host adapter, history backend and live check; the Run button refuses a checkout that isn't live. */
   deploy?: ((ctx: EngineContext) => Promise<Deploy>) | undefined;
+  /** The scan relay, mounted at its public URL's path (DSA_RELAY_URL), for a published dashboard to re-scan through. */
+  relay?: { handler: RelayHandler; publicUrl: string } | undefined;
 }
 
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1']);
@@ -113,6 +117,8 @@ export async function startServer(opts: ServeOptions): Promise<{ url: string; cl
   const onInt = () => { storybook?.stop(); process.exit(130); };
   process.once('exit', onExit);
   process.once('SIGINT', onInt);
+  const relayPath = opts.relay ? new URL(opts.relay.publicUrl).pathname.replace(/\/?$/, '/') : null;
+  const relay = opts.relay ? toNodeListener(opts.relay.handler, new URL(opts.relay.publicUrl).origin) : null;
   const server = http.createServer(async (req, res) => {
     const send = (code: number, body: unknown, type = 'application/json') => {
       res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store' });
@@ -121,6 +127,8 @@ export async function startServer(opts: ServeOptions): Promise<{ url: string; cl
     try {
       if (!allowedHosts.has(String(req.headers.host))) return send(403, { error: 'Unexpected host.' });
       const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
+      // The relay has its own sign-in, CSRF and CORS checks.
+      if (relay && relayPath && (url.pathname.startsWith(relayPath) || url.pathname === relayPath.slice(0, -1))) return await relay(req, res);
       // Mounted under a sub-path: /dsa → /dsa/, /dsa/api/run → /api/run, anything else isn't ours.
       if (base !== '/') {
         if (url.pathname === base.slice(0, -1)) { res.writeHead(301, { Location: base + url.search }); return res.end(); }

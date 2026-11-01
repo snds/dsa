@@ -1351,6 +1351,23 @@
                   ],
                   "additionalProperties": false
                 },
+                "relay": {
+                  "description": "Where the published dashboard's Re-scan goes: a scan relay that holds the runner credential, so viewers only sign in. Also `dsa publish --relay <url>`.",
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "description": "The scan relay's address (https://relay.example.com/, or <dsa serve>/relay/). The published page signs viewers in there and Re-scan starts the scan through it. See docs/relay.md."
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": false
+                },
                 "decisions": {
                   "description": "Where decisions made on the static dashboard go.",
                   "type": "object",
@@ -1385,8 +1402,7 @@
                       "type": "string"
                     },
                     "dispatch": {
-                      "default": true,
-                      "description": "Re-scan starts the workflow from the page (with the viewer's own token) and shows its progress. false: Re-scan only opens the workflow's page.",
+                      "description": "No longer used: Re-scan goes through the scan relay (host.relay). Kept so older configs still load.",
                       "type": "boolean"
                     },
                     "ref": {
@@ -1410,7 +1426,6 @@
                   },
                   "required": [
                     "workflow",
-                    "dispatch",
                     "label",
                     "server"
                   ],
