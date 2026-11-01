@@ -68,8 +68,7 @@ test('publish: the static site carries the host adapter\'s buttons and the revis
   const payload = payloadOf(fs.readFileSync(path.join(out, 'index.html'), 'utf8'));
   assert.equal(payload.serve, false);
   assert.equal(payload.base, null, 'a published page uses relative links, so it works under any sub-path');
-  assert.equal(payload.actions.rescan.kind, 'run');
-  assert.equal(payload.actions.rescan.fallbackUrl, 'https://github.com/acme/site/actions/workflows/dsa.yml');
+  assert.equal(payload.actions.rescan.kind, 'none', 'no relay configured: no Re-scan button, words on how to add one');
   assert.equal(payload.actions.decisions.kind, 'issue');
   assert.deepEqual(payload.live, { state: 'live', ok: true, unreleased: false, label: LIVE.label, head: LIVE.head, revision: LIVE.revision });
 

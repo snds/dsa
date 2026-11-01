@@ -3,7 +3,7 @@
 // picks for this page, so this file never knows which host it talks to.
 import * as React from "react"
 import { D, at } from "@/lib/dsa"
-import { ScanError, reportStamp, runnerFor, tokenStore, type RunnerSpec, type ScanRun, type ScanRunner } from "@/lib/scan"
+import { ScanError, readSignInReturn, relayRunner, relaySession, reportStamp, runnerFor, signInHref, type RelaySessionInfo, type RunnerSpec, type ScanRun, type ScanRunner } from "@/lib/scan"
 
 export type Phase = "idle" | "asking" | "starting" | "running" | "deploying" | "ready" | "failed"
 
@@ -15,8 +15,8 @@ export interface ScanState {
   /** The progress dialog: opens by itself for long scans, and can be hidden while the banner stays. */
   dialog: boolean
   error: { message: string; url?: string | null } | null
-  /** Why the token dialog opened again (a refused token), if it did. */
-  tokenProblem: string | null
+  /** Why the sign-in dialog opened again (an expired sign-in, a refusal), if it did. */
+  signInProblem: string | null
   /** True when the scan was found running rather than started here. */
   found: boolean
 }
@@ -26,14 +26,16 @@ const POLL_MS = 5000
 const PAGE_POLL_MS = 10000
 const PAGE_WAIT_MS = 20 * 60_000
 
-const rescan = (): { kind?: string; runner?: RunnerSpec; fallbackUrl?: string; estimateSeconds?: number | null } | undefined => D.actions?.rescan
-const githubSpec = () => { const r = rescan()?.runner; return r?.type === "github" ? r : null }
-const storage = () => { try { return window.localStorage } catch { return null } }
-export const token = () => { const g = githubSpec(); return g ? tokenStore(storage(), g) : null }
-/** In-page runs are possible here: dsa serve, or a published page whose adapter gives a runner. */
-export const canRun = () => Boolean(D.serve || (rescan()?.kind === "run" && rescan()?.runner))
+const rescan = (): { kind?: string; url?: string; runner?: RunnerSpec; estimateSeconds?: number | null } | undefined => D.actions?.rescan
+/** The scan relay's address when this page re-scans through one. */
+export const relayUrl = () => (!D.serve && rescan()?.kind === "relay" && rescan()?.url) || null
+const storage = () => { try { return window.sessionStorage } catch { return null } }
+export const relaySessionStore = () => { const r = relayUrl(); return r ? relaySession(storage(), r) : null }
+const PENDING = "dsa.relay-pending-scan"
+/** In-page runs are possible here: dsa serve, the scan relay, or a webhook runner. */
+export const canRun = () => Boolean(D.serve || relayUrl() || (rescan()?.kind === "run" && rescan()?.runner?.type === "webhook"))
 
-let state: ScanState = { phase: "idle", run: null, estimate: D.actions?.rescan?.estimateSeconds ?? D.scanEstimate ?? null, dialog: false, error: null, tokenProblem: null, found: false }
+let state: ScanState = { phase: "idle", run: null, estimate: D.actions?.rescan?.estimateSeconds ?? D.scanEstimate ?? null, dialog: false, error: null, signInProblem: null, found: false }
 const listeners = new Set<() => void>()
 const set = (patch: Partial<ScanState>) => { state = { ...state, ...patch }; listeners.forEach(f => f()) }
 const subscribe = (f: () => void) => { listeners.add(f); return () => { listeners.delete(f) } }
@@ -43,14 +45,14 @@ let timer: ReturnType<typeof setTimeout> | null = null
 const stop = () => { if (timer) clearTimeout(timer); timer = null }
 
 function runner(): ScanRunner | null {
-  return runnerFor(D, at, token()?.get() ?? null)
+  return runnerFor(D, at, () => relaySessionStore()?.get() ?? null)
 }
 
-/** A refused token is forgotten and asked for again; anything else is shown with a link to look. */
+/** An expired or missing sign-in asks the viewer to sign in; anything else is shown with a link to look. */
 function fail(e: unknown, url?: string | null) {
   stop()
-  if (e instanceof ScanError && e.kind === "auth" && githubSpec()) { token()?.forget(); set({ phase: "asking", tokenProblem: e.message }); return }
-  set({ phase: "failed", error: { message: e instanceof Error ? e.message : String(e), url: (e as ScanError)?.url ?? url ?? state.run?.url ?? rescan()?.fallbackUrl ?? null } })
+  if (e instanceof ScanError && e.kind === "auth" && relayUrl()) { relaySessionStore()?.forget(); set({ phase: "asking", signInProblem: state.phase === "starting" ? null : e.message }); return }
+  set({ phase: "failed", error: { message: e instanceof Error ? e.message : String(e), url: (e as ScanError)?.url ?? url ?? state.run?.url ?? null } })
 }
 
 async function learnEstimate(r: ScanRunner) {
@@ -90,11 +92,10 @@ function awaitReport(since: number) {
   void check()
 }
 
-/** Re-scan: ask for a token first where one is needed, then start and follow the run. */
+/** Re-scan: start and follow the run. Through the relay, a viewer who isn't signed in is asked to first. */
 export async function startScan() {
   const r = runner()
   if (!r) return
-  if (r.needsToken && !token()?.get()) return set({ phase: "asking", tokenProblem: null })
   set({ phase: "starting", error: null, found: false, run: null })
   void learnEstimate(r)
   try {
@@ -106,27 +107,53 @@ export async function startScan() {
   }
 }
 
-export function saveToken(t: string) {
-  token()?.set(t)
-  set({ tokenProblem: null })
-  void startScan()
+/** Off to the relay's sign-in; back here afterwards, where the scan starts by itself. */
+export function signIn() {
+  const r = relayUrl()
+  if (!r) return
+  try { storage()?.setItem(PENDING, "1") } catch { /* the viewer presses Re-scan again */ }
+  location.assign(signInHref(r, location.href))
 }
 
-export function forgetToken() {
-  token()?.forget()
+/** Who is signed in at the relay (null: no relay, or it can't be reached). */
+export async function relayWho(): Promise<RelaySessionInfo | null> {
+  const r = relayUrl()
+  if (!r) return null
+  try { return await relayRunner(r, () => relaySessionStore()?.get() ?? null).session() } catch { return null }
 }
 
-export const closeAsk = () => set({ phase: state.run ? state.phase : "idle", tokenProblem: null })
+export async function signOut() {
+  const r = relayUrl()
+  if (!r) return
+  try { await relayRunner(r, () => relaySessionStore()?.get() ?? null).signOut() } catch { /* the session expires on its own */ }
+  relaySessionStore()?.forget()
+}
+
+/** Back from sign-in: keep the session the relay sent in the fragment, clear the fragment, and carry on. */
+function takeSignInReturn(): boolean {
+  if (!relayUrl()) return false
+  const back = readSignInReturn(location.hash)
+  if (!back) return false
+  history.replaceState(null, "", location.pathname + location.search)
+  let pending = false
+  try { pending = storage()?.getItem(PENDING) === "1"; storage()?.removeItem(PENDING) } catch { /* no storage */ }
+  if (back.error) { set({ phase: "failed", error: { message: back.error, url: null } }); return true }
+  if (back.session) relaySessionStore()?.set(back.session)
+  if (pending) { void startScan(); return true }
+  return false
+}
+
+export const closeAsk = () => set({ phase: state.run ? state.phase : "idle", signInProblem: null })
 export const showDialog = (open: boolean) => set({ dialog: open })
 export const dismiss = () => { stop(); set({ phase: "idle", error: null, run: null, dialog: false }) }
 
 /**
- * On load: a scan already going (scheduled, or started by someone else) is shown as it runs. A
- * published GitHub page asks without a token too, which works for a public repo and quietly does
- * nothing for a private one.
+ * On load: finish a sign-in that just came back, then show a scan already going (scheduled, or
+ * started by someone else) as it runs.
  */
 export async function detectRunning() {
-  const r = runnerFor(D, at, token()?.get() ?? null)
+  if (takeSignInReturn()) return
+  const r = runner()
   if (!r) return
   try {
     const [first] = await r.listActive()

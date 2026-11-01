@@ -31,6 +31,14 @@
       "types": "./dist/engine/index.d.ts",
       "import": "./dist/engine/index.js"
     },
+    "./relay": {
+      "types": "./dist/relay/index.d.ts",
+      "import": "./dist/relay/index.js"
+    },
+    "./relay/node": {
+      "types": "./dist/relay/node.d.ts",
+      "import": "./dist/relay/node.js"
+    },
     "./schema/*": "./schema/*",
     "./package.json": "./package.json"
   },

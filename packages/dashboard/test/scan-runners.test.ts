@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 import net from 'node:net';
 import { ACME_ROOT, contextFor, NOW, runPipeline, tmp } from '../../../test/engine/fixture.js';
 import { startServer } from '../src/server.js';
-import { ScanError, githubRunner, looksLikeToken, median, progress, reportStamp, runnerFor, serveRunner, tokenStore, webhookRunner, type RunnerSpec, type ScanRunner } from '../ui/src/lib/scan.js';
+import { median, progress, readSignInReturn, relaySession, reportStamp, runnerFor, serveRunner, signInHref, webhookRunner, type ScanRunner } from '../ui/src/lib/scan.js';
+import type { RunnerSpec } from '../../../src/deploy/types.js';
+import { RunnerError, githubRunner } from '../../../src/relay/runners.js';
 
 // The Re-scan contract every runner keeps: trigger() → a run, status(id) → where it stands (steps
 // done of total, done, failed with why), listActive() → runs already going (scheduled ones too).
-// GitHub and a webhook are faked at the HTTP level; dsa serve is the real server.
+// GitHub and a webhook are faked at the HTTP level; dsa serve is the real server. The GitHub runner
+// lives in the scan relay (src/relay/runners.ts), which holds its token; the page never calls GitHub.
 
 type Route = (req: { method: string; url: URL; body: any; headers: Record<string, string> }) => { status?: number; body?: unknown } | undefined;
 
@@ -25,7 +28,7 @@ function fake(handler: Route) {
   return { f, calls };
 }
 
-const GH: Extract<RunnerSpec, { type: 'github' }> = { type: 'github', api: 'https://api.github.test', server: 'https://github.test', repo: 'acme/site', workflow: 'pages.yml', tokenUrl: 'https://github.test/settings/personal-access-tokens/new' };
+const GH: Extract<RunnerSpec, { type: 'github' }> = { type: 'github', api: 'https://api.github.test', server: 'https://github.test', repo: 'acme/site', workflow: 'pages.yml' };
 const runJson = (id: number, o: Record<string, unknown> = {}) => ({ id, status: 'in_progress', conclusion: null, event: 'workflow_dispatch', run_started_at: '2026-10-31T10:00:00Z', created_at: '2026-10-31T10:00:00Z', updated_at: '2026-10-31T10:02:00Z', html_url: `https://github.test/acme/site/actions/runs/${id}`, ...o });
 const jobsJson = (steps: { name: string; status: string; conclusion?: string | null }[], name = 'deploy') => ({ jobs: [{ name, steps }] });
 
@@ -84,14 +87,14 @@ describe('the GitHub runner', () => {
   });
 
   it('says plainly why it failed: a refused token, a missing permission, a repo it can\'t see, a run that never appeared', async () => {
-    await expect(githubRunner(GH, 'github_pat_expired', fakeGithub().f, { wait: noWait }).trigger()).rejects.toMatchObject({ kind: 'auth', message: expect.stringMatching(/expired or was revoked/) });
+    await expect(githubRunner(GH, 'github_pat_expired', fakeGithub().f, { wait: noWait }).trigger()).rejects.toMatchObject({ kind: 'auth', message: expect.stringMatching(/relay's runner token: it has expired or was revoked/) });
     const forbidden = fake(() => ({ status: 403, body: { message: 'Resource not accessible by personal access token' } }));
     await expect(githubRunner(GH, 'github_pat_good', forbidden.f).trigger()).rejects.toMatchObject({ kind: 'forbidden', message: expect.stringMatching(/Actions: read and write on acme\/site/) });
     await expect(githubRunner({ ...GH, repo: 'acme/other', ref: 'main' }, 'github_pat_good', fakeGithub().f).trigger()).rejects.toMatchObject({ kind: 'not-found' });
     const silent = fake(({ url, method }) => (method === 'POST' ? { status: 204 } : url.pathname.endsWith('/runs') ? { body: { workflow_runs: [] } } : { body: { default_branch: 'main' } }));
     await expect(githubRunner(GH, 'github_pat_good', silent.f, { wait: noWait, tries: 2 }).trigger()).rejects.toMatchObject({ url: 'https://github.test/acme/site/actions/workflows/pages.yml' });
     const offline = (async () => { throw new TypeError('Failed to fetch'); }) as unknown as typeof fetch;
-    await expect(githubRunner(GH, 'github_pat_good', offline).status('1')).rejects.toBeInstanceOf(ScanError);
+    await expect(githubRunner(GH, 'github_pat_good', offline).status('1')).rejects.toBeInstanceOf(RunnerError);
   });
 
   it('maps finished runs: done, cancelled, failed with the step that failed', async () => {
@@ -187,28 +190,33 @@ describe('helpers the page uses', () => {
     expect(reportStamp('<html></html>')).toBeNull();
   });
 
-  it('keeps the token in this browser only, and survives storage that throws', () => {
+  it('keeps the relay session for this tab only, and survives storage that throws', () => {
     const mem = new Map<string, string>();
     const store = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v), removeItem: (k: string) => void mem.delete(k) };
-    const t = tokenStore(store, GH);
-    t.set('  github_pat_abc  ');
-    expect([...mem.keys()]).toEqual(['dsa.github-token.github.test/acme/site']);
-    expect(t.get()).toBe('github_pat_abc');
+    const t = relaySession(store, 'https://relay.example.test/');
+    t.set('v1.abc.def');
+    expect([...mem.keys()]).toEqual(['dsa.relay-session.relay.example.test/']);
+    expect(t.get()).toBe('v1.abc.def');
     t.forget();
     expect(t.get()).toBeNull();
     const broken = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); }, removeItem: () => { throw new Error('blocked'); } };
-    const b = tokenStore(broken, GH);
+    const b = relaySession(broken, 'https://relay.example.test/');
     expect(() => { b.set('x'); b.forget(); }).not.toThrow();
     expect(b.get()).toBeNull();
-    expect(looksLikeToken('github_pat_11ABCDEFG0123456789_abcdefghij')).toBe(true);
-    expect(looksLikeToken('my password')).toBe(false);
+    // What sign-in sends back, in the fragment.
+    expect(readSignInReturn('#dsa-relay=v1.a.b')).toEqual({ session: 'v1.a.b' });
+    expect(readSignInReturn('#overview&dsa-relay-error=Signed%20in%20as%20x')).toEqual({ error: 'Signed in as x' });
+    expect(readSignInReturn('#overview')).toBeNull();
+    expect(signInHref('https://relay.example.test/', 'https://acme.example.test/dsa/#usage')).toBe('https://relay.example.test/auth/start?return=https%3A%2F%2Facme.example.test%2Fdsa%2F');
   });
 
   it('picks the runner the page was published with', () => {
     const at = (p: string) => p;
-    expect(runnerFor({ serve: true }, at, null)?.type).toBe('serve');
-    expect(runnerFor({ actions: { rescan: { kind: 'run', runner: GH } } }, at, 't')?.type).toBe('github');
-    expect(runnerFor({ actions: { rescan: { kind: 'run', runner: { type: 'webhook', trigger: 'https://x.test' } } } }, at, null)?.type).toBe('webhook');
-    expect(runnerFor({ actions: { rescan: { kind: 'link' } } }, at, null)).toBeNull();
+    expect(runnerFor({ serve: true }, at)?.type).toBe('serve');
+    expect(runnerFor({ actions: { rescan: { kind: 'relay', url: 'https://relay.example.test/' } } }, at)?.type).toBe('relay');
+    expect(runnerFor({ actions: { rescan: { kind: 'run', runner: { type: 'webhook', trigger: 'https://x.test' } } } }, at)?.type).toBe('webhook');
+    // The page never calls GitHub itself: that takes a credential, which only the relay holds.
+    expect(runnerFor({ actions: { rescan: { kind: 'run', runner: GH } } }, at)).toBeNull();
+    expect(runnerFor({ actions: { rescan: { kind: 'link' } } }, at)).toBeNull();
   });
 });

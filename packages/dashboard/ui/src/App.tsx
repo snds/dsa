@@ -25,7 +25,7 @@ import { AgentProvider, canChat, useAgent } from "@/agent/store"
 import { AgentPanel } from "@/agent/AgentPanel"
 import { cn } from "cn"
 import { ACTIONS, rescan as hostRescan } from "@/lib/host"
-import { NextScan, ScanBanner, ScanButton, ScanDialog, TokenDialog } from "@/components/scan"
+import { NextScan, ScanBanner, ScanButton, ScanDialog, SignInDialog } from "@/components/scan"
 import { canRun, detectRunning } from "@/lib/useScan"
 
 type ViewId = "overview" | "queue" | "system" | "federation" | "elements" | "usage" | "readiness" | "design" | "trends" | "settings"
@@ -92,6 +92,13 @@ function AgentButton() {
 function StaticRescan({ onPost }: { onPost: () => void }) {
   const r = ACTIONS!.rescan
   const target = (r.url ?? "").replace(/^https?:\/\//, "").replace(/\/$/, "")
+  // No relay: say how Re-scan gets enabled instead of a button that can't work.
+  if (r.kind === "none") return (
+    <div className="flex max-w-sm flex-col items-end gap-1">
+      <NextScan prefix="Next scheduled scan" className="text-xs text-muted-foreground" />
+      <p className="text-right text-xs text-muted-foreground">{r.help}</p>
+    </div>
+  )
   return (
     <div className="flex max-w-sm flex-col items-end gap-1">
       {r.kind === "link" ? (
@@ -172,7 +179,7 @@ function Shell() {
           <div className="flex items-center gap-2">
             <RolePicker />
           {D.serve && <AgentButton />}
-          {canRun() ? <ScanButton /> : !D.serve && D.published && ACTIONS && ACTIONS.rescan.kind !== "none" && <StaticRescan onPost={rerun} />}
+          {canRun() ? <ScanButton /> : !D.serve && D.published && ACTIONS && <StaticRescan onPost={rerun} />}
           </div>
         </div>
         <div className="mx-auto mt-3 max-w-[1400px] px-4 sm:px-6">
@@ -205,7 +212,7 @@ function Shell() {
         )}
         <ScanBanner />
         <ScanDialog />
-        <TokenDialog />
+        <SignInDialog />
         {scan.error && (
           <Alert variant="destructive" className="mb-6">
             <AlertTitle>The scan request didn't go through</AlertTitle>

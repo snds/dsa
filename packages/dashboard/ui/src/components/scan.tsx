@@ -1,15 +1,12 @@
 import * as React from "react"
-import { cn } from "cn"
-import { ArrowClockwiseIcon, ArrowSquareOutIcon, CheckCircleIcon, CircleNotchIcon, KeyIcon, WarningIcon } from "@phosphor-icons/react"
+import { ArrowClockwiseIcon, ArrowSquareOutIcon, CheckCircleIcon, CircleNotchIcon, GithubLogoIcon, SignInIcon, WarningIcon } from "@phosphor-icons/react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { D, fmtWhen } from "@/lib/dsa"
 import { nextScheduled } from "@/lib/cron"
-import { aboutTime, looksLikeToken, progress, type ScanRun } from "@/lib/scan"
-import { canRun, closeAsk, dismiss, saveToken, showDialog, startScan, useScan } from "@/lib/useScan"
+import { aboutTime, progress, type ScanRun } from "@/lib/scan"
+import { canRun, closeAsk, dismiss, relayUrl, showDialog, signIn, startScan, useScan } from "@/lib/useScan"
 
 /**
  * Re-scan from the page, with feedback the whole way: Starting… on click, a banner while a scan runs
@@ -60,7 +57,7 @@ export function ScanBanner() {
   const s = useScan()
   useTick()
   const r = s.run
-  if (s.phase === "starting") return <Alert className="mb-6" role="status"><CircleNotchIcon className="animate-spin" /><AlertTitle>Starting a scan…</AlertTitle><AlertDescription>{D.serve ? "The server is starting the scan." : "Asking the host to start the scan workflow."}</AlertDescription></Alert>
+  if (s.phase === "starting") return <Alert className="mb-6" role="status"><CircleNotchIcon className="animate-spin" /><AlertTitle>Starting a scan…</AlertTitle><AlertDescription>{D.serve ? "The server is starting the scan." : "Asking the scan relay to start the scan."}</AlertDescription></Alert>
   if (s.phase === "running") return (
     <Alert className="mb-6" role="status">
       <CircleNotchIcon className="animate-spin" />
@@ -87,11 +84,11 @@ export function ScanBanner() {
   if (s.phase === "failed" && s.error) return (
     <Alert variant="destructive" className="mb-6">
       <WarningIcon />
-      <AlertTitle>The scan didn't complete</AlertTitle>
+      <AlertTitle>{s.run ? "The scan didn't complete" : "The scan didn't start"}</AlertTitle>
       <AlertDescription>
         <p>{s.error.message}</p>
         <span className="mt-1 flex flex-wrap gap-2">
-          {s.error.url && <a className={buttonVariants({ size: "xs", variant: "outline" })} href={s.error.url} target="_blank" rel="noopener noreferrer">{s.run ? "See the run" : "Open the workflow"}<ArrowSquareOutIcon data-icon="inline-end" /></a>}
+          {s.error.url && <a className={buttonVariants({ size: "xs", variant: "outline" })} href={s.error.url} target="_blank" rel="noopener noreferrer">{s.run ? "See the run" : "Open the run's page"}<ArrowSquareOutIcon data-icon="inline-end" /></a>}
           <Button size="xs" variant="ghost" onClick={dismiss}>Dismiss</Button>
         </span>
       </AlertDescription>
@@ -144,49 +141,30 @@ export function ScanDialog() {
 }
 
 /**
- * A published page has no server, so starting a GitHub workflow needs the viewer's own token. It
- * stays in this browser only; declining opens the workflow page instead, with what to do there.
+ * Re-scan through the scan relay: the relay holds the credential that starts the scan, so the viewer
+ * only signs in (once per tab). After sign-in the page comes back here and the scan starts by itself.
  */
-export function TokenDialog() {
+export function SignInDialog() {
   const s = useScan()
-  const [value, setValue] = React.useState("")
-  const spec = D.actions?.rescan?.runner?.type === "github" ? D.actions.rescan.runner : null
-  if (!spec) return null
-  const ok = looksLikeToken(value)
-  const fallback = D.actions?.rescan?.fallbackUrl
+  const relay = relayUrl()
+  if (!relay) return null
+  const host = new URL(relay).host
   return (
     <Dialog open={s.phase === "asking"} onOpenChange={o => { if (!o) closeAsk() }}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><KeyIcon />Re-scan needs a GitHub token</DialogTitle>
-          <DialogDescription>This page is a static file, so it can't start the scan on its own. With a token of yours it can start the <b>{spec.workflow}</b> workflow in <b>{spec.repo}</b> and show its progress here.</DialogDescription>
+          <DialogTitle className="flex items-center gap-2"><SignInIcon />Sign in to re-scan</DialogTitle>
+          <DialogDescription>Re-scan starts a new scan through the team's scan relay at <b>{host}</b>. It checks that you can change the repo first.</DialogDescription>
         </DialogHeader>
-        {s.tokenProblem && <Alert variant="destructive"><WarningIcon /><AlertDescription>{s.tokenProblem}</AlertDescription></Alert>}
-        <div className="flex flex-col gap-3 text-sm">
-          <ol className="list-decimal space-y-1 pl-5">
-            <li><a className="underline underline-offset-4" href={spec.tokenUrl} target="_blank" rel="noopener noreferrer">Create a fine-grained token on GitHub</a> (it opens filled in).</li>
-            <li>Repository access: <b>Only select repositories</b>, then pick <b>{spec.repo}</b>.</li>
-            <li>Permissions: <b>Actions: Read and write</b>. Nothing else. Keep the short expiry.</li>
-          </ol>
-          <div className="rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground">
-            <p><b className="text-foreground">What it can do:</b> start, re-run and cancel workflows in {spec.repo}, and read their runs and logs. It can't read or change the code, issues or settings.</p>
-            <p className="mt-1"><b className="text-foreground">Where it's kept:</b> only in this browser (local storage for this site). It is never sent anywhere but {new URL(spec.api).host}, never added to the report, and you can forget it any time in Settings. Anyone using this browser profile could use it.</p>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="dsa-token">Token</Label>
-            <Input id="dsa-token" type="password" autoComplete="off" spellCheck={false} placeholder="github_pat_…" value={value} onChange={e => setValue(e.target.value)} aria-invalid={value.length > 0 && !ok} />
-            {value.length > 0 && !ok && <p className="text-xs text-destructive">That doesn't look like a GitHub token (they start with github_pat_).</p>}
-          </div>
+        {s.signInProblem && <Alert variant="destructive"><WarningIcon /><AlertDescription>{s.signInProblem}</AlertDescription></Alert>}
+        <div className="rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground">
+          <p><b className="text-foreground">What it asks for:</b> only who you are. GitHub asks no permissions; the relay reads your access to the repo and forgets your GitHub sign-in.</p>
+          <p className="mt-1"><b className="text-foreground">What it keeps:</b> a short sign-in for this tab (it ends when you close it, or in a few hours). Sign out any time in Settings.</p>
         </div>
-        <DialogFooter className={cn("gap-2 sm:justify-between")}>
-          {fallback ? (
-            <a className={buttonVariants({ variant: "ghost" })} href={fallback} target="_blank" rel="noopener noreferrer" onClick={() => closeAsk()}>
-              No token: open the workflow page<ArrowSquareOutIcon data-icon="inline-end" />
-            </a>
-          ) : <span />}
-          <Button disabled={!ok} onClick={() => { saveToken(value); setValue("") }}>Save and re-scan</Button>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => closeAsk()}>Not now</Button>
+          <Button onClick={() => signIn()}><GithubLogoIcon data-icon="inline-start" />Sign in with GitHub</Button>
         </DialogFooter>
-        {fallback && <p className="-mt-2 text-xs text-muted-foreground">Without a token: on the workflow page, press <b>Run workflow</b>. This report updates after that run deploys; reload it then.</p>}
       </DialogContent>
     </Dialog>
   )

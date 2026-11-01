@@ -1,12 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
-import { decisionsIn, genericHost } from "../host.js";
+import { NO_RELAY, decisionsIn, genericHost, relayRescan } from "../host.js";
 import type { HostAdapter, HostContext, PageActions, RevisionSource } from "../types.js";
 
 /**
- * The GitHub host adapter. Re-scan opens the scan workflow's page (its Run workflow button is
- * workflow_dispatch); decisions become an issue with a label a workflow listens for, which runs
+ * The GitHub host adapter. Re-scan goes through the scan relay (host.relay), which starts the scan
+ * workflow with workflow_dispatch using its own credential; decisions become an issue with a label a workflow listens for, which runs
  * `dsa apply-decisions --issue <n>` and commits the result or opens a pull request. The live
  * revision can come from the repo's deployments (GitHub Pages records one per deploy).
  *
@@ -18,7 +18,7 @@ function settings(c: Pick<HostContext, "host" | "config" | "env">) {
   const server = (g?.server ?? "https://github.com").replace(/\/+$/, "");
   const api = (g?.api ?? (server === "https://github.com" ? "https://api.github.com" : `${server}/api/v3`)).replace(/\/+$/, "");
   const repo = g?.repo ?? c.config.github?.defaultRepo ?? c.env.GITHUB_REPOSITORY;
-  return { server, api, repo, workflow: g?.workflow ?? "dsa.yml", ref: g?.ref, label: g?.label ?? "dsa-decisions", dispatch: g?.dispatch ?? true };
+  return { server, api, repo, workflow: g?.workflow ?? "dsa.yml", ref: g?.ref, label: g?.label ?? "dsa-decisions" };
 }
 
 async function gh(c: HostContext, method: string, pathname: string, body?: unknown): Promise<any> {
@@ -30,16 +30,6 @@ async function gh(c: HostContext, method: string, pathname: string, body?: unkno
   });
   if (!r.ok) throw new Error(`GitHub ${method} ${pathname.split("?")[0]} answered ${r.status}${!t ? " (no GITHUB_TOKEN set)" : r.status === 403 || r.status === 404 ? " (check the token's permissions)" : ""}.`);
   return r.status === 204 ? null : r.json();
-}
-
-/**
- * GitHub's page for a new fine-grained token, filled in where it allows: a name, a short expiry,
- * the repo's owner and Actions read and write. The viewer still picks "Only select repositories".
- */
-export function tokenUrl(server: string, repo: string): string {
-  const owner = repo.split("/")[0] ?? "";
-  const q = new URLSearchParams({ name: `dsa re-scan ${repo}`.slice(0, 40), description: `Starts and follows the scan workflow in ${repo} from the dsa dashboard.`, target_name: owner, expires_in: "30", actions: "write" });
-  return `${server}/settings/personal-access-tokens/new?${q}`;
 }
 
 const isIssueRef = (ref: string) => /^#?\d+$|\/issues\/\d+\/?$/.test(ref.trim());
@@ -98,23 +88,11 @@ export const githubHost: HostAdapter = {
     const mode = c.host.decisions?.mode ?? "issue";
     return {
       host: "github",
-      rescan: c.host.rescan
+      rescan: c.host.relay?.url
+        ? { ...relayRescan(c.host.relay.url, c.host.relay.label, c.host.rescan?.estimateSeconds), help: `Starts the ${s.workflow} workflow in ${s.repo} through the scan relay at ${new URL(c.host.relay.url).host} and shows its progress here. You sign in with GitHub first; the new report loads once that run has deployed.` }
+        : c.host.rescan
         ? generic.rescan
-        : s.dispatch
-        ? {
-            kind: "run",
-            label: "Re-scan",
-            help: `Starts the ${s.workflow} workflow on GitHub with your own token and shows its progress here. The new report loads when that run has deployed.`,
-            runner: { type: "github", api: s.api, server: s.server, repo: s.repo, workflow: s.workflow, ref: s.ref, tokenUrl: tokenUrl(s.server, s.repo) },
-            fallbackUrl: `${s.server}/${s.repo}/actions/workflows/${encodeURIComponent(s.workflow)}`,
-            estimateSeconds: null,
-          }
-        : {
-            kind: "link",
-            url: `${s.server}/${s.repo}/actions/workflows/${encodeURIComponent(s.workflow)}`,
-            label: "Re-scan on GitHub",
-            help: `Opens the ${s.workflow} workflow's page on GitHub in a new tab. Press Run workflow there${s.ref ? ` (branch ${s.ref})` : ""}. This page updates after that run finishes deploying, usually a few minutes later.`,
-          },
+        : { kind: "none", label: "Re-scan", help: NO_RELAY },
       decisions:
         mode === "issue" || mode === "pr"
           ? {

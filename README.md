@@ -308,7 +308,8 @@ Install them from the release (see [Install](#install)).
 |---|---|---|
 | `dsa serve [--port 4319] [--host] [--base /dsa/] [--allow-host]` | dashboard | The live dashboard: findings, element review, the action queue, trends, live Settings and a Run button. On localhost by default; on a server under a sub-path, behind your sign-in proxy. |
 | `dsa report` | dashboard | Rebuilds the single-file report in `<data>/report/index.html`. `dsa run` writes it too (`--no-report` skips it). |
-| `dsa publish [--out <dir>]` | dashboard | The dashboard as a static folder (default `<data>/site`), with only the images it shows. Works under any sub-path; Re-scan and decisions go where the host adapter says. |
+| `dsa publish [--out <dir>] [--relay <url>]` | dashboard | The dashboard as a static folder (default `<data>/site`), with only the images it shows. Works under any sub-path; Re-scan goes through the scan relay, decisions where the host adapter says. |
+| `dsa relay [--port <n>] [--check]` | core | The scan relay alone: viewers sign in with GitHub and it starts scans with its own credential, for a published dashboard's Re-scan ([docs/relay.md](docs/relay.md)). `dsa serve` mounts it too when `DSA_RELAY_*` is set. |
 | `dsa shots [--target] [--url] [--routes a,b] [--per-group 3] [--fresh] [--retry-missing]` | review | Screenshots example elements. It starts each app itself, visits its routes, and stops it. |
 | `dsa render [--force]` | review | Measures the system's components in its Storybook (height, padding, radius, colors, border, type). |
 | `dsa setup` | review | One time: installs the headless browser and app dependencies, and turns screenshots on for every run. |

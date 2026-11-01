@@ -8,14 +8,29 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- The scan relay ([docs/relay.md](docs/relay.md)): a published dashboard re-scans without the viewer
+  handling a token. One Web Fetch handler (`@snds/dsa/relay`) holds the runner credential as an
+  environment secret, signs viewers in with GitHub's OAuth web flow (no scopes; access to the repo is
+  checked with the relay's own token at sign-in and before every scan, default write), and gives them
+  a short-lived signed session (HttpOnly cookie, and a bearer token in the tab's sessionStorage for
+  browsers that block third-party cookies). Starting a scan needs the dashboard's origin and the
+  `X-DSA-Relay` header; CORS answers only that origin. One scan at a time (a second press follows the
+  running one), a per-viewer rate limit, and progress read from the run and its steps on the server.
+  Runs in `dsa serve` (when `DSA_RELAY_*` is set), alone with `dsa relay`, or on Cloudflare Workers,
+  Netlify or Vercel (`examples/relay/`). `dsa publish --relay <url>` or `host.relay.url` points the
+  page at it.
 - Re-scan from the page, with progress. Runners share one contract (`trigger`, `status`,
-  `listActive`): GitHub (`workflow_dispatch` with the viewer's own fine-grained token, kept only in
-  that browser; Settings → Forget token), a webhook with status URLs, and `dsa serve` (scans now run
-  as a background job). The page shows Starting…, a banner while a scan runs (one found on load
+  `listActive`): GitHub (`workflow_dispatch`, through the scan relay), a webhook with status URLs,
+  and `dsa serve` (scans now run as a background job). The page shows Starting…, a banner while a scan runs (one found on load
   too, scheduled ones included), a progress dialog for scans over a minute (steps, time left from
   recent runs), Load the new report once it is deployed, and plain errors with a link to the run.
 - The next scheduled scan, in the header and under Re-scan: `host.schedule` (cron, UTC), or read
   from the GitHub workflow's `on.schedule`.
+
+### Removed
+
+- Pasting a GitHub token into the published page to re-scan. Re-scan goes through the scan relay;
+  without one, the page says how to enable it. `host.github.dispatch` is ignored.
 
 ### Fixed
 

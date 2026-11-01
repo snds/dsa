@@ -22,6 +22,8 @@ import { mapInstance } from "./engine/mapping.js";
 import { useSystem } from "./engine/system.js";
 import type { Finding } from "./engine/types.js";
 import { deployFor, NotLiveError, recordScanTime, type Deploy, type LiveCheck } from "./deploy/index.js";
+import { createRelay, relayEnvProblems, relayOptionsFromEnv } from "./relay/index.js";
+import { startRelayServer } from "./relay/node.js";
 
 export interface EngineGlobals {
   config?: string;
@@ -221,6 +223,25 @@ export function addEngineCommands(program: Command, io: CliIo): void {
         if (e instanceof NotLiveError && g(cmd).json) io.out(JSON.stringify(e.check, null, 2));
         throw e;
       }
+    });
+
+  program
+    .command("relay")
+    .description("the scan relay alone: signs viewers in and starts scans for the published dashboard, holding the runner credential (settings from DSA_RELAY_* environment variables; docs/relay.md)")
+    .option("--port <n>", "port", "8788")
+    .option("--host <address>", "address to listen on (default 127.0.0.1; put it behind HTTPS)")
+    .option("--check", "say what's missing from the settings and exit")
+    .action(async (o: { port: string; host?: string; check?: boolean }) => {
+      const problems = relayEnvProblems(process.env);
+      if (o.check || problems.length) {
+        io.out(problems.length ? `The relay isn't configured:\n- ${problems.join("\n- ")}` : "The relay's settings are complete.");
+        if (problems.length) process.exitCode = 1;
+        return;
+      }
+      const opts = relayOptionsFromEnv(process.env, { log: io.out });
+      const s = await startRelayServer(createRelay(opts), { port: Number(o.port), host: o.host, publicUrl: opts.publicUrl });
+      io.out(`dsa relay: listening on ${s.url}, reached as ${opts.publicUrl}. Dashboards allowed: ${opts.origins.join(", ")}.`);
+      await new Promise(() => {});
     });
 
   const history = program.command("history").description("the data folder's persistence between runs (history.adapter)");

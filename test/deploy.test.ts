@@ -261,26 +261,23 @@ describe("host adapters", () => {
     expect(issueNumber("https://github.com/o/r/issues/34")).toBe(34);
   });
 
-  it("github: Re-scan runs the workflow from the page, decisions become a labelled issue; the repo comes from config, then GITHUB_REPOSITORY", () => {
-    const a = githubHost.actions(hostCtx({ adapter: "github", github: { repo: "acme/site", workflow: "scan.yml", ref: "main" } }));
-    expect(a.rescan).toMatchObject({
-      kind: "run",
-      runner: { type: "github", api: "https://api.github.com", server: "https://github.com", repo: "acme/site", workflow: "scan.yml", ref: "main" },
-      fallbackUrl: "https://github.com/acme/site/actions/workflows/scan.yml",
-    });
-    // The token page is filled in: Actions write, the owner, a short expiry.
-    const t = new URL(a.rescan.runner!.type === "github" ? a.rescan.runner!.tokenUrl : "");
-    expect([t.pathname, t.searchParams.get("actions"), t.searchParams.get("target_name"), t.searchParams.get("expires_in")]).toEqual(["/settings/personal-access-tokens/new", "write", "acme", "30"]);
-    // dispatch: false keeps the plain link to the workflow page.
-    expect(githubHost.actions(hostCtx({ adapter: "github", github: { repo: "acme/site", dispatch: false } })).rescan).toMatchObject({ kind: "link", label: "Re-scan on GitHub", url: "https://github.com/acme/site/actions/workflows/dsa.yml" });
+  it("github: Re-scan goes through the scan relay, decisions become a labelled issue; the repo comes from config, then GITHUB_REPOSITORY", () => {
+    const a = githubHost.actions(hostCtx({ adapter: "github", github: { repo: "acme/site", workflow: "scan.yml", ref: "main" }, relay: { url: "https://relay.example.test" } }));
+    expect(a.rescan).toMatchObject({ kind: "relay", url: "https://relay.example.test/", label: "Re-scan", help: expect.stringMatching(/scan\.yml workflow in acme\/site through the scan relay at relay\.example\.test.*sign in with GitHub/) });
+    expect(a.rescan.runner).toBeUndefined();
+    // No relay: no button that can't work, and words on how to get one (not a link to the workflow page).
+    const none = githubHost.actions(hostCtx({ adapter: "github", github: { repo: "acme/site", dispatch: false } })).rescan;
+    expect(none).toMatchObject({ kind: "none", help: expect.stringMatching(/deploys the dsa scan relay.*--relay <url>/) });
+    expect(JSON.stringify(none)).not.toMatch(/actions\/workflows/);
     expect(a.decisions).toMatchObject({ kind: "issue", url: "https://github.com/acme/site/issues/new", labels: ["dsa-decisions"], apply: "dsa apply-decisions --issue <number>" });
     const ghes = githubHost.actions(hostCtx({ adapter: "github", github: { server: "https://git.corp.test/" }, decisions: { mode: "pr" } }, { env: { GITHUB_REPOSITORY: "team/app" } }));
-    expect(ghes.rescan.fallbackUrl).toBe("https://git.corp.test/team/app/actions/workflows/dsa.yml");
-    expect(ghes.rescan.runner).toMatchObject({ api: "https://git.corp.test/api/v3", server: "https://git.corp.test" });
+    expect(ghes.rescan.kind).toBe("none");
     expect(ghes.decisions.help).toMatch(/pull request/);
     expect(githubHost.actions(hostCtx({ adapter: "github" }, { config: { github: { defaultRepo: "x/y" } } })).decisions.url).toBe("https://github.com/x/y/issues/new");
     // No repo anywhere: the generic buttons, with a note.
     expect(githubHost.actions(hostCtx({ adapter: "github" })).rescan).toMatchObject({ kind: "none", help: expect.stringMatching(/host.github.repo/) });
+    // The generic adapter takes a relay too.
+    expect(genericHost.actions(hostCtx({ relay: { url: "https://example.test/dsa/relay/" } })).rescan).toMatchObject({ kind: "relay", url: "https://example.test/dsa/relay/" });
     // decisions.mode export keeps the download.
     expect(githubHost.actions(hostCtx({ adapter: "github", github: { repo: "a/b" }, decisions: { mode: "export" } })).decisions.kind).toBe("export");
   });
@@ -400,7 +397,7 @@ describe("deployFor", () => {
     const d = deployFor({ root: dir, config, env: {} });
     expect(d.host.id).toBe("github");
     expect(d.history.id).toBe("git-branch");
-    expect(d.actions().rescan.fallbackUrl).toBe("https://github.com/a/b/actions/workflows/dsa.yml");
+    expect(d.actions().rescan.kind).toBe("none");
     expect((await d.check()).state).toBe("live");
     const custom = { id: "custom", create: () => ({ id: "custom", pull: async () => "p", push: async () => "q" }) };
     const withAddon = deployFor({ root: dir, config: { designSystem: { core: { name: "c", packages: [] } }, history: { adapter: "custom" } } as never, histories: [custom] });

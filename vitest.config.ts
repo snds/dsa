@@ -9,6 +9,8 @@ export default defineConfig({
     alias: [
       { find: /^@snds\/dsa$/, replacement: at("./src/index.ts") },
       { find: /^@snds\/dsa\/engine$/, replacement: at("./src/engine/index.ts") },
+      { find: /^@snds\/dsa\/relay$/, replacement: at("./src/relay/index.ts") },
+      { find: /^@snds\/dsa\/relay\/node$/, replacement: at("./src/relay/node.ts") },
       ...["review", "dashboard", "figma", "agent", "history"].map((n) => ({ find: new RegExp(`^@snds/dsa-${n}$`), replacement: at(`./packages/${n}/src/index.ts`) })),
     ],
   },
