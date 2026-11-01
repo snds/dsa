@@ -96,7 +96,7 @@
                         "type": "string"
                       },
                       "sources": {
-                        "description": "Folders of its code, when there are several (set by `dsa sources --pin` or Settings → Sources). Without `path` or `sources`, dsa finds them.",
+                        "description": "Folders of its code, when there are several: inside the repo or in another checkout (\"../vendor/ds/packages/ui\"), or a glob of package folders (\"../vendor/ds/packages/*\", which also picks up its tokens package). With `git`, folders inside the clone. Set by `dsa sources --pin` or Settings → Sources. Without `path` or `sources`, dsa finds them.",
                         "type": "array",
                         "items": {
                           "type": "string"
@@ -169,7 +169,7 @@
                   "type": "string"
                 },
                 "sources": {
-                  "description": "Folders of its code, when there are several (set by `dsa sources --pin` or Settings → Sources). Without `path` or `sources`, dsa finds them.",
+                  "description": "Folders of its code, when there are several: inside the repo or in another checkout (\"../vendor/ds/packages/ui\"), or a glob of package folders (\"../vendor/ds/packages/*\", which also picks up its tokens package). With `git`, folders inside the clone. Set by `dsa sources --pin` or Settings → Sources. Without `path` or `sources`, dsa finds them.",
                   "type": "array",
                   "items": {
                     "type": "string"
@@ -269,7 +269,7 @@
                     "type": "string"
                   },
                   "sources": {
-                    "description": "Folders of its code, when there are several (set by `dsa sources --pin` or Settings → Sources). Without `path` or `sources`, dsa finds them.",
+                    "description": "Folders of its code, when there are several: inside the repo or in another checkout (\"../vendor/ds/packages/ui\"), or a glob of package folders (\"../vendor/ds/packages/*\", which also picks up its tokens package). With `git`, folders inside the clone. Set by `dsa sources --pin` or Settings → Sources. Without `path` or `sources`, dsa finds them.",
                     "type": "array",
                     "items": {
                       "type": "string"
@@ -351,7 +351,7 @@
                     "type": "string"
                   },
                   "sources": {
-                    "description": "Folders of its code, when there are several (set by `dsa sources --pin` or Settings → Sources). Without `path` or `sources`, dsa finds them.",
+                    "description": "Folders of its code, when there are several: inside the repo or in another checkout (\"../vendor/ds/packages/ui\"), or a glob of package folders (\"../vendor/ds/packages/*\", which also picks up its tokens package). With `git`, folders inside the clone. Set by `dsa sources --pin` or Settings → Sources. Without `path` or `sources`, dsa finds them.",
                     "type": "array",
                     "items": {
                       "type": "string"

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import fg from 'fast-glob';
 
 /** The dsa package folder (src/engine or dist/engine, two levels down). */
 export const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -128,3 +129,31 @@ export function globMatch(pattern: string, rel: string): boolean {
   const re = p.split('**/').map(part => part.split('**').map(esc).join('.*')).join('(?:.*/)?');
   return p.includes('/') ? new RegExp(`^${re}$`).test(target) : new RegExp(`(^|/)${re}$`).test(target);
 }
+
+const GLOB = /[*?[\]{}]/;
+
+/**
+ * The folders a list of sources names, as absolute paths: plain folders as they are (inside the repo
+ * or in another checkout, `../vendor/ds/packages/ui`), and globs expanded (`../vendor/ds/packages/*`).
+ * A glob keeps only folders with a package.json, so it picks packages, not every directory. Order
+ * follows the list; duplicates are dropped.
+ */
+export function expandSources(base: string, entries: string[]): string[] {
+  const out: string[] = [];
+  const add = (d: string) => { if (!out.includes(d)) out.push(d); };
+  for (const e of entries) {
+    const clean = e.trim().replace(/\/+$/, '');
+    if (!clean) continue;
+    if (!GLOB.test(clean)) { add(path.resolve(base, clean)); continue; }
+    // The part before the first glob segment is a folder to start from (it may be outside the repo).
+    const parts = clean.split('/');
+    const i = parts.findIndex(p => GLOB.test(p));
+    const from = path.resolve(base, parts.slice(0, i).join('/') || '.');
+    if (!fs.existsSync(from)) continue;
+    const found = fg.sync(parts.slice(i).join('/'), { cwd: from, onlyDirectories: true, absolute: true, ignore: ['**/node_modules/**'] }).sort();
+    for (const d of found) if (fs.existsSync(path.join(d, 'package.json'))) add(path.normalize(d));
+  }
+  return out;
+}
+
+export const isGlob = (s: string) => GLOB.test(s);

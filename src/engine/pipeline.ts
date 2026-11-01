@@ -104,7 +104,8 @@ export interface RunResult {
 
 /** The design system's core packages, by folder and published name. */
 function corePackages(targets: Target[]) {
-  return targets.filter(t => t.role === 'core').map(t => ({ dir: t.dir, name: (JSON.parse(fs.readFileSync(path.join(t.dir, 'package.json'), 'utf8')).name as string) ?? t.name }));
+  // A source folder without a package.json (a raw tokens folder) still counts, under the library's name.
+  return targets.filter(t => t.role === 'core').map(t => { let name: string | undefined; try { name = JSON.parse(fs.readFileSync(path.join(t.dir, 'package.json'), 'utf8')).name; } catch { /* no package.json */ } return { dir: t.dir, name: name ?? t.name }; });
 }
 
 /** Set the system for this run and drop caches from the last one. */

@@ -12,6 +12,12 @@ export interface LibraryDef {
   /** Path to the library's source inside the host repo (optional). */
   path?: string | undefined;
   /**
+   * Several folders, or globs of package folders, that together are this library (a vendored copy
+   * in another checkout: its components and its tokens package). Relative to the host root, or to
+   * the clone when the library comes from `git`.
+   */
+  sources?: string[] | undefined;
+  /**
    * Element tag prefixes this library owns, e.g. "ds-" for <ds-button> (Angular selectors,
    * globally registered Vue components, web components). The rest of the tag becomes the
    * component name: ds-data-table -> DataTable.

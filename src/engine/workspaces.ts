@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
 import { execFileSync } from 'node:child_process';
-import { APP_DIR, isInside, readJson } from './paths.js';
+import { APP_DIR, expandSources, isInside, readJson } from './paths.js';
 import { allDsPackages, type Config } from './config.js';
 import type { Target } from './types.js';
 
@@ -88,9 +88,7 @@ export function resolveTargets(root: string, config: Config): Target[] {
     ...(config.designSystem.children ?? []).map(c => [c, 'child'] as [typeof c, 'child']),
   ];
   for (const [lib, role] of libs) {
-    const dirs = lib.path
-      ? [path.resolve(root, lib.path)]
-      : ws.filter(w => lib.packages.includes(w.name)).map(w => w.dir);
+    const dirs = libraryDirs(root, lib, ws);
     // A library may span several packages (one per framework); scan each as part of the same target name.
     for (const dir of dirs) add({ name: lib.name, dir, role, owner: lib.owner, repo: lib.repo, deps: depsOf(dir), ...extras(lib, dir) });
   }
@@ -120,6 +118,21 @@ export function resolveTargets(root: string, config: Config): Target[] {
   return targets;
 }
 
+/**
+ * The folders that are one library: `sources` (several folders or package globs; inside the clone
+ * when it came from git), with `path` too when both are set; else `path`; else the host's
+ * workspaces published under its package names.
+ */
+export function libraryDirs(root: string, lib: Config['designSystem']['core'] & { remote?: boolean | undefined }, ws: { name: string; dir: string }[] = discoverWorkspaces(root)): string[] {
+  if (lib.sources?.length) {
+    // A clone: its sources are folders inside it, and the clone's root is just the container.
+    if (lib.remote && lib.path) return expandSources(path.resolve(root, lib.path), lib.sources);
+    return [...(lib.path ? [path.resolve(root, lib.path)] : []), ...expandSources(root, lib.sources)].filter((d, i, a) => a.indexOf(d) === i);
+  }
+  if (lib.path) return [path.resolve(root, lib.path)];
+  return ws.filter(w => lib.packages.includes(w.name)).map(w => w.dir);
+}
+
 /** Latest known version of each DS package: its workspace version, else the registry (opt-in), else null. */
 export function latestVersions(root: string, config: Config, useRegistry = false): Record<string, string | null> {
   const ws = discoverWorkspaces(root);
@@ -128,9 +141,11 @@ export function latestVersions(root: string, config: Config, useRegistry = false
   for (const lib of libs) {
     for (const pkg of lib.packages) {
       let v = ws.find(w => w.name === pkg)?.version ?? null;
-      if (!v && lib.path) {
-        const pj = readJson<any>(path.join(root, lib.path, 'package.json'));
-        if (pj?.name === pkg) v = pj.version ?? null;
+      if (!v && (lib.path || lib.sources?.length)) {
+        for (const d of libraryDirs(root, lib, ws)) {
+          const pj = readJson<any>(path.join(d, 'package.json'));
+          if (pj?.name === pkg) { v = pj.version ?? null; break; }
+        }
       }
       if (!v && useRegistry) {
         try { v = execFileSync('npm', ['view', pkg, 'version'], { encoding: 'utf8', timeout: 20000 }).trim() || null; } catch { v = null; }

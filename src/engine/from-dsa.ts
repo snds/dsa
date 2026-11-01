@@ -15,12 +15,12 @@ import type { ConsumerDef, LibraryDef } from './types.js';
 export function engineConfig(c: DsaConfig, profile: ResolvedProfile = NEUTRAL_PROFILE): Config {
   const sys = c.system;
   const core: LibraryDef = clean({
-    name: sys.name, packages: sys.packages, path: sys.path, tagPrefixes: sys.tagPrefixes, owner: sys.owner, repo: sys.repo,
+    name: sys.name, packages: sys.packages, path: sys.path, sources: sys.sources, tagPrefixes: sys.tagPrefixes, owner: sys.owner, repo: sys.repo,
     git: sys.git, aliases: sys.aliases, exclude: sys.exclude, pin: sys.pin, mainRef: sys.mainRef,
   });
   const out: Config = { designSystem: { core } };
   if (sys.children) out.designSystem.children = sys.children.map(ch => clean({
-    name: ch.name, packages: ch.packages, path: ch.path, tagPrefixes: ch.tagPrefixes, owner: ch.owner, repo: ch.repo,
+    name: ch.name, packages: ch.packages, path: ch.path, sources: ch.sources, tagPrefixes: ch.tagPrefixes, owner: ch.owner, repo: ch.repo,
     git: ch.git, aliases: ch.aliases, exclude: ch.exclude, pin: ch.pin,
   }) as LibraryDef);
   const consumer = (x: NonNullable<DsaConfig['consumers']>[number]): ConsumerDef => clean({ ...x, path: x.path }) as ConsumerDef;

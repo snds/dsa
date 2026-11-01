@@ -19,6 +19,10 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- A design system read from another checkout can span several folders: `system.sources` (and a
+  child's `sources`) now reach the engine, not only the system model, and accept globs of package
+  folders (`../vendor/ds/packages/*`), so its tokens package is read too. With `git`, sources are
+  folders inside the clone. A source folder without a `package.json` no longer stops signatures.
 - Overview deltas: a value the earlier scan didn't measure reads "First measurement", an unchanged
   one "No change" (never "NaN pts" or "−0 pts"); Trends leave a gap instead of plotting NaN.
 
