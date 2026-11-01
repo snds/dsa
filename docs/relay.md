@@ -46,9 +46,11 @@ They never see or paste a token.
   is signed and tied to a cookie in the same browser, which stops login CSRF (cross-site request
   forgery).
 - **Runs one scan at a time.** If a scan is already going, whether a teammate started it or the
-  schedule did, a second press gets that run (`409`) and follows it. Each viewer may start
-  `DSA_RELAY_RATE` scans per window. The default is 3 per 10 minutes, counted in memory on each
-  relay instance.
+  schedule did, a second press gets that run (`409`) and follows it. This check is made by each
+  relay instance, so two instances (on a serverless host) can both find nothing running and both
+  start a scan. The scan workflow's own `concurrency` setting closes that gap; see step 5 below.
+- **Limits each viewer** to `DSA_RELAY_RATE` scans per window. The default is 3 per 10 minutes. It is
+  counted in memory, per relay instance, so on a serverless host each instance counts separately.
 - **Reads progress on the server.** It polls the workflow run and its jobs' steps, and maps them to
   queued, step n of m, done or failed. It reuses its answers for a few seconds, so many viewers
   polling don't use up the relay's GitHub API allowance. Anyone who can reach the relay sees
@@ -96,6 +98,21 @@ You need four things:
 3. **A session secret.** Any random string of 32 or more characters, for example
    `openssl rand -base64 48`. Changing it signs everyone out.
 4. **A host for the relay** (see below), reachable over HTTPS.
+5. **One scan at a time in the workflow itself.** Give the scan workflow a concurrency group, so a
+   second start waits for the first instead of running beside it:
+
+   ```yaml
+   # the scan workflow (DSA_RELAY_WORKFLOW, default dsa.yml)
+   on:
+     workflow_dispatch:            # the relay starts it
+   concurrency: { group: dsa-scan, cancel-in-progress: false }
+   ```
+
+   The relay refuses a second scan while one is running, but only on the instance that is asked.
+   Two relay instances can each start one at the same moment, and so can the schedule and the relay.
+   With the group, GitHub queues the second run behind the first. Any group name works, as long as
+   every workflow that scans and publishes the dashboard uses the same one (Example 3 in
+   [deploy.md](deploy.md) uses its Pages group).
 
 Then set these in the relay's environment. Use your host's encrypted secrets for the secret ones.
 
@@ -164,9 +181,9 @@ which settings are missing.
 Each one imports `@snds/dsa/relay`, which uses only the Fetch API and Web Crypto, with no Node
 built-ins.
 
-On a serverless host, every instance has its own memory, so the rate limit is per instance. The
-one-scan-at-a-time rule still holds everywhere, because the relay asks GitHub whether a run is
-already going before it starts one.
+On a serverless host, every instance has its own memory. The rate limit is counted per instance,
+and the relay's one-scan-at-a-time check runs on each instance separately. The workflow's
+`concurrency` group (step 5 above) is what keeps scans from overlapping across instances.
 
 ## What it can't do
 

@@ -153,6 +153,11 @@ viewers in with GitHub, and checks they can write to the repo before it starts a
 handle a token. Setup, the secrets to set, the callback URL and where to host it:
 [docs/relay.md](relay.md).
 
+Give the scan workflow a concurrency group, `concurrency: { group: dsa-scan, cancel-in-progress: false }`,
+or the group your deploy already uses. The relay refuses a second scan while one runs, but that
+check and its per-viewer rate limit are kept by each relay instance. On a serverless host, two
+instances could each start a scan at once; the group makes GitHub queue the second instead.
+
 A webhook's `status` URL answers one run as `{ "status": "queued" | "running" | "done" | "failed", "steps": { "done", "total", "current" }, "url", "startedAt", "error" }`
 (`{id}` in the URL is filled in); `active` answers `{ "runs": [ … ] }`. The trigger may answer
 `{ "id", "url" }`. Requests carry the browser's cookies, for a sign-in in front of the hook.
@@ -287,7 +292,7 @@ permissions:
   contents: write               # push the dsa-data branch
   pages: write
   id-token: write
-concurrency: { group: pages, cancel-in-progress: false }
+concurrency: { group: pages, cancel-in-progress: false }   # one scan and deploy at a time, however it was started
 jobs:
   deploy:
     runs-on: ubuntu-latest      # Linux: macOS and Windows minutes weigh 2–10× on private repos
