@@ -19,8 +19,6 @@ export interface ScanState {
   signInProblem: string | null
   /** True when the scan was found running rather than started here. */
   found: boolean
-  /** Step names seen so far, in order (runners report only the current one). */
-  seen: string[]
   /** When this page started following the scan (ms), for elapsed time when the run has no start. */
   since: number | null
 }
@@ -38,7 +36,7 @@ const PENDING = "dsa.relay-pending-scan"
 /** In-page runs are possible here: dsa serve, the scan relay, or a webhook runner. */
 export const canRun = () => Boolean(D.serve || relayUrl() || (rescan()?.kind === "run" && rescan()?.runner?.type === "webhook"))
 
-let state: ScanState = { phase: "idle", run: null, estimate: D.actions?.rescan?.estimateSeconds ?? D.scanEstimate ?? null, overlay: false, error: null, signInProblem: null, found: false, seen: [], since: null }
+let state: ScanState = { phase: "idle", run: null, estimate: D.actions?.rescan?.estimateSeconds ?? D.scanEstimate ?? null, overlay: false, error: null, signInProblem: null, found: false, since: null }
 const listeners = new Set<() => void>()
 const set = (patch: Partial<ScanState>) => { state = { ...state, ...patch }; listeners.forEach(f => f()) }
 const subscribe = (f: () => void) => { listeners.add(f); return () => { listeners.delete(f) } }
@@ -65,8 +63,6 @@ async function learnEstimate(r: ScanRunner) {
 /** Follow a run until it finishes, then until the new report is published. */
 function follow(r: ScanRunner, run: ScanRun) {
   stop()
-  const step = run.steps?.current
-  if (step && state.seen[state.seen.length - 1] !== step) set({ seen: [...state.seen, step] })
   set({ run, phase: run.status === "done" ? "deploying" : run.status === "queued" || run.status === "running" ? "running" : "failed" })
   if (run.status === "failed" || run.status === "cancelled") return fail(new Error(run.error ?? (run.status === "cancelled" ? "The run was cancelled." : "The scan failed.")), run.url)
   if (run.status === "done") return awaitReport(Date.now())
@@ -101,7 +97,7 @@ function awaitReport(since: number) {
 export async function startScan() {
   const r = runner()
   if (!r) return
-  set({ phase: "starting", overlay: true, error: null, found: false, run: null, seen: [], since: Date.now() })
+  set({ phase: "starting", overlay: true, error: null, found: false, run: null, since: Date.now() })
   void learnEstimate(r)
   try {
     follow(r, await r.trigger())
@@ -148,7 +144,7 @@ function takeSignInReturn(): boolean {
 
 export const closeAsk = () => set({ phase: state.run ? state.phase : "idle", signInProblem: null })
 export const showOverlay = (open: boolean) => set({ overlay: open })
-export const dismiss = () => { stop(); set({ phase: "idle", error: null, run: null, overlay: false, seen: [], since: null }) }
+export const dismiss = () => { stop(); set({ phase: "idle", error: null, run: null, overlay: false, since: null }) }
 
 /**
  * On load: finish a sign-in that just came back, then show a scan already going (scheduled, or
@@ -161,7 +157,7 @@ export async function detectRunning() {
   try {
     const [first] = await r.listActive()
     if (first && state.phase === "idle") {
-      set({ found: true, overlay: true, seen: [], since: Date.now() })
+      set({ found: true, overlay: true, since: Date.now() })
       void learnEstimate(r)
       follow(r, first)
     }
