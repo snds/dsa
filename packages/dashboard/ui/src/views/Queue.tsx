@@ -104,10 +104,10 @@ export function Queue() {
               : <span>Issues sync every minute{q.syncedAt ? ` · last synced ${ago(q.syncedAt).toLowerCase()}` : ""}{q.syncError ? " · last sync had an error (Settings › Notes)" : ""}</span>}
           </p>
           <div className="flex items-center gap-2">
-            {!noToken && <Button variant="outline" size="sm" onClick={() => load("force")} disabled={syncing}><ArrowsClockwiseIcon data-icon="inline-start" className={syncing ? "animate-spin" : ""} />Sync Now</Button>}
+            {!noToken && <Button variant="outline" size="sm" onClick={() => load("force")} disabled={syncing}><ArrowsClockwiseIcon data-icon="inline-start" className={syncing ? "animate-spin" : ""} />Sync now</Button>}
             <Gate off={noToken || !fileableWithRepo.length} why={noToken ? "Add a GitHub token in Settings first." : fileable.length ? "No repo for these items: set a default repo in Settings." : "Every open item already has an issue."}>
               <Button size="sm" onClick={() => setConfirm(true)} disabled={noToken || !fileableWithRepo.length || !!creating}>
-                <GithubLogoIcon data-icon="inline-start" />Create Issues for All ({fileableWithRepo.length})
+                <GithubLogoIcon data-icon="inline-start" />Create issues for all ({fileableWithRepo.length})
               </Button>
             </Gate>
           </div>
@@ -141,7 +141,7 @@ export function Queue() {
           {fileable.length > fileableWithRepo.length && <p className="text-xs text-muted-foreground">{fileable.length - fileableWithRepo.length} item(s) have no repo and will be skipped. Set a default repo in Settings to include them.</p>}
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirm(false)} disabled={!!creating}>Cancel</Button>
-            <Button onClick={() => create()} disabled={!!creating}>{creating ? "Creating…" : "Create Issues"}</Button>
+            <Button onClick={() => create()} disabled={!!creating}>{creating ? "Creating…" : "Create issues"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -297,12 +297,12 @@ function Detail({ i, q, busy, onCreate }: { i: any; q: Q; busy: boolean; onCreat
         <div className="flex flex-wrap gap-2">
           {canCreate && (
             <Gate off={!!createBlock} why={createBlock}>
-              <Button onClick={onCreate} disabled={!!createBlock || busy}><GithubLogoIcon data-icon="inline-start" />{busy ? "Creating…" : l ? "Create New Issue" : "Create Issue"}</Button>
+              <Button onClick={onCreate} disabled={!!createBlock || busy}><GithubLogoIcon data-icon="inline-start" />{busy ? "Creating…" : l ? "Create new issue" : "Create issue"}</Button>
             </Gate>
           )}
-          {l && <Button variant="outline" nativeButton={false} render={<a href={safeHref(l.url)} target="_blank" rel="noopener" />}><ArrowSquareOutIcon data-icon="inline-start" />Open Issue</Button>}
-          <Button variant="outline" onClick={() => copy(issue, "Issue text copied")}>Copy Issue</Button>
-          <AskAgent subject={{ kind: "queue", id: i.id }} label="Work on this with the agent" size="sm" />
+          {l && <Button variant="outline" nativeButton={false} render={<a href={safeHref(l.url)} target="_blank" rel="noopener" />}><ArrowSquareOutIcon data-icon="inline-start" />Open issue</Button>}
+          <Button variant="outline" onClick={() => copy(issue, "Issue text copied")}>Copy issue</Button>
+          <AskAgent subject={{ kind: "queue", id: i.id }} label="Ask the agent" />
         </div>
         <Disclosure label="Details" hint={l ? "the GitHub issue as filed" : "the drafted GitHub issue"} className="mt-4">
           <Pre className="max-h-80">{issue}</Pre>
@@ -310,7 +310,7 @@ function Detail({ i, q, busy, onCreate }: { i: any; q: Q; busy: boolean; onCreat
       </>}
       <Disclosure key={i.id} label="Technical details" hint="history, repo, IDs" hash={`queue/${encodeURIComponent(i.id)}/details`} closedHash={`queue/${encodeURIComponent(i.id)}`} className="mt-4">
         <Facts rows={tech} />
-        {i.kind === "finding" && <Button variant="outline" size="sm" className="w-fit" onClick={() => copy(cmd, `Copied: ${cmd}`)}>Copy File Command</Button>}
+        {i.kind === "finding" && <Button variant="outline" size="sm" className="w-fit" onClick={() => copy(cmd, `Copied: ${cmd}`)}>Copy command</Button>}
       </Disclosure>
     </Panel>
   )

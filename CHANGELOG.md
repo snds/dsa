@@ -60,6 +60,11 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- Buttons and fields share one height scale (`--spacing-control-sm`, `--spacing-control`,
+  `--spacing-control-lg`): Button, icon buttons, the agent split button (both halves), inputs, selects
+  and toggles. A row sets its size once (`ControlSize`) and every control in it follows, so the split
+  button no longer sits shorter, with smaller text, than the buttons beside it. Disabled buttons are
+  easier to read (60% opacity, was 50%).
 - Overview stat cards: the change chip (arrow, value, "pts") no longer wraps. It sits in a slot of
   fixed bounds, so the "vs scan of…" text starts at the same place on every card; only that text
   wraps, and on a narrow card it drops below the chip. "No change" has a neutral arrow, and a fall

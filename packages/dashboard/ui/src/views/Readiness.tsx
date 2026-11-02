@@ -42,7 +42,7 @@ function RepoCard({ r }: { r: any }) {
     <Panel
       title={<span className="flex items-center gap-2">{r.subject}<Badge variant="outline" className={TIER_TONE[r.tier]}>{r.tier} · {r.score}/100</Badge></span>}
       description={r.bestTier !== r.tier ? `Was ${r.bestTier}: a finding is open until it's back.` : r.scope === "core" ? "The design system itself" : "A repo that builds with the design system"}
-      action={<AskAgent subject={{ kind: "readiness", subject: r.subject }} label="Ask how to raise it" />}>
+      action={<AskAgent subject={{ kind: "readiness", subject: r.subject }} label="Ask the agent" />}>
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <section>
           <h3 className="mb-2 text-sm font-medium">Checks</h3>

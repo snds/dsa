@@ -7,6 +7,7 @@ import { type VariantProps } from "class-variance-authority"
 import { cn } from "cn"
 
 import { toggleVariants } from "@/components/ui/toggle"
+import { useControlSize } from "@/components/ui/control-size"
 
 const ToggleGroupContext = React.createContext<
   VariantProps<typeof toggleVariants> & {
@@ -33,6 +34,8 @@ function ToggleGroup({
     spacing?: number
     orientation?: "horizontal" | "vertical"
   }) {
+  const row = useControlSize()
+  size ??= row
   return (
     <ToggleGroupPrimitive
       data-slot="toggle-group"
