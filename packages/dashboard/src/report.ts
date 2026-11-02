@@ -2,7 +2,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { DEFAULT_THRESHOLD, openStore, withMetrics, appSettings, closestRendered, compareRendered, computeFit, effectiveSettings, familyKey, figmaEnabled, homeOf, loadCatalog, patterns as stylePatterns, pushedThisWeek, questions, readEvents, readProposals, readRendered, renderIssue, renderedFor as composeRendered, resolveTargets, rowToFinding, sourceExcerpts, titleOf, type Config } from '@snds/dsa/engine';
+import { DEFAULT_THRESHOLD, openStore, withMetrics, appSettings, closestRendered, compareRendered, computeFit, effectiveSettings, familyKey, figmaEnabled, homeOf, loadCatalog, patterns as stylePatterns, pushedThisWeek, questions, readEvents, readProposals, readRendered, renderIssue, renderedFor as composeRendered, resolveTargets, rowToFinding, sourceExcerpts, placeExcerpts, titleOf, type Config } from '@snds/dsa/engine';
 
 import { scanEstimate, type PageActions, type ResolvedProfile } from '@snds/dsa';
 import { buildQueue, PKG_DIR } from './queue.js';
@@ -229,6 +229,8 @@ export async function renderReport(root: string, config: Config, dataDir: string
       settingsLog,
       elements,
       queue,
+      // The code reader's lines for each place an action cites. dsa serve reads them on request.
+      evidenceSources: opts.serve || !queue ? null : placeExcerpts(root, config, queue.items.flatMap((i: any) => i.places ?? [])),
       readiness,
       bench: bench.map(b => ({ id: b.id, at: b.at, repo: b.repo, rows: b.rows, cells: b.cells, errored: b.errored, tasks: b.tasks, findings: b.findings, manifest: b.manifest })),
       usage: profile.usage?.(root) ?? null,

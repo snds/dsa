@@ -12,6 +12,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 import { Disclosure, Facts, Panel, Pre, SevBadge, Stat, sevTone } from "@/components/bits"
 import { D, SCOPES, ago, api, copy, fmtD, say } from "@/lib/dsa"
 import { AskAgent } from "@/agent/AskAgent"
+import { Evidence } from "@/components/code-reader"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { CERTAINTY, classify, whoActs, type Certainty } from "@/lib/insight"
 
@@ -258,6 +259,7 @@ function Detail({ i, q, busy, onCreate }: { i: any; q: Q; busy: boolean; onCreat
     ["Routed to", <><b>{i.owner}</b> <Badge variant="outline" className="ml-1">{SCOPES[i.scope] ?? i.scope}</Badge></>],
     ...(i.why ? [["Why them", i.why] as [string, React.ReactNode]] : []),
     ["Who acts", whoActs(i.rule)],
+    ["Evidence", <Evidence text={i.evidence} summary={i.summary} places={i.places} />],
     ...(d?.verdict === "replace" ? [["Decision", <>Use {d.use}{i.from ? <span className="text-muted-foreground"> instead of {i.from}</span> : null}</>] as [string, React.ReactNode]] : []),
     ...(i.exit ? [["Done when", i.exit] as [string, React.ReactNode]] : []),
     ...(l ? [["Issue", (
@@ -271,7 +273,6 @@ function Detail({ i, q, busy, onCreate }: { i: any; q: Q; busy: boolean; onCreat
     )] as [string, React.ReactNode]] : []),
   ]
   const tech: [string, React.ReactNode][] = [
-    ["Evidence", <span className="break-words">{i.evidence}</span>],
     ...(i.repo ? [["Repo", <span className="font-mono text-xs">{i.repo}</span>] as [string, React.ReactNode]] : []),
     ...(d?.verdict === "replace" ? [["Markup", <code className="font-mono text-xs">&lt;{d.use}{Object.entries(d.props ?? {}).filter(([, v]) => v).map(([k, v]) => ` ${k}="${v}"`).join("")}&gt;</code>] as [string, React.ReactNode]] : []),
     ...(i.kind === "finding" ? [["Rule", <>{i.family}{i.pushed ? " · pushed this week" : ""}</>] as [string, React.ReactNode]] : []),
@@ -307,7 +308,7 @@ function Detail({ i, q, busy, onCreate }: { i: any; q: Q; busy: boolean; onCreat
           <Pre className="max-h-80">{issue}</Pre>
         </Disclosure>
       </>}
-      <Disclosure key={i.id} label="Technical details" hint="evidence, history, IDs" hash={`queue/${encodeURIComponent(i.id)}/details`} closedHash={`queue/${encodeURIComponent(i.id)}`} className="mt-4">
+      <Disclosure key={i.id} label="Technical details" hint="history, repo, IDs" hash={`queue/${encodeURIComponent(i.id)}/details`} closedHash={`queue/${encodeURIComponent(i.id)}`} className="mt-4">
         <Facts rows={tech} />
         {i.kind === "finding" && <Button variant="outline" size="sm" className="w-fit" onClick={() => copy(cmd, `Copied: ${cmd}`)}>Copy File Command</Button>}
       </Disclosure>
