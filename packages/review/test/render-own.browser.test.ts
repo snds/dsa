@@ -62,3 +62,44 @@ test('a miss is tried again once the app\'s setup changes, without --retry-missi
   const again = await takeShots({ root, dataDir: data, config: cfg, target: 'billing', perGroup: 3 });
   assert.ok(again.apps.find(a => a.target === 'billing')!.url, 'the changed setup opens the app again');
 });
+
+test('a sign-in wall is said plainly, and nothing behind it is remembered as "not found"', { timeout: 180_000 }, async ({ skip }) => {
+  if (!hasBrowser) skip('no headless browser (run dsa setup)');
+  const { root, data, config } = demo();
+  // The same app, signed out: every page sends you to a sign-in form.
+  const locked = path.join(root, 'apps/billing/locked');
+  fs.mkdirSync(locked);
+  fs.writeFileSync(path.join(locked, 'index.html'), '<meta http-equiv="refresh" content="0; url=/login.html"><p>Redirecting…</p>');
+  fs.writeFileSync(path.join(locked, 'login.html'), '<h1>Sign in</h1><form><input name="user"><input type="password" name="pass"><button>Sign in</button></form>');
+  await runPipeline({ root, dataDir: data, git: false, now: NOW });
+  const cfg = config(); cfg.live.apps.billing = { dir: 'apps/billing/locked' };
+  const logs: string[] = [];
+  const r = await takeShots({ root, dataDir: data, config: cfg, target: 'billing', perGroup: 3, log: m => logs.push(m) });
+  const a = r.apps.find(x => x.target === 'billing')!;
+  assert.match(a.signIn ?? '', /login/, JSON.stringify({ a, logs }));
+  assert.equal(a.captured, 0);
+  assert.ok(logs.some(l => /Every page asked for sign-in\. Run `dsa login .+` and set live\.apps\["billing"\]\.auth/.test(l)), logs.join('\n'));
+  const idx = JSON.parse(fs.readFileSync(path.join(data, 'shots', 'index.json'), 'utf8'));
+  assert.deepEqual(Object.keys(idx.misses ?? {}), [], 'no misses remembered behind the wall');
+  assert.equal(r.missing, 0);
+  // Signed in (here: the open site), the same elements are looked for at once, no flag needed.
+  const open = await takeShots({ root, dataDir: data, config: config(), target: 'billing', perGroup: 3 });
+  assert.ok((open.apps.find(x => x.target === 'billing')!.captured ?? 0) > 0);
+});
+
+test('a redirect to another host to sign in (an identity provider) is a sign-in wall too', { timeout: 120_000 }, async ({ skip }) => {
+  if (!hasBrowser) skip('no headless browser (run dsa setup)');
+  const http = await import('node:http');
+  const idp = http.createServer((_q, s) => { s.setHeader('content-type', 'text/html'); s.end('<form><input type="password"></form>'); });
+  await new Promise<void>(r => idp.listen(0, '127.0.0.1', r));
+  const idpUrl = `http://localhost:${(idp.address() as any).port}/realms/acme/protocol/openid-connect/auth`;
+  const app = http.createServer((_q, s) => { s.writeHead(302, { location: `${idpUrl}?client_id=billing` }); s.end(); });
+  await new Promise<void>(r => app.listen(0, '127.0.0.1', r));
+  try {
+    const { root, data, config } = demo();
+    await runPipeline({ root, dataDir: data, git: false, now: NOW });
+    const r = await takeShots({ root, dataDir: data, config: config(), url: `http://127.0.0.1:${(app.address() as any).port}/`, target: 'billing', routes: ['/', '/invoices', '/settings'], perGroup: 3 });
+    assert.match(r.apps[0]!.signIn ?? '', /realms\/acme\/protocol/);
+    assert.equal(r.missing, 0);
+  } finally { app.close(); idp.close(); }
+});
