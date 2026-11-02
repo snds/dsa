@@ -52,7 +52,7 @@ const settle = () => act(async () => { await new Promise(r => setTimeout(r, 0)) 
 test("a scan takes over the page: modal, labelled, focus inside, the page behind inert", async () => {
   reply = () => running(1, "Scan sources")
   await mount()
-  await click(button(/Re-run Scan/))
+  await click(button(/Re-run scan/))
   await settle()
   const d = dialog()!
   expect(d).toBeTruthy()
@@ -84,7 +84,7 @@ test("a scan takes over the page: modal, labelled, focus inside, the page behind
 test("unknown progress shows a sliding bar with no value, which sits still for reduced motion", async () => {
   reply = () => ({ id: "s2", status: "running", startedAt: started })
   await mount()
-  await click(button(/Re-run Scan/))
+  await click(button(/Re-run scan/))
   await settle()
   const bar = dialog()!.querySelector('[role="progressbar"]')!
   expect(bar.hasAttribute("aria-valuenow")).toBe(false)
@@ -97,7 +97,7 @@ test("unknown progress shows a sliding bar with no value, which sits still for r
 test("Keep working in the background leaves a pill in the header that reopens it", async () => {
   reply = () => running(2, "Build site")
   await mount()
-  await click(button(/Re-run Scan/))
+  await click(button(/Re-run scan/))
   await settle()
   await click(button(/Run in the background/))
   await settle()
@@ -115,7 +115,7 @@ test("a failure reopens the overlay with the reason and Try again, and never clo
   let calls = 0
   reply = url => (url.includes("status") ? { id: "s1", status: "failed", error: "The scan ran out of memory.", url: "http://localhost/runs/s1" } : (calls++, running(1, "Scan sources")))
   await mount()
-  await click(button(/Re-run Scan/))
+  await click(button(/Re-run scan/))
   await act(async () => { await vi.advanceTimersByTimeAsync(0) })
   await click(button(/Run in the background/))
   await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
@@ -137,7 +137,7 @@ test("Escape on a running scan sends it to the background; on a failure, Close e
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
   reply = url => (url.includes("status") ? { id: "s1", status: "failed", error: "Nope." } : running(0, "Set up"))
   await mount()
-  await click(button(/Re-run Scan/))
+  await click(button(/Re-run scan/))
   await act(async () => { await vi.advanceTimersByTimeAsync(0) })
   await act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })) })
   await act(async () => { await vi.advanceTimersByTimeAsync(0) })
@@ -148,7 +148,7 @@ test("Escape on a running scan sends it to the background; on a failure, Close e
   await click(button(/^Close$/))
   await act(async () => { await vi.advanceTimersByTimeAsync(0) })
   expect(dialog()).toBeNull()
-  expect(button(/Re-run Scan/)).toBeTruthy()
+  expect(button(/Re-run scan/)).toBeTruthy()
 })
 
 test("a finished scan shows success, then loads the new report", async () => {
@@ -159,7 +159,7 @@ test("a finished scan shows success, then loads the new report", async () => {
   try {
     reply = url => (url.includes("status") ? { id: "s1", status: "done", startedAt: started } : running(3, "Publish"))
     await mount()
-    await click(button(/Re-run Scan/))
+    await click(button(/Re-run scan/))
     await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
     expect(document.getElementById(dialog()!.getAttribute("aria-labelledby")!)!.textContent).toBe("The new report is ready")
     expect(reload).not.toHaveBeenCalled()

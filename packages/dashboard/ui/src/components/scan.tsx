@@ -47,7 +47,7 @@ export function ScanButton() {
     <span className="flex flex-col items-end gap-1">
       <Button onClick={() => startScan()} title={D.actions?.rescan?.help}>
         <ArrowClockwiseIcon data-icon="inline-start" />
-        {D.run ? (D.serve ? "Re-run Scan" : "Re-scan") : "Run First Scan"}
+        {D.run ? (D.serve ? "Re-run scan" : "Re-scan") : "Run first scan"}
       </Button>
       <NextScan prefix="Next scheduled scan" className="text-xs text-muted-foreground" />
     </span>
