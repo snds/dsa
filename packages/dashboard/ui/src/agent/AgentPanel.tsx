@@ -176,7 +176,7 @@ function ChangesCard() {
       </Collapsible>
       <BeforeAfter />
       <div className="mt-3 flex gap-2">
-        <Button size="sm" onClick={() => a.changesAction("keep")} disabled={a.busy || a.visual.running}><GitBranchIcon data-icon="inline-start" />Keep as a branch</Button>
+        <Button size="sm" onClick={() => a.changesAction("keep")} disabled={a.busy || a.visual.running}><GitBranchIcon data-icon="inline-start" />Keep as branch</Button>
         <Button size="sm" variant="outline" onClick={() => a.changesAction("discard")} disabled={a.busy || a.visual.running}><TrashIcon data-icon="inline-start" />Throw away</Button>
       </div>
     </div>

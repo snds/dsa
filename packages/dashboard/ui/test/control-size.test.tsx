@@ -66,9 +66,9 @@ test("a row's size reaches every control in it: buttons, the split button's halv
       <AgentProvider>
         <ControlSize size={size}>
           <div data-row>
-            <Button>Create Issue</Button>
-            <Button variant="outline">Copy Issue</Button>
-            <AskAgent subject={{ kind: "queue", id: "F-1" }} label="Work on this with the agent" />
+            <Button>Create issue</Button>
+            <Button variant="outline">Copy issue</Button>
+            <AskAgent subject={{ kind: "queue", id: "F-1" }} label="Ask the agent" />
             <Input aria-label="Note" />
             <NativeSelect aria-label="Pick"><option>One</option></NativeSelect>
             <ToggleGroup><ToggleGroupItem value="a">A</ToggleGroupItem></ToggleGroup>
@@ -114,4 +114,31 @@ test("views don't override a control's height, padding or font size", () => {
     }
   }
   expect(bad).toEqual([])
+})
+
+// Button labels: a verb and at most one object, sentence case. Explanations belong in tooltips or
+// descriptions (packages/dashboard/ui/README.md, Writing rules). Proper nouns keep their capitals.
+const PROPER = new Set(["GitHub", "Settings", "Figma", "Cursor", "Claude", "Code", "Storybook", "PR", "URL", "JSX", "CSS"])
+test("button labels are short and in sentence case", () => {
+  const src = path.resolve(import.meta.dirname, "../src")
+  const files = fs.readdirSync(src, { recursive: true }).map(String).filter(f => f.endsWith(".tsx") && !f.startsWith(`components${path.sep}ui`))
+  const bad: string[] = []
+  const check = (f: string, label: string) => {
+    const words = label.replace(/\([^)]*\)|…/g, "").trim().split(/\s+/).filter(Boolean)
+    if (words.length > 4) bad.push(`${f}: "${label}" is ${words.length} words`)
+    for (const w of words.slice(1)) if (/^[A-Z][a-z]/.test(w) && !PROPER.has(w)) bad.push(`${f}: "${label}" is Title Case ("${w}")`)
+  }
+  for (const f of files) {
+    const text = fs.readFileSync(path.join(src, f), "utf8")
+    // Plain-text button labels, after any icon element.
+    for (const m of text.matchAll(/<Button\b(?:[^>]|(?<==)>)*>(?:\s*<\w+Icon[^>]*\/>)?([A-Za-z][^<>{}]*?)(?:<\w+Icon[^>]*\/>)?\s*<\/Button>/g)) check(f, m[1]!.trim())
+    // Labels chosen in code: "A" : "B" inside a button, and AskAgent's label prop.
+    for (const m of text.matchAll(/<Button\b(?:[^>]|(?<==)>)*>[^<]*\{[^}]*\}<\/Button>/g)) for (const q of m[0].matchAll(/"([A-Z][^"]+)"/g)) check(f, q[1]!)
+    for (const m of text.matchAll(/<AskAgent\b(?:[^>]|(?<==)>)*?label=(?:"([^"]+)"|\{([^}\n]*)\})/g)) {
+      if (m[1]) check(f, m[1])
+      for (const q of (m[2] ?? "").matchAll(/"([^"]+)"/g)) check(f, q[1]!)
+    }
+  }
+  // The scan overlay's button is renamed "Run in the background" in snds/dsa#33; drop this when it lands.
+  expect(bad.filter(b => !b.startsWith(`components${path.sep}scan.tsx: "Keep working in the background"`))).toEqual([])
 })

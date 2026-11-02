@@ -58,14 +58,14 @@ export function AskAgent({ subject, label = "Ask the agent", ask, size, variant 
                 </ol>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <Button size="sm" nativeButton={false} render={<a href={handoff.cursor.prompt} />}><ArrowSquareOutIcon data-icon="inline-start" />Send to Cursor</Button>
-                  <Button size="sm" variant="outline" onClick={() => copy(handoff.prompt, "Prompt copied")}><CopyIcon data-icon="inline-start" />Copy the prompt</Button>
+                  <Button size="sm" variant="outline" onClick={() => copy(handoff.prompt, "Prompt copied")}><CopyIcon data-icon="inline-start" />Copy prompt</Button>
                 </div>
               </section>
               <section>
                 <h3 className="mb-1 font-medium">Claude Code (terminal)</h3>
                 <p className="text-muted-foreground">Paste into a terminal. It opens Claude in the repo with the dsa tools, the design system's tools, and the brief.</p>
                 <Pre className="mt-2 max-h-28">{handoff.claudeCode}</Pre>
-                <Button size="sm" variant="outline" className="mt-2" onClick={() => copy(handoff.claudeCode, "Command copied")}><TerminalWindowIcon data-icon="inline-start" />Copy the command</Button>
+                <Button size="sm" variant="outline" className="mt-2" onClick={() => copy(handoff.claudeCode, "Command copied")}><TerminalWindowIcon data-icon="inline-start" />Copy command</Button>
               </section>
               <p className="text-xs text-muted-foreground">Brief: <code className="font-mono">{handoff.brief}</code></p>
             </div>

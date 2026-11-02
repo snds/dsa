@@ -345,7 +345,7 @@ export function Picker({ target, onClose }: { target: { ids: string[]; pattern?:
                     </div>
                   ) : <Note>No measured renderings for this component.</Note>}
                   {!D.serve ? <Note className="text-xs">Live previews need <code className="font-mono">dsa serve</code>.</Note>
-                    : sbErr ? <div className="flex flex-col gap-2"><Note className="text-xs text-destructive">Storybook didn't start: {sbErr}</Note><Button variant="outline" className="w-fit" onClick={startSb}>Try Again</Button></div>
+                    : sbErr ? <div className="flex flex-col gap-2"><Note className="text-xs text-destructive">Storybook didn't start: {sbErr}</Note><Button variant="outline" className="w-fit" onClick={startSb}>Try again</Button></div>
                     : <Note className="text-xs">{sbBusy ? "Storybook is still starting in the background (the first start can take a minute). The live preview appears here when it's ready." : "Connecting to Storybook…"}</Note>}
                 </div>
               ) : null}
