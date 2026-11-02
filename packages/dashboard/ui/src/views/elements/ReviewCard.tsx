@@ -1,11 +1,10 @@
 import * as React from "react"
 import { cn } from "cn"
-import { ArrowRightIcon, CaretDownIcon, CheckIcon, ImageBrokenIcon } from "@phosphor-icons/react"
+import { ArrowRightIcon, CheckIcon, ImageBrokenIcon } from "@phosphor-icons/react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { Pre } from "@/components/bits"
+import { Code, Disclosure, Pre } from "@/components/bits"
 import { D, short, SYS } from "@/lib/dsa"
 import { stageKey, useStaged } from "@/lib/staged"
 import { AskAgent } from "@/agent/AskAgent"
@@ -217,40 +216,33 @@ function Confidence({ lo, hi }: { lo: number; hi: number }) {
 
 /** Everything behind the recommendation, folded: why it's uncertain, how it was made, alternatives, every element. */
 function Details({ items, ready = [] }: { items: any[]; ready?: any[] }) {
-  const [open, setOpen] = React.useState(false)
   const why = [...new Set(items.flatMap(e => e.reasons.filter((r: any) => r.delta < 0).map((r: any) => r.text)))].slice(0, 4)
   const n = items.length
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="border-t pt-3">
-      <CollapsibleTrigger className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground underline-offset-4 hover:underline">
-        <CaretDownIcon className={cn("transition-transform", open && "rotate-180")} />
-        Details <span className="font-normal">· reasons, alternatives, {n === 1 ? "the element" : `all ${n} elements`}</span>
-      </CollapsibleTrigger>
-      <CollapsibleContent className="mt-3 flex flex-col gap-4">
-        {why.length > 0 && (
-          <section>
-            <h4 className="mb-1 text-xs font-medium text-muted-foreground">Why it's uncertain</h4>
-            <ul className="ml-4 list-disc space-y-1 text-sm">{why.map(t => <li key={t}>{t}</li>)}</ul>
-          </section>
-        )}
+    <Disclosure label="Details" hint={`reasons, alternatives, ${n === 1 ? "the element" : `all ${n} elements`}`}>
+      {why.length > 0 && (
         <section>
-          <h4 className="mb-1 text-xs font-medium text-muted-foreground">How the pick was made ({short(items[0].file)}:{items[0].line})</h4>
-          <Reasons e={items[0]} />
+          <h4 className="mb-1 text-xs font-medium text-muted-foreground">Why it's uncertain</h4>
+          <ul className="ml-4 list-disc space-y-1 text-sm">{why.map(t => <li key={t}>{t}</li>)}</ul>
         </section>
-        {items[0].alternatives?.length > 0 && <p className="text-xs text-muted-foreground"><b className="font-medium">Alternatives:</b> {items[0].alternatives.map((a: any) => `${desc(a)} (${Math.round(a.confidence * 100)}%)`).join(" · ")}</p>}
-        {items.some(e => e.a11y?.length) && <p className="text-xs text-muted-foreground"><b className="font-medium">Accessibility:</b> {[...new Set(items.flatMap(e => e.a11y))].join(" ")}</p>}
+      )}
+      {items[0].alternatives?.length > 0 && <p className="text-xs text-muted-foreground"><b className="font-medium">Alternatives:</b> {items[0].alternatives.map((a: any) => `${desc(a)} (${Math.round(a.confidence * 100)}%)`).join(" · ")}</p>}
+      {items.some(e => e.a11y?.length) && <p className="text-xs text-muted-foreground"><b className="font-medium">Accessibility:</b> {[...new Set(items.flatMap(e => e.a11y))].join(" ")}</p>}
+      <section>
+        <h4 className="mb-1 text-xs font-medium text-muted-foreground">{n === 1 ? "The element" : `All ${n} elements`}</h4>
+        <div>{items.map(e => <ElementRow key={e.id} e={e} group={items.map(x => x.id)} />)}</div>
+      </section>
+      {ready.length > 0 && (
         <section>
-          <h4 className="mb-1 text-xs font-medium text-muted-foreground">{n === 1 ? "The element" : `All ${n} elements`}</h4>
-          <div>{items.map(e => <ElementRow key={e.id} e={e} group={items.map(x => x.id)} />)}</div>
+          <h4 className="mb-1 text-xs font-medium text-muted-foreground">Same kind, already sure ({ready.length}): for comparison, decided in Ready</h4>
+          <div>{ready.map(e => <ElementRow key={e.id} e={e} group={ready.map(x => x.id)} />)}</div>
         </section>
-        {ready.length > 0 && (
-          <section>
-            <h4 className="mb-1 text-xs font-medium text-muted-foreground">Same kind, already sure ({ready.length}): for comparison, decided in Ready</h4>
-            <div>{ready.map(e => <ElementRow key={e.id} e={e} group={ready.map(x => x.id)} />)}</div>
-          </section>
-        )}
-      </CollapsibleContent>
-    </Collapsible>
+      )}
+      <Disclosure label="Technical details" hint="how the pick was made">
+        <p className="text-xs text-muted-foreground">From <Code>{short(items[0].file)}:{items[0].line}</Code></p>
+        <Reasons e={items[0]} />
+      </Disclosure>
+    </Disclosure>
   )
 }
 
