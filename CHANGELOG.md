@@ -8,6 +8,17 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- Evidence as data, with a code reader. Findings now carry the places they cite (file, line, target
+  and what's there, up to 25; stored in a new `places` column, migrated in place), and older findings
+  read their "Examples:" text back into places. An action shows its evidence sentence and "N places"
+  folded; open, one row per place (the checkout folder stripped, vendored code marked), and each
+  opens a code reader: the lines around it, highlighted, the line marked, prev/next (arrows or J/K),
+  Copy path:line, and Open on GitHub at the scanned commit. A published page carries the excerpts,
+  captured at scan time and capped (12 lines either side, long lines cut, a total budget); `dsa
+  serve` reads the file. Reads stay inside the scanned targets and never show environment files,
+  keys, credentials or dsa's data folder. System's "Declared in" and Element Review's code viewer use
+  the same reader.
+
 - The scan relay ([docs/relay.md](docs/relay.md)): a published dashboard re-scans without the viewer
   handling a token. One Web Fetch handler (`@snds/dsa/relay`) holds the runner credential as an
   environment secret, signs viewers in with GitHub's OAuth web flow (no scopes; access to the repo is

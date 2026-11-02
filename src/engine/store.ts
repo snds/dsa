@@ -37,6 +37,7 @@ create table if not exists baselines (metric_id varchar, subject varchar, value 
 export const STORE_MIGRATIONS = [
   'alter table versions add column if not exists days_behind integer',
   'alter table versions add column if not exists commits_behind integer',
+  'alter table findings add column if not exists places json',
 ];
 
 /** Every table, for dumps and tests. */

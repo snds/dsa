@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { Code, Facts, Note, Panel, StatusDot } from "@/components/bits"
+import { Facts, Note, Panel, StatusDot } from "@/components/bits"
+import { CodeReader, shortPath, type Place } from "@/components/code-reader"
 import { D, SYS, band, fmt, pct, threshold } from "@/lib/dsa"
 import { FOUND_BY } from "@/lib/insight"
 import { Components } from "@/views/Components"
@@ -29,6 +30,7 @@ export function System() {
   const [filter, setFilter] = React.useState<Filter>(FILTERS.some((f) => f.id === initial) ? initial! : "all")
   // One component open at a time, in the address bar (#system/<filter>/<key>) so a link opens it.
   const [opened, setOpened] = React.useState<string | null>(linked ? decodeURIComponent(linked) : null)
+  const [reading, setReading] = React.useState<Place | null>(null)
   const openRow = (key: string | null) => { setOpened(key); try { history.replaceState(null, "", `#system/${filter}${key ? `/${encodeURIComponent(key)}` : ""}`) } catch { /* file:// */ } }
   const [q, setQ] = React.useState("")
   if (!m) return <Components />
@@ -112,7 +114,7 @@ export function System() {
                           ["Parts", c.parts.length ? c.parts.join(", ") : "None"],
                           ["Tokens", c.tokens ? fmt(c.tokens) : "None"],
                           ["Kind", c.kind ? `${c.kind.kind}, ${Math.round(c.kind.confidence * 100)}% sure${c.kind.ambiguous ? ", close to another kind" : ""}` : "Not recognised"],
-                          ["Declared in", <><Code>{c.evidence.file}{c.evidence.line ? `:${c.evidence.line}` : ""}</Code> <span className="text-muted-foreground">({c.evidence.extractor})</span></>],
+                          ["Declared in", <><button type="button" className="rounded-sm font-mono text-xs text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring outline-none" onClick={() => setReading({ file: c.evidence.file, line: c.evidence.line || 1, kind: c.name })}>{shortPath(c.evidence.file)}{c.evidence.line ? `:${c.evidence.line}` : ""}</button> <span className="text-muted-foreground">({c.evidence.extractor})</span></>],
                         ]} />
                       </div>
                     </TableCell>
@@ -123,6 +125,7 @@ export function System() {
             })}
           </TableBody>
         </Table>
+        {reading && <CodeReader places={[reading]} index={0} onIndex={() => {}} onClose={() => setReading(null)} />}
         <Note className="mt-3 px-4">Open a component for its variants, parts, tokens and where it is declared. "Found by" is how {SYS}'s source declares each component: a circle is reliable (declared or exported), a diamond is a stylesheet class, a square is naming alone or app code alone and should be confirmed. Kind is the component type the scan recognises (button, dialog, tabs…); a question mark means it was close to another kind.</Note>
       </Panel>
     </div>

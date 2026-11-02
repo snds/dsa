@@ -3,8 +3,12 @@ import { grade, type Catalog, type MetricDef, type Settings } from './catalog.js
 import { clusterThreshold } from './settings.js';
 import { system } from './system.js';
 import type { Config } from './config.js';
-import type { MetricRow, ScanData } from './metrics.js';
-import type { Finding, LibraryDef, Scope, Severity, Target } from './types.js';
+import { MAX_PLACES, type MetricRow, type ScanData } from './metrics.js';
+import type { Finding, LibraryDef, Place, Scope, Severity, Target } from './types.js';
+
+/** The places a set of metric rows cite, for a finding (optionally only those of one kind). */
+const placesOf = (rs: MetricRow[], kind?: string): Place[] =>
+  rs.flatMap(r => (r.detail.places as Place[] | undefined) ?? []).filter(p => !kind || (p.kind ?? '').split(', ').includes(kind)).slice(0, MAX_PLACES);
 
 /**
  * Rules turn metrics into OBSERVATIONS: one per subject a rule looked at.
@@ -187,6 +191,7 @@ function misuseRule(ctx: Ctx): Observation[] {
         title: `${component}: ${external.length} consumers override it with ${kind} — likely an API or docs gap`,
         why: `${external.length} consumers (threshold ${threshold}${rs.length > external.length ? `; ${rs.length - external.length} internal app(s) also do it` : ''}) override ${component} the same way. Misuse at this scale points at the component, so it routes to ${library}.`,
         evidence: `${total} ${kind} overrides on ${component} across ${targets.join(', ')}. Examples: ${rs.flatMap(r => (r.detail.examples as string[]).slice(0, 2)).slice(0, 4).join(', ')}`,
+        places: placesOf(rs, kind),
         fix: `Find out what the overrides are doing (sample the examples), then add a variant or prop for it, document it, and ship a codemod that removes the overrides.`,
         exit: `Fewer than ${threshold} consumers override ${component} with ${kind}.`,
         affected: targets, settingsUsed: settingsUsed(ctx, component), metricValue: external.length,
@@ -213,6 +218,7 @@ function misuseRule(ctx: Ctx): Observation[] {
         title: `Remove overrides on ${component} in ${target} (${r.value}% used as intended)`,
         why: `Below the cluster threshold of ${clusterThreshold(ctx.settings, component)} consumers, so ${target} owns the fix.`,
         evidence: `${r.detail.overridden} of ${r.detail.instances} instances overridden (${kinds}). Examples: ${(r.detail.examples as string[]).join(', ')}`,
+        places: placesOf([r]),
         fix: `Replace the overrides with documented props, variants, or spacing tokens. If none fit, raise it with the design system team.`,
         exit: `${component} used as intended in at least ${m.thresholds?.close ?? m.thresholds?.watch}% of instances.`,
         affected: [target], settingsUsed: settingsUsed(ctx, component), metricValue: r.value,
@@ -250,6 +256,7 @@ function lookalikeRule(ctx: Ctx): Observation[] {
         title: `${external.length} consumers hand-build ${component} with raw elements — coverage or docs gap`,
         why: `When ${threshold}+ teams build their own ${component}, the system's version is probably missing something they need.`,
         evidence: `${n} raw <${[...new Set(rs.flatMap(r => r.detail.elements as string[]))].join('>, <')}> across ${rs.map(r => r.detail.target).join(', ')}. Examples: ${rs.flatMap(r => (r.detail.examples as string[]).slice(0, 2)).slice(0, 4).join(', ')}`,
+        places: placesOf(rs),
         fix: `Sample the look-alikes to see what they do that ${component} doesn't. Close the gap, then ship a migration guide or codemod.`,
         exit: `Fewer than ${threshold} consumers above the look-alike threshold for ${component}.`,
         affected: rs.map(r => r.detail.target as string), settingsUsed: settingsUsed(ctx, component), metricValue: external.length,
@@ -272,6 +279,7 @@ function lookalikeRule(ctx: Ctx): Observation[] {
         title: `Replace ${r.detail.lookalikes} raw <${(r.detail.elements as string[]).join('>, <')}> with ${component} in ${target}`,
         why: `${r.value}% of ${component}-like UI in ${target} is hand-built, so it misses the system's fixes and accessibility work.`,
         evidence: `${r.detail.lookalikes} raw elements vs ${r.detail.instances} ${component} instances. Examples: ${(r.detail.examples as string[]).join(', ')}`,
+        places: placesOf([r]),
         fix: `Swap the raw elements for ${component}. If ${component} can't do what they need, say so in the issue so it can be routed to the system team.`,
         exit: `Under ${m.thresholds?.close ?? m.thresholds?.watch}% hand-built.`,
         affected: [target], settingsUsed: settingsUsed(ctx, component), metricValue: r.value,
@@ -323,6 +331,7 @@ function deprecationRule(ctx: Ctx): Observation[] {
         title: `Migrate ${row.value} deprecated component use(s) in ${row.subject}`,
         why: `Deprecated components stop getting fixes and block their removal for everyone.`,
         evidence: Object.entries(row.detail.byComponent as Record<string, number>).map(([c, n]) => `${n}× ${c}`).join(', ') + `. Examples: ${(row.detail.examples as string[]).join(', ')}`,
+        places: placesOf([row]),
         fix: Object.entries(repl).map(([c, r]) => `${c} → ${r}`).join('; '),
         exit: 'No deprecated components left.',
         affected: [row.subject], settingsUsed: settingsUsed(ctx), metricValue: row.value,
