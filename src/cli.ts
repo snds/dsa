@@ -15,6 +15,8 @@ import { loadConfig } from "./config.js";
 import { buildSystemModel, discoverSources, type SourceDiscovery, type SystemModel } from "./model/index.js";
 import { dsaVersion } from "./version.js";
 import { addAddonCommands, addEngineCommands } from "./cli-engine.js";
+import { checklistFromContext } from "./checklist/index.js";
+import { checklistMarkdown, formatChecklist } from "./report/checklist.js";
 
 export interface CliIo {
   out: (text: string) => void;
@@ -149,6 +151,25 @@ export function createProgram(io: CliIo = { out: console.log, err: console.error
       const report = ratchetFromContext(ctx, extra);
       emit(io, g.json, path.join(ctx.outputDir, "ratchet.json"), report, formatRatchet(report));
       if (!report.ok) process.exitCode = 1;
+    });
+
+  program
+    .command("checklist")
+    .argument("[dir]", "directory to scan", ".")
+    .option("--answers <file>", "the team's answers for items the scan can't measure (default: dsa.checklist.json in the config root)")
+    .option("--markdown [file]", "also write the checklist as a Markdown page (default: <output.dir>/checklist.md)")
+    .description("design-system health checklist, agent readiness included: the scan marks what it can measure -> <output.dir>/checklist.json")
+    .action(async (dir: string, opts: { answers?: string; markdown?: string | boolean }, cmd: Command) => {
+      const g = cmd.optsWithGlobals<GlobalOpts>();
+      const ctx = await loadRunContext(runOptions(dir, g, io));
+      const report = checklistFromContext(ctx, opts.answers ? { answersPath: path.resolve(io.cwd, opts.answers) } : {});
+      emit(io, g.json, path.join(ctx.outputDir, "checklist.json"), report, formatChecklist(report));
+      if (opts.markdown) {
+        const file = typeof opts.markdown === "string" ? path.resolve(io.cwd, opts.markdown) : path.join(ctx.outputDir, "checklist.md");
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, checklistMarkdown(report));
+        (g.json ? io.err : io.out)(pc.dim(`wrote ${file}`));
+      }
     });
 
   const config = program.command("config").description("work with dsa.config.json");
