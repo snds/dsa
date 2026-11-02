@@ -4,25 +4,23 @@ import { ArrowDownIcon, ArrowUpIcon, ArrowRightIcon, WarningIcon, CheckCircleIco
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { Note, Panel, StatusDot } from "@/components/bits"
+import { Code, Disclosure, Facts, Note, Panel, StatusDot } from "@/components/bits"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { D, SYS, band, fmt, fmtDT, num, ratio, threshold, type Band } from "@/lib/dsa"
-import { CERTAINTY, ROLES, classify, forRole, useRole, type Certainty } from "@/lib/insight"
+import { CERTAINTY, classify, type Certainty } from "@/lib/insight"
 
 /**
  * The first screen: is the system healthy, what should my team do next, and how far can I trust this scan.
  * Five measures with their trend and status; the open actions split into definite fixes and decisions,
- * filtered by the viewer's role; and the scan's own confidence, with what to do where it is low.
+ * highest impact first; and the scan's own confidence, with what to do where it is low.
  */
 export function Overview({ go }: { go: (view: string) => void }) {
-  const [role] = useRole()
   const runs: any[] = D.runs ?? []
   const last = runs[runs.length - 1] ?? null
   const prev = runs.length > 1 ? runs[runs.length - 2] : null
   const items: any[] = (D.queue?.items ?? []).filter((i: any) => i.status === "open")
-  const mine = items.filter((i) => forRole(role, i.rule))
-  const definite = mine.filter((i) => classify(i.rule).certainty === "definite")
-  const decide = mine.filter((i) => classify(i.rule).certainty === "recommendation")
+  const definite = items.filter((i) => classify(i.rule).certainty === "definite")
+  const decide = items.filter((i) => classify(i.rule).certainty === "recommendation")
   const cu = threshold("correct_use_rate"), tc = threshold("token_compliance_new_code")
   const currentShare = (r: any) => ratio(r?.current_consumers, r?.consumers)
 
@@ -42,15 +40,15 @@ export function Overview({ go }: { go: (view: string) => void }) {
       <Coverage />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {kpis.map((k) => <KpiCard key={k.label} k={k} onOpen={() => go(k.to)} since={prev?.taken_at} />)}
-        <ActionsCard definite={definite.length} decide={decide.length} role={role} onOpen={() => go("queue")} />
+        <ActionsCard definite={definite.length} decide={decide.length} onOpen={() => go("queue")} />
       </div>
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
-        <Panel title="What to do next" description={role === "all" ? "Open actions, highest impact first" : `For ${ROLES.find((r) => r.id === role)?.label}: ${ROLES.find((r) => r.id === role)?.hint.toLowerCase()}`}
+        <Panel title="What to do next" description="Open actions, highest impact first"
           action={<Button variant="ghost" size="sm" onClick={() => go("queue")}>All actions<ArrowRightIcon data-icon="inline-end" /></Button>}>
           <ActionGroup kind="definite" items={definite} go={go} />
           <ActionGroup kind="recommendation" items={decide} go={go} />
-          {!mine.length && <Note>Nothing open{role === "all" ? "" : " for this role"}. That is the goal.</Note>}
+          {!items.length && <Note>Nothing open. That is the goal.</Note>}
         </Panel>
         <ScanConfidence go={go} />
       </div>
@@ -126,10 +124,10 @@ function KpiCard({ k, onOpen, since }: { k: Kpi; onOpen: () => void; since?: str
   )
 }
 
-function ActionsCard({ definite, decide, role, onOpen }: { definite: number; decide: number; role: string; onOpen: () => void }) {
+function ActionsCard({ definite, decide, onOpen }: { definite: number; decide: number; onOpen: () => void }) {
   return (
     <button type="button" onClick={onOpen} className="flex min-w-0 flex-col gap-1.5 rounded-lg border bg-card p-4 text-left transition-colors hover:bg-muted/60">
-      <span className="text-xs font-medium text-muted-foreground">Open actions{role === "all" ? "" : ", your role"}</span>
+      <span className="text-xs font-medium text-muted-foreground">Open actions</span>
       <span className="font-heading text-3xl font-semibold tabular-nums">{fmt(definite + decide)}</span>
       <span className="text-xs text-muted-foreground">{fmt(definite)} definite · {fmt(decide)} to decide</span>
     </button>
@@ -154,7 +152,7 @@ function ActionGroup({ kind, items, go }: { kind: Certainty; items: any[]; go: (
                 <Badge variant={kind === "definite" ? "default" : "outline"} className="mt-0.5 shrink-0">{c.verb}</Badge>
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm">{i.title}</span>
-                  <span className="text-xs text-muted-foreground">{i.owner}{i.affected?.length ? ` · ${i.affected.length} place${i.affected.length === 1 ? "" : "s"}` : ""} · for {c.roles.map((r) => ROLES.find((x) => x.id === r)?.label).join(", ")}</span>
+                  <span className="text-xs text-muted-foreground">{i.owner}{i.affected?.length ? ` · ${i.affected.length} place${i.affected.length === 1 ? "" : "s"}` : ""}</span>
                 </span>
               </a>
             </li>
@@ -182,12 +180,11 @@ function ScanConfidence({ go }: { go: (v: string) => void }) {
   }
   const [howText, ok] = how[m.sources.how] ?? how.unknown!
   const rows: { ok: boolean; title: string; body: React.ReactNode; act?: [string, () => void] }[] = [
-    { ok, title: "Where the system's code is", body: <>{howText}. Reading {m.sources.read.length ? m.sources.read.map((s: string) => <code key={s} className="mr-1 rounded bg-muted px-1 font-mono text-xs">{s}</code>) : "nothing"}</>,
+    { ok, title: "Where the system's code is", body: <>{howText}. {m.sources.read.length ? `${fmt(m.sources.read.length)} folder${m.sources.read.length === 1 ? "" : "s"} read.` : "Nothing is read yet."}</>,
       act: ["Check sources", () => { location.hash = "settings/general" }] },
     { ok: true, title: `${fmt(m.counts.components)} components`, body: <>Plus {fmt(m.counts.parts)} parts (DialogTitle, MenuItem) and {fmt(m.counts.icons)} icons, counted apart.</>, act: ["See inventory", () => go("system")] },
     { ok: check === 0, title: `${fmt(check)} need a check`, body: "Known only from how apps write them, found by naming alone, or of an unclear kind. Confirm or correct them.", act: ["Review", () => { location.hash = "system/check"; go("system") }] },
     { ok: unused === 0, title: `${fmt(unused)} not used by any app`, body: "Candidates to promote, document, or retire. Some are building blocks used only inside the system.", act: ["Review", () => { location.hash = "system/unused"; go("system") }] },
-    { ok: false, title: "Known limits", body: "Token tiers (primitive, semantic, component) are a guide: names are reliable, tiers less so. Component parts can be partial for systems that build anatomy in unusual ways." },
   ]
   return (
     <Panel title="How sure is this scan" description="Read this before acting on a number">
@@ -203,6 +200,12 @@ function ScanConfidence({ go }: { go: (v: string) => void }) {
           </li>
         ))}
       </ul>
+      <Disclosure label="Technical details" hint="folders read, known limits" className="mt-4">
+        <Facts rows={[
+          ["Folders read", m.sources.read.length ? <span className="flex flex-wrap gap-1">{m.sources.read.map((s: string) => <Code key={s}>{s}</Code>)}</span> : "None"],
+          ["Known limits", "Token tiers (primitive, semantic, component) are a guide: names are reliable, tiers less so. Component parts can be partial for systems that build anatomy in unusual ways."],
+        ]} />
+      </Disclosure>
     </Panel>
   )
 }

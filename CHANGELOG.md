@@ -107,6 +107,14 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Changed
 
+- One dashboard for every role: the "View as" picker is gone (and what it stored is forgotten).
+  Every view leads with the highlights, and more is one click away through one control: "Details"
+  for the supporting data and guidance, "Technical details" for paths, lines, IDs, raw text and
+  config. Actions: who, why, who acts and when it's done up front; evidence, history, repo, markup,
+  the item ID and the file command under Technical details (linkable as `#queue/<id>/details`).
+  System: six columns; each component opens its variants, parts, tokens and declaring file
+  (`#system/<filter>/<key>`). Element Review and Settings use the same control.
+
 - `scan`, `ratchet` and `run` read through the system model, so they measure every
   framework and markup the model reads (Vue, Angular templates incl. inline `template:`,
   Svelte, Lit, HTML, Nunjucks, CSS classes), not only React imports. Counts can change:

@@ -10,7 +10,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Code, Note, Panel, Pre } from "@/components/bits"
+import { Code, Disclosure, Note, Panel, Pre } from "@/components/bits"
 import { D, SCOPES, api, say } from "@/lib/dsa"
 
 const RULES: [string, string, string][] = [
@@ -45,6 +45,7 @@ function SystemFolders({ d, onPin }: { d: any; onPin: (dirs: string[]) => void }
       </div>
       <div className="flex flex-wrap gap-1.5">{d.reading.length ? d.reading.map((r: string) => <Badge key={r} variant="secondary"><Code>{r}</Code></Badge>) : <Note className="text-xs">Nothing is read yet.</Note>}</div>
       {d.candidates.length > 0 && (
+        <Disclosure label="Technical details" hint={`every folder dsa scored (${d.candidates.length})`} defaultOpen={d.how === "none"}>
         <Table>
           <TableHeader><TableRow><TableHead className="w-10">Read</TableHead><TableHead>Folder</TableHead><TableHead className="w-20 text-right">Confidence</TableHead><TableHead>Why</TableHead></TableRow></TableHeader>
           <TableBody>{d.candidates.map((c: any) => (
@@ -55,6 +56,7 @@ function SystemFolders({ d, onPin }: { d: any; onPin: (dirs: string[]) => void }
               <TableCell className="text-xs text-muted-foreground">{c.why.join(" · ")}</TableCell>
             </TableRow>))}</TableBody>
         </Table>
+        </Disclosure>
       )}
       <div className="flex items-end gap-2">
         <Field className="flex-1"><FieldLabel htmlFor="s-addsrc">Add a folder</FieldLabel><Input id="s-addsrc" value={add} placeholder="src/components/ui" onChange={e => setAdd(e.target.value)} /></Field>
@@ -215,11 +217,13 @@ export function General({ onTitle }: { onTitle: (t: string) => void }) {
       </Panel>
 
       <Panel title="Rule settings" description={st("rules") ?? "Every change is logged in Notes"}>
+        <Disclosure label="Technical details" hint="thresholds each rule uses" className="border-t-0 pt-0">
         <FieldGroup className="grid gap-4 sm:grid-cols-2">
           {RULES.map(([k, l, h]) => (
             <Field key={k}><FieldLabel htmlFor={`r-${k}`}>{l}</FieldLabel><Input id={`r-${k}`} type="number" min={0} value={v.rules[k]} onChange={e => set(["rules", k], e.target.value)} onBlur={() => commit("rules")} /><FieldDescription>{h}</FieldDescription></Field>
           ))}
         </FieldGroup>
+        </Disclosure>
       </Panel>
 
       <Panel title="Modules" description={st("modules") ?? "Off modules keep their settings and data"}>
