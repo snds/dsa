@@ -48,6 +48,10 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- Overview stat cards: the change chip (arrow, value, "pts") no longer wraps. It sits in a slot of
+  fixed bounds, so the "vs scan of…" text starts at the same place on every card; only that text
+  wraps, and on a narrow card it drops below the chip. "No change" has a neutral arrow, and a fall
+  reads "−0.4 pts" with a true minus.
 - A design system read from another checkout can span several folders: `system.sources` (and a
   child's `sources`) now reach the engine, not only the system model, and accept globs of package
   folders (`../vendor/ds/packages/*`), so its tokens package is read too. With `git`, sources are
