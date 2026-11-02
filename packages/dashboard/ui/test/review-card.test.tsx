@@ -40,7 +40,7 @@ beforeAll(async () => {
         // Photographed but nothing drawn in its box; a row from a list, one of three alike; one drawn with its own label.
         el("k1", "ledger", "ledger/src/Rows.tsx", { title: "Row actions", shot: { url: "shots/k1.png", match: 1, page: "/", box, blank: true } }),
         el("k2", "ledger", "ledger/src/Rows.tsx", { title: "Row actions", styleSig: "look-k2", ownHash: "own123", label: "Open", shot: { url: "shots/k2.png", match: 0.95, page: "/", box, ties: 3, alike: 3 } }),
-        el("m1", "ledger", "ledger/src/Menu.tsx", { use: "MenuItem", props: {}, title: "Menu rows", home: "MenuItem" }),
+        el("m1", "ledger", "ledger/src/Menu.tsx", { use: "MenuItem", props: {}, title: "Menu rows", home: "MenuItem", confidence: 0.89, evidenceCap: { from: 0.96, why: ["there is no photo of it in the app", "the proposal (MenuItem) isn't drawn exactly yet"] } }),
       ],
       questions: [
         { key: "q1", kind: "group", title: "Ghost buttons", ask: "Replace with Button (variant ghost)?", home: "Button", ids: ["b1", "b2"], options: [{ label: "Button · variant ghost", decision: ghost }], auto: ghost, fit: null, parts: null, context: null, note: null },
@@ -189,4 +189,12 @@ test("no render with these props: the story as written stands in, with the reaso
   expect(p.textContent).toContain("Its story as written")
   expect(p.textContent).toContain("it may only appear inside something closed")
   expect(p.querySelector("img")!.getAttribute("src")).toBe("rendered/fallback-menu.png")
+})
+
+test("a recommendation the scanner was sure of, but no one can see yet, is held under the bar and says why", async () => {
+  await mount()
+  const held = card("Menu rows").querySelector('[data-slot="held-back"]')!
+  expect(held.textContent).toBe("Held under 90% (the scanner said 96%): there is no photo of it in the app; the proposal (MenuItem) isn't drawn exactly yet.")
+  expect(document.body.textContent).toContain("1 element the scanner was sure of is held under 90% until a person can see it")
+  expect(card("Ghost buttons").querySelector('[data-slot="held-back"]')).toBeNull()
 })

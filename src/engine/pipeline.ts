@@ -10,6 +10,7 @@ import { resolveTargets, latestVersions } from './workspaces.js';
 import { scanVersions, scanPins } from './scanners/versions.js';
 import { scanCode } from './scanners/code.js';
 import { modelSummary, readRepo } from '../model/index.js';
+import { applyEvidenceCap } from './evidence-cap.js';
 import { instancesFromReading } from './model-instances.js';
 import type { DsaConfig } from '../config.js';
 import { scanTokens, gitTouchedFiles } from './scanners/tokens.js';
@@ -255,6 +256,8 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
     await store.insertMany('instances', ['run_id', 'target', 'library', 'pkg', 'component', 'file', 'line', 'framework', 'overrides'], data.instances.map(i => [runId, i.target, i.library, i.pkg, i.component, i.file, i.line, i.framework, i.overrides.join(',')]));
     await store.insertMany('lookalikes', ['run_id', 'target', 'element', 'component', 'file', 'line'], data.lookalikes.map(l => [runId, l.target, l.element, l.component, l.file, l.line]));
     await store.insertMany('tokens', ['run_id', 'target', 'file', 'raw_values', 'token_refs', 'is_new'], data.tokens.map(t => [runId, t.target, t.file, t.rawValues, t.tokenRefs, t.isNew]));
+    // Nothing is "ready" that a person can't see: no photo or no exact render keeps it under the bar (evidence-cap.ts).
+    applyEvidenceCap(opts.dataDir, evals, threshold);
     await store.insertMany('element_evals', ['run_id', 'id', 'target', 'file', 'line', 'element', 'role', 'verdict', 'use_component', 'confidence', 'needs_human', 'exception', 'decided', 'data'],
       evals.map(e => [runId, e.id, e.target, e.file, e.line, e.element, e.role, e.decided?.decision.verdict ?? e.verdict, e.decided?.decision.use ?? e.use ?? null, e.confidence, e.needsHuman, e.exception ?? null, Boolean(e.decided), JSON.stringify(e)]));
     await store.insertMany('figma_usage', ['run_id', 'file_key', 'file_name', 'project', 'library', 'component', 'instances', 'lookalike_frames'], data.figma.map(f => [runId, f.fileKey, f.fileName, f.project, f.library, f.component, f.instances, f.lookalikeFrames]));
@@ -312,6 +315,8 @@ export async function reevaluateElements(opts: { root: string; dataDir: string; 
     const before = new Map((await store.all<any>('select id, data from element_evals where run_id=$1', [runId])).map(r => { const d = typeof r.data === 'string' ? JSON.parse(r.data) : r.data; return [r.id, `${d.role}|${d.use}|${JSON.stringify(d.props ?? {})}`]; }));
     const changed = evals.filter(e => before.has(e.id) && before.get(e.id) !== `${e.role}|${e.use}|${JSON.stringify(e.props ?? {})}`).length;
     await store.exec('delete from element_evals where run_id=$1', [runId]);
+    // Nothing is "ready" that a person can't see: no photo or no exact render keeps it under the bar (evidence-cap.ts).
+    applyEvidenceCap(opts.dataDir, evals, threshold);
     await store.insertMany('element_evals', ['run_id', 'id', 'target', 'file', 'line', 'element', 'role', 'verdict', 'use_component', 'confidence', 'needs_human', 'exception', 'decided', 'data'],
       evals.map(e => [runId, e.id, e.target, e.file, e.line, e.element, e.role, e.decided?.decision.verdict ?? e.verdict, e.decided?.decision.use ?? e.use ?? null, e.confidence, e.needsHuman, e.exception ?? null, Boolean(e.decided), JSON.stringify(e)]));
     log(`Re-evaluated ${evals.length} elements with page placement from ${page.size} screenshots: ${changed} recommendation${changed === 1 ? '' : 's'} changed.`);

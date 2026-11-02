@@ -109,6 +109,7 @@ export function ReviewCard({ items, auto, pattern, options, fit, kind, title, as
                 <Confidence lo={lo} hi={hi} />
               </div>
               {state === "changed" && <p className="text-xs text-muted-foreground">Recommended: {pickText(auto)}</p>}
+              <HeldBack items={items} />
               {ask && shown.verdict !== "replace" && state === "open" && <p className="text-sm">{ask}</p>}
               {shown.parent && <ParentNote parent={shown.parent} />}
               {shown.how && <p className="text-sm text-muted-foreground">{shown.how}</p>}
@@ -211,6 +212,23 @@ function Pick({ label, r }: { label: string; r: any }) {
       {props.map(([k, v]) => <Badge key={k} variant="secondary" className="font-mono text-[11px] font-normal">{k} <b className="font-semibold">{v}</b></Badge>)}
       {r.verdict === "replace" && r.content && <Badge variant="outline" className="text-[11px] font-normal">{contentText(r.content)}</Badge>}
     </div>
+  )
+}
+
+/**
+ * Why the confidence stops under the "ready" bar though the scanner was surer: what a person can't see
+ * yet (no photo, the proposal not drawn exactly). Said once per card, for the elements it holds back.
+ */
+export function HeldBack({ items }: { items: any[] }) {
+  const { th } = useEl()
+  const held = items.filter(e => e.evidenceCap)
+  if (!held.length) return null
+  const why = [...new Set(held.flatMap(e => e.evidenceCap.why as string[]))]
+  const from = Math.max(...held.map(e => e.evidenceCap.from))
+  return (
+    <p className="text-xs text-warning-soft-foreground" data-slot="held-back">
+      Held under {Math.round(th * 100)}% (the scanner said {Math.round(from * 100)}%{held.length < items.length ? ` for ${held.length} of ${items.length}` : ""}): {why.join("; ")}.
+    </p>
   )
 }
 

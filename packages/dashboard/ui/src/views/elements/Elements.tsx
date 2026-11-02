@@ -50,6 +50,7 @@ export function Elements() {
   const deferred = mine.filter((e: any) => e.exception && e.exception !== "unused" && e.exception !== "lab").length
   const lab = mine.filter((e: any) => e.exception === "lab").length
   // A question can cover several apps: it belongs to every app it holds an element of.
+  const held = mine.filter((e: any) => e.evidenceCap && !e.exception).length
   const qs = E.questions.filter((q: any) => !target || q.ids.some((id: string) => byId.get(id)?.target === target))
 
   const staged = useStaged()
@@ -83,11 +84,12 @@ export function Elements() {
       <div className="flex flex-col">
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <Stat label="Need a decision" value={count("open")} detail={`${elementsIn("open")} elements`} active={show === "open"} onClick={() => pick(["open"])} />
-          <Stat label="Ready to migrate" value={elementsIn("ready")} detail={`At or above ${Math.round(th * 100)}%, in ${count("ready")} groups`} active={show === "ready"} onClick={() => pick(["ready"])} />
+          <Stat label="Ready to migrate" value={elementsIn("ready")} detail={`At or above ${Math.round(th * 100)}%, seen and drawn, in ${count("ready")} groups`} active={show === "ready"} onClick={() => pick(["ready"])} />
           <Stat label="Decided" value={elementsIn("decided")} detail={staged.length && !D.serve ? `${staged.length} staged in this browser` : `${count("decided")} decisions`} active={show === "decided"} onClick={() => pick(["decided"])} />
           <Stat label={`No ${SYS} home yet`} value={gaps.reduce((a, u) => a + u.items.length, 0)} detail={`${gaps.length} pattern${gaps.length === 1 ? "" : "s"} to propose or map`} />
         </div>
 
+        {held > 0 && <Note className="mt-3 text-xs">{held} element{held === 1 ? " the scanner was sure of is" : "s the scanner was sure of are"} held under {Math.round(th * 100)}% until a person can see {held === 1 ? "it" : "them"}: a photo in the app, and the proposal drawn exactly. Each card says what's missing.</Note>}
         {/* The filter stays in reach while the groups scroll. */}
         <div className="sticky top-0 z-10 -mx-1 mt-6 mb-4 flex flex-wrap items-center gap-2 bg-background/95 px-1 py-2 backdrop-blur">
           <ToggleGroup aria-label="Show" value={[show]} onValueChange={pick} variant="outline" size="sm">

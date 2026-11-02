@@ -35,9 +35,9 @@ export const contentText = (c: any) => {
 export const recText = (r: any) => r.verdict === "ignore" ? "Ignored" : r.verdict === "keep" ? "Keep native" : r.verdict === "gap" ? `System gap${r.gap ? `: ${r.gap}` : ""}` : [r.use, ...Object.entries(r.props ?? {}).map(([k, v]) => `${k} ${v}`), contentText(r.content)].filter(Boolean).join(" · ")
 export const sameDecision = (a: any, b: any) => a && b && a.verdict === b.verdict && (a.use ?? "") === (b.use ?? "") && JSON.stringify(a.props ?? {}) === JSON.stringify(b.props ?? {})
 
-export function Conf({ c }: { c: number }) {
+export function Conf({ c, cap }: { c: number; cap?: { from: number; why: string[] } | null }) {
   const { th } = useEl()
-  return <Badge variant="outline" className={cn("tabular-nums", c >= th ? "border-success-soft-border text-success-soft-foreground" : c >= th - 0.15 ? "border-warning-soft-border text-warning-soft-foreground" : "border-destructive/40 text-destructive")}>{Math.round(c * 100)}%</Badge>
+  return <Badge title={cap ? `Held under ${Math.round(th * 100)}% (the scanner said ${Math.round(cap.from * 100)}%): ${cap.why.join("; ")}.` : undefined} variant="outline" className={cn("tabular-nums", c >= th ? "border-success-soft-border text-success-soft-foreground" : c >= th - 0.15 ? "border-warning-soft-border text-warning-soft-foreground" : "border-destructive/40 text-destructive")}>{Math.round(c * 100)}%</Badge>
 }
 
 export const Where = ({ e }: { e: any }) => <Code>{short(e.file)}:{e.line}</Code>
@@ -185,7 +185,7 @@ export function ElementRow({ e, group }: { e: any; group?: string[] }) {
   return (
     <Collapsible className="border-b last:border-b-0">
       <div className="grid grid-cols-[3.25rem_1fr_auto] items-center gap-3 py-1.5 text-sm">
-        <span className="justify-self-start"><Conf c={e.confidence} /></span>
+        <span className="justify-self-start"><Conf c={e.confidence} cap={e.evidenceCap} /></span>
         <CollapsibleTrigger className="flex min-w-0 items-center gap-1.5 text-left underline-offset-4 hover:underline">
           <span className={cn("truncate", !e.label && "text-muted-foreground")}>{nameOf(e)}</span>
           {e.regions?.length > 0 && <span className="shrink-0 text-xs text-muted-foreground">in {e.regions.join(", ")}</span>}

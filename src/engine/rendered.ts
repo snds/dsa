@@ -174,6 +174,8 @@ export async function applyRenderedEvidence(dataDir: string, threshold = 0.9): P
     const bySig = new Map<string, Styles>();
     for (const e of evals) { const st = idx.shots?.[e.id]?.styles; if (st && e.styleSig) bySig.set(e.styleSig, st); }
     for (const e of evals) {
+      // Work from the scanner's score: the evidence cap is re-applied after (evidence-cap.ts).
+      if (e.evidenceCap) { e.confidence = e.evidenceCap.from; delete e.evidenceCap; }
       const st: Styles | undefined = idx.shots?.[e.id]?.styles ?? (e.styleSig ? bySig.get(e.styleSig) : undefined);
       const comp = e.signature && rendered.components[e.signature.component];
       if (!st || !comp || e.decided) continue;
