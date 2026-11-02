@@ -1,0 +1,45 @@
+{
+  "$id": "https://github.com/snds/dsa/schema/checklist-answers.json",
+  "title": "dsa.checklist.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "items": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "description": "A checklist item id, such as agents.genUi."
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "done",
+              "partial",
+              "missing",
+              "na"
+            ]
+          },
+          "note": {
+            "description": "Shown as the item's evidence.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "items"
+  ],
+  "additionalProperties": false,
+  "description": "dsa.checklist.json: the team's answers for checklist items the scan can't measure, or overrides of what it measured."
+}

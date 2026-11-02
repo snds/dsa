@@ -257,6 +257,28 @@ rawElements                0        0      0
 wrote <repo>/test/fixtures/app/.dsa/ratchet.json
 ```
 
+### `dsa checklist [dir] [--answers <file>] [--markdown [file]]`
+
+Scores the system against a 78-item health checklist in 13 areas: the usual design-system
+ones, plus usage in product code and agent readiness (component manifest, tokens as data,
+llms.txt, agent rules and skills, an MCP server, guard rails, agent benchmarks). The scan
+measures 52 items itself and shows the evidence for each. The team answers the rest in
+`dsa.checklist.json`. Partial counts as half, and unanswered items are listed, not scored.
+`--markdown` also writes a page to share. Items, bars and limits:
+[docs/checklist.md](docs/checklist.md).
+
+```text
+dsa checklist — fixture — 10% of applicable items (49 measured by the scan, 0 answered, 29 unanswered)
+
+area                   score  done  partial  missing  unanswered
+---------------------  -----  ----  -------  -------  ----------
+Tokens                    0%     0        0       10           1
+Components               38%     0        3        1           3
+Usage in product code    50%     1        1        1           0
+Agent readiness           5%     0        1        9           3
+…
+```
+
 ### `dsa run` and the run history
 
 `dsa run` measures a whole repo over time: package versions, component use and

@@ -109,7 +109,7 @@ export function Agents() {
             <h3 className="mb-1 font-medium">Cursor</h3>
             <p className="text-muted-foreground">Each button asks Cursor to add a tool server; Cursor shows what it will run before you confirm.</p>
             <div className="mt-2 flex flex-wrap gap-2">
-              <Button size="sm" nativeButton={false} render={<a href={v.setup.cursor.installDsa} />}>Add the scan tools (dsa)</Button>
+              <Button size="sm" nativeButton={false} render={<a href={v.setup.cursor.installDsa} />}>Add scan tools</Button>
               <Button size="sm" variant="outline" nativeButton={false} render={<a href={v.setup.cursor.installSystem} />}>Add the design-system tools</Button>
             </div>
           </section>

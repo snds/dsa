@@ -8,6 +8,18 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- `dsa checklist`: a design-system health checklist with agent readiness built in
+  ([docs/checklist.md](docs/checklist.md)). It has 78 items in 13 areas. The scan measures 52 of
+  them from the same reading as `dsa scan`: tokens by tier, group and mode, component kinds, variant
+  axes and anatomy, docs, story and test coverage by component, adoption and correct use, the ratchet,
+  and agent artifacts (component manifests, DTCG tokens, llms.txt, AGENTS.md and editor rules,
+  SKILL.md, an MCP server package or `profile.agent.mcpServer`, MCP configs, lint guard rails, evals).
+  Every measured item carries its evidence. The team answers the rest, or overrides the scan, in
+  `dsa.checklist.json` (schema `schema/checklist-answers.json`). An override keeps what the scan
+  found. Areas score done plus half of partial over the items that apply; unanswered items are listed,
+  not scored. `--markdown` writes a page to share. In a repo with no system source, the system-side
+  items are left to the team instead of marked missing.
+
 - Evidence as data, with a code reader. Findings now carry the places they cite (file, line, target
   and what's there, up to 25; stored in a new `places` column, migrated in place), and older findings
   read their "Examples:" text back into places. An action shows its evidence sentence and "N places"
@@ -51,6 +63,11 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 - Dialog footers run edge to edge whatever a dialog's padding: content and footer share one padding
   variable (`--dialog-pad`), and a test refuses `p-*` on a dialog.
+- Buttons and fields share one height scale (`--spacing-control-sm`, `--spacing-control`,
+  `--spacing-control-lg`): Button, icon buttons, the agent split button (both halves), inputs, selects
+  and toggles. A row sets its size once (`ControlSize`) and every control in it follows, so the split
+  button no longer sits shorter, with smaller text, than the buttons beside it. Disabled buttons are
+  easier to read (60% opacity, was 50%).
 - Overview stat cards: the change chip (arrow, value, "pts") no longer wraps. It sits in a slot of
   fixed bounds, so the "vs scan of…" text starts at the same place on every card; only that text
   wraps, and on a narrow card it drops below the chip. "No change" has a neutral arrow, and a fall

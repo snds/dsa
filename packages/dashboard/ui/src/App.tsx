@@ -64,7 +64,7 @@ function AgentButton() {
   if (!canChat()) return null
   return (
     <Button variant="outline" onClick={() => (a.session ? a.setOpen(!a.open) : a.start({ kind: "scan" }))} aria-pressed={a.open}>
-      <SparkleIcon data-icon="inline-start" />Ask the DS Engineer
+      <SparkleIcon data-icon="inline-start" />Ask the agent
     </Button>
   )
 }

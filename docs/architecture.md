@@ -26,6 +26,7 @@ dsa/                     @snds/dsa: core library + the `dsa` CLI
   src/detect/            pattern candidates
   src/metrics/           adoption and correct use
   src/engine/            `dsa run`: repo discovery, scanners, findings, issues, element review
+  src/checklist/         `dsa checklist`: health and agent-readiness items, each measured from the scan or answered
   src/addons.ts          how add-ons plug in
   src/profile.ts         the profile interface
   schema/                published JSON Schemas for config and reports
