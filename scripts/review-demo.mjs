@@ -30,7 +30,7 @@ fs.cpSync(path.join(ROOT, 'test/fixtures/review-demo'), root, { recursive: true 
 // What is live: each app's built pages, and the system's built Storybook.
 const cfgFile = path.join(root, 'dsa.config.json');
 const raw = JSON.parse(fs.readFileSync(cfgFile, 'utf8'));
-raw.live = { apps: { billing: { dir: 'apps/billing/dist' }, checkout: { dir: 'apps/checkout/dist' } }, storybook: { dir: 'storybook-static' } };
+raw.live = { apps: { billing: { dir: 'apps/billing/site' }, checkout: { dir: 'apps/checkout/site' } }, storybook: { dir: 'storybook-static' } };
 fs.writeFileSync(cfgFile, JSON.stringify(raw, null, 2));
 
 const loaded = core.loadConfig({ cwd: root });
