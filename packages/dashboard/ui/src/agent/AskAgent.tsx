@@ -2,6 +2,7 @@ import * as React from "react"
 import { CaretDownIcon, CopyIcon, SparkleIcon, TerminalWindowIcon, ArrowSquareOutIcon, ChatCircleDotsIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
+import { iconSizeFor, useControlSize, type ControlSizeName } from "@/components/ui/control-size"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -13,20 +14,23 @@ import { canChat, useAgent, type Subject } from "./store"
  * The way into the agent from any card: chat here (the side panel), or take the same brief to Cursor
  * or a Claude Code terminal. All three start from the same facts.
  */
-export function AskAgent({ subject, label = "Ask the agent", ask, size = "sm", variant = "outline" }: { subject: Subject; label?: string; ask?: string; size?: "sm" | "xs"; variant?: "outline" | "ghost" | "default" }) {
+export function AskAgent({ subject, label = "Ask the agent", ask, size, variant = "outline" }: { subject: Subject; label?: string; ask?: string; size?: ControlSizeName | "xs"; variant?: "outline" | "ghost" | "default" }) {
   const a = useAgent()
+  // Both halves take the row's size, so the split button matches the buttons beside it.
+  const row = useControlSize()
+  const s = size ?? row
   const [handoff, setHandoff] = React.useState<any>(null)
   const live = canChat()
   async function take() {
     try { setHandoff(await api("/api/agent/handoff", { subject, question: ask ?? "" })) } catch (e: any) { say(e.message, true) }
   }
-  const main = <Button variant={variant} size={size} onClick={() => a.start(subject, { ask })} disabled={!live}><SparkleIcon data-icon="inline-start" />{label}</Button>
-  return (
-    <>
+  const main = <Button variant={variant} size={s} onClick={() => a.start(subject, { ask })} disabled={!live}><SparkleIcon data-icon="inline-start" />{label}</Button>
+  // Disabled buttons get no hover, so the reason sits on the whole group (which keeps the halves flush).
+  const group = (
       <ButtonGroup>
-        {live ? main : <Tooltip><TooltipTrigger render={<span className="inline-flex" tabIndex={0} />}>{main}</TooltipTrigger><TooltipContent>Agents work when the dashboard is served (dsa serve).</TooltipContent></Tooltip>}
+        {main}
         <DropdownMenu>
-          <DropdownMenuTrigger render={<Button variant={variant} size={size === "xs" ? "icon-xs" : "icon-sm"} aria-label="Other ways to work with an agent" disabled={!live} />}><CaretDownIcon /></DropdownMenuTrigger>
+          <DropdownMenuTrigger render={<Button variant={variant} size={iconSizeFor(s)} aria-label="Other ways to work with an agent" disabled={!live} />}><CaretDownIcon /></DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-64">
             <DropdownMenuItem onClick={() => a.start(subject, { ask })}><ChatCircleDotsIcon />Chat here</DropdownMenuItem>
             <DropdownMenuItem onClick={() => a.start(subject, { ask, mode: "try" })}><SparkleIcon />Chat here, with a sandbox to try changes</DropdownMenuItem>
@@ -34,6 +38,10 @@ export function AskAgent({ subject, label = "Ask the agent", ask, size = "sm", v
           </DropdownMenuContent>
         </DropdownMenu>
       </ButtonGroup>
+  )
+  return (
+    <>
+      {live ? group : <Tooltip><TooltipTrigger render={<span className="inline-flex" tabIndex={0} />}>{group}</TooltipTrigger><TooltipContent>Agents work when the dashboard is served (dsa serve).</TooltipContent></Tooltip>}
       <Dialog open={!!handoff} onOpenChange={o => !o && setHandoff(null)}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>

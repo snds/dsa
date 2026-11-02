@@ -301,7 +301,7 @@ function Detail({ i, q, busy, onCreate }: { i: any; q: Q; busy: boolean; onCreat
           )}
           {l && <Button variant="outline" nativeButton={false} render={<a href={safeHref(l.url)} target="_blank" rel="noopener" />}><ArrowSquareOutIcon data-icon="inline-start" />Open Issue</Button>}
           <Button variant="outline" onClick={() => copy(issue, "Issue text copied")}>Copy Issue</Button>
-          <AskAgent subject={{ kind: "queue", id: i.id }} label="Work on this with the agent" size="sm" />
+          <AskAgent subject={{ kind: "queue", id: i.id }} label="Work on this with the agent" />
           {i.kind === "finding" && <Button variant="outline" onClick={() => copy(cmd, `Copied: ${cmd}`)}>Copy File Command</Button>}
         </div>
       </>}

@@ -55,6 +55,11 @@
     --radius-2xl: calc(var(--radius) * 1.8);
     --radius-3xl: calc(var(--radius) * 2.2);
     --radius-4xl: calc(var(--radius) * 2.6);
+    /* One height scale for every control (buttons, the split button, icon buttons, inputs, selects,
+       toggles): h-control-sm / h-control / h-control-lg. A row of controls uses one size. */
+    --spacing-control-sm: 1.75rem;
+    --spacing-control: 2rem;
+    --spacing-control-lg: 2.25rem;
 }
 
 :root {

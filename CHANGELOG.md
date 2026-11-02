@@ -34,6 +34,12 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- Buttons and fields share one height scale (`--spacing-control-sm`, `--spacing-control`,
+  `--spacing-control-lg`): Button, icon buttons, the agent split button (both halves), inputs, selects
+  and toggles. A row sets its size once (`ControlSize`) and every control in it follows, so the split
+  button no longer sits shorter, with smaller text, than the buttons beside it. Disabled buttons are
+  easier to read (60% opacity, was 50%).
+
 - A design system read from another checkout can span several folders: `system.sources` (and a
   child's `sources`) now reach the engine, not only the system model, and accept globs of package
   folders (`../vendor/ds/packages/*`), so its tokens package is read too. With `git`, sources are

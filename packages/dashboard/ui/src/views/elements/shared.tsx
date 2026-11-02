@@ -3,6 +3,7 @@ import { cn } from "cn"
 import { CaretDownIcon, CheckIcon, ImageBrokenIcon } from "@phosphor-icons/react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { ControlSize } from "@/components/ui/control-size"
 import { Input } from "@/components/ui/input"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -319,16 +320,18 @@ export function ReviewControls({ items, auto, pattern, options, label }: { items
         <OptionTiles choices={choices} current={current} disabled={busy || off || locked}
           onPick={(r, recommended) => (sameDecision(r, current) ? undo("Choice removed") : recommended ? decide(auto, "Approved") : decide(r, `Changed to ${pickText(r)}`))} />
       )}
+      {/* One size for the whole decision row: buttons, menu and the note field line up. */}
+      <ControlSize size="sm">
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" variant={state === "approved" ? "secondary" : "default"} aria-pressed={state === "approved"} disabled={busy || off || (locked && state === "approved")}
+        <Button variant={state === "approved" ? "secondary" : "default"} aria-pressed={state === "approved"} disabled={busy || off || (locked && state === "approved")}
           onClick={() => (state === "approved" ? undo("Approval removed") : decide(auto, "Approved"))}>
           {state === "approved" && <CheckIcon data-icon="inline-start" />}{state === "approved" ? "Approved" : "Approve"}
         </Button>
         {live ? (
-          <Button size="sm" variant={state === "changed" ? "secondary" : "outline"} disabled={busy || off} onClick={() => openPicker({ ids, pattern })}>{state === "changed" ? "Changed" : "Change…"}</Button>
+          <Button variant={state === "changed" ? "secondary" : "outline"} disabled={busy || off} onClick={() => openPicker({ ids, pattern })}>{state === "changed" ? "Changed" : "Change…"}</Button>
         ) : (
           <DropdownMenu>
-            <DropdownMenuTrigger render={<Button size="sm" variant={state === "changed" ? "secondary" : "outline"} disabled={off} />}>
+            <DropdownMenuTrigger render={<Button variant={state === "changed" ? "secondary" : "outline"} disabled={off} />}>
               {state === "changed" ? "Changed" : "Change"}<CaretDownIcon data-icon="inline-end" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-80">
@@ -343,11 +346,12 @@ export function ReviewControls({ items, auto, pattern, options, label }: { items
             </DropdownMenuContent>
           </DropdownMenu>
         )}
-        <Button size="sm" variant={off ? "secondary" : "ghost"} aria-pressed={off} disabled={busy || (locked && off)}
+        <Button variant={off ? "secondary" : "ghost"} aria-pressed={off} disabled={busy || (locked && off)}
           onClick={() => (off ? undo("No longer ignored") : decide({ verdict: "ignore", role: items[0].role }, "Ignored"))}>{off ? "Ignored" : "Ignore"}</Button>
         <Input value={note} onChange={e => { setNote(e.target.value); if (staged) setStagedNote(key, e.target.value) }} placeholder="Note for the decision (optional)" aria-label="Note for the decision" disabled={off}
-          className="h-7 max-w-lg min-w-48 flex-1 text-sm" />
+          className="max-w-lg min-w-48 flex-1" />
       </div>
+      </ControlSize>
       {/* The page-level note (Questions for a human) explains staging once; a card only says where it stands. */}
       {!live && (staged || locked) && (
         <p className="text-xs text-muted-foreground">
