@@ -2,7 +2,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_DECISIONS_FILE, openStore, clearMappingCache, effectiveSettings, githubHttp, githubToken, labelsFor, loadCatalog, mapInstance, materializeRemotes, pushedThisWeek, renderIssue, resolveTargets, rowToFinding, targetRelative, type Config, type ElementEval, type Finding, type Http, type Mapping, type Recommendation, type Target } from '@snds/dsa/engine';
+import { DEFAULT_DECISIONS_FILE, openStore, clearMappingCache, effectiveSettings, githubHttp, githubToken, labelsFor, loadCatalog, mapInstance, materializeRemotes, pushedThisWeek, renderIssue, resolveTargets, rowToFinding, targetRelative, parsePlaces, evidenceSummary, isVendored, MAX_PLACES, type Place, type Config, type ElementEval, type Finding, type Http, type Mapping, type Recommendation, type Target } from '@snds/dsa/engine';
+
+/** An item's evidence as data: the sentence without its examples, and the places (from older findings, read back from the text). */
+function evidenceOf(evidence: string, places?: Place[]): { summary?: string; places?: (Place & { vendored?: boolean })[] } {
+  const list = places?.length ? places : parsePlaces(evidence)
+  if (!list.length) return {}
+  return { ...(evidence ? { summary: evidenceSummary(evidence) } : {}), places: list.map(p => (isVendored(p.file) ? { ...p, vendored: true } : p)) }
+}
 
 /**
  * The Action Queue: every item that needs someone to do something.
@@ -53,6 +60,8 @@ export interface QueueItem {
   repo: string | null;
   severity?: string; score?: number; family?: string; pushed?: boolean;
   why: string; evidence: string; fix: string; exit: string;
+  /** The evidence as data: its sentence, and each place it cites (vendored ones marked). */
+  summary?: string; places?: (Place & { vendored?: boolean })[];
   affected: string[];
   status: 'open' | 'done';
   doneReason?: string | null;
@@ -151,7 +160,7 @@ export async function buildQueue(root: string, config: Config, dataDir: string):
     items.push({
       id: f.id, kind: 'finding', rule: f.rule, title: f.title, owner: f.owner, scope: f.scope, repo: repoFor(f.repo),
       severity: f.severity, score: f.score, family: f.family, pushed: pushed.has(f.id),
-      why: f.why, evidence: f.evidence, fix: f.fix, exit: f.exit, affected: f.affected,
+      why: f.why, evidence: f.evidence, ...evidenceOf(f.evidence, f.places), fix: f.fix, exit: f.exit, affected: f.affected,
       status: done ? 'done' : 'open',
       doneReason: f.status === 'resolved' ? 'Resolved by scan' : closed ? `Issue #${link!.number} closed` : null,
       doneAt: f.status === 'resolved' ? f.resolvedAt ?? null : closed ? link!.closedAt ?? null : null,
@@ -211,6 +220,7 @@ export async function buildQueue(root: string, config: Config, dataDir: string):
         ? `A reviewer confirmed that ${n} ${tags} in ${g.target} have no matching component: ${d.gap || 'the system is missing one'}. It's design system work, not a consumer fix.`
         : `A reviewer approved replacing ${n} hand-built ${tags} in ${g.target} with ${d.use}. Until they're swapped, they miss the system's fixes and accessibility work.`,
       evidence: `${n} element${n === 1 ? '' : 's'} in ${new Set(g.items.map(e => e.file)).size} file${new Set(g.items.map(e => e.file)).size === 1 ? '' : 's'}${check ? `; ${check} flagged to check by hand` : ''}. Examples: ${g.items.slice(0, 5).map(e => `${e.file}:${e.line}`).join(', ')}`,
+      ...evidenceOf('', g.items.slice(0, MAX_PLACES).map(e => ({ target: g.target, file: e.file, line: e.line, kind: `<${e.element}>` }))),
       fix: gap
         ? `Design and add the missing component or variant (${d.gap || 'see the elements'}), then re-review these elements against it.`
         : `Replace each element with \`<${d.use}${propText(d.props) ? ' ' + propText(d.props) : ''}>\`${from ? ` imported from \`${from}\`` : ''}. The JSX for each instance is below: it keeps handlers, aria, data attributes, and layout classes, and drops the visual classes the component now owns. Anything marked "check" needs a look before applying.`,

@@ -23,14 +23,31 @@ export interface SourceFile {
 
 const MAX_LINES = 6000;
 
-/** The target that owns a displayed file, and the file on disk. Null when it isn't readable or escapes. */
+/**
+ * Files never shown, whatever cites them: environment files, keys and credentials, and dsa's own data
+ * folder (secrets.json lives there).
+ */
+export function isSecretPath(rel: string): boolean {
+  const parts = rel.split(/[\\/]/)
+  const base = parts[parts.length - 1] ?? ''
+  return /^\.env(\..*)?$/i.test(base) || /^(secrets?|credentials?)(\.[\w-]+)?\.(json|ya?ml|toml)$/i.test(base) || /\.(pem|key|p12|pfx|keystore)$/i.test(base)
+    || /^id_(rsa|dsa|ecdsa|ed25519)/.test(base) || /^\.?npmrc$|^\.netrc$|^\.pgpass$/.test(base) || parts.includes('.dsa') || parts.includes('.git')
+}
+
+/**
+ * The target that owns a displayed file, and the file on disk. Null when it isn't readable, escapes its
+ * target, or is a secret. Without a target name (evidence from older reports), the first target that
+ * holds the file.
+ */
 export function locate(root: string, targets: Target[], target: string, file: string): { abs: string; rel: string; t: Target } | null {
-  const t = targets.find(x => x.name === target);
-  if (!t) return null;
-  const rel = targetRelative(root, file, t.dir);
-  const abs = path.resolve(t.dir, rel);
-  if (!isInside(abs, t.dir) || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) return null;
-  return { abs, rel, t };
+  const pool = target ? targets.filter(x => x.name === target) : targets
+  for (const t of pool) {
+    const rel = targetRelative(root, file, t.dir);
+    const abs = path.resolve(t.dir, rel);
+    if (!isInside(abs, t.dir) || isSecretPath(rel) || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) continue;
+    return { abs, rel, t };
+  }
+  return null;
 }
 
 /** The commit a target folder is at, when it's a git checkout. */
@@ -82,4 +99,31 @@ export function sourceExcerpts(root: string, config: Config, els: { target: stri
     out[file] = { repo: at.t.repo, ref: heads.get(at.t.dir), rel: at.rel, chunks: merged.map(([a, b]) => ({ start: a, lines: all.slice(a - 1, Math.min(b, all.length)) })) };
   }
   return out;
+}
+
+/** Caps for evidence excerpts carried in a static page: cited lines only, and bounded in total. */
+export const EXCERPT_LIMITS = { context: 12, maxLineChars: 400, maxFiles: 200, maxLines: 6000 }
+
+/**
+ * Excerpts around each cited place, for the evidence code reader on a static page: the lines either
+ * side of each place (merged per file), long lines cut, and the whole set capped. Places that can't be
+ * read (outside the scanned targets, secret files) are left out.
+ */
+export function placeExcerpts(root: string, config: Config, places: { target?: string | undefined; file: string; line: number }[], limits = EXCERPT_LIMITS): Record<string, SourceFile> {
+  const seen = new Set<string>()
+  const els = places.filter(p => { const k = `${p.file}:${p.line}`; if (seen.has(k)) return false; seen.add(k); return true })
+    .map(p => ({ target: p.target ?? '', file: p.file, line: p.line }))
+  const files = [...new Set(els.map(e => e.file))].slice(0, limits.maxFiles)
+  const out = sourceExcerpts(root, config, els.filter(e => files.includes(e.file)), limits.context)
+  let budget = limits.maxLines
+  for (const [file, src] of Object.entries(out)) {
+    src.chunks = src.chunks.flatMap(c => {
+      if (budget <= 0) return []
+      const lines = c.lines.slice(0, budget).map(l => (l.length > limits.maxLineChars ? l.slice(0, limits.maxLineChars) + ' …' : l))
+      budget -= lines.length
+      return [{ start: c.start, lines }]
+    })
+    if (!src.chunks.length) delete out[file]
+  }
+  return out
 }

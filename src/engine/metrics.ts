@@ -1,5 +1,8 @@
 import type { Config } from './config.js';
-import type { FigmaUsageRow, Instance, Lookalike, Target, TokenRow, VersionRow } from './types.js';
+import type { FigmaUsageRow, Instance, Lookalike, Place, Target, TokenRow, VersionRow } from './types.js';
+
+/** How many places a finding carries (its text keeps five as examples). */
+export const MAX_PLACES = 25;
 
 /** Everything one scan produced. Metrics and rules are pure functions over this. */
 export interface ScanData {
@@ -57,7 +60,8 @@ export function computeMetrics(data: ScanData, config: Config): MetricRow[] {
       const kinds: Record<string, number> = {};
       for (const r of ov) for (const k of r.overrides) kinds[k] = (kinds[k] ?? 0) + 1;
       out.push({ metric_id: 'correct_use_rate', scope: 'component', subject: `${target}|${component}`, value: pct(crow.length - ov.length, crow.length),
-        detail: { target, component, library: crow[0]!.library, instances: crow.length, overridden: ov.length, kinds, examples: ov.slice(0, 5).map(r => `${r.file}:${r.line}`) } });
+        detail: { target, component, library: crow[0]!.library, instances: crow.length, overridden: ov.length, kinds, examples: ov.slice(0, 5).map(r => `${r.file}:${r.line}`),
+          places: ov.slice(0, MAX_PLACES).map((r): Place => ({ target, file: r.file, line: r.line, kind: r.overrides.join(', ') })) } });
     }
   }
 
@@ -68,7 +72,8 @@ export function computeMetrics(data: ScanData, config: Config): MetricRow[] {
     const [target, component] = key.split('|');
     const real = instCount.get(key) ?? 0;
     out.push({ metric_id: 'custom_ratio', scope: 'component', subject: key, value: pct(rows.length, rows.length + real),
-      detail: { target, component, lookalikes: rows.length, instances: real, elements: [...new Set(rows.map(r => r.element))], examples: rows.slice(0, 5).map(r => `${r.file}:${r.line}`) } });
+      detail: { target, component, lookalikes: rows.length, instances: real, elements: [...new Set(rows.map(r => r.element))], examples: rows.slice(0, 5).map(r => `${r.file}:${r.line}`),
+      places: rows.slice(0, MAX_PLACES).map((r): Place => ({ target, file: r.file, line: r.line, col: r.col, kind: `<${r.element}>` })) } });
   }
 
   // token_compliance_new_code: token refs share of style values in recently changed files.
@@ -88,7 +93,8 @@ export function computeMetrics(data: ScanData, config: Config): MetricRow[] {
     const byComp: Record<string, number> = {};
     for (const r of rows) byComp[r.component] = (byComp[r.component] ?? 0) + 1;
     out.push({ metric_id: 'deprecation_burndown', scope: roleOf.get(target) ?? 'consumer', subject: target, value: rows.length,
-      detail: { byComponent: byComp, replacements: Object.fromEntries(Object.keys(byComp).map(c => [c, deprecated[c]])), examples: rows.slice(0, 5).map(r => `${r.file}:${r.line}`) } });
+      detail: { byComponent: byComp, replacements: Object.fromEntries(Object.keys(byComp).map(c => [c, deprecated[c]])), examples: rows.slice(0, 5).map(r => `${r.file}:${r.line}`),
+      places: rows.slice(0, MAX_PLACES).map((r): Place => ({ target, file: r.file, line: r.line, kind: r.component })) } });
   }
 
   // Figma: instance adoption and the look-alike frame proxy for detaches, per library component.

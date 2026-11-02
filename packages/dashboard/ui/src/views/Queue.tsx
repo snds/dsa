@@ -9,11 +9,12 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
-import { Panel, Pre, SevBadge, Stat, sevTone } from "@/components/bits"
+import { Disclosure, Facts, Panel, Pre, SevBadge, Stat, sevTone } from "@/components/bits"
 import { D, SCOPES, ago, api, copy, fmtD, say } from "@/lib/dsa"
 import { AskAgent } from "@/agent/AskAgent"
+import { Evidence } from "@/components/code-reader"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { CERTAINTY, ROLES, classify, forRole, useRole, type Certainty } from "@/lib/insight"
+import { CERTAINTY, classify, whoActs, type Certainty } from "@/lib/insight"
 
 /** Only https links reach an href (a javascript: or data: URL from the data never does). */
 const safeHref = (u: unknown) => { try { const x = new URL(String(u)); return x.protocol === "https:" ? x.href : undefined } catch { return undefined } }
@@ -29,7 +30,6 @@ type Q = { items: any[]; prompt: string; github: { token: boolean; defaultRepo: 
 export function Queue() {
   const [q, setQ] = React.useState<Q | null>(D.queue ?? null)
   const [scope, setScope] = React.useState("all")
-  const [role] = useRole()
   const [certainty, setCertainty] = React.useState<"any" | Certainty>("any")
   // An Overview link opens the queue on one item: #queue/<id>.
   const [current, setCurrent] = React.useState<string | null>(() => { const id = location.hash.split("/")[1]; return id ? decodeURIComponent(id) : null })
@@ -64,7 +64,7 @@ export function Queue() {
 
   if (!q) return <Empty className="border"><EmptyHeader><EmptyTitle>The queue isn't in this report</EmptyTitle><EmptyDescription>Re-run the scan to build it.</EmptyDescription></EmptyHeader></Empty>
 
-  const inScope = (i: any) => (scope === "all" || i.scope === scope) && forRole(role, i.rule) && (certainty === "any" || classify(i.rule).certainty === certainty)
+  const inScope = (i: any) => (scope === "all" || i.scope === scope) && (certainty === "any" || classify(i.rule).certainty === certainty)
   const open = q.items.filter(i => i.status === "open")
   const findings = open.filter(i => i.kind === "finding" && inScope(i)).sort((a, b) => b.score - a.score)
   const approvals = open.filter(i => i.kind === "approval" && inScope(i))
@@ -92,7 +92,6 @@ export function Queue() {
             <Tooltip key={c}><TooltipTrigger render={<ToggleGroupItem value={c} />}>{CERTAINTY[c].label}</TooltipTrigger><TooltipContent>{CERTAINTY[c].hint}</TooltipContent></Tooltip>
           ))}
         </ToggleGroup>
-        {role !== "all" && <span className="text-sm text-muted-foreground">Showing actions for {ROLES.find(r => r.id === role)?.label}. Change the role at the top of the page.</span>}
       </div>
 
       <AgentPrompt prompt={q.prompt} count={open.length} />
@@ -212,7 +211,7 @@ function CertaintyBadge({ rule }: { rule?: string }) {
       <TooltipTrigger render={<span className="inline-flex" />}>
         <Badge variant={c.certainty === "definite" ? "default" : "outline"}>{c.verb} · {CERTAINTY[c.certainty].label}</Badge>
       </TooltipTrigger>
-      <TooltipContent>{CERTAINTY[c.certainty].hint} For {c.roles.map(r => ROLES.find(x => x.id === r)?.label).join(", ")}.</TooltipContent>
+      <TooltipContent>{CERTAINTY[c.certainty].hint} Usually for {whoActs(rule)}.</TooltipContent>
     </Tooltip>
   )
 }
@@ -235,8 +234,6 @@ function Row({ i, sel, onClick }: { i: any; sel: boolean; onClick: () => void })
             <CertaintyBadge rule={i.rule} />
             {i.kind === "finding" ? <SevBadge sev={i.severity} /> : <Badge variant="outline">Approved{i.approvedBy ? ` by ${i.approvedBy}` : ""}</Badge>}
             <Badge variant="secondary">{i.owner}</Badge>
-            {i.kind === "finding" && <Badge variant="outline">{i.family}</Badge>}
-            {i.pushed && !done && <Badge variant="outline">Pushed this week</Badge>}
             {done && <Badge variant="outline" className="gap-1"><CheckCircleIcon />{i.doneReason}</Badge>}
             {i.stillDetected && <Badge variant="destructive">Still detected</Badge>}
             {i.newSinceIssue > 0 && <Badge variant="outline">{i.newSinceIssue} new since issue closed</Badge>}
@@ -244,8 +241,7 @@ function Row({ i, sel, onClick }: { i: any; sel: boolean; onClick: () => void })
           </span>
         </span>
         <span className="shrink-0 text-right">
-          <span className="block font-heading text-lg font-semibold tabular-nums">{i.kind === "finding" ? Math.round(i.score) : i.ids?.length ?? ""}</span>
-          <span className="font-mono text-[11px] text-muted-foreground">{i.id}</span>
+          <span className="block font-heading text-lg font-semibold tabular-nums" title={i.kind === "finding" ? "Severity score" : "Elements"}>{i.kind === "finding" ? Math.round(i.score) : i.ids?.length ?? ""}</span>
         </span>
       </button>
     </li>
@@ -257,13 +253,15 @@ function Detail({ i, q, busy, onCreate }: { i: any; q: Q; busy: boolean; onCreat
   const cmd = `./bin/dsa.js issues sync --apply --only ${i.id}`
   const l = i.link
   const d = i.decision
+  // First view: who, why, what to do, when it's done, and the issue. The evidence behind it (paths,
+  // lines), its history and the raw decision are technical details, a click away.
   const rows: [string, React.ReactNode][] = [
-    ["Routed to", <><b>{i.owner}</b> <Badge variant="outline" className="ml-1">{SCOPES[i.scope] ?? i.scope}</Badge>{i.repo && <span className="ml-2 font-mono text-xs">{i.repo}</span>}</>],
+    ["Routed to", <><b>{i.owner}</b> <Badge variant="outline" className="ml-1">{SCOPES[i.scope] ?? i.scope}</Badge></>],
     ...(i.why ? [["Why them", i.why] as [string, React.ReactNode]] : []),
-    ...(d?.verdict === "replace" ? [["Decision", <code className="font-mono text-xs">&lt;{d.use}{Object.entries(d.props ?? {}).filter(([, v]) => v).map(([k, v]) => ` ${k}="${v}"`).join("")}&gt;{i.from ? ` from ${i.from}` : ""}</code>] as [string, React.ReactNode]] : []),
-    ["Evidence", <span className="break-words">{i.evidence}</span>],
+    ["Who acts", whoActs(i.rule)],
+    ["Evidence", <Evidence text={i.evidence} summary={i.summary} places={i.places} />],
+    ...(d?.verdict === "replace" ? [["Decision", <>Use {d.use}{i.from ? <span className="text-muted-foreground"> instead of {i.from}</span> : null}</>] as [string, React.ReactNode]] : []),
     ...(i.exit ? [["Done when", i.exit] as [string, React.ReactNode]] : []),
-    ["History", i.history.map((h: any) => `${fmtD(h.at)} ${h.event}${h.detail ? ` (${h.detail})` : ""}`).join(" · ") || "—"],
     ...(l ? [["Issue", (
       <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <a className="text-primary underline-offset-4 hover:underline" href={safeHref(l.url)} target="_blank" rel="noopener">{l.repo}#{l.number}</a>
@@ -273,6 +271,13 @@ function Detail({ i, q, busy, onCreate }: { i: any; q: Q; busy: boolean; onCreat
         {l.updatedAt && <span className="text-muted-foreground">· updated {ago(l.updatedAt).toLowerCase()}</span>}
       </span>
     )] as [string, React.ReactNode]] : []),
+  ]
+  const tech: [string, React.ReactNode][] = [
+    ...(i.repo ? [["Repo", <span className="font-mono text-xs">{i.repo}</span>] as [string, React.ReactNode]] : []),
+    ...(d?.verdict === "replace" ? [["Markup", <code className="font-mono text-xs">&lt;{d.use}{Object.entries(d.props ?? {}).filter(([, v]) => v).map(([k, v]) => ` ${k}="${v}"`).join("")}&gt;</code>] as [string, React.ReactNode]] : []),
+    ...(i.kind === "finding" ? [["Rule", <>{i.family}{i.pushed ? " · pushed this week" : ""}</>] as [string, React.ReactNode]] : []),
+    ["History", i.history.map((h: any) => `${fmtD(h.at)} ${h.event}${h.detail ? ` (${h.detail})` : ""}`).join(" · ") || "—"],
+    ["Item", <span className="font-mono text-xs">{i.id}</span>],
   ]
   const canCreate = D.serve && i.status === "open" && l?.state !== "open"
   const createBlock = !q.github.token ? "Add a GitHub token in Settings first." : !i.repo ? "No repo for this owner: set a default repo in Settings." : ""
@@ -286,14 +291,10 @@ function Detail({ i, q, busy, onCreate }: { i: any; q: Q; busy: boolean; onCreat
         </p>
       )}
       {i.newSinceIssue > 0 && <p className="mb-4 rounded-lg border bg-muted/40 px-3 py-2 text-sm">{i.newSinceIssue} element{i.newSinceIssue === 1 ? " was" : "s were"} approved after issue #{l?.number} closed, so this is open again. A new issue covers the whole set.</p>}
-      <dl className="grid grid-cols-[7rem_minmax(0,1fr)] gap-x-4 gap-y-2.5 text-sm">
-        {rows.map(([k, v]) => <React.Fragment key={k}><dt className="text-muted-foreground">{k}</dt><dd>{v}</dd></React.Fragment>)}
-      </dl>
+      <Facts rows={rows} />
       {i.issue.body && <>
         <Separator className="my-4" />
-        <h3 className="mb-2 text-sm font-medium">{l ? "GitHub issue (as filed)" : "Drafted GitHub issue"}</h3>
-        <Pre className="max-h-80">{issue}</Pre>
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2">
           {canCreate && (
             <Gate off={!!createBlock} why={createBlock}>
               <Button onClick={onCreate} disabled={!!createBlock || busy}><GithubLogoIcon data-icon="inline-start" />{busy ? "Creating…" : l ? "Create new issue" : "Create issue"}</Button>
@@ -302,9 +303,15 @@ function Detail({ i, q, busy, onCreate }: { i: any; q: Q; busy: boolean; onCreat
           {l && <Button variant="outline" nativeButton={false} render={<a href={safeHref(l.url)} target="_blank" rel="noopener" />}><ArrowSquareOutIcon data-icon="inline-start" />Open issue</Button>}
           <Button variant="outline" onClick={() => copy(issue, "Issue text copied")}>Copy issue</Button>
           <AskAgent subject={{ kind: "queue", id: i.id }} label="Ask the agent" />
-          {i.kind === "finding" && <Button variant="outline" onClick={() => copy(cmd, `Copied: ${cmd}`)}>Copy command</Button>}
         </div>
+        <Disclosure label="Details" hint={l ? "the GitHub issue as filed" : "the drafted GitHub issue"} className="mt-4">
+          <Pre className="max-h-80">{issue}</Pre>
+        </Disclosure>
       </>}
+      <Disclosure key={i.id} label="Technical details" hint="history, repo, IDs" hash={`queue/${encodeURIComponent(i.id)}/details`} closedHash={`queue/${encodeURIComponent(i.id)}`} className="mt-4">
+        <Facts rows={tech} />
+        {i.kind === "finding" && <Button variant="outline" size="sm" className="w-fit" onClick={() => copy(cmd, `Copied: ${cmd}`)}>Copy command</Button>}
+      </Disclosure>
     </Panel>
   )
 }

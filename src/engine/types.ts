@@ -128,6 +128,18 @@ export interface FigmaUsageRow {
   lookalikeFrames: number;
 }
 
+/** One place a finding cites: a file and line in a scanned target, and what was found there. */
+export interface Place {
+  /** The scan target the file belongs to (reads stay inside it). */
+  target?: string | undefined;
+  /** Display path, as findings show it ("<repo-folder>/src/…" for a sibling repo). */
+  file: string;
+  line: number;
+  col?: number | undefined;
+  /** What is there, e.g. "className" (an override) or "<button>" (a raw look-alike). */
+  kind?: string | undefined;
+}
+
 export interface Finding {
   id: string;
   rule: string;
@@ -141,6 +153,8 @@ export interface Finding {
   title: string;
   why: string;
   evidence: string;
+  /** The places the evidence cites, structured (the evidence text keeps a few as examples). */
+  places?: Place[] | undefined;
   fix: string;
   exit: string;
   affected: string[];

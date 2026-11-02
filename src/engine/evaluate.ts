@@ -31,14 +31,14 @@ export async function applyObservations(store: Store, runId: string, obs: Observ
     if (o.breach && !o.forceResolve) {
       const d = o.breach;
       if (!f) {
-        await store.insertMany('findings', ['id', 'rule', 'subject', 'scope', 'owner', 'repo', 'family', 'severity', 'score', 'title', 'why', 'evidence', 'fix', 'exit', 'affected', 'settings_used', 'status', 'opened_at', 'updated_at', 'metric_value'],
-          [[d.id, d.rule, d.subject, d.scope, d.owner, d.repo ?? null, d.family, d.severity, d.score, d.title, d.why, d.evidence, d.fix, d.exit, JSON.stringify(d.affected), JSON.stringify(d.settingsUsed), 'open', at, at, d.metricValue]]);
+        await store.insertMany('findings', ['id', 'rule', 'subject', 'scope', 'owner', 'repo', 'family', 'severity', 'score', 'title', 'why', 'evidence', 'places', 'fix', 'exit', 'affected', 'settings_used', 'status', 'opened_at', 'updated_at', 'metric_value'],
+          [[d.id, d.rule, d.subject, d.scope, d.owner, d.repo ?? null, d.family, d.severity, d.score, d.title, d.why, d.evidence, JSON.stringify(d.places ?? []), d.fix, d.exit, JSON.stringify(d.affected), JSON.stringify(d.settingsUsed), 'open', at, at, d.metricValue]]);
         await event(d.id, 'opened', { value: o.value });
         sum.opened.push(d.id);
       } else {
         const status = snoozed ? 'snoozed' : 'open';
-        await store.exec(`update findings set scope=$2, owner=$3, repo=$4, severity=$5, score=$6, title=$7, why=$8, evidence=$9, fix=$10, exit=$11, affected=$12, settings_used=$13, status=$14, updated_at=$15, resolved_at=null, metric_value=$16 where id=$1`,
-          [d.id, d.scope, d.owner, d.repo ?? null, d.severity, d.score, d.title, d.why, d.evidence, d.fix, d.exit, JSON.stringify(d.affected), JSON.stringify(d.settingsUsed), status, at, d.metricValue]);
+        await store.exec(`update findings set scope=$2, owner=$3, repo=$4, severity=$5, score=$6, title=$7, why=$8, evidence=$9, fix=$10, exit=$11, affected=$12, settings_used=$13, status=$14, updated_at=$15, resolved_at=null, metric_value=$16, places=$17 where id=$1`,
+          [d.id, d.scope, d.owner, d.repo ?? null, d.severity, d.score, d.title, d.why, d.evidence, d.fix, d.exit, JSON.stringify(d.affected), JSON.stringify(d.settingsUsed), status, at, d.metricValue, JSON.stringify(d.places ?? [])]);
         if (f.status === 'resolved') { await event(d.id, 'reopened', { value: o.value }); sum.reopened.push(d.id); }
         else { if (f.metric_value !== d.metricValue || f.severity !== d.severity) await event(d.id, 'updated', { from: f.metric_value, to: d.metricValue }); sum.updated.push(d.id); }
       }
@@ -76,6 +76,7 @@ export function rowToFinding(r: any): Finding {
   return {
     id: r.id, rule: r.rule, subject: r.subject, scope: r.scope, owner: r.owner, repo: r.repo ?? undefined, family: r.family,
     severity: r.severity, score: r.score, title: r.title, why: r.why, evidence: r.evidence, fix: r.fix, exit: r.exit,
+    places: typeof r.places === 'string' ? JSON.parse(r.places) : r.places ?? undefined,
     affected: typeof r.affected === 'string' ? JSON.parse(r.affected) : r.affected ?? [],
     settingsUsed: typeof r.settings_used === 'string' ? JSON.parse(r.settings_used) : r.settings_used ?? {},
     status: r.status, openedAt: r.opened_at, updatedAt: r.updated_at, resolvedAt: r.resolved_at, snoozeUntil: r.snooze_until, snoozeReason: r.snooze_reason,
