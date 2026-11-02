@@ -255,7 +255,7 @@ export function Picker({ target, onClose }: { target: { ids: string[]; pattern?:
 
   return (
     <Dialog open onOpenChange={o => !o && onClose()}>
-      <DialogContent className="flex h-[92vh] w-[96vw] max-w-[1320px] flex-col gap-0 p-0 sm:max-w-[1320px]">
+      <DialogContent className="flex h-[92vh] w-[96vw] max-w-[1320px] flex-col gap-0 [--dialog-pad:0px] sm:max-w-[1320px]">
         <DialogHeader className="border-b px-4 py-3 pr-12">
           <DialogTitle>Replace &lt;{first.element}&gt;</DialogTitle>
           <DialogDescription>{short(first.file)}:{first.line}{items.length > 1 && ` and ${items.length - 1} more`}{target.pattern && ` · pattern ${target.pattern}`}</DialogDescription>
@@ -378,7 +378,7 @@ export function Picker({ target, onClose }: { target: { ids: string[]; pattern?:
             </TabsContent>
           </Tabs>
         </div>
-        <DialogFooter className="mx-0 mb-0 flex-row items-center gap-2 rounded-b-xl border-t px-4 py-3 sm:justify-end">
+        <DialogFooter className="flex-row items-center gap-2 rounded-b-xl border-t px-4 py-3 sm:justify-end">
           <Input className="flex-1" placeholder="Note (optional)" value={note} onChange={e => setNote(e.target.value)} />
           <Button variant="outline" onClick={() => record({ verdict: "keep", role: first.role })}>Keep native</Button>
           <Button variant="outline" onClick={() => { const what = prompt("What is missing from the design system?", first.gap || ""); if (what !== null) record({ verdict: "gap", role: first.role, gap: what }) }}>Mark as system gap</Button>

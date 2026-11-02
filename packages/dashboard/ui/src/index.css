@@ -163,3 +163,19 @@
     from { transform: translateX(-100%); }
     to { transform: translateX(400%); }
 }
+
+/* "Scanning…": three dots revealed one at a time; all three, still, under reduced motion. */
+.dsa-ellipsis {
+    display: inline-block;
+    overflow: hidden;
+    vertical-align: bottom;
+}
+@media (prefers-reduced-motion: no-preference) {
+    .dsa-ellipsis {
+        width: 0;
+        animation: dsa-ellipsis 1.6s steps(4, end) infinite;
+    }
+}
+@keyframes dsa-ellipsis {
+    to { width: 1.1em; }
+}

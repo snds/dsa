@@ -47,8 +47,9 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   and `dsa serve` (scans now run as a background job). Every scan (started here, or found running on load,
   scheduled ones included) takes over the page: the page behind is dimmed, blurred and inert, and a
   card shows the estimate, elapsed time, and a filling bar with the steps when the runner reports
-  them (a sliding bar when it doesn't; still for reduced motion). "Keep working in the background"
-  leaves a pill in the header that reopens it. It ends on the new report (loaded by itself) or on the
+  them (a sliding bar when it doesn't; still for reduced motion). "Run in the background" leaves a
+  pill in the header that reopens it. Under the heading ("Scanning…"), one line says how many steps
+  are left; the logs link shows only when a scan fails ("View logs"). It ends on the new report (loaded by itself) or on the
   reason the scan failed, with Try again and a link to the run.
 - The next scheduled scan, in the header and under Re-scan: `host.schedule` (cron, UTC), or read
   from the GitHub workflow's `on.schedule`.
@@ -60,6 +61,8 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- Dialog footers run edge to edge whatever a dialog's padding: content and footer share one padding
+  variable (`--dialog-pad`), and a test refuses `p-*` on a dialog.
 - Buttons and fields share one height scale (`--spacing-control-sm`, `--spacing-control`,
   `--spacing-control-lg`): Button, icon buttons, the agent split button (both halves), inputs, selects
   and toggles. A row sets its size once (`ControlSize`) and every control in it follows, so the split

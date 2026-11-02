@@ -139,6 +139,5 @@ test("button labels are short and in sentence case", () => {
       for (const q of (m[2] ?? "").matchAll(/"([^"]+)"/g)) check(f, q[1]!)
     }
   }
-  // The scan overlay's button is renamed "Run in the background" in snds/dsa#33; drop this when it lands.
-  expect(bad.filter(b => !b.startsWith(`components${path.sep}scan.tsx: "Keep working in the background"`))).toEqual([])
+  expect(bad).toEqual([])
 })
