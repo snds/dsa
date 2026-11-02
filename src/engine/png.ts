@@ -43,8 +43,8 @@ export function decodePng(buf: Buffer): Pixels {
 export const BLANK_INSET = 3;
 
 /**
- * Whether a region shows anything: a box is blank when its luminance barely varies (spread under 6)
- * or it holds two colours or fewer. `box` is in CSS pixels; `scale` is the capture's device pixel ratio.
+ * Whether a region shows anything: a box is blank when its luminance barely varies (spread under 6), or
+ * it holds two colours and the second is a sliver (under 2% of it: an edge, not content). `box` is in CSS pixels; `scale` is the capture's device pixel ratio.
  */
 export function isBlank(px: Pixels, box?: { x: number; y: number; w: number; h: number } | null, scale = 2, inset = 0): boolean {
   // Inset (CSS px) skips the box's own edge: an empty bordered button is a border and a fill, nothing inside.
@@ -52,12 +52,16 @@ export function isBlank(px: Pixels, box?: { x: number; y: number; w: number; h: 
   const x0 = Math.max(0, Math.floor(((box?.x ?? 0) + i) * scale)), y0 = Math.max(0, Math.floor(((box?.y ?? 0) + i) * scale));
   const x1 = Math.min(px.width, Math.ceil(box ? (box.x + box.w - i) * scale : px.width)), y1 = Math.min(px.height, Math.ceil(box ? (box.y + box.h - i) * scale : px.height));
   let lo = 255, hi = 0;
-  const colours = new Set<number>();
+  const colours = new Map<number, number>();
   for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
     const i = (y * px.width + x) * 4, r = px.data[i]!, g = px.data[i + 1]!, b = px.data[i + 2]!;
     const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
     if (l < lo) lo = l; if (l > hi) hi = l;
-    if (colours.size < 3) colours.add((r << 16) | (g << 8) | b);
+    const k = (r << 16) | (g << 8) | b;
+    if (colours.size < 3 || colours.has(k)) colours.set(k, (colours.get(k) ?? 0) + 1);
   }
-  return x1 <= x0 || y1 <= y0 || hi - lo < 6 || colours.size <= 2;
+  if (x1 <= x0 || y1 <= y0 || hi - lo < 6) return true;
+  // Two colours: a crisp icon on a fill is content; a hairline of the second colour is an edge, not content.
+  if (colours.size <= 2) { const n = (x1 - x0) * (y1 - y0); return Math.min(...colours.values()) / n < 0.02 || colours.size < 2; }
+  return false;
 }

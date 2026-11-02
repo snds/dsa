@@ -8,6 +8,21 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- Element Review photos and proposals are checked, not assumed. A capture waits for fonts, checks the
+  element is the top layer at its centre (`elementFromPoint`) and that its box has painted pixels, and
+  tries hover, then focus, before it records the photo as blank or covered; the card then says "Captured
+  but blank" instead of showing an empty box. Each photo keeps the element's own content (its words,
+  aria-label and icon, sanitised), and `dsa render` draws each proposal with it, instead of the story's
+  sample label or a stand-in icon, and says so when it can't. It also draws what each card proposes, the
+  auto-picked size included (`autoPick`, now shared by the report and the renderer), and runs again after
+  the screenshots' evidence pass. A proposal that can't be drawn says why in plain words and shows the
+  component's story as written in its place.
+- Ties: identical-looking elements on a page no longer cap a match at 1/ties (that hid most correct
+  photos); a tie among different-looking ones still does. Two source lines that want the same controls
+  count each other as ties and are a guess between them, unless the page's route names one. Cached
+  "not found" results are tried again when the app's setup changes (its start, routes, flows, live
+  surface, sign-in, or built folder), without `--retry-missing`.
+
 - Element Review cards show their evidence plainly. Each photo is labelled "In the app" with its app,
   a file:line that opens the code, and the match; the proposal beside it is labelled "Proposed" with
   the component and its props, or "Closest variant" (with why) when the exact props aren't rendered.
@@ -88,6 +103,7 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- The review demo's built pages are kept in git (`site/`; `dist/` is ignored).
 - Overview's "Used as intended", "Apps on a current version" and "Tokens in new code" cards opened
   Trends instead of Apps.
 

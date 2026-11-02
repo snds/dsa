@@ -324,7 +324,7 @@ function LookTile({ look, group, target, proposal, compare, measure }: { look: L
             {Object.entries(exact ? target.props ?? {} : closest ? keyProps(closest.key) : target.props ?? {}).filter(([k]) => k !== "render").map(([k, v]) => <Badge key={k} variant="secondary" className="font-mono text-[10px] font-normal">{k} {String(v)}</Badge>)}
             {exact && chk && <span className={cn(chk.warn && "text-warning-soft-foreground")}>{chk.text}</span>}
             {!exact && <span className="text-warning-soft-foreground">{proposal?.note ?? (closest ? "The exact props aren't rendered yet" : chk?.text ?? "Not rendered yet")}</span>}
-            {exact?.own && <span>with its own label and icon</span>}
+            {exact?.own && <span>with this element's own content</span>}
             {exact?.content && <span className="text-warning-soft-foreground" title={exact.content}>{/stand-in|^icon/.test(exact.content) ? "Stand-in icon: the app's own icon wasn't captured" : "The story's sample label, not this element's"}</span>}
           </>
         ) : undefined}

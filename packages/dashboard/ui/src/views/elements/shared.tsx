@@ -280,7 +280,7 @@ function OptionTiles({ choices, current, onPick, disabled, rep }: { choices: { d
               {recommended && <Badge variant="outline" className="text-[10px]">Recommended</Badge>}
               {on && <span className="inline-flex items-center gap-0.5 text-primary"><CheckIcon />Chosen</span>}
               {chk && <span className={cn(chk.warn && "text-warning-soft-foreground")} title={chk.text}>{chk.text}</span>}
-              {p?.own && <span>With its own label and icon</span>}
+              {p?.own && <span>With this element's own content</span>}
               {!p?.url && p?.fallback && <span>Its story as written</span>}
               {p?.content && <span title={p.content}>{/stand-in|^icon/.test(p.content) ? "Stand-in icon" : "Story's sample label"}</span>}
             </span>

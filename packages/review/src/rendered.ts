@@ -229,7 +229,7 @@ export async function renderProposals(opts: { root: string; config: Config; data
     try {
       for (const [k, p] of todo) {
         const s = sigOf(p.use);
-        if (!s) { items[k] = { ...noOwn(p), check: 'none', note: `${p.use} isn't in the design system's Storybook in a form dsa can find (its root has no data-slot), so it can't be drawn.`, hash: hashOf(p.use) }; continue; }
+        if (!s) { items[k] = { ...noOwn(p), check: 'none', note: `${p.use} isn't in the design system's Storybook in a form dsa can find, so it can't be drawn.`, hash: hashOf(p.use) }; continue; }
         const candidates = stories.filter(x => stemOf(x.importPath) === stemOf(s.file)).sort((a, b) => rank(a) - rank(b)).slice(0, 8);
         if (!candidates.length) { items[k] = { ...noOwn(p), check: 'none', note: `${p.use} has no story to draw it from (${path.basename(s.file)}).`, hash: hashOf(p.use) }; continue; }
         const args = argsParam(p.props);

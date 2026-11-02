@@ -56,6 +56,7 @@ test('a screenshot is read back; an unpainted box is blank, a drawn one is not',
     // The same image, but only its empty corner.
     assert.equal(isBlank(p, { x: 0, y: 0, w: 4, h: 3 }), true);
   }
-  // Two flat colours (a border and a fill) are still nothing to see.
-  assert.equal(isBlank(decodePng(png(10, 10, (x) => (x === 0 ? [200, 200, 200] : [255, 255, 255])))), true);
+  // Two colours: a hairline edge on a fill is nothing to see; a crisp mark of real size is.
+  assert.equal(isBlank(decodePng(png(100, 10, (x) => (x === 0 ? [200, 200, 200] : [255, 255, 255])))), true);
+  assert.equal(isBlank(decodePng(png(20, 10, (x) => (x >= 8 && x < 12 ? [0, 0, 0] : [255, 255, 255])))), false);
 });
