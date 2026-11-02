@@ -32,6 +32,15 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   "not found" results are tried again when the app's setup changes (its start, routes, flows, live
   surface, sign-in, or built folder), without `--retry-missing`.
 
+- Screenshots find React Router's config routes: `app/routes.ts` built with `route()`, `index()`,
+  `layout()` and `prefix()` from `@react-router/dev/routes` is read (nested routes, optional segments).
+  Routes with a `:param` or a splat need a value, so they aren't guessed; `dsa shots` lists them, to name
+  real ones in `apps["name"].routes`.
+- A sign-in wall reads as one. When every page sends the crawler to a sign-in (a login path, another host
+  such as an identity provider, a password form), `dsa shots` says "Every page asked for sign-in. Run
+  `dsa login <url>` and set live.apps["name"].auth", stops early, and remembers no misses for that app,
+  instead of reporting hundreds of elements "not found".
+
 - Element Review cards show their evidence plainly. Each photo is labelled "In the app" with its app,
   a file:line that opens the code, and the match; the proposal beside it is labelled "Proposed" with
   the component and its props, or "Closest variant" (with why) when the exact props aren't rendered.
@@ -112,6 +121,9 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- `dsa login` no longer makes signing in impossible: it saved the session every 1.5 s, which in a visible
+  browser took focus from the sign-in form. It now saves once a page has loaded and gone quiet (2 s),
+  and once at the end; never on a timer. IndexedDB is left out of the saved session unless `--indexeddb`.
 - The review demo's built pages are kept in git (`site/`; `dist/` is ignored).
 - Overview's "Used as intended", "Apps on a current version" and "Tokens in new code" cards opened
   Trends instead of Apps.
