@@ -23,7 +23,7 @@ import { AgentProvider, canChat, useAgent } from "@/agent/store"
 import { AgentPanel } from "@/agent/AgentPanel"
 import { cn } from "cn"
 import { ACTIONS, rescan as hostRescan } from "@/lib/host"
-import { NextScan, ScanBanner, ScanButton, ScanDialog, SignInDialog } from "@/components/scan"
+import { NextScan, ScanButton, ScanOverlay, SignInDialog } from "@/components/scan"
 import { canRun, detectRunning } from "@/lib/useScan"
 
 type ViewId = "overview" | "queue" | "system" | "federation" | "elements" | "usage" | "readiness" | "design" | "trends" | "settings"
@@ -136,7 +136,7 @@ function Shell() {
   async function rerun() {
     try { await hostRescan() } catch (e: any) { setScan({ busy: false, error: e.message }) }
   }
-  // A scan already going when the page opens (scheduled, or started elsewhere) shows in the banner.
+  // A scan already going when the page opens (scheduled, or started elsewhere) opens the scan overlay.
   React.useEffect(() => { void detectRunning() }, [])
 
   const figma = D.modules?.figma && D.run ? (() => { const g = D.run.sources?.figmaDiag; return g?.error ? "Figma crawl failed" : !D.run.sources?.figma ? "Figma not crawled" : g ? `${g.crawled} Figma file${g.crawled === 1 ? "" : "s"} crawled` : "Figma crawled" })() : null
@@ -200,8 +200,7 @@ function Shell() {
             <AlertDescription>{D.live.label} Numbers and screenshots here may include unreleased work.</AlertDescription>
           </Alert>
         )}
-        <ScanBanner />
-        <ScanDialog />
+        <ScanOverlay />
         <SignInDialog />
         {scan.error && (
           <Alert variant="destructive" className="mb-6">

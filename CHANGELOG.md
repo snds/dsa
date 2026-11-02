@@ -32,9 +32,12 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   page at it.
 - Re-scan from the page, with progress. Runners share one contract (`trigger`, `status`,
   `listActive`): GitHub (`workflow_dispatch`, through the scan relay), a webhook with status URLs,
-  and `dsa serve` (scans now run as a background job). The page shows Starting…, a banner while a scan runs (one found on load
-  too, scheduled ones included), a progress dialog for scans over a minute (steps, time left from
-  recent runs), Load the new report once it is deployed, and plain errors with a link to the run.
+  and `dsa serve` (scans now run as a background job). Every scan (started here, or found running on load,
+  scheduled ones included) takes over the page: the page behind is dimmed, blurred and inert, and a
+  card shows the estimate, elapsed time, and a filling bar with the steps when the runner reports
+  them (a sliding bar when it doesn't; still for reduced motion). "Keep working in the background"
+  leaves a pill in the header that reopens it. It ends on the new report (loaded by itself) or on the
+  reason the scan failed, with Try again and a link to the run.
 - The next scheduled scan, in the header and under Re-scan: `host.schedule` (cron, UTC), or read
   from the GitHub workflow's `on.schedule`.
 
