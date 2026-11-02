@@ -1,6 +1,6 @@
 import * as React from "react"
 import { cn } from "cn"
-import { ArrowDownIcon, ArrowUpIcon, ArrowRightIcon, MinusIcon, WarningIcon, CheckCircleIcon } from "@phosphor-icons/react"
+import { ArrowDownIcon, ArrowUpIcon, ArrowRightIcon, WarningIcon, CheckCircleIcon } from "@phosphor-icons/react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -106,14 +106,18 @@ function KpiCard({ k, onOpen, since }: { k: Kpi; onOpen: () => void; since?: str
         <StatusDot band={k.band} />
       </span>
       <span className="font-heading text-3xl font-semibold tabular-nums">{v == null ? "—" : fmt(v)}{v != null && k.unit}</span>
-      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+      {/* The change row. The chip (arrow, value, unit) never wraps and sits in a slot of fixed
+          bounds, so the text beside it starts at the same place on every card and doesn't jump as
+          numbers change. Only the "vs scan of…" text wraps; when the card is too narrow for both,
+          it drops below the chip instead of squeezing it. */}
+      <span className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
         {v == null ? <span>Not measured in this scan</span> : d == null || !Number.isFinite(d) ? <span>{since ? "First measurement" : "No earlier scan to compare"}</span> : (
           <>
-            <span className={cn("inline-flex items-center gap-0.5 font-medium", better === true && "text-success-soft-foreground", better === false && "text-destructive")}>
-              {d > 0 ? <ArrowUpIcon className="size-3" /> : d < 0 ? <ArrowDownIcon className="size-3" /> : <MinusIcon className="size-3" />}
-              {d === 0 ? "No change" : <>{d > 0 ? "+" : ""}{fmt(d)}{k.unit === "%" ? " pts" : ""}</>}
+            <span data-slot="kpi-delta" className={cn("inline-flex min-w-[5rem] max-w-[7rem] shrink-0 items-center gap-1 overflow-hidden font-medium whitespace-nowrap tabular-nums", better === true && "text-success-soft-foreground", better === false && "text-destructive")}>
+              {d > 0 ? <ArrowUpIcon className="size-3 shrink-0" aria-hidden /> : d < 0 ? <ArrowDownIcon className="size-3 shrink-0" aria-hidden /> : <ArrowRightIcon className="size-3 shrink-0" aria-hidden />}
+              <span className="truncate">{d === 0 ? "No change" : <>{d > 0 ? "+" : "−"}{fmt(Math.abs(d))}{k.unit === "%" ? " pts" : ""}</>}</span>
             </span>
-            <span>vs scan of {since ? fmtDT(since) : "before"}</span>
+            <span data-slot="kpi-since" className="min-w-0 flex-[1_1_9rem]">vs scan of {since ? fmtDT(since) : "before"}</span>
           </>
         )}
       </span>
