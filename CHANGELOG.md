@@ -8,6 +8,19 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- One app selector for the whole dashboard, in the header beside "Ask the agent": "All apps", or
+  one consumer app or child library, and every view shows that app's numbers. Overview's cards (with
+  "Majors behind" in place of the all-apps version share), Do now / Decide and open count; Actions'
+  list, scope tiles, counts and "Create issues"; System's uses, overrides and look-alikes; the Apps
+  table and cards; Trends' lines; Readiness; and Element Review, which loses its own selector (all
+  apps lists every app's elements together, since one question can cover several apps). The choice
+  rides in the address bar after the route (`#queue/F-1/details?app=billing`), so reloads, Back and
+  shared links keep it, and links without it open on all apps. It filters on the page, so a
+  published snapshot works too. Where a number covers every app (the scan's confidence, the agent
+  prompt, bench runs, Figma and system usage), the view says it isn't split by app yet. The report
+  now carries the per-app numbers this needs: each component's uses and look-alikes by app, each
+  run's measures by app, and the model's app uses by app. Hidden when the scan measured one app.
+
 - `dsa checklist`: a design-system health checklist with agent readiness built in
   ([docs/checklist.md](docs/checklist.md)). It has 78 items in 13 areas. The scan measures 52 of
   them from the same reading as `dsa scan`: tokens by tier, group and mode, component kinds, variant
@@ -60,6 +73,9 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   without one, the page says how to enable it. `host.github.dispatch` is ignored.
 
 ### Fixed
+
+- Overview's "Used as intended", "Apps on a current version" and "Tokens in new code" cards opened
+  Trends instead of Apps.
 
 - Dialog footers run edge to edge whatever a dialog's padding: content and footer share one padding
   variable (`--dialog-pad`), and a test refuses `p-*` on a dialog.

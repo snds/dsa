@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { CaretRightIcon } from "@phosphor-icons/react"
 import { SEV, type Band } from "@/lib/dsa"
+import { hashFor, routePath } from "@/lib/app"
 
 /** Healthy / watch / act, as a shape and a color (never color alone). */
 export function StatusDot({ band }: { band: Band }) {
@@ -104,11 +105,11 @@ export function Disclosure({ label = "Details", hint, hash, closedHash, defaultO
   label?: "Details" | "Technical details" | (string & {}); hint?: React.ReactNode; hash?: string; closedHash?: string
   defaultOpen?: boolean; className?: string; children: React.ReactNode
 }) {
-  const [open, setOpen] = React.useState(() => defaultOpen || (!!hash && location.hash.slice(1) === hash))
+  const [open, setOpen] = React.useState(() => defaultOpen || (!!hash && routePath() === hash))
   const id = React.useId()
   const toggle = (o: boolean) => {
     setOpen(o)
-    if (hash) try { history.replaceState(null, "", `#${o ? hash : closedHash ?? ""}`) } catch { /* file:// */ }
+    if (hash) try { history.replaceState(null, "", hashFor(o ? hash : closedHash ?? "")) } catch { /* file:// */ }
   }
   return (
     <Collapsible open={open} onOpenChange={toggle} className={cn("border-t pt-3", className)} data-slot="disclosure">

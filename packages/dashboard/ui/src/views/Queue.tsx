@@ -15,6 +15,8 @@ import { AskAgent } from "@/agent/AskAgent"
 import { Evidence } from "@/components/code-reader"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { CERTAINTY, classify, whoActs, type Certainty } from "@/lib/insight"
+import { hashFor, inApp, routePath, useApp } from "@/lib/app"
+import { AllAppsNote } from "@/components/app-select"
 
 /** Only https links reach an href (a javascript: or data: URL from the data never does). */
 const safeHref = (u: unknown) => { try { const x = new URL(String(u)); return x.protocol === "https:" ? x.href : undefined } catch { return undefined } }
@@ -32,10 +34,11 @@ export function Queue() {
   const [scope, setScope] = React.useState("all")
   const [certainty, setCertainty] = React.useState<"any" | Certainty>("any")
   // An Overview link opens the queue on one item: #queue/<id>.
-  const [current, setCurrent] = React.useState<string | null>(() => { const id = location.hash.split("/")[1]; return id ? decodeURIComponent(id) : null })
+  const [current, setCurrent] = React.useState<string | null>(() => { const id = routePath().split("/")[1]; return id ? decodeURIComponent(id) : null })
   const [syncing, setSyncing] = React.useState(false)
   const [confirm, setConfirm] = React.useState(false)
   const [creating, setCreating] = React.useState<string[] | null>(null)
+  const app = useApp()
 
   const load = React.useCallback(async (sync: "" | "1" | "force" = "1") => {
     if (!D.serve) return
@@ -65,10 +68,12 @@ export function Queue() {
   if (!q) return <Empty className="border"><EmptyHeader><EmptyTitle>The queue isn't in this report</EmptyTitle><EmptyDescription>Re-run the scan to build it.</EmptyDescription></EmptyHeader></Empty>
 
   const inScope = (i: any) => (scope === "all" || i.scope === scope) && (certainty === "any" || classify(i.rule).certainty === certainty)
-  const open = q.items.filter(i => i.status === "open")
+  // The app chosen in the header: its actions only. Counts, tiles and "Create issues" follow it.
+  const mine = q.items.filter(inApp(app))
+  const open = mine.filter(i => i.status === "open")
   const findings = open.filter(i => i.kind === "finding" && inScope(i)).sort((a, b) => b.score - a.score)
   const approvals = open.filter(i => i.kind === "approval" && inScope(i))
-  const completed = q.items.filter(i => i.status === "done" && inScope(i)).sort((a, b) => String(b.doneAt ?? "").localeCompare(String(a.doneAt ?? "")))
+  const completed = mine.filter(i => i.status === "done" && inScope(i)).sort((a, b) => String(b.doneAt ?? "").localeCompare(String(a.doneAt ?? "")))
   const all = [...findings, ...approvals, ...completed]
   const sel = all.find(i => i.id === current) ?? findings[0] ?? approvals[0] ?? null
   const fileable = open.filter(i => !(i.link?.state === "open"))
@@ -94,20 +99,20 @@ export function Queue() {
         </ToggleGroup>
       </div>
 
-      <AgentPrompt prompt={q.prompt} count={open.length} />
+      <AgentPrompt prompt={q.prompt} count={q.items.filter(i => i.status === "open").length} />
 
       {D.serve && (
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
             <GithubLogoIcon className="size-4" />
-            {noToken ? <span>Add a GitHub token in <a href="#settings/general" className="text-primary underline-offset-4 hover:underline">Settings</a> to file issues and follow them here.</span>
+            {noToken ? <span>Add a GitHub token in <a href={hashFor("settings/general")} className="text-primary underline-offset-4 hover:underline">Settings</a> to file issues and follow them here.</span>
               : <span>Issues sync every minute{q.syncedAt ? ` · last synced ${ago(q.syncedAt).toLowerCase()}` : ""}{q.syncError ? " · last sync had an error (Settings › Notes)" : ""}</span>}
           </p>
           <div className="flex items-center gap-2">
             {!noToken && <Button variant="outline" size="sm" onClick={() => load("force")} disabled={syncing}><ArrowsClockwiseIcon data-icon="inline-start" className={syncing ? "animate-spin" : ""} />Sync now</Button>}
             <Gate off={noToken || !fileableWithRepo.length} why={noToken ? "Add a GitHub token in Settings first." : fileable.length ? "No repo for these items: set a default repo in Settings." : "Every open item already has an issue."}>
               <Button size="sm" onClick={() => setConfirm(true)} disabled={noToken || !fileableWithRepo.length || !!creating}>
-                <GithubLogoIcon data-icon="inline-start" />Create issues for all ({fileableWithRepo.length})
+                <GithubLogoIcon data-icon="inline-start" />{app ? "Create issues" : "Create issues for all"} ({fileableWithRepo.length})
               </Button>
             </Gate>
           </div>
@@ -133,7 +138,7 @@ export function Queue() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Create {fileableWithRepo.length} GitHub issue{fileableWithRepo.length === 1 ? "" : "s"}?</DialogTitle>
-            <DialogDescription>One issue per open item without one, in the owner's repo. Items already linked to an open issue are skipped, and re-running never duplicates an issue.</DialogDescription>
+            <DialogDescription>One issue per open item{app ? ` for ${app}` : ""} without one, in the owner's repo. Items already linked to an open issue are skipped, and re-running never duplicates an issue.</DialogDescription>
           </DialogHeader>
           <ul className="text-sm">
             {Object.entries(fileableWithRepo.reduce((m: Record<string, number>, i) => ({ ...m, [i.repo]: (m[i.repo] ?? 0) + 1 }), {})).map(([r, n]) => <li key={r} className="flex justify-between gap-4 py-0.5"><span className="font-mono text-xs">{r}</span><span className="tabular-nums">{String(n)}</span></li>)}
@@ -141,7 +146,7 @@ export function Queue() {
           {fileable.length > fileableWithRepo.length && <p className="text-xs text-muted-foreground">{fileable.length - fileableWithRepo.length} item(s) have no repo and will be skipped. Set a default repo in Settings to include them.</p>}
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirm(false)} disabled={!!creating}>Cancel</Button>
-            <Button onClick={() => create()} disabled={!!creating}>{creating ? "Creating…" : "Create issues"}</Button>
+            <Button onClick={() => create(app ? fileableWithRepo.map(i => i.id) : undefined)} disabled={!!creating}>{creating ? "Creating…" : "Create issues"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -163,6 +168,7 @@ function AgentPrompt({ prompt, count }: { prompt: string; count: number }) {
       <CardHeader>
         <CardTitle>Agentic Completion Prompt</CardTitle>
         <CardDescription>{count ? `Covers all ${count} open item${count === 1 ? "" : "s"}: review approvals first, then findings by score` : "Nothing open"}</CardDescription>
+        <AllAppsNote>This prompt covers every app's open items; it isn't split by app yet.</AllAppsNote>
         <CardAction className="flex items-center gap-1">
           <Tooltip>
             <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Copy prompt" onClick={() => copy(prompt, "Prompt copied")} />}><CopyIcon /></TooltipTrigger>
