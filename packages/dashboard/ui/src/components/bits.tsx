@@ -2,6 +2,8 @@ import * as React from "react"
 import { cn } from "cn"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { CaretRightIcon } from "@phosphor-icons/react"
 import { SEV, type Band } from "@/lib/dsa"
 
 /** Healthy / watch / act, as a shape and a color (never color alone). */
@@ -90,4 +92,42 @@ export function Pre({ children, className }: { children: React.ReactNode; classN
 
 export function Note({ children, className }: { children: React.ReactNode; className?: string }) {
   return <p className={cn("text-sm text-muted-foreground", className)}>{children}</p>
+}
+
+/**
+ * The one way every view shows more: highlights first, then "Details" (the supporting data and
+ * guidance) or "Technical details" (paths, lines, selectors, prop maps, raw text). A button with
+ * aria-expanded opens a labelled region. With `hash`, an open disclosure is in the address bar
+ * (#<hash>), so a link opens it again; `closedHash` is what the address goes back to.
+ */
+export function Disclosure({ label = "Details", hint, hash, closedHash, defaultOpen = false, className, children }: {
+  label?: "Details" | "Technical details" | (string & {}); hint?: React.ReactNode; hash?: string; closedHash?: string
+  defaultOpen?: boolean; className?: string; children: React.ReactNode
+}) {
+  const [open, setOpen] = React.useState(() => defaultOpen || (!!hash && location.hash.slice(1) === hash))
+  const id = React.useId()
+  const toggle = (o: boolean) => {
+    setOpen(o)
+    if (hash) try { history.replaceState(null, "", `#${o ? hash : closedHash ?? ""}`) } catch { /* file:// */ }
+  }
+  return (
+    <Collapsible open={open} onOpenChange={toggle} className={cn("border-t pt-3", className)} data-slot="disclosure">
+      <CollapsibleTrigger id={`${id}-t`} className="flex items-center gap-1.5 rounded-sm text-xs font-medium text-muted-foreground underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring">
+        <CaretRightIcon aria-hidden className={cn("size-3 transition-transform motion-reduce:transition-none", open && "rotate-90")} />
+        {label}{hint ? <span className="font-normal">· {hint}</span> : null}
+      </CollapsibleTrigger>
+      <CollapsibleContent role="region" aria-labelledby={`${id}-t`} className="mt-3 flex flex-col gap-3 text-sm">
+        {children}
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
+/** Label and value rows inside a disclosure. */
+export function Facts({ rows }: { rows: [string, React.ReactNode][] }) {
+  return (
+    <dl className="grid grid-cols-[7rem_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
+      {rows.map(([k, v]) => <React.Fragment key={k}><dt className="text-muted-foreground">{k}</dt><dd className="min-w-0 break-words">{v}</dd></React.Fragment>)}
+    </dl>
+  )
 }
