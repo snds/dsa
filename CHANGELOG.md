@@ -20,6 +20,17 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   not scored. `--markdown` writes a page to share. In a repo with no system source, the system-side
   items are left to the team instead of marked missing.
 
+- Evidence as data, with a code reader. Findings now carry the places they cite (file, line, target
+  and what's there, up to 25; stored in a new `places` column, migrated in place), and older findings
+  read their "Examples:" text back into places. An action shows its evidence sentence and "N places"
+  folded; open, one row per place (the checkout folder stripped, vendored code marked), and each
+  opens a code reader: the lines around it, highlighted, the line marked, prev/next (arrows or J/K),
+  Copy path:line, and Open on GitHub at the scanned commit. A published page carries the excerpts,
+  captured at scan time and capped (12 lines either side, long lines cut, a total budget); `dsa
+  serve` reads the file. Reads stay inside the scanned targets and never show environment files,
+  keys, credentials or dsa's data folder. System's "Declared in" and Element Review's code viewer use
+  the same reader.
+
 - The scan relay ([docs/relay.md](docs/relay.md)): a published dashboard re-scans without the viewer
   handling a token. One Web Fetch handler (`@snds/dsa/relay`) holds the runner credential as an
   environment secret, signs viewers in with GitHub's OAuth web flow (no scopes; access to the repo is
@@ -33,9 +44,12 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   page at it.
 - Re-scan from the page, with progress. Runners share one contract (`trigger`, `status`,
   `listActive`): GitHub (`workflow_dispatch`, through the scan relay), a webhook with status URLs,
-  and `dsa serve` (scans now run as a background job). The page shows Starting…, a banner while a scan runs (one found on load
-  too, scheduled ones included), a progress dialog for scans over a minute (steps, time left from
-  recent runs), Load the new report once it is deployed, and plain errors with a link to the run.
+  and `dsa serve` (scans now run as a background job). Every scan (started here, or found running on load,
+  scheduled ones included) takes over the page: the page behind is dimmed, blurred and inert, and a
+  card shows the estimate, elapsed time, and a filling bar with the steps when the runner reports
+  them (a sliding bar when it doesn't; still for reduced motion). "Keep working in the background"
+  leaves a pill in the header that reopens it. It ends on the new report (loaded by itself) or on the
+  reason the scan failed, with Try again and a link to the run.
 - The next scheduled scan, in the header and under Re-scan: `host.schedule` (cron, UTC), or read
   from the GitHub workflow's `on.schedule`.
 
@@ -46,6 +60,10 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- Overview stat cards: the change chip (arrow, value, "pts") no longer wraps. It sits in a slot of
+  fixed bounds, so the "vs scan of…" text starts at the same place on every card; only that text
+  wraps, and on a narrow card it drops below the chip. "No change" has a neutral arrow, and a fall
+  reads "−0.4 pts" with a true minus.
 - A design system read from another checkout can span several folders: `system.sources` (and a
   child's `sources`) now reach the engine, not only the system model, and accept globs of package
   folders (`../vendor/ds/packages/*`), so its tokens package is read too. With `git`, sources are
@@ -111,6 +129,14 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 
 ### Changed
+
+- One dashboard for every role: the "View as" picker is gone (and what it stored is forgotten).
+  Every view leads with the highlights, and more is one click away through one control: "Details"
+  for the supporting data and guidance, "Technical details" for paths, lines, IDs, raw text and
+  config. Actions: who, why, who acts and when it's done up front; evidence, history, repo, markup,
+  the item ID and the file command under Technical details (linkable as `#queue/<id>/details`).
+  System: six columns; each component opens its variants, parts, tokens and declaring file
+  (`#system/<filter>/<key>`). Element Review and Settings use the same control.
 
 - `scan`, `ratchet` and `run` read through the system model, so they measure every
   framework and markup the model reads (Vue, Angular templates incl. inline `template:`,

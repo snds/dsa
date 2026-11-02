@@ -18,14 +18,12 @@ import { SettingsPage, SECTIONS, type SectionId } from "@/views/settings/Setting
 import { Readiness } from "@/views/Readiness"
 import { Overview } from "@/views/Overview"
 import { System } from "@/views/System"
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
-import { ROLES, useRole, type Role } from "@/lib/insight"
 import { Usage } from "@/views/Usage"
 import { AgentProvider, canChat, useAgent } from "@/agent/store"
 import { AgentPanel } from "@/agent/AgentPanel"
 import { cn } from "cn"
 import { ACTIONS, rescan as hostRescan } from "@/lib/host"
-import { NextScan, ScanBanner, ScanButton, ScanDialog, SignInDialog } from "@/components/scan"
+import { NextScan, ScanButton, ScanOverlay, SignInDialog } from "@/components/scan"
 import { canRun, detectRunning } from "@/lib/useScan"
 
 type ViewId = "overview" | "queue" | "system" | "federation" | "elements" | "usage" | "readiness" | "design" | "trends" | "settings"
@@ -58,19 +56,6 @@ function readHash(): { view: ViewId; section: SectionId } {
 
 export function App() {
   return <AgentProvider><Shell /></AgentProvider>
-}
-
-/** Who is looking: the Overview and Actions put that role's work first. Kept per browser. */
-function RolePicker() {
-  const [role, setRole] = useRole()
-  return (
-    <label className="flex items-center gap-2 text-sm text-muted-foreground">
-      <span className="hidden sm:inline">View as</span>
-      <NativeSelect value={role} onChange={(e: any) => setRole(e.target.value as Role)} aria-label="View as role" className="w-36">
-        {ROLES.map(r => <NativeSelectOption key={r.id} value={r.id}>{r.label}</NativeSelectOption>)}
-      </NativeSelect>
-    </label>
-  )
 }
 
 /** Opens the agent on the whole scan, or back on the last session. */
@@ -151,7 +136,7 @@ function Shell() {
   async function rerun() {
     try { await hostRescan() } catch (e: any) { setScan({ busy: false, error: e.message }) }
   }
-  // A scan already going when the page opens (scheduled, or started elsewhere) shows in the banner.
+  // A scan already going when the page opens (scheduled, or started elsewhere) opens the scan overlay.
   React.useEffect(() => { void detectRunning() }, [])
 
   const figma = D.modules?.figma && D.run ? (() => { const g = D.run.sources?.figmaDiag; return g?.error ? "Figma crawl failed" : !D.run.sources?.figma ? "Figma not crawled" : g ? `${g.crawled} Figma file${g.crawled === 1 ? "" : "s"} crawled` : "Figma crawled" })() : null
@@ -173,11 +158,16 @@ function Shell() {
               {D.live && <span> · <LiveRevision /></span>}
               {D.schedule?.length > 0 && <span> · <NextScan /></span>}
               {figma && <span> · {figma}</span>}
-              {!D.serve && <span> · Snapshot from {fmtD(D.generatedAt)}{D.published ? `. Static: review decisions are staged in your browser and ${ACTIONS?.decisions.kind === "issue" ? "filed as an issue" : ACTIONS?.decisions.kind === "post" ? "sent to the team" : "exported"}; the agent needs dsa serve` : ""}</span>}
+              {/* How a static page differs is detail, not a headline: it's on hover and focus. */}
+              {!D.serve && <span> · {D.published ? (
+                <Tooltip>
+                  <TooltipTrigger render={<span tabIndex={0} className="cursor-default underline decoration-dotted underline-offset-4" />}>Snapshot from {fmtD(D.generatedAt)}</TooltipTrigger>
+                  <TooltipContent className="max-w-xs">A static copy. Review decisions are staged in your browser and {ACTIONS?.decisions.kind === "issue" ? "filed as an issue" : ACTIONS?.decisions.kind === "post" ? "sent to the team" : "exported"}; the agent needs dsa serve.</TooltipContent>
+                </Tooltip>
+              ) : <>Snapshot from {fmtD(D.generatedAt)}</>}</span>}
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <RolePicker />
           {D.serve && <AgentButton />}
           {canRun() ? <ScanButton /> : !D.serve && D.published && ACTIONS && <StaticRescan onPost={rerun} />}
           </div>
@@ -210,8 +200,7 @@ function Shell() {
             <AlertDescription>{D.live.label} Numbers and screenshots here may include unreleased work.</AlertDescription>
           </Alert>
         )}
-        <ScanBanner />
-        <ScanDialog />
+        <ScanOverlay />
         <SignInDialog />
         {scan.error && (
           <Alert variant="destructive" className="mb-6">

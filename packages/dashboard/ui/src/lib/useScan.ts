@@ -12,16 +12,19 @@ export interface ScanState {
   run: ScanRun | null
   /** Seconds a scan usually takes (earlier runs), or null. */
   estimate: number | null
-  /** The progress dialog: opens by itself for long scans, and can be hidden while the banner stays. */
-  dialog: boolean
+  /** The full-screen scan overlay: opens with every scan; hidden, a pill in the header reopens it. */
+  overlay: boolean
   error: { message: string; url?: string | null } | null
   /** Why the sign-in dialog opened again (an expired sign-in, a refusal), if it did. */
   signInProblem: string | null
   /** True when the scan was found running rather than started here. */
   found: boolean
+  /** Step names seen so far, in order (runners report only the current one). */
+  seen: string[]
+  /** When this page started following the scan (ms), for elapsed time when the run has no start. */
+  since: number | null
 }
 
-const LONG = 60
 const POLL_MS = 5000
 const PAGE_POLL_MS = 10000
 const PAGE_WAIT_MS = 20 * 60_000
@@ -35,7 +38,7 @@ const PENDING = "dsa.relay-pending-scan"
 /** In-page runs are possible here: dsa serve, the scan relay, or a webhook runner. */
 export const canRun = () => Boolean(D.serve || relayUrl() || (rescan()?.kind === "run" && rescan()?.runner?.type === "webhook"))
 
-let state: ScanState = { phase: "idle", run: null, estimate: D.actions?.rescan?.estimateSeconds ?? D.scanEstimate ?? null, dialog: false, error: null, signInProblem: null, found: false }
+let state: ScanState = { phase: "idle", run: null, estimate: D.actions?.rescan?.estimateSeconds ?? D.scanEstimate ?? null, overlay: false, error: null, signInProblem: null, found: false, seen: [], since: null }
 const listeners = new Set<() => void>()
 const set = (patch: Partial<ScanState>) => { state = { ...state, ...patch }; listeners.forEach(f => f()) }
 const subscribe = (f: () => void) => { listeners.add(f); return () => { listeners.delete(f) } }
@@ -52,7 +55,7 @@ function runner(): ScanRunner | null {
 function fail(e: unknown, url?: string | null) {
   stop()
   if (e instanceof ScanError && e.kind === "auth" && relayUrl()) { relaySessionStore()?.forget(); set({ phase: "asking", signInProblem: state.phase === "starting" ? null : e.message }); return }
-  set({ phase: "failed", error: { message: e instanceof Error ? e.message : String(e), url: (e as ScanError)?.url ?? url ?? state.run?.url ?? null } })
+  set({ phase: "failed", overlay: true, error: { message: e instanceof Error ? e.message : String(e), url: (e as ScanError)?.url ?? url ?? state.run?.url ?? null } })
 }
 
 async function learnEstimate(r: ScanRunner) {
@@ -62,6 +65,8 @@ async function learnEstimate(r: ScanRunner) {
 /** Follow a run until it finishes, then until the new report is published. */
 function follow(r: ScanRunner, run: ScanRun) {
   stop()
+  const step = run.steps?.current
+  if (step && state.seen[state.seen.length - 1] !== step) set({ seen: [...state.seen, step] })
   set({ run, phase: run.status === "done" ? "deploying" : run.status === "queued" || run.status === "running" ? "running" : "failed" })
   if (run.status === "failed" || run.status === "cancelled") return fail(new Error(run.error ?? (run.status === "cancelled" ? "The run was cancelled." : "The scan failed.")), run.url)
   if (run.status === "done") return awaitReport(Date.now())
@@ -96,12 +101,10 @@ function awaitReport(since: number) {
 export async function startScan() {
   const r = runner()
   if (!r) return
-  set({ phase: "starting", error: null, found: false, run: null })
+  set({ phase: "starting", overlay: true, error: null, found: false, run: null, seen: [], since: Date.now() })
   void learnEstimate(r)
   try {
-    const run = await r.trigger()
-    follow(r, run)
-    if ((state.estimate ?? 0) > LONG) set({ dialog: true })
+    follow(r, await r.trigger())
   } catch (e) {
     fail(e)
   }
@@ -137,15 +140,15 @@ function takeSignInReturn(): boolean {
   history.replaceState(null, "", location.pathname + location.search)
   let pending = false
   try { pending = storage()?.getItem(PENDING) === "1"; storage()?.removeItem(PENDING) } catch { /* no storage */ }
-  if (back.error) { set({ phase: "failed", error: { message: back.error, url: null } }); return true }
+  if (back.error) { set({ phase: "failed", overlay: true, error: { message: back.error, url: null } }); return true }
   if (back.session) relaySessionStore()?.set(back.session)
   if (pending) { void startScan(); return true }
   return false
 }
 
 export const closeAsk = () => set({ phase: state.run ? state.phase : "idle", signInProblem: null })
-export const showDialog = (open: boolean) => set({ dialog: open })
-export const dismiss = () => { stop(); set({ phase: "idle", error: null, run: null, dialog: false }) }
+export const showOverlay = (open: boolean) => set({ overlay: open })
+export const dismiss = () => { stop(); set({ phase: "idle", error: null, run: null, overlay: false, seen: [], since: null }) }
 
 /**
  * On load: finish a sign-in that just came back, then show a scan already going (scheduled, or
@@ -158,7 +161,7 @@ export async function detectRunning() {
   try {
     const [first] = await r.listActive()
     if (first && state.phase === "idle") {
-      set({ found: true })
+      set({ found: true, overlay: true, seen: [], since: Date.now() })
       void learnEstimate(r)
       follow(r, first)
     }

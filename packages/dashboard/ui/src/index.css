@@ -153,3 +153,8 @@
     @apply font-sans;
     }
 }
+/* The scan overlay's bar when the runner reports no steps: one segment sliding across. */
+@keyframes dsa-indeterminate {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(400%); }
+}

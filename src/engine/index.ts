@@ -55,3 +55,4 @@ export * from './scanners/table.js';
 export * from './scanners/tokens.js';
 export * from './scanners/versions.js';
 export { switchKindOf } from './classify-button.js';
+export * from './places.js';
