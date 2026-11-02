@@ -2,7 +2,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { DEFAULT_THRESHOLD, openStore, withMetrics, appSettings, closestRendered, compareRendered, computeFit, effectiveSettings, familyKey, figmaEnabled, homeOf, loadCatalog, patterns as stylePatterns, pushedThisWeek, questions, readEvents, readProposals, readRendered, renderIssue, renderedFor as composeRendered, resolveTargets, rowToFinding, sourceExcerpts, placeExcerpts, titleOf, type Config } from '@snds/dsa/engine';
+import { DEFAULT_THRESHOLD, openStore, plainText, withPlain, withMetrics, appSettings, closestRendered, compareRendered, computeFit, effectiveSettings, familyKey, figmaEnabled, homeOf, loadCatalog, patterns as stylePatterns, pushedThisWeek, questions, readEvents, readProposals, readRendered, renderIssue, renderedFor as composeRendered, resolveTargets, rowToFinding, sourceExcerpts, placeExcerpts, titleOf, type Config } from '@snds/dsa/engine';
 
 import { scanEstimate, type PageActions, type ResolvedProfile } from '@snds/dsa';
 import { buildQueue, PKG_DIR } from './queue.js';
@@ -167,11 +167,12 @@ export async function renderReport(root: string, config: Config, dataDir: string
       const t = comp && composeRendered(comp, e.signature.variant, e.signature.size);
       return t?.shot ? { url: renderedUrl(t.shot), key: t.key } : null;
     };
-    const elements = {
+    const elements = plainHows({
       threshold: config.review?.threshold ?? DEFAULT_THRESHOLD,
       evals: evals.map((e: any) => ({ id: e.id, target: e.target, file: e.file, line: e.line, element: e.element, verdict: e.verdict, role: e.role, use: e.use, from: e.from, props: e.props, gap: e.gap,
-        confidence: e.confidence, needsHuman: e.needsHuman, decided: e.decided, exception: e.exception, ruleId: e.ruleId, reasons: e.reasons, alternatives: e.alternatives, signature: e.signature,
-        snippet: e.snippet, a11y: e.a11y, styleKey: e.styleKey, styleSig: e.styleSig, regions: e.regions ?? null, how: e.how ?? null, parent: e.parent ?? null, recipe: e.recipe ?? null,
+        confidence: e.confidence, needsHuman: e.needsHuman, decided: e.decided, exception: e.exception, ruleId: e.ruleId, reasons: withPlain(e.reasons ?? []), alternatives: e.alternatives, signature: e.signature,
+        snippet: e.snippet, a11y: e.a11y, styleKey: e.styleKey, styleSig: e.styleSig, regions: e.regions ?? null,
+how: e.how ?? null, parent: e.parent ?? null, recipe: e.recipe ?? null,
         // Design identity (identity.ts): the family it belongs to, its name in designer words, and where its answer lands.
         family: familyKey(e), title: titleOf(e), home: homeOf(e.decided?.decision ?? e),
         // What a person sees on it (its text, aria-label, or title), and how many lines its source spans: for the element list and code viewer.
@@ -202,8 +203,8 @@ export async function renderReport(root: string, config: Config, dataDir: string
         };
         const { auto, fit } = autoFor(q.items, q.options[0]?.decision);
         return {
-          key: q.key, kind: q.kind, title: q.title, ask: q.ask, home: q.home, note: q.note ?? null, ids: q.items.map(i => i.id), options: q.options, auto, fit,
-          parts: q.parts?.map(p => ({ key: p.key, ask: p.ask, ids: p.items.map(i => i.id), options: p.options, ...autoFor(p.items, p.options[0]?.decision) })) ?? null,
+          key: q.key, kind: q.kind, title: q.title, ask: plainText(q.ask) ?? 'Choose the answer.', home: q.home, note: plainText(q.note), noteRaw: q.note ?? null, ids: q.items.map(i => i.id), options: q.options, auto, fit,
+          parts: q.parts?.map(p => ({ key: p.key, ask: plainText(p.ask) ?? 'Choose the answer.', ids: p.items.map(i => i.id), options: p.options, ...autoFor(p.items, p.options[0]?.decision) })) ?? null,
           context: q.context?.map(i => i.id) ?? null,
         };
       }),
@@ -215,7 +216,7 @@ export async function renderReport(root: string, config: Config, dataDir: string
       rendered: renderedSet ? { takenAt: renderedSet.takenAt, source: renderedSet.source, combos: Object.values(renderedSet.components).reduce((a, c) => a + Object.keys(c).length, 0) } : null,
       // Each proposed replacement rendered with its exact props (dsa render), keyed like proposalKey: the review shows the options as they would look.
       proposals: Object.fromEntries(Object.entries(readProposals(dataDir)).map(([k, p]) => [k, { use: p.use, props: p.props, check: p.check, url: p.shot ? renderedUrl(p.shot) : null, story: p.story ?? null, content: p.content ?? null, actual: p.actual ?? null, note: p.note ?? null }])),
-    };
+    });
     // Agent readiness: this run per repo (audit checks, the profile's usage checker by kind, reconciled with look-alikes), the trend, and bench runs.
     const provider = profile.readiness;
     const det = (d: any) => (typeof d === 'string' ? JSON.parse(d) : d);
@@ -279,6 +280,19 @@ function liveOf(run: any) {
   const src = typeof run?.sources === 'string' ? JSON.parse(run.sources) : run?.sources;
   const l = src?.live;
   return l ? { state: l.state, ok: l.ok, unreleased: Boolean(l.unreleased), label: l.label, head: l.head ?? null, revision: l.revision ?? null } : null;
+}
+
+/**
+ * The review's face speaks plainly: every "how" (an element's, a decision's, a part's container) in plain
+ * words, the scanner's own line (attribute names, .map()) kept as howRaw for Technical details.
+ */
+function plainHows<T>(x: T): T {
+  if (Array.isArray(x)) { for (const v of x) plainHows(v); return x; }
+  if (!x || typeof x !== 'object') return x;
+  const o = x as any;
+  if (typeof o.how === 'string' && o.howRaw === undefined) { o.howRaw = o.how; o.how = plainText(o.how); }
+  for (const k of Object.keys(o)) if (k !== 'sources' && o[k] && typeof o[k] === 'object') plainHows(o[k]);
+  return x;
 }
 
 /** Rows' count columns as numbers (null stays null). */

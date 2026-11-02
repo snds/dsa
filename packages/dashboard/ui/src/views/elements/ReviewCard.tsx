@@ -8,7 +8,9 @@ import { Code, Disclosure, Pre } from "@/components/bits"
 import { D, short, SYS } from "@/lib/dsa"
 import { stageKey, useStaged } from "@/lib/staged"
 import { AskAgent } from "@/agent/AskAgent"
-import { Conf, ElementRow, NoShot, Reasons, ReviewControls, Ring, contentText, desc, nameOf, pickText, proposalFor, revealedText, useEl, useReviewState } from "./shared"
+import { Conf, ElementRow, NoShot, Reasons, ReviewControls, contentText, desc, nameOf, pickText, proposalCheck, proposalFor, revealedText, useEl, useReviewState } from "./shared"
+import { SameScale } from "./SameScale"
+import { useApp } from "@/lib/app"
 import { styleName } from "./units"
 
 /**
@@ -40,7 +42,11 @@ export function ReviewCard({ items, auto, pattern, options, fit, kind, title, as
   const anyStaged = partStates ? partStates.some(x => x.staged) : Boolean(staged)
   const shown = state === "changed" && !split ? d.decision : auto
   const off = state === "ignored"
-  const looks = React.useMemo(() => looksOf(items), [items])
+  // With an app chosen, the evidence is that app's; the answer still covers every element, and says so.
+  const app = useApp()
+  const mine = app ? items.filter(e => e.target === app) : items
+  const elsewhere = app ? items.filter(e => e.target !== app) : []
+  const looks = React.useMemo(() => looksOf(mine.length ? mine : items), [mine, items])
   const captured = looks.filter(l => l.shot)
   const uncaptured = looks.filter(l => !l.shot).flatMap(l => l.items)
   const lo = Math.min(...items.map(e => e.confidence)), hi = Math.max(...items.map(e => e.confidence))
@@ -53,13 +59,14 @@ export function ReviewCard({ items, auto, pattern, options, fit, kind, title, as
   })()
   // Every look and every case, so a reviewer can see they really are the same before one answer covers them.
   const visible = captured
-  const shotCount = items.filter(e => e.shot).length
+  const shotCount = (mine.length ? mine : items).filter(e => e.shot).length
   // A system rendering only means something for a replacement, so gap / keep tiles show the app alone.
   const compares = shown.verdict === "replace" && !split
   const proposal = compares ? proposalFor(shown) : null
   const unrendered = compares && !proposal?.url && !visible.some(l => l.rep.rendered?.systemShot || l.rep.systemPreview)
   const unmeasured = compares && !visible.some(l => deltaOf(l.rep))
   const answered = partStates?.filter(x => x.state !== "open").length ?? 0
+  const partShown = (p: Part) => { const i = split!.indexOf(p); const ps = partStates?.[i]; return ps?.state === "changed" ? ps.d.decision : p.auto }
   const status = split && state === "open" && answered ? `${answered} of ${split.length} parts answered`
     : anyStaged ? `Staged · ${STATE_LABEL[state]}` : state === "open" ? (kind === "question" ? "Needs a decision" : "Not decided") : STATE_LABEL[state]
   const n = items.length
@@ -113,22 +120,28 @@ export function ReviewCard({ items, auto, pattern, options, fit, kind, title, as
           </>
         )}
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-          <span>{split ? "" : scope}{ready.length > 0 && `${split ? "" : " "}${ready.length} more of this kind are already sure; they're listed under Ready.`}</span>
+          <span>{split ? "" : scope}{ready.length > 0 && `${split ? "" : " "}${ready.length} more of this kind are already sure; they're listed under Ready.`}{elsewhere.length > 0 && ` ${otherApps(elsewhere)}`}</span>
           {D.serve && <AskAgent subject={{ kind: "review", ids: items.map(e => e.id), pattern: pattern ?? null }} label={kind === "question" ? "Talk it through" : "Ask the agent"} size="xs" variant="ghost" />}
         </div>
       </CardHeader>
       {/* 4. The evidence. */}
       <CardContent className={cn("flex flex-col gap-3 py-4", off && "opacity-50")}>
         <h4 className="text-xs font-medium text-muted-foreground">
-          {captured.length ? `${n === 1 ? "The case" : `All ${n} cases`} · ${looks.length === 1 ? "one look" : `${looks.length} looks`} · ${shotCount} captured · ${compares ? `the app next to ${SYS} ${pickText(shown)}` : "as the app renders it"}` : "Not captured in the app"}
+          {captured.length ? `${app && elsewhere.length ? `${mine.length === 1 ? "The case" : `${mine.length} cases`} in ${app}` : n === 1 ? "The case" : `All ${n} cases`} · ${looks.length === 1 ? "one look" : `${looks.length} looks`} · ${shotCount} captured · ${compares ? `the app next to ${SYS} ${pickText(shown)}` : "as the app renders it"}` : "Not captured in the app"}
         </h4>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {visible.map(l => <LookTile key={l.key} look={l} group={items.map(e => e.id)} target={shown} proposal={proposal} compare={compares && !unrendered} measure={compares && !unmeasured} />)}
+          {visible.map(l => {
+            // A split card proposes per part: each look sits beside its own part's answer.
+            const part = split?.find(p => p.ids.includes(l.rep.id))
+            const t = part ? partShown(part) : shown
+            const c = t?.verdict === "replace" && Boolean(t.use) && (!split || Boolean(part))
+            return <LookTile key={l.key} look={l} group={items.map(e => e.id)} target={t} proposal={c ? proposalFor(t) : null} compare={c} measure={c && !unmeasured} />
+          })}
           {uncaptured.length > 0 && <Uncaptured items={uncaptured} />}
         </div>
-        {(unrendered || unmeasured) && captured.length > 0 && (
+        {unmeasured && !unrendered && captured.length > 0 && (
           <p className="text-xs text-muted-foreground">
-            {unrendered ? `No Storybook rendering of ${shown.use}${Object.keys(shown.props ?? {}).length ? ` ${Object.values(shown.props).join("/")}` : ""} to show next to ${n === 1 ? "it" : "them"} yet.${unmeasured ? " Nothing is measured." : ""}` : `Not measured against ${SYS} yet.`}
+            {`Not measured against ${SYS} yet.`}
           </p>
         )}
         <Details items={items} ready={ready} />
@@ -216,7 +229,7 @@ function Confidence({ lo, hi }: { lo: number; hi: number }) {
 
 /** Everything behind the recommendation, folded: why it's uncertain, how it was made, alternatives, every element. */
 function Details({ items, ready = [] }: { items: any[]; ready?: any[] }) {
-  const why = [...new Set(items.flatMap(e => e.reasons.filter((r: any) => r.delta < 0).map((r: any) => r.text)))].slice(0, 4)
+  const why = [...new Set(items.flatMap(e => e.reasons.filter((r: any) => r.delta < 0).map((r: any) => (r.plain === undefined ? r.text : r.plain)).filter(Boolean)))].slice(0, 4)
   const n = items.length
   return (
     <Disclosure label="Details" hint={`reasons, alternatives, ${n === 1 ? "the element" : `all ${n} elements`}`}>
@@ -240,7 +253,8 @@ function Details({ items, ready = [] }: { items: any[]; ready?: any[] }) {
       )}
       <Disclosure label="Technical details" hint="how the pick was made">
         <p className="text-xs text-muted-foreground">From <Code>{short(items[0].file)}:{items[0].line}</Code></p>
-        <Reasons e={items[0]} />
+        <Reasons e={items[0]} raw />
+        {[...new Set(items.flatMap(e => [e.howRaw, e.parent?.howRaw]).filter(Boolean))].map(t => <p key={t} className="font-mono text-xs text-muted-foreground">{t}</p>)}
       </Disclosure>
     </Disclosure>
   )
@@ -268,38 +282,53 @@ export function deltaOf(e: any): { source: "measured" | "source"; changes: { lab
   return { source: "source", changes, same: s.matched.length, score: s.score }
 }
 
+/**
+ * One look, as evidence: the element in the app beside the proposal, at the same CSS scale (both are
+ * captured at 2x and drawn at half their pixels), each labelled with what it is. The photo is cropped
+ * to the element; a wide one (a table, a panel) keeps its size and scrolls instead of shrinking.
+ */
 function LookTile({ look, group, target, proposal, compare, measure }: { look: Look; group: string[]; target: any; proposal: any; compare: boolean; measure: boolean }) {
-  const { openLightbox, byId } = useEl()
+  const { openLightbox, openCode, byId } = useEl()
   const e = look.rep, r = e.rendered
   const delta = deltaOf(e)
   const shotIds = group.filter(id => byId.get(id)?.shot)
-  const openAt = (id: string) => openLightbox(shotIds, Math.max(0, shotIds.indexOf(id)))
-  const open = () => openAt(e.id)
-  // The proposal with its exact props first; else the closest variant × size Storybook already showed.
-  const sys = proposal?.url ?? r?.systemShot ?? e.systemPreview?.url ?? null
+  const openAt = (id: string) => openLightbox(shotIds, Math.max(0, shotIds.indexOf(id)), compare ? target : undefined)
   const others = look.items.filter(x => x.shot && x.id !== e.id)
-  const b = e.shot.box
   const caption = e.shot.revealedBy ? revealedText(e.shot.revealedBy) : null
+  // The exact proposal when there is one. Otherwise the closest variant Storybook showed, said as such.
+  const exact = proposal?.url ? proposal : null
+  const closest = !exact ? (r?.systemShot ? { url: r.systemShot, key: r.key } : e.systemPreview ? { url: e.systemPreview.url, key: e.systemPreview.key } : null) : null
+  const chk = proposalCheck(proposal)
+  const wide = (e.shot.box?.w ?? 0) > 340
   return (
-    <figure className="m-0 flex min-w-0 flex-col gap-2 rounded-lg border bg-muted/20 p-2">
-      <button type="button" onClick={open} className={cn("grid cursor-zoom-in items-center gap-1.5 text-left", compare && "grid-cols-[1fr_auto_1fr]")} aria-label={compare ? "Open side by side" : "Open the screenshot"}>
-        {/* Sized to the crop's ratio and at most 160px tall, so the image fills the box and the ring lines up. */}
-        <span className="relative mx-auto block w-full overflow-hidden rounded-md border bg-background" style={b ? { aspectRatio: `${b.cw}/${b.ch}`, maxWidth: `${Math.round((160 * b.cw) / b.ch)}px` } : undefined}>
-          <img src={e.shot.url} alt={`In the app: ${e.snippet.slice(0, 60)}`} loading="lazy" className={cn("block w-full object-contain", b ? "h-full" : "max-h-40")} />
-          <Ring b={b} />
-        </span>
-        {compare && <ArrowRightIcon className="text-muted-foreground" aria-hidden />}
-        {compare && (sys ? (
-          <span className="grid h-full min-h-16 place-items-center overflow-hidden rounded-md border bg-background p-3">
-            <img src={sys} alt={`${SYS} ${pickText(target)}`} loading="lazy" className="block max-h-16 w-auto max-w-full object-contain" />
-          </span>
-        ) : <span className="grid h-full place-items-center rounded-md border border-dashed p-2 text-center text-[11px] text-muted-foreground">No rendering for this look</span>)}
-      </button>
+    <figure className={cn("m-0 flex min-w-0 flex-col gap-2 rounded-lg border bg-muted/20 p-2", wide && "md:col-span-2 xl:col-span-3")}>
+      <SameScale
+        app={{ url: e.shot.url, box: e.shot.box, alt: `In the app: ${e.snippet.slice(0, 60)}`, onOpen: () => openAt(e.id) }}
+        proposed={compare ? (exact ? { url: exact.url, alt: `Proposed: ${SYS} ${pickText(target)}` } : closest ? { url: closest.url, alt: `Closest ${SYS} variant: ${target.use} ${closest.key}` } : null) : undefined}
+        appLabel={
+          <>
+            <span className="font-medium text-foreground">In the app</span>
+            <Badge variant="outline" className="text-[10px] font-normal" title="The app this element is in">{e.target}</Badge>
+            <button type="button" onClick={() => openCode(e.id)} className="truncate font-mono text-[11px] underline-offset-4 hover:text-foreground hover:underline" title="Open the code">{short(e.file)}:{e.line}</button>
+            <span className="tabular-nums" title="How sure the crawler is that this is the element">match {Math.round(e.shot.match * 100)}%</span>
+          </>
+        }
+        proposedLabel={compare ? (
+          <>
+            <span className="font-medium text-foreground">{exact ? "Proposed" : closest ? "Closest variant" : "Proposed"}</span>
+            <b className="font-medium text-foreground">{target.use}</b>
+            {Object.entries(exact ? target.props ?? {} : closest ? keyProps(closest.key) : target.props ?? {}).filter(([k]) => k !== "render").map(([k, v]) => <Badge key={k} variant="secondary" className="font-mono text-[10px] font-normal">{k} {String(v)}</Badge>)}
+            {exact && chk && <span className={cn(chk.warn && "text-warning-soft-foreground")}>{chk.text}</span>}
+            {!exact && <span className="text-warning-soft-foreground">{closest ? "The exact props aren't rendered yet" : chk?.text ?? "Not rendered yet"}</span>}
+            {exact?.content && <span title={exact.content}>{exact.content.startsWith("icon") ? "Stand-in icon" : "Story's sample label"}</span>}
+          </>
+        ) : undefined}
+      />
       {others.length > 0 && (
         <div className="flex flex-wrap gap-1" aria-label={`The other ${others.length} cases with this look`}>
           {others.map(x => (
-            <button key={x.id} type="button" onClick={() => openAt(x.id)} className="h-9 max-w-24 cursor-zoom-in overflow-hidden rounded border bg-background" title={`${short(x.file)}:${x.line}`}>
-              <img src={x.shot.url} alt={`Same look: ${x.snippet.slice(0, 40)}`} loading="lazy" className="block h-full w-auto object-contain" />
+            <button key={x.id} type="button" onClick={() => openAt(x.id)} className="h-9 max-w-24 cursor-zoom-in overflow-hidden rounded border bg-background" title={`${x.target} · ${short(x.file)}:${x.line}`}>
+              <img src={x.shot.url} alt={`Same look in ${x.target}: ${x.snippet.slice(0, 40)}`} loading="lazy" className="block h-full w-auto object-contain" />
             </button>
           ))}
         </div>
@@ -314,6 +343,17 @@ function LookTile({ look, group, target, proposal, compare, measure }: { look: L
       </figcaption>
     </figure>
   )
+}
+
+/** "outline/sm" → { variant: outline, size: sm }: the closest variant's props, to label it. */
+const keyProps = (key: string) => { const [variant, size] = key.split("/"); return { ...(variant ? { variant } : {}), ...(size ? { size } : {}) } }
+
+/** "That includes 3 in checkout and 1 in admin, not shown here." */
+function otherApps(items: any[]) {
+  const n = new Map<string, number>()
+  for (const e of items) n.set(e.target, (n.get(e.target) ?? 0) + 1)
+  const parts = [...n].map(([a, c]) => `${c} in ${a}`)
+  return `That includes ${parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0]}, not shown here.`
 }
 
 /** Only what changes. Matches are a count, not a list. */

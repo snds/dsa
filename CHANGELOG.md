@@ -8,6 +8,20 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- Element Review cards show their evidence plainly. Each photo is labelled "In the app" with its app,
+  a file:line that opens the code, and the match; the proposal beside it is labelled "Proposed" with
+  the component and its props, or "Closest variant" (with why) when the exact props aren't rendered.
+  Photo and proposal are drawn at one CSS scale (both are captured at 2x), the photo cropped to the
+  element; a wide one such as a table keeps its size and scrolls. A split card shows each part's own
+  proposal. With one app chosen, a question that covers several apps shows that app's evidence and says
+  what else the answer covers, and a question is listed under every app it holds an element of. Reasons
+  and "how" lines are in plain words on the card (`plainText`), the scanner's own words under Technical
+  details. The zoom view no longer doubles "after opening", and proposes what the card proposes.
+- The trust rubric (`packages/dashboard/src/trust.ts`): ten checks a recommendation must pass on its card
+  before a person can approve it with confidence, scored from a report. `scripts/review-demo.mjs` builds a
+  review with real photos and renders from the acme fixture plus `test/fixtures/review-demo`, and
+  `--score` prints the rubric for it.
+
 - One app selector for the whole dashboard, in the header beside "Ask the agent": "All apps", or
   one consumer app or child library, and every view shows that app's numbers. Overview's cards (with
   "Majors behind" in place of the all-apps version share), Do now / Decide and open count; Actions'

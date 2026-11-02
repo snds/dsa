@@ -1,0 +1,33 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Storybook preview</title>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 0; padding: 24px; background: #fff; }
+  #storybook-root { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  [data-slot=button] { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: 6px; font: 500 14px system-ui; border: 1px solid transparent; cursor: pointer; }
+  [data-variant=default] { background: #1d4ed8; color: #fff; }
+  [data-variant=outline] { background: #fff; border-color: #d4d4d8; color: #111; }
+  [data-variant=ghost] { background: transparent; color: #111; }
+  [data-size=default] { height: 36px; padding: 0 16px; }
+  [data-size=sm] { height: 32px; padding: 0 12px; }
+  [data-size=icon] { width: 36px; height: 36px; padding: 0; }
+  svg[data-slot=icon] { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; }
+</style></head>
+<body><div id="storybook-root"></div>
+<script>
+  // A stand-in for a built Storybook's preview frame: renders the Button stories from the URL's story id
+  // and args, and takes updateStoryArgs on the addons channel the way Controls does.
+  const q = new URLSearchParams(location.search);
+  const id = q.get('id');
+  const urlArgs = Object.fromEntries((q.get('args') || '').split(';').filter(Boolean).map(p => p.split(':')));
+  const ICON = '<svg data-slot="icon" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>';
+  const button = (a) => '<button data-slot="button" data-variant="' + (a.variant || 'default') + '" data-size="' + (a.size || 'default') + '"' + (a['aria-label'] ? ' aria-label="' + a['aria-label'] + '"' : '') + '>' + (a.children || 'Button') + '</button>';
+  const stories = {
+    'button--default': (a) => button({ children: 'Button', ...a }),
+    'button--all-variants': () => ['default', 'outline', 'ghost'].map(v => button({ variant: v })).join(''),
+    'button--icon': (a) => button({ size: 'icon', 'aria-label': 'Add', children: ICON, ...a }),
+  };
+  let args = urlArgs;
+  const render = () => { document.getElementById('storybook-root').innerHTML = (stories[id] || (() => ''))(args); };
+  window.__STORYBOOK_ADDONS_CHANNEL__ = { emit: (ev, p) => { if (ev === 'updateStoryArgs' && p.storyId === id) { args = { ...args, ...p.updatedArgs }; render(); } } };
+  render();
+</script></body></html>
