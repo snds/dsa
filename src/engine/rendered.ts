@@ -46,6 +46,10 @@ export interface Proposal {
   actual?: Record<string, string> | undefined;
   note?: string | undefined;
   hash?: string | undefined;
+  /** Drawn with the element's own content (its words, accessible name, icon), not the story's sample. */
+  own?: boolean | undefined;
+  /** When it couldn't be drawn with these props: the component's story as its authors wrote it, to show instead. */
+  fallback?: string | undefined;
 }
 
 /** Props that change how a component looks; `render` and `asChild` change what it's built from. */

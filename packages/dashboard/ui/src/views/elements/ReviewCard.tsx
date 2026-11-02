@@ -135,7 +135,7 @@ export function ReviewCard({ items, auto, pattern, options, fit, kind, title, as
             const part = split?.find(p => p.ids.includes(l.rep.id))
             const t = part ? partShown(part) : shown
             const c = t?.verdict === "replace" && Boolean(t.use) && (!split || Boolean(part))
-            return <LookTile key={l.key} look={l} group={items.map(e => e.id)} target={t} proposal={c ? proposalFor(t) : null} compare={c} measure={c && !unmeasured} />
+            return <LookTile key={l.key} look={l} group={items.map(e => e.id)} target={t} proposal={c ? proposalFor(t, l.rep) : null} compare={c} measure={c && !unmeasured} />
           })}
           {uncaptured.length > 0 && <Uncaptured items={uncaptured} />}
         </div>
@@ -297,7 +297,8 @@ function LookTile({ look, group, target, proposal, compare, measure }: { look: L
   const caption = e.shot.revealedBy ? revealedText(e.shot.revealedBy) : null
   // The exact proposal when there is one. Otherwise the closest variant Storybook showed, said as such.
   const exact = proposal?.url ? proposal : null
-  const closest = !exact ? (r?.systemShot ? { url: r.systemShot, key: r.key } : e.systemPreview ? { url: e.systemPreview.url, key: e.systemPreview.key } : null) : null
+  // Not drawn with these props: the closest variant measured, else the component's story as written.
+  const closest = !exact ? (r?.systemShot ? { url: r.systemShot, key: r.key } : e.systemPreview ? { url: e.systemPreview.url, key: e.systemPreview.key } : proposal?.fallback ? { url: proposal.fallback, key: "" } : null) : null
   const chk = proposalCheck(proposal)
   const wide = (e.shot.box?.w ?? 0) > 340
   return (
@@ -311,16 +312,20 @@ function LookTile({ look, group, target, proposal, compare, measure }: { look: L
             <Badge variant="outline" className="text-[10px] font-normal" title="The app this element is in">{e.target}</Badge>
             <button type="button" onClick={() => openCode(e.id)} className="truncate font-mono text-[11px] underline-offset-4 hover:text-foreground hover:underline" title="Open the code">{short(e.file)}:{e.line}</button>
             <span className="tabular-nums" title="How sure the crawler is that this is the element">match {Math.round(e.shot.match * 100)}%</span>
+            {e.shot.shared > 1 ? <span title="Identical controls in other files match the same place on the page; which is which is a guess">one of {e.shot.shared} lines that look the same</span>
+              : e.shot.ties > 1 && e.shot.alike >= e.shot.ties ? <span title="Several identical elements on the page match it; any of them shows how it looks">one of {e.shot.ties} alike on the page</span> : null}
+            {e.shot.via && <span>shown on {e.shot.via}</span>}
           </>
         }
         proposedLabel={compare ? (
           <>
-            <span className="font-medium text-foreground">{exact ? "Proposed" : closest ? "Closest variant" : "Proposed"}</span>
+            <span className="font-medium text-foreground">{exact ? "Proposed" : closest?.key ? "Closest variant" : closest ? "Its story as written" : "Proposed"}</span>
             <b className="font-medium text-foreground">{target.use}</b>
             {Object.entries(exact ? target.props ?? {} : closest ? keyProps(closest.key) : target.props ?? {}).filter(([k]) => k !== "render").map(([k, v]) => <Badge key={k} variant="secondary" className="font-mono text-[10px] font-normal">{k} {String(v)}</Badge>)}
             {exact && chk && <span className={cn(chk.warn && "text-warning-soft-foreground")}>{chk.text}</span>}
-            {!exact && <span className="text-warning-soft-foreground">{closest ? "The exact props aren't rendered yet" : chk?.text ?? "Not rendered yet"}</span>}
-            {exact?.content && <span title={exact.content}>{exact.content.startsWith("icon") ? "Stand-in icon" : "Story's sample label"}</span>}
+            {!exact && <span className="text-warning-soft-foreground">{proposal?.note ?? (closest ? "The exact props aren't rendered yet" : chk?.text ?? "Not rendered yet")}</span>}
+            {exact?.own && <span>with its own label and icon</span>}
+            {exact?.content && <span className="text-warning-soft-foreground" title={exact.content}>{/stand-in|^icon/.test(exact.content) ? "Stand-in icon: the app's own icon wasn't captured" : "The story's sample label, not this element's"}</span>}
           </>
         ) : undefined}
       />
@@ -390,11 +395,11 @@ const shortColor = (v: string) => { const m = v.match(/rgba?\(([^)]+)\)/); if (!
 
 /** Looks the crawler couldn't find: say why once, with the first element's trace. */
 function Uncaptured({ items }: { items: any[] }) {
-  const e = items.find(x => x.reach) ?? items[0]
+  const e = items.find(x => x.badShot) ?? items.find(x => x.reach) ?? items[0]
   return (
     <div className="flex min-w-0 flex-col gap-2 rounded-lg border border-dashed p-3">
-      <span className="flex items-center gap-1.5 text-xs font-medium"><ImageBrokenIcon className="text-muted-foreground" />{items.length} not captured</span>
-      {e.shotMissing || e.weakShot || e.reach?.status === "unused" ? <NoShot e={e} /> : <p className="text-xs text-muted-foreground">Not picked as an example this run.</p>}
+      <span className="flex items-center gap-1.5 text-xs font-medium"><ImageBrokenIcon className="text-muted-foreground" />{items.length} not {items.some(x => x.badShot) ? "shown" : "captured"}</span>
+      {e.shotMissing || e.weakShot || e.badShot || e.reach?.status === "unused" ? <NoShot e={e} /> : <p className="text-xs text-muted-foreground">Not picked as an example this run.</p>}
       {!e.systemPreview && <Pre className="max-h-28 text-[11px]">{e.snippet}</Pre>}
       {items.length > 1 && <span className="text-[11px] text-muted-foreground">{[...new Set(items.map(x => short(x.file)))].slice(0, 3).join(", ")}{new Set(items.map(x => x.file)).size > 3 ? "…" : ""}</span>}
     </div>

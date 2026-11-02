@@ -39,13 +39,18 @@ export function decodePng(buf: Buffer): Pixels {
   return { width, height, data };
 }
 
+/** CSS pixels kept off a box's edge when looking for content: past a border and its anti-aliasing. */
+export const BLANK_INSET = 3;
+
 /**
  * Whether a region shows anything: a box is blank when its luminance barely varies (spread under 6)
  * or it holds two colours or fewer. `box` is in CSS pixels; `scale` is the capture's device pixel ratio.
  */
-export function isBlank(px: Pixels, box?: { x: number; y: number; w: number; h: number } | null, scale = 2): boolean {
-  const x0 = Math.max(0, Math.floor((box?.x ?? 0) * scale)), y0 = Math.max(0, Math.floor((box?.y ?? 0) * scale));
-  const x1 = Math.min(px.width, Math.ceil(box ? (box.x + box.w) * scale : px.width)), y1 = Math.min(px.height, Math.ceil(box ? (box.y + box.h) * scale : px.height));
+export function isBlank(px: Pixels, box?: { x: number; y: number; w: number; h: number } | null, scale = 2, inset = 0): boolean {
+  // Inset (CSS px) skips the box's own edge: an empty bordered button is a border and a fill, nothing inside.
+  const i = box ? Math.min(inset, box.w / 4, box.h / 4) : 0;
+  const x0 = Math.max(0, Math.floor(((box?.x ?? 0) + i) * scale)), y0 = Math.max(0, Math.floor(((box?.y ?? 0) + i) * scale));
+  const x1 = Math.min(px.width, Math.ceil(box ? (box.x + box.w - i) * scale : px.width)), y1 = Math.min(px.height, Math.ceil(box ? (box.y + box.h - i) * scale : px.height));
   let lo = 255, hi = 0;
   const colours = new Set<number>();
   for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {

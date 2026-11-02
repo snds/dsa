@@ -62,6 +62,13 @@ function Figure({ src, alt, caption, onOpen, box, ratio }: { src: string; alt: s
 
 export function NoShot({ e }: { e: any }) {
   const r = e.reach
+  // Photographed, but the photo doesn't show it: say so instead of showing an empty or covered box.
+  if (e.badShot && r?.status !== "unused") return (
+    <p className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground" data-slot="bad-shot">
+      <b className="font-medium text-foreground">{e.badShot.blank ? "Captured but blank." : "Covered by something else."}</b>{" "}
+      {e.badShot.blank ? "The crawler found it, but nothing was drawn inside its box, even when hovered and focused (an icon that hadn't loaded, or content that shows only in some state). The photo isn't shown." : "Another layer sat over it on the page (a bar, a toast, an overlay), so the photo shows that instead. It isn't shown."}
+    </p>
+  )
   if (e.weakShot && r?.status !== "unused") return (
     <p className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
       <b className="font-medium text-foreground">No reliable screenshot.</b> The closest element the crawler found was only {Math.round(e.weakShot.match * 100)}% alike, so it may be a different element. It isn't shown.
@@ -231,11 +238,16 @@ export const proposalKey = (use: string, props?: Record<string, unknown> | null)
   return p ? `${use}|${p}` : use
 }
 /** The proposed replacement rendered with exactly its props (dsa render), when there is one. */
-export const proposalFor = (r: any): any | null => (r?.verdict === "replace" && r.use ? D.elements?.proposals?.[proposalKey(r.use, r.props)] ?? null : null)
+export const proposalFor = (r: any, e?: any): any | null => {
+  if (r?.verdict !== "replace" || !r.use) return null
+  const all = D.elements?.proposals ?? {}, key = proposalKey(r.use, r.props)
+  // Drawn with this element's own words and icon, when it was; else the proposal with the story's content.
+  return (e?.ownHash && all[`${key}#${e.ownHash}`]) || all[key] || null
+}
 
 /** How far a rendered proposal can be trusted, in words. */
 export const proposalCheck = (p: any): { text: string; warn: boolean } | null =>
-  !p ? { text: "Not rendered yet: dsa render draws it", warn: true }
+  !p ? { text: "Not rendered yet: the next dsa run or dsa render draws it", warn: true }
   : p.check === "exact" ? null
   : p.check === "unverified" ? { text: "Props set; the component doesn't expose them to confirm", warn: false }
   : p.check === "closest" ? { text: `Nearest story: ${Object.entries(p.actual ?? {}).map(([k, v]) => `${k} ${v}`).join(", ")}. Its stories don't take these props`, warn: true }
@@ -245,11 +257,11 @@ export const proposalCheck = (p: any): { text: string; warn: boolean } | null =>
  * Every replacement the card could take, drawn as the system component with its props, so the reviewer
  * picks by look. The recommendation comes first; the current decision is pressed. Click to choose.
  */
-function OptionTiles({ choices, current, onPick, disabled }: { choices: { decision: any; recommended: boolean }[]; current: any; onPick: (d: any, recommended: boolean) => void; disabled: boolean }) {
+function OptionTiles({ choices, current, onPick, disabled, rep }: { choices: { decision: any; recommended: boolean }[]; current: any; onPick: (d: any, recommended: boolean) => void; disabled: boolean; rep?: any }) {
   return (
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4" role="group" aria-label="Options, rendered">
       {choices.map(({ decision, recommended }) => {
-        const p = proposalFor(decision)
+        const p = proposalFor(decision, rep)
         const chk = proposalCheck(p)
         const on = sameDecision(decision, current)
         return (
@@ -257,6 +269,7 @@ function OptionTiles({ choices, current, onPick, disabled }: { choices: { decisi
             className={cn("flex min-w-0 flex-col gap-1.5 rounded-lg border bg-card p-2 text-left transition-colors hover:bg-muted/60 disabled:opacity-60", on && "border-primary ring-1 ring-primary")}>
             <span className="grid h-20 place-items-center overflow-hidden rounded-md border bg-background p-2">
               {p?.url ? <img src={p.url} alt={`${SYS} ${pickText(decision)}`} loading="lazy" className="block max-h-16 w-auto max-w-full object-contain" />
+                : p?.fallback ? <img src={p.fallback} alt={`${SYS} ${decision.use}, its story as written`} loading="lazy" className="block max-h-16 w-auto max-w-full object-contain opacity-80" />
                 : <span className="flex flex-col items-center gap-1 text-[11px] text-muted-foreground"><ImageBrokenIcon />No rendering</span>}
             </span>
             <span className="flex flex-wrap items-center gap-1 text-xs">
@@ -267,7 +280,9 @@ function OptionTiles({ choices, current, onPick, disabled }: { choices: { decisi
               {recommended && <Badge variant="outline" className="text-[10px]">Recommended</Badge>}
               {on && <span className="inline-flex items-center gap-0.5 text-primary"><CheckIcon />Chosen</span>}
               {chk && <span className={cn(chk.warn && "text-warning-soft-foreground")} title={chk.text}>{chk.text}</span>}
-              {p?.content && <span title={p.content}>{p.content.startsWith("icon") ? "Stand-in icon" : "Story's sample label"}</span>}
+              {p?.own && <span>With its own label and icon</span>}
+              {!p?.url && p?.fallback && <span>Its story as written</span>}
+              {p?.content && <span title={p.content}>{/stand-in|^icon/.test(p.content) ? "Stand-in icon" : "Story's sample label"}</span>}
             </span>
           </button>
         )
@@ -324,7 +339,7 @@ export function ReviewControls({ items, auto, pattern, options, label }: { items
   return (
     <div className="flex flex-col gap-2">
       {choices.length > 0 && (
-        <OptionTiles choices={choices} current={current} disabled={busy || off || locked}
+        <OptionTiles choices={choices} current={current} disabled={busy || off || locked} rep={items[0]}
           onPick={(r, recommended) => (sameDecision(r, current) ? undo("Choice removed") : recommended ? decide(auto, "Approved") : decide(r, `Changed to ${pickText(r)}`))} />
       )}
       {/* One size for the whole decision row: buttons, menu and the note field line up. */}

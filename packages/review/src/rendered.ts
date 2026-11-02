@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { latestEvals, lookProps, proposalKey, readProposals, readRendered, resolveTargets, type Config, type Proposal, type RenderedSet, type Styles } from '@snds/dsa/engine';
+import { cardPicks, latestEvals, lookProps, ownKey, ownOf, proposalKey, readProposals, readRendered, resolveTargets, type Config, type OwnContent, type Proposal, type RenderedSet, type Styles } from '@snds/dsa/engine';
 
 import { cookiesFor, openSurface, serveStatic } from '@snds/dsa';
 import { detectApp, ensureBrowser, startApp } from './apps.js';
@@ -150,14 +150,29 @@ export async function renderSignatures(opts: { root: string; config: Config; dat
   return out;
 }
 
-/** Every component and look props the review proposes: each recommendation, each scored alternative, each decision. */
-export async function wantedProposals(dataDir: string): Promise<Map<string, { use: string; props: Record<string, string> }>> {
+/**
+ * Every component and look props the review proposes: each card's own pick (with the size it auto-picks,
+ * which may be one no evaluation named), each recommendation, each scored alternative, each decision.
+ * The card's pick is also wanted with each element's own content (its words, accessible name and icon),
+ * keyed by that content, so the proposal shows the element as it would be, not a story's sample.
+ */
+export async function wantedProposals(dataDir: string, threshold?: number): Promise<Map<string, { use: string; props: Record<string, string>; own?: OwnContent }>> {
   const { evals } = await latestEvals(dataDir);
-  const out = new Map<string, { use: string; props: Record<string, string> }>();
+  let shots: Record<string, any> = {};
+  try { shots = JSON.parse(fs.readFileSync(path.join(dataDir, 'shots', 'index.json'), 'utf8')).shots ?? {}; } catch { /* no screenshots yet */ }
+  const picks = new Map<string, any>();
+  for (const c of cardPicks(dataDir, evals, threshold)) for (const id of c.ids) picks.set(id, c.auto);
+  const out = new Map<string, { use: string; props: Record<string, string>; own?: OwnContent }>();
+  const add = (r: any, own?: OwnContent | null) => {
+    if (r?.verdict !== 'replace' || !r.use) return;
+    out.set(proposalKey(r.use, r.props), { use: r.use, props: lookProps(r.props) });
+    if (own) out.set(ownKey(r.use, r.props, own), { use: r.use, props: lookProps(r.props), own });
+  };
   for (const e of evals) {
-    for (const r of [e, e.decided?.decision, ...(e.alternatives ?? [])] as any[]) {
-      if (r?.verdict === 'replace' && r.use) out.set(proposalKey(r.use, r.props), { use: r.use, props: lookProps(r.props) });
-    }
+    if (e.exception) continue;
+    const own = ownOf(e, shots[e.id]);
+    add(picks.get(e.id), own);
+    for (const r of [e, e.decided?.decision, ...(e.alternatives ?? [])] as any[]) add(r, r === e || r === e.decided?.decision ? own : null);
   }
   return out;
 }
@@ -177,12 +192,12 @@ export async function renderProposals(opts: { root: string; config: Config; data
   if (!fs.existsSync(sigFile)) throw new Error('No signatures yet. Run "dsa run" first.');
   const sigs: any[] = JSON.parse(fs.readFileSync(sigFile, 'utf8'));
   const sigOf = (use: string) => sigs.find(c => c.component === use && c.slot && c.file);
-  const want = await wantedProposals(opts.dataDir);
+  const want = await wantedProposals(opts.dataDir, opts.config.review?.threshold);
   const prev = opts.force ? {} : readProposals(opts.dataDir);
   const tHash = tokensHash(opts.root, opts.config);
   const hashOf = (use: string) => { const s = sigOf(use); return s ? hashFiles([s.file], tHash) : `none:${tHash}`; };
   const items: Record<string, Proposal> = {};
-  const todo: [string, { use: string; props: Record<string, string> }][] = [];
+  const todo: [string, { use: string; props: Record<string, string>; own?: OwnContent }][] = [];
   for (const [k, p] of want) {
     const c = prev[k];
     if (c && c.hash === hashOf(p.use) && (!c.shot || fs.existsSync(path.join(opts.dataDir, 'rendered', c.shot)))) items[k] = c; else todo.push([k, p]);
@@ -214,9 +229,9 @@ export async function renderProposals(opts: { root: string; config: Config; data
     try {
       for (const [k, p] of todo) {
         const s = sigOf(p.use);
-        if (!s) { items[k] = { ...p, check: 'none', note: `No ${p.use} signature with a data-slot to find it by in Storybook.`, hash: hashOf(p.use) }; continue; }
+        if (!s) { items[k] = { ...noOwn(p), check: 'none', note: `${p.use} isn't in the design system's Storybook in a form dsa can find (its root has no data-slot), so it can't be drawn.`, hash: hashOf(p.use) }; continue; }
         const candidates = stories.filter(x => stemOf(x.importPath) === stemOf(s.file)).sort((a, b) => rank(a) - rank(b)).slice(0, 8);
-        if (!candidates.length) { items[k] = { ...p, check: 'none', note: `No story for ${p.use} (${path.basename(s.file)}).`, hash: hashOf(p.use) }; continue; }
+        if (!candidates.length) { items[k] = { ...noOwn(p), check: 'none', note: `${p.use} has no story to draw it from (${path.basename(s.file)}).`, hash: hashOf(p.use) }; continue; }
         const args = argsParam(p.props);
         const hasProps = Object.keys(p.props).length > 0;
         // First every story as its authors wrote it: one that already shows these props shows them with real content
@@ -270,12 +285,26 @@ export async function renderProposals(opts: { root: string; config: Config; data
           const check: Proposal['check'] = top.contradicted ? 'closest' : top.unknown ? 'unverified' : 'exact';
           if (best && order[best.check] <= order[check]) continue;
           const file = `proposal-${sha(k).slice(0, 12)}.png`;
+          // The element's own words, name and icon in place of the story's: then the proposal is this element.
+          const own = p.own ? await run<{ own: boolean; why?: string }>(page, INJECT_OWN, { sel: `[data-dsa-p="${top.idx}"][data-slot="${s.slot}"]`, own: p.own }).catch(() => ({ own: false, why: 'its content could not be set' })) : null;
+          if (own?.own) await page.waitForTimeout(120);
           const shot = await shoot(page, `[data-dsa-p="${top.idx}"][data-slot="${s.slot}"]`, path.join(dir, file));
-          const content = set ? (iconSize && icon ? `icon from ${icon.story}` : 'story default') : undefined;
-          best = { ...p, check, shot: shot ? file : undefined, styles: top.styles, story: st.id, ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash: hashOf(p.use) };
+          const content = own?.own ? undefined : own?.why ? own.why : set ? (iconSize && icon ? `icon from ${icon.story}` : 'story default') : undefined;
+          best = { ...noOwn(p), check, shot: shot ? file : undefined, styles: top.styles, story: st.id, ...(own?.own ? { own: true } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash: hashOf(p.use) };
           if (check === 'exact') break;
         }
-        items[k] = best ?? { ...p, check: 'none', note: `${p.use} isn't visible in its stories (it may sit inside a closed overlay).`, hash: hashOf(p.use) };
+        if (!best) {
+          // Nothing to photograph with these props: show the component's first story as its authors wrote it, and say why.
+          let fallback: string | undefined;
+          try {
+            await page.goto(new URL(`iframe.html?id=${encodeURIComponent(candidates[0]!.id)}&viewMode=story`, sb.url).toString(), { waitUntil: 'domcontentloaded', timeout: 30000 });
+            await page.waitForTimeout(400);
+            const f = `fallback-${sha(k).slice(0, 12)}.png`;
+            if (await shoot(page, '#storybook-root > *, #root > *', path.join(dir, f))) fallback = f;
+          } catch { /* no fallback */ }
+          best = { ...noOwn(p), check: 'none', note: `${p.use} doesn't show in its stories: it may only appear inside something closed, like a menu or a dialog, and opening it didn't show it.${fallback ? ' Its story as written is shown instead.' : ''}`, story: candidates[0]!.id, ...(fallback ? { fallback } : {}), hash: hashOf(p.use) };
+        }
+        items[k] = best;
         rendered++;
         if (rendered % 10 === 0) log(`  rendered ${rendered}/${todo.length}…`);
       }
@@ -285,6 +314,44 @@ export async function renderProposals(opts: { root: string; config: Config; data
   log(`Proposed components: ${Object.keys(items).length} rendered with their props · ${exactCount()} exact (confirmed by the element's attributes).`);
   return { rendered, reused, exact: exactCount() };
 }
+
+/** A proposal as stored: its component and props; the content it was asked to show isn't kept. */
+const noOwn = (p: { use: string; props: Record<string, string>; own?: OwnContent }) => ({ use: p.use, props: p.props });
+
+/** Run a fixed in-page function with data as its argument (the function is a constant here, never built from data). */
+async function run<T = any>(page: any, src: string, arg?: unknown): Promise<T> {
+  const fn = await page.evaluateHandle(src);
+  try { return await page.evaluate(([f, a]: [any, unknown]) => f(a), [fn, arg]); }
+  finally { await fn.dispose().catch(() => {}); }
+}
+
+/**
+ * Runs in the page: put an element's own content into the rendered component. Its icon replaces the
+ * story's (or becomes the only child of an icon-only button), its words replace the sample label, its
+ * aria-label is set. An icon-only element whose icon wasn't captured keeps the stand-in, and says so.
+ */
+const INJECT_OWN = `({ sel, own }) => {
+  const el = document.querySelector(sel);
+  if (!el) return { own: false, why: 'the component was not found to set its content' };
+  const icons = Array.from(el.querySelectorAll('svg, [data-slot=icon]'));
+  const iconOnly = !own.text;
+  if (iconOnly && !own.icon) {
+    if (own.ariaLabel) el.setAttribute('aria-label', own.ariaLabel);
+    return { own: false, why: "stand-in icon: the app's own icon wasn't captured" };
+  }
+  let svg = null;
+  if (own.icon) { const t = document.createElement('template'); t.innerHTML = own.icon; svg = t.content.querySelector('svg'); }
+  if (iconOnly) { el.textContent = ''; if (svg) el.append(svg); }
+  else {
+    if (svg && icons[0]) icons[0].replaceWith(svg); else if (svg) el.prepend(svg);
+    // The label: the deepest element holding the sample's words, else the element itself.
+    const holders = Array.from(el.querySelectorAll('*')).filter(n => !n.closest('svg') && n.children.length === 0 && (n.textContent || '').trim());
+    if (holders.length) { holders[0].textContent = own.text; holders.slice(1).forEach(h => h.remove()); }
+    else { for (const n of Array.from(el.childNodes)) if (n.nodeType === 3) n.remove(); el.append(document.createTextNode(own.text)); }
+  }
+  if (own.ariaLabel) el.setAttribute('aria-label', own.ariaLabel);
+  return { own: true };
+}`;
 
 async function shoot(page: any, sel: string, file: string) {
   try {

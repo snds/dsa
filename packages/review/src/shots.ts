@@ -2,7 +2,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { groupKey, latestEvals, materializeRemotes, resolveTargets, targetRelative, type Config, type ElementEval } from '@snds/dsa/engine';
+import { BLANK_INSET, decodePng, groupKey, isBlank, latestEvals, materializeRemotes, resolveTargets, targetRelative, type Config, type ElementEval } from '@snds/dsa/engine';
 import { appSurface, openSurface } from '@snds/dsa';
 
 import { detectApp, discoverRoutes, ensureBrowser, linkCoreForChild, startApp } from './apps.js';
@@ -32,9 +32,9 @@ async function inPage<T = any>(page: any, src: string, arg?: unknown): Promise<T
 }
 
 /** Bump when finding or revealing elements changes, so earlier misses get another try. */
-const CRAWLER = 6;
+const CRAWLER = 7;
 
-interface Target { id: string; m: ElementEval['match']; steps?: { label: string; event: 'click' | 'dblclick' }[]; hints: string[] }
+interface Target { id: string; m: ElementEval['match']; steps?: { label: string; event: 'click' | 'dblclick' }[]; hints: string[]; where: string[] }
 
 /**
  * Words that point at the UI state an element needs: string literals in its gates (`viewMode === 'gallery'`,
@@ -53,6 +53,13 @@ export function hintsOf(e: ElementEval): string[] {
   for (const c of e.reach?.via ?? []) for (const w of c.replace(/(View|Panel|Section|Page|Modal|Drawer|Sheet|Lab)$/, '').replace(/([a-z])([A-Z])/g, '$1 $2').split(/\s+/)) add(w);
   return [...out].slice(0, 12);
 }
+/** Words in an element's file path (orders/OrderRow.tsx → orders, order, row): a page whose route has them is likely its page. */
+export function pathWords(file: string): string[] {
+  const out = new Set<string>();
+  for (const part of file.replace(/\.[\w]+$/, '').split(/[\/._-]+/)) for (const w of part.replace(/([a-z])([A-Z])/g, '$1 $2').split(/\s+/)) { const x = w.toLowerCase(); if (x.length >= 4 && !PATH_STOP.test(x)) out.add(x); }
+  return [...out];
+}
+const PATH_STOP = /^(apps?|src|lib|components?|views?|pages?|index|main|shared|common|features?|modules?|packages?|tsx|jsx|vue|html)$/;
 const STOP = /^(open|opened|show|shown|visible|true|false|null|undefined|mode|view|state|active|current|selected|editing|edit|value|props|items|item|length|setup|takeover|demo|route|hide|chrome|that|this|with|from|when|page|kind|type|enabled|disabled|dialog|popover)$/;
 
 /**
@@ -90,7 +97,17 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
   // A "not found" is only worth reusing if nothing about how we'd look for it changed: the crawler
   // itself (CRAWLER) and the reveal steps traced for this element. Otherwise a fix never gets a retry.
   const stepsKey = (e: ElementEval) => (e.reach?.steps ?? []).map(x => x.event + ':' + x.label).join('|');
-  const freshMiss = (entry: any, e: ElementEval) => !opts.retryMissing && fresh(entry, e) && entry.crawler === CRAWLER && (entry.steps ?? '') === stepsKey(e);
+  // …nor how the app is reached: its start, routes, flows, live surface and sign-in, and the build it serves.
+  // Fixing the app's setup retries its misses on the next run, no flag needed.
+  const setupKey = (target: string) => {
+    const surface: any = appSurface(opts.config.live, target);
+    const built = surface?.dir ? (() => { try { return fs.statSync(path.join(path.resolve(opts.root, surface.dir), 'index.html')).mtimeMs; } catch { return 0; } })() : 0;
+    const auth = surface?.auth ? (() => { try { return fs.statSync(path.resolve(opts.root, surface.auth)).mtimeMs; } catch { return 0; } })() : 0;
+    return crypto.createHash('sha1').update(JSON.stringify([opts.config.apps?.[target] ?? null, surface ?? null, opts.config.shots?.routes ?? null, opts.url ?? null, built, auth])).digest('hex').slice(0, 12);
+  };
+  const setups = new Map<string, string>();
+  const setupOf = (target: string) => { if (!setups.has(target)) setups.set(target, setupKey(target)); return setups.get(target)!; };
+  const freshMiss = (entry: any, e: ElementEval) => !opts.retryMissing && fresh(entry, e) && entry.crawler === CRAWLER && (entry.steps ?? '') === stepsKey(e) && entry.setup === setupOf(e.target);
   index.misses ??= {};
   const misses = index.misses;
   const plan = (mine: ElementEval[]) => {
@@ -152,7 +169,7 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
       const at = new Date().toISOString();
       const byId = new Map(s.need.map(e => [e.id, e]));
       for (const [id, v] of Object.entries<any>(r.shots)) { index.shots[id] = { ...v, at, fileHash: hashOf(byId.get(id)!) }; delete misses[id]; }
-      for (const id of r.missing) misses[id] = { at, fileHash: hashOf(byId.get(id)!), crawler: CRAWLER, steps: stepsKey(byId.get(id)!) };
+      for (const id of r.missing) misses[id] = { at, fileHash: hashOf(byId.get(id)!), crawler: CRAWLER, steps: stepsKey(byId.get(id)!), setup: setupOf(byId.get(id)!.target) };
       index.missing.push(...r.missing);
       index.pages.push(...r.pages);
       result.apps.push({ target: s.target, url: s.url, how: s.how, routes: s.routes.length, captured: Object.keys(r.shots).length });
@@ -195,7 +212,7 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
   const queue: string[] = o.routes.map(r => routeUrl(r, base));
   const firstUrls = new Set((o.first ?? []).map(r => routeUrl(r, base)));
   const seen = new Set<string>();
-  let remaining: Target[] = o.examples.map(e => ({ id: e.id, m: e.match, steps: e.reach?.steps?.map(x => ({ label: x.label, event: x.event })), hints: hintsOf(e) }));
+  let remaining: Target[] = o.examples.map(e => ({ id: e.id, m: e.match, steps: e.reach?.steps?.map(x => ({ label: x.label, event: x.event })), hints: hintsOf(e), where: pathWords(e.file) }));
   const replayed = new Set<string>();
   let replays = 0;
   const deadline = Date.now() + (o.maxMinutes ?? 12) * 60_000;
@@ -212,18 +229,25 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
     queue.sort((a, b) => score(b) - score(a));
   };
   const sweeper = (u: string) => async (revealedBy?: string) => {
-    const found: { id: string; score: number; ties: number }[] = await inPage(page, FIND_IN_PAGE, remaining);
+    const found: { id: string; score: number; ties: number; alike: number; with: string[] }[] = await inPage(page, FIND_IN_PAGE, remaining);
+    // Which line is which, when several want the same controls: the page's route names one of them, or it's a guess.
+    const onRoute = (id: string) => { const t = remaining.find(r => r.id === id); const at = decodeURIComponent(new URL(u).pathname + new URL(u).hash).toLowerCase(); return Boolean(t?.where.some(w => at.includes(w))); };
     for (const f of found) {
-      f.score = matchConfidence(f.score, f.ties);
+      const claim = [f.id, ...f.with];
+      const named = claim.filter(onRoute);
+      const claimants = named.length === 1 ? (named[0] === f.id ? 1 : claim.length) : claim.length;
+      f.score = matchConfidence(f.score, f.ties, f.alike, claimants);
+      (f as any).claimants = claimants;
       const file = `${f.id}.png`;
       // Measure before capturing (capture clears the marker): the same properties rendered signatures record,
       // and where it sits (landmarks, live ARIA, geometry) for the next evaluation.
       const styles = await inPage(page, `(id) => { const el = document.querySelector('[data-dsa-shot="' + CSS.escape(id) + '"]'); return el ? (${READ_STYLE})(el) : null; }`, f.id).catch(() => null);
       const placement = await inPage(page, `(id) => { const el = document.querySelector('[data-dsa-shot="' + CSS.escape(id) + '"]'); return el ? (${PLACE_IN_PAGE})(el) : null; }`, f.id).catch(() => null);
+      const content = await inPage(page, OWN_CONTENT, f.id).catch(() => null);
       const cap = await capture(page, f.id, path.join(o.dir, file));
       if (!cap) continue;
-      shots[f.id] = { file, page: u, matchScore: Math.round(f.score * 100) / 100, ties: f.ties, styles, placement, box: cap.box, revealedBy };
-      o.log(`  ${f.id} on ${u.replace(base.origin, '')}${revealedBy ? ` after ${revealedBy}` : ''} (match ${Math.round(f.score * 100)}%${f.ties > 1 ? `, a guess among ${f.ties} similar elements on the page` : ''})`);
+      shots[f.id] = { file, page: u, matchScore: Math.round(f.score * 100) / 100, ties: f.ties, alike: f.alike, ...((f as any).claimants > 1 ? { shared: (f as any).claimants } : {}), styles, placement, box: cap.box, revealedBy, content, ...(cap.blank ? { blank: true } : {}), ...(cap.covered ? { covered: true } : {}), ...(cap.via ? { via: cap.via } : {}) };
+      o.log(`  ${f.id} on ${u.replace(base.origin, '')}${revealedBy ? ` after ${revealedBy}` : ''} (match ${Math.round(f.score * 100)}%${(f as any).claimants > 1 ? `, ${(f as any).claimants} source lines want the same control` : f.ties > 1 ? (f.alike >= f.ties ? `, one of ${f.ties} alike on the page` : `, a guess among ${f.ties} similar elements on the page`) : ''})${cap.blank ? ' · captured but blank' : cap.covered ? ' · covered by another layer' : cap.via ? ` · shows on ${cap.via}` : ''}`);
     }
     remaining = remaining.filter(r => !shots[r.id]);
   };
@@ -601,12 +625,22 @@ const FIND_CONTROL = `(label) => {
 }`;
 
 /**
- * How sure a match is. The page scores every candidate; when several score within 0.05 of the best, the pick
- * among them is a guess, right about one time in `ties`, so the confidence is capped there. Below
- * PLACEMENT_MIN_MATCH a shot is still shown, but its placement doesn't feed the next evaluation.
+ * How sure a match is. The page scores every candidate; when several score within 0.05 of the best, the
+ * pick among them is a guess.
+ *
+ * - `alike` of the `ties` look the same (same tag and classes): whichever was picked, the photo shows how
+ *   the element looks, so a tie among look-alikes costs a little, not a cap. (Capping it at 1/ties hid
+ *   most correct-looking photos behind the review's 80% cut-off.)
+ * - Ties that look different cap it at a guess among the different ones: right about 1 time in that many.
+ * - `claimants` source lines want the same candidates (identical controls in two files): which line is which
+ *   is a guess, right 1 time in that many, unless the page's route names one (the caller passes 1 then).
+ *
+ * Below PLACEMENT_MIN_MATCH a shot is still taken, but its placement doesn't feed the next evaluation.
  */
-export function matchConfidence(score: number, ties: number): number {
-  return ties > 1 ? Math.min(score * 0.85, 1 / ties) : score;
+export function matchConfidence(score: number, ties: number, alike = 1, claimants = 1): number {
+  const distinct = Math.max(1, ties - Math.max(1, alike) + 1);
+  const looks = ties <= 1 ? score : distinct === 1 ? score * 0.95 : Math.min(score * 0.85, 1 / distinct);
+  return claimants > 1 ? Math.min(looks, 1 / claimants) : looks;
 }
 
 /**
@@ -618,13 +652,15 @@ const FIND_IN_PAGE = `(targets) => {
   const norm = (s) => s.replace(/\\s+/g, ' ').trim();
   // A button's words without its icons: icon fonts render their name as text ("add Colour").
   const words = (el) => { const c = el.cloneNode(true); c.querySelectorAll('[data-slot=icon], .material-symbols-outlined, .material-symbols-rounded, .material-icons, svg, [aria-hidden=true]').forEach(x => x.remove()); return c.textContent || ''; };
+  const look = (el) => el.tagName + '|' + Array.from(el.classList).sort().join(' ');
 
-  for (const t of targets) {
-    const els = Array.from(document.querySelectorAll(t.m.tag));
+  // Every candidate scored for every target, the ones already photographed included: a control matched by
+  // one source line still counts as a tie for the next, so two identical lines don't each read as certain.
+  const all = targets.map((t) => {
     const scored = [];
-    for (const el of els) {
+    for (const el of document.querySelectorAll(t.m.tag)) {
       const r = el.getBoundingClientRect();
-      if (!r.width || !r.height || el.closest('[data-dsa-shot]')) continue;
+      if (!r.width || !r.height) continue;
       const st = getComputedStyle(el);
       // Hidden until hover (row actions: invisible group-hover:visible) still counts; capture hovers it in.
       if (st.display === 'none' || (st.visibility === 'hidden' && !el.closest('[class*="group"]'))) continue;
@@ -638,35 +674,104 @@ const FIND_IN_PAGE = `(targets) => {
       const score = w ? s / w : 0;
       if (score >= 0.6) scored.push({ el, s: score });
     }
-    if (!scored.length) continue;
     scored.sort((a, b) => b.s - a.s);
-    const best = scored[0];
-    const ties = scored.filter(x => best.s - x.s < 0.05).length;
-    best.el.setAttribute('data-dsa-shot', t.id);
-    out.push({ id: t.id, score: best.s, ties });
+    const tied = scored.length ? scored.filter(x => scored[0].s - x.s < 0.05) : [];
+    return { t, scored, tied };
+  });
+  for (const a of all) {
+    if (!a.tied.length) continue;
+    // The best not already taken (by this sweep, or photographed before); a taken one only when nothing else matches.
+    const pick = a.tied.find(x => !x.el.closest('[data-dsa-shot]')) || a.scored.find(x => !x.el.closest('[data-dsa-shot]'));
+    if (!pick) continue;
+    const alike = a.tied.filter(x => look(x.el) === look(pick.el)).length;
+    // Other source lines whose best candidates overlap this one's: they want the same controls.
+    const others = all.filter(b => b !== a && b.tied.some(x => a.tied.some(y => y.el === x.el))).map(b => b.t.id);
+    pick.el.setAttribute('data-dsa-shot', a.t.id);
+    out.push({ id: a.t.id, score: pick.s, ties: a.tied.length, alike, with: others });
   }
   return out;
 }`;
 
 /**
- * Capture one marked element with context around it. The image is left untouched (no outline drawn
- * into it, so shadows, focus rings, and other effects stay visible); the element's box within the
- * crop is returned, and the report draws a thin highlight from it.
+ * Runs in the page: the element's own content, so its proposal can be drawn with it instead of a story's
+ * sample: its words (icons left out), its aria-label, and its icon's markup. The icon keeps its shape and
+ * takes the system's colour (currentColor); scripts, foreignObject, event handlers and javascript: URLs
+ * are stripped, and a large icon is left out.
  */
-async function capture(page: any, id: string, file: string): Promise<{ box: { x: number; y: number; w: number; h: number; cw: number; ch: number } } | null> {
+const OWN_CONTENT = `(id) => {
+  const el = document.querySelector('[data-dsa-shot="' + CSS.escape(id) + '"]');
+  if (!el) return null;
+  const c = el.cloneNode(true);
+  c.querySelectorAll('svg, [data-slot=icon], .material-symbols-outlined, .material-symbols-rounded, .material-icons, [aria-hidden=true]').forEach(x => x.remove());
+  const text = (c.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 80);
+  const svg = el.querySelector('svg');
+  let icon = null;
+  if (svg) {
+    const s = svg.cloneNode(true);
+    s.querySelectorAll('script, foreignObject').forEach(x => x.remove());
+    for (const n of [s, ...s.querySelectorAll('*')]) for (const a of Array.from(n.attributes)) if (/^on/i.test(a.name) || /javascript:/i.test(a.value) || a.name === 'class' || a.name === 'style') n.removeAttribute(a.name);
+    const cs = getComputedStyle(svg), r = svg.getBoundingClientRect();
+    s.setAttribute('width', String(Math.round(r.width))); s.setAttribute('height', String(Math.round(r.height)));
+    s.setAttribute('fill', cs.fill === 'none' ? 'none' : 'currentColor');
+    s.setAttribute('stroke', cs.stroke === 'none' ? 'none' : 'currentColor');
+    if (cs.stroke !== 'none') s.setAttribute('stroke-width', cs.strokeWidth);
+    s.setAttribute('data-slot', 'icon');
+    icon = s.outerHTML.length <= 4000 ? s.outerHTML : null;
+  }
+  return { text: text || null, ariaLabel: el.getAttribute('aria-label'), icon };
+}`;
+
+/**
+ * Runs in the page: is the element what shows at its centre? It is when the topmost element there is it,
+ * inside it, or holds it (a label span over a button). Covered by another layer (a toast, a sticky bar,
+ * an overlay's scrim), a screenshot of its box shows something else.
+ */
+const TOP_AT_CENTER = `(sel) => {
+  const el = document.querySelector(sel);
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  return Boolean(hit && (hit === el || el.contains(hit) || hit.contains(el)));
+}`;
+
+export interface Captured {
+  box: { x: number; y: number; w: number; h: number; cw: number; ch: number };
+  /** Nothing painted inside the box, after hover and focus were tried: the photo shows an empty box. */
+  blank?: true;
+  /** Another layer sits over its centre: the photo shows that, not the element. */
+  covered?: true;
+  /** What made it paint: hovering or focusing it. */
+  via?: 'hover' | 'focus';
+}
+
+/**
+ * Capture one marked element with context around it, and check the photo shows it. Fonts load first (an
+ * icon font draws nothing until then). The element must be the top layer at its centre, and its box must
+ * have painted pixels; if not, hover it, then focus it, and look again. What still fails is recorded
+ * (blank, covered), so the review says "captured but blank" instead of showing an empty box as evidence.
+ * The image is left untouched (no outline drawn into it); the element's box within the crop is returned,
+ * and the report draws a thin highlight from it.
+ */
+async function capture(page: any, id: string, file: string): Promise<Captured | null> {
   const sel = `[data-dsa-shot="${id}"]`;
   try {
     // Center it, reveal hover-only controls (row actions fade in on hover), and let layout settle.
     await inPage(page, `(sel) => { const el = document.querySelector(sel); if (el) el.scrollIntoView({ block: 'center', inline: 'center' }); }`, sel);
+    await page.evaluate(`document.fonts ? Promise.race([document.fonts.ready.then(() => true), new Promise(r => setTimeout(r, 3000))]) : true`).catch(() => {});
     const hidden = await inPage<boolean>(page, `(sel) => { let el = document.querySelector(sel); if (el && getComputedStyle(el).visibility === 'hidden') return true; let o = 1; while (el && el !== document.body) { o *= Number(getComputedStyle(el).opacity); el = el.parentElement; } return o < 0.3; }`, sel);
-    if (hidden) await page.locator(sel).first().hover({ force: true, timeout: 2000 }).catch(() => {});
-    let box: any = null;
-    for (let i = 0; i < 8; i++) {
-      await page.waitForTimeout(i ? 120 : 200);
-      const b = await page.locator(sel).first().boundingBox();
-      if (b && box && Math.abs(b.x - box.x) < 0.5 && Math.abs(b.y - box.y) < 0.5 && Math.abs(b.width - box.width) < 0.5) { box = b; break; }
-      box = b;
-    }
+    let via: Captured['via'];
+    if (hidden) { await page.locator(sel).first().hover({ force: true, timeout: 2000 }).catch(() => {}); via = 'hover'; }
+    const settle = async () => {
+      let box: any = null;
+      for (let i = 0; i < 8; i++) {
+        await page.waitForTimeout(i ? 120 : 200);
+        const b = await page.locator(sel).first().boundingBox();
+        if (b && box && Math.abs(b.x - box.x) < 0.5 && Math.abs(b.y - box.y) < 0.5 && Math.abs(b.width - box.width) < 0.5) { box = b; break; }
+        box = b;
+      }
+      return box;
+    };
+    const box = await settle();
     if (!box || box.width < 2 || box.height < 2) return null;
     const vp = page.viewportSize();
     // Context scales with the element; small controls still get enough surroundings to recognize them.
@@ -675,18 +780,37 @@ async function capture(page: any, id: string, file: string): Promise<{ box: { x:
     cw = Math.min(cw, vp.width); ch = Math.min(ch, vp.height);
     let cx = box.x + box.width / 2 - cw / 2, cy = box.y + box.height / 2 - ch / 2;
     cx = Math.max(0, Math.min(cx, vp.width - cw)); cy = Math.max(0, Math.min(cy, vp.height - ch));
-    await page.screenshot({ path: file, clip: { x: cx, y: cy, width: cw, height: ch } });
     const r = (n: number) => Math.round(n * 10) / 10;
-    return { box: { x: r(box.x - cx), y: r(box.y - cy), w: r(box.width), h: r(box.height), cw: r(cw), ch: r(ch) } };
+    const rel = { x: r(box.x - cx), y: r(box.y - cy), w: r(box.width), h: r(box.height), cw: r(cw), ch: r(ch) };
+    const shoot = async () => {
+      const buf: Buffer = await page.screenshot({ clip: { x: cx, y: cy, width: cw, height: ch } });
+      let blank = false;
+      try { blank = isBlank(decodePng(buf), rel, 2, BLANK_INSET); } catch { /* an image we can't read: keep it */ }
+      const top = await inPage<boolean>(page, TOP_AT_CENTER, sel).catch(() => true);
+      return { buf, blank, top };
+    };
+    let shot = await shoot();
+    // Hover-only content, then focus-only (a focus ring, a revealed label): one try each.
+    for (const how of ['hover', 'focus'] as const) {
+      if (!shot.blank && shot.top) break;
+      if (how === 'hover') await page.locator(sel).first().hover({ force: true, timeout: 2000 }).catch(() => {});
+      else await page.locator(sel).first().focus({ timeout: 2000 }).catch(() => {});
+      await page.waitForTimeout(250);
+      const again = await shoot();
+      if ((!again.blank && again.top) || (shot.blank && !again.blank)) { shot = again; via = how; }
+    }
+    fs.writeFileSync(file, shot.buf);
+    return { box: rel, ...(shot.blank ? { blank: true as const } : {}), ...(!shot.top ? { covered: true as const } : {}), ...(via ? { via } : {}) };
   } catch { return null; }
   finally {
     await inPage(page, `(sel) => { const el = document.querySelector(sel); if (el) el.removeAttribute('data-dsa-shot'); }`, sel).catch(() => {});
     await page.mouse.move(0, 0).catch(() => {});
+    await page.evaluate(`document.activeElement && document.activeElement.blur && document.activeElement.blur()`).catch(() => {});
   }
 }
 
 /** For tests: the in-page scripts and the helper that runs them. */
-export const __test = { inPage, FIND_IN_PAGE, CANDIDATES, MARK_SEEN, PLACE_IN_PAGE };
+export const __test = { inPage, FIND_IN_PAGE, CANDIDATES, MARK_SEEN, PLACE_IN_PAGE, TOP_AT_CENTER, OWN_CONTENT, capture };
 
 /** One headless capture pass over a running app (the workbench's before/after uses it on two copies of the app). */
 export const captureSession = session;

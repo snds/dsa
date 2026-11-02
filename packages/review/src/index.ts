@@ -134,6 +134,9 @@ export default defineAddon({
           notes.push(`screenshots skipped: ${firstLine(e)}`);
           logEvent(dataDir, { level: 'warning', source: 'Screenshots', message: 'Screenshots were skipped.', detail: firstLine(e) });
         }
+        // Again, now that photos recorded each element's own content and the evidence may have changed a
+        // pick: draw what the cards will propose. Everything already drawn is reused.
+        try { await renderProposals({ root, config, dataDir, log }); } catch (e) { notes.push(`proposed components not rendered: ${firstLine(e)}`); }
       },
     },
   ],
