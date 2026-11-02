@@ -152,6 +152,65 @@ export const RatchetReportSchema = z
   })
   .describe("Output of `dsa ratchet`.");
 
+const ItemStatusSchema = z.enum(["done", "partial", "missing", "na", "unanswered"]);
+const MeasuredStatusSchema = z.enum(["done", "partial", "missing"]);
+
+export const ChecklistAnswersSchema = z
+  .object({
+    $schema: z.string().optional(),
+    items: z.record(
+      z.string().describe("A checklist item id, such as agents.genUi."),
+      z.object({
+        status: z.enum(["done", "partial", "missing", "na"]),
+        note: z.string().optional().describe("Shown as the item's evidence."),
+      }),
+    ),
+  })
+  .describe("dsa.checklist.json: the team's answers for checklist items the scan can't measure, or overrides of what it measured.");
+
+export const ChecklistReportSchema = z
+  .object({
+    meta: MetaSchema,
+    root: z.string(),
+    system: z.string(),
+    answersPath: z.string().nullable(),
+    summary: z.object({
+      items: z.number().int().min(0),
+      measured: z.number().int().min(0),
+      answered: z.number().int().min(0),
+      unanswered: z.number().int().min(0),
+      score: z.number().min(0).max(1).nullable().describe("done + half of partial, over items that apply."),
+    }),
+    areas: z.array(
+      z.object({
+        id: z.string(),
+        title: z.string(),
+        applicable: z.number().int().min(0),
+        done: z.number().int().min(0),
+        partial: z.number().int().min(0),
+        missing: z.number().int().min(0),
+        unanswered: z.number().int().min(0),
+        score: z.number().min(0).max(1).nullable(),
+      }),
+    ),
+    items: z.array(
+      z.object({
+        id: z.string(),
+        area: z.string(),
+        title: z.string(),
+        about: z.string(),
+        size: z.enum(["S", "M", "L"]),
+        status: ItemStatusSchema,
+        source: z.enum(["measured", "answered", "overridden", "none"]),
+        evidence: z.array(z.string()),
+        measured: z.object({ status: MeasuredStatusSchema, evidence: z.array(z.string()) }).optional().describe("What the scan found, when an answer overrode it."),
+        note: z.string().optional(),
+      }),
+    ),
+    unknownAnswers: z.array(z.string()),
+  })
+  .describe("Output of `dsa checklist`.");
+
 export const SCHEMA_BASE_URL = "https://github.com/snds/dsa/schema";
 
 export interface SchemaFile {
@@ -166,6 +225,8 @@ export const SCHEMA_FILES: SchemaFile[] = [
   { file: "patterns-report.json", title: "dsa patterns report", schema: PatternsReportSchema },
   { file: "suggestion-record.json", title: "dsa suggestion record", schema: SuggestionRecordSchema },
   { file: "ratchet-report.json", title: "dsa ratchet report", schema: RatchetReportSchema },
+  { file: "checklist-report.json", title: "dsa checklist report", schema: ChecklistReportSchema },
+  { file: "checklist-answers.json", title: "dsa.checklist.json", schema: ChecklistAnswersSchema },
 ];
 
 export function toJsonSchema(entry: SchemaFile): Record<string, unknown> {

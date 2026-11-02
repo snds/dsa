@@ -21,6 +21,8 @@ export { loadDecisions, saveDecisions, ignoreCandidate, type DecisionsFile, type
 export { computeAdoption, findLookAlikes, type AdoptionMetrics, type Adoption, type Counts, type Inventory, type ComponentUsage, type CorrectUse, type OverrideFinding, type SpreadFinding, type LookAlikeFinding, type RawElementFinding, type AdoptionOptions, type ViolationCounts } from "./metrics/adoption.js";
 export { componentFamilies, patternCatalog, canonicalComponent, familyOf, catalogComponentNames, type Family, type CatalogPattern } from "./data/index.js";
 export { formatScan, formatPatterns, formatRatchet, table } from "./report/text.js";
+export { checklistFromContext, readAnswers, AREAS as CHECKLIST_AREAS, ITEMS as CHECKLIST_ITEMS, ANSWERS_FILENAME, type ChecklistReport, type ChecklistResult, type ChecklistItem, type ChecklistOptions, type AreaScore, type AreaId, type ItemStatus, type Answer, type AnswersFile, type Detection } from "./checklist/index.js";
+export { formatChecklist, checklistMarkdown } from "./report/checklist.js";
 export { createProgram, type CliIo } from "./cli.js";
 export { dsaVersion } from "./version.js";
 export { buildSystemModel, discoverSources, type SystemModel, type SourceCandidate, type SourceDiscovery } from "./model/index.js";

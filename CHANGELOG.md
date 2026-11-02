@@ -8,6 +8,18 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- `dsa checklist`: a design-system health checklist with agent readiness built in
+  ([docs/checklist.md](docs/checklist.md)). It has 78 items in 13 areas. The scan measures 52 of
+  them from the same reading as `dsa scan`: tokens by tier, group and mode, component kinds, variant
+  axes and anatomy, docs, story and test coverage by component, adoption and correct use, the ratchet,
+  and agent artifacts (component manifests, DTCG tokens, llms.txt, AGENTS.md and editor rules,
+  SKILL.md, an MCP server package or `profile.agent.mcpServer`, MCP configs, lint guard rails, evals).
+  Every measured item carries its evidence. The team answers the rest, or overrides the scan, in
+  `dsa.checklist.json` (schema `schema/checklist-answers.json`). An override keeps what the scan
+  found. Areas score done plus half of partial over the items that apply; unanswered items are listed,
+  not scored. `--markdown` writes a page to share. In a repo with no system source, the system-side
+  items are left to the team instead of marked missing.
+
 - The scan relay ([docs/relay.md](docs/relay.md)): a published dashboard re-scans without the viewer
   handling a token. One Web Fetch handler (`@snds/dsa/relay`) holds the runner credential as an
   environment secret, signs viewers in with GitHub's OAuth web flow (no scopes; access to the repo is

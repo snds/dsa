@@ -1,0 +1,1789 @@
+{
+  "$id": "https://github.com/snds/dsa/schema/checklist-report.json",
+  "title": "dsa checklist report",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "meta": {
+      "type": "object",
+      "properties": {
+        "dsaVersion": {
+          "type": "string"
+        },
+        "generatedAt": {
+          "type": "string"
+        },
+        "config": {
+          "type": "object",
+          "properties": {
+            "$schema": {
+              "description": "JSON Schema URL for editor support.",
+              "type": "string"
+            },
+            "profile": {
+              "description": "The design system's profile module: a path relative to this file, or a package name. See docs/architecture.md.",
+              "type": "string"
+            },
+            "system": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "default": "design-system",
+                  "description": "Human name of the design system being measured.",
+                  "type": "string"
+                },
+                "packages": {
+                  "default": [],
+                  "description": "Import sources that count as design-system components (exact name or package prefix).",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "localAliases": {
+                  "default": [],
+                  "description": "In-repo import sources that are the design system (shadcn-style owned source), e.g. @/components/ui.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "tagPrefixes": {
+                  "description": "Element tag prefixes it owns (\"ck-\" maps <ck-card> to Card): Angular selectors, global Vue components, web components.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "mainRef": {
+                  "description": "Ref treated as the latest core for pin currency (default origin/main, then main).",
+                  "type": "string"
+                },
+                "children": {
+                  "description": "Child libraries built on the core (a product kit, a prototype). Scored on their own; they consume the core.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "description": "Library name."
+                      },
+                      "packages": {
+                        "default": [],
+                        "description": "Packages it publishes.",
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "localAliases": {
+                        "description": "In-repo import sources that are this library.",
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "tagPrefixes": {
+                        "description": "Element tag prefixes it owns (\"ck-\" maps <ck-card> to Card): Angular selectors, global Vue components, web components.",
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "path": {
+                        "description": "Folder of its code, relative to the config root (another checkout may be outside it, e.g. ../prototype).",
+                        "type": "string"
+                      },
+                      "sources": {
+                        "description": "Folders of its code, when there are several: inside the repo or in another checkout (\"../vendor/ds/packages/ui\"), or a glob of package folders (\"../vendor/ds/packages/*\", which also picks up its tokens package). With `git`, folders inside the clone. Set by `dsa sources --pin` or Settings → Sources. Without `path` or `sources`, dsa finds them.",
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "git": {
+                        "description": "Clone from here when `path` is missing (or when runs are told to use remotes). Only ever read.",
+                        "type": "object",
+                        "properties": {
+                          "url": {
+                            "type": "string"
+                          },
+                          "ref": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "url"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "aliases": {
+                        "description": "Import aliases beyond tsconfig paths, e.g. { \"@/\": \"src/\" }, relative to this folder.",
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "exclude": {
+                        "description": "Paths to skip inside this folder (vendored copies, generated code).",
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "pin": {
+                        "description": "A file holding the core commit SHA this code is pinned to; currency is then days and commits behind core's main.",
+                        "type": "object",
+                        "properties": {
+                          "file": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "file"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "owner": {
+                        "description": "Team that owns it; findings about it are routed here.",
+                        "type": "string"
+                      },
+                      "repo": {
+                        "description": "GitHub repo \"owner/name\" that receives its issues.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "packages"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "path": {
+                  "description": "Folder of its code, relative to the config root (another checkout may be outside it, e.g. ../prototype).",
+                  "type": "string"
+                },
+                "sources": {
+                  "description": "Folders of its code, when there are several: inside the repo or in another checkout (\"../vendor/ds/packages/ui\"), or a glob of package folders (\"../vendor/ds/packages/*\", which also picks up its tokens package). With `git`, folders inside the clone. Set by `dsa sources --pin` or Settings → Sources. Without `path` or `sources`, dsa finds them.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "git": {
+                  "description": "Clone from here when `path` is missing (or when runs are told to use remotes). Only ever read.",
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    },
+                    "ref": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": false
+                },
+                "aliases": {
+                  "description": "Import aliases beyond tsconfig paths, e.g. { \"@/\": \"src/\" }, relative to this folder.",
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "exclude": {
+                  "description": "Paths to skip inside this folder (vendored copies, generated code).",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "pin": {
+                  "description": "A file holding the core commit SHA this code is pinned to; currency is then days and commits behind core's main.",
+                  "type": "object",
+                  "properties": {
+                    "file": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "file"
+                  ],
+                  "additionalProperties": false
+                },
+                "owner": {
+                  "description": "Team that owns it; findings about it are routed here.",
+                  "type": "string"
+                },
+                "repo": {
+                  "description": "GitHub repo \"owner/name\" that receives its issues.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "packages",
+                "localAliases"
+              ],
+              "additionalProperties": false
+            },
+            "discovery": {
+              "description": "Finding the system's source when `system.path` / `system.sources` are not set.",
+              "type": "object",
+              "properties": {
+                "threshold": {
+                  "default": 0.9,
+                  "description": "Confidence a found folder needs before dsa reads it as the system's source (0–1).",
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "required": [
+                "threshold"
+              ],
+              "additionalProperties": false
+            },
+            "consumers": {
+              "description": "Consumers, listed explicitly. When absent, workspaces that depend on a system package are found.",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Consumer name (an app)."
+                  },
+                  "path": {
+                    "description": "Folder of its code, relative to the config root (another checkout may be outside it, e.g. ../prototype).",
+                    "type": "string"
+                  },
+                  "sources": {
+                    "description": "Folders of its code, when there are several: inside the repo or in another checkout (\"../vendor/ds/packages/ui\"), or a glob of package folders (\"../vendor/ds/packages/*\", which also picks up its tokens package). With `git`, folders inside the clone. Set by `dsa sources --pin` or Settings → Sources. Without `path` or `sources`, dsa finds them.",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "git": {
+                    "description": "Clone from here when `path` is missing (or when runs are told to use remotes). Only ever read.",
+                    "type": "object",
+                    "properties": {
+                      "url": {
+                        "type": "string"
+                      },
+                      "ref": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "aliases": {
+                    "description": "Import aliases beyond tsconfig paths, e.g. { \"@/\": \"src/\" }, relative to this folder.",
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "exclude": {
+                    "description": "Paths to skip inside this folder (vendored copies, generated code).",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "pin": {
+                    "description": "A file holding the core commit SHA this code is pinned to; currency is then days and commits behind core's main.",
+                    "type": "object",
+                    "properties": {
+                      "file": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "file"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "owner": {
+                    "description": "Team that owns it; findings about it are routed here.",
+                    "type": "string"
+                  },
+                  "repo": {
+                    "description": "GitHub repo \"owner/name\" that receives its issues.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "extraRepos": {
+              "description": "Consumers in other checkouts, added to the ones found.",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Consumer name (an app)."
+                  },
+                  "path": {
+                    "description": "Folder of its code, relative to the config root (another checkout may be outside it, e.g. ../prototype).",
+                    "type": "string"
+                  },
+                  "sources": {
+                    "description": "Folders of its code, when there are several: inside the repo or in another checkout (\"../vendor/ds/packages/ui\"), or a glob of package folders (\"../vendor/ds/packages/*\", which also picks up its tokens package). With `git`, folders inside the clone. Set by `dsa sources --pin` or Settings → Sources. Without `path` or `sources`, dsa finds them.",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "git": {
+                    "description": "Clone from here when `path` is missing (or when runs are told to use remotes). Only ever read.",
+                    "type": "object",
+                    "properties": {
+                      "url": {
+                        "type": "string"
+                      },
+                      "ref": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "aliases": {
+                    "description": "Import aliases beyond tsconfig paths, e.g. { \"@/\": \"src/\" }, relative to this folder.",
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "exclude": {
+                    "description": "Paths to skip inside this folder (vendored copies, generated code).",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "pin": {
+                    "description": "A file holding the core commit SHA this code is pinned to; currency is then days and commits behind core's main.",
+                    "type": "object",
+                    "properties": {
+                      "file": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "file"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "owner": {
+                    "description": "Team that owns it; findings about it are routed here.",
+                    "type": "string"
+                  },
+                  "repo": {
+                    "description": "GitHub repo \"owner/name\" that receives its issues.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "internalConsumers": {
+              "description": "Consumers the system team owns (docs, Storybook): scored, but not counted toward cross-consumer clusters.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "scan": {
+              "type": "object",
+              "properties": {
+                "include": {
+                  "default": [
+                    "**/*.tsx",
+                    "**/*.jsx"
+                  ],
+                  "description": "Glob patterns of files to scan, relative to the config root.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "exclude": {
+                  "default": [
+                    "**/node_modules/**",
+                    "**/dist/**",
+                    "**/*.test.tsx",
+                    "**/*.spec.tsx",
+                    "**/*.stories.tsx"
+                  ],
+                  "description": "Glob patterns to leave out.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "include",
+                "exclude"
+              ],
+              "additionalProperties": false
+            },
+            "hosts": {
+              "type": "object",
+              "properties": {
+                "by": {
+                  "default": "file",
+                  "description": "What counts as one host when counting pattern spread: a file or its directory.",
+                  "type": "string",
+                  "enum": [
+                    "file",
+                    "dir"
+                  ]
+                }
+              },
+              "required": [
+                "by"
+              ],
+              "additionalProperties": false
+            },
+            "patterns": {
+              "type": "object",
+              "properties": {
+                "minOccurrences": {
+                  "default": 3,
+                  "description": "Occurrences needed before a composition is more than a snowflake (rule of three).",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "minHosts": {
+                  "default": 2,
+                  "description": "Distinct hosts needed before a composition is more than a snowflake.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "minComponents": {
+                  "default": 2,
+                  "description": "Minimum design-system or local components in a composition for it to be considered.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "ignoreIgnoredTimes": {
+                  "default": 3,
+                  "description": "A candidate ignored this many times is parked and no longer raised.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "minOccurrences",
+                "minHosts",
+                "minComponents",
+                "ignoreIgnoredTimes"
+              ],
+              "additionalProperties": false
+            },
+            "correctUse": {
+              "type": "object",
+              "properties": {
+                "rawElements": {
+                  "default": [
+                    "button"
+                  ],
+                  "description": "Plain HTML tags that bypass the design system when written in a consumer (counted as rawElements). An element handed to a component through a prop, e.g. render={<button />}, is the system's element and isn't counted.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "elementMap": {
+                  "description": "The system's element map (which native elements it replaces, and with what), relative to the config root. Overrides the profile's.",
+                  "type": "string"
+                },
+                "nativeLookalikes": {
+                  "description": "Native elements that imitate a component: { \"select\": \"Select\" }. \"input[checkbox]\" keys set input types. Overrides entries from the element map.",
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "exceptionsFile": {
+                  "description": "Each app's element-map exceptions, relative to the app. Overrides the profile's.",
+                  "type": "string"
+                },
+                "deprecated": {
+                  "description": "Deprecated components and their replacements: { OldModal: Modal }.",
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "rawElements"
+              ],
+              "additionalProperties": false
+            },
+            "tokens": {
+              "type": "object",
+              "properties": {
+                "patterns": {
+                  "description": "Regex sources that count as a token reference in styles.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": false
+            },
+            "tailwind": {
+              "description": "Tailwind / shadcn-style systems: read classes the way the repo's own lint does.",
+              "type": "object",
+              "properties": {
+                "tierLeakageSpec": {
+                  "description": "Leak grammar shared with the repo's lint rule. Overrides the profile's.",
+                  "type": "string"
+                },
+                "semanticCss": {
+                  "description": "CSS declaring --color-<name> semantic utilities. Overrides the profile's.",
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  ]
+                },
+                "classNameOverrides": {
+                  "description": "\"leaky\" (default): className counts as an override only when it carries drift.",
+                  "type": "string",
+                  "enum": [
+                    "leaky",
+                    "any"
+                  ]
+                },
+                "arbitraryValues": {
+                  "description": "Which arbitrary values count as drift (default color).",
+                  "type": "string",
+                  "enum": [
+                    "color",
+                    "all",
+                    "none"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "apps": {
+              "description": "Per-app switches, keyed by app or workspace name. Anything not listed is fully measured.",
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "versions": {
+                    "description": "Measure package versions and pin currency (default on).",
+                    "type": "boolean"
+                  },
+                  "components": {
+                    "description": "Measure component use and overrides (default on).",
+                    "type": "boolean"
+                  },
+                  "lookalikes": {
+                    "description": "Measure native look-alikes (default on). Usually off for Storybook.",
+                    "type": "boolean"
+                  },
+                  "tokens": {
+                    "description": "Measure token compliance (default on).",
+                    "type": "boolean"
+                  },
+                  "tokenSkip": {
+                    "description": "Files left out of token compliance, globs relative to the app.",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "start": {
+                    "description": "How to start the app for screenshots, e.g. \"npm run dev -- --port {port}\".",
+                    "type": "string"
+                  },
+                  "url": {
+                    "description": "URL once started; {port} is filled in.",
+                    "type": "string"
+                  },
+                  "routes": {
+                    "description": "Pages to visit; replaces the routes found in the source.",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "extraRoutes": {
+                    "description": "Pages visited first, added to the ones found in the source.",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "flows": {
+                    "description": "Written-down UI sequences that reveal elements only a filled field or an upload shows.",
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "route": {
+                          "type": "string"
+                        },
+                        "steps": {
+                          "type": "array",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "click": {
+                                    "type": "string"
+                                  },
+                                  "nth": {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "within": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "click"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "dblclick": {
+                                    "type": "string"
+                                  },
+                                  "nth": {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "within": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "dblclick"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "hover": {
+                                    "type": "string"
+                                  },
+                                  "nth": {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "within": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "hover"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "check": {
+                                    "type": "string"
+                                  },
+                                  "nth": {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "within": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "check"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "fill": {
+                                    "type": "object",
+                                    "properties": {
+                                      "label": {
+                                        "type": "string"
+                                      },
+                                      "text": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "label",
+                                      "text"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "nth": {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "within": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "fill"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "press": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "press"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "upload": {
+                                    "type": "string"
+                                  },
+                                  "nth": {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "within": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "upload"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "wait": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "wait"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ]
+                          }
+                        },
+                        "reveals": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "notes": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "route",
+                        "steps"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "screenshots": {
+                    "description": "false: never start this app for screenshots.",
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "review": {
+              "description": "Element review (the review add-on).",
+              "type": "object",
+              "properties": {
+                "threshold": {
+                  "description": "Below this confidence a human decides (default 0.9).",
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "labPaths": {
+                  "description": "Specimen pages, globs relative to each app. Overrides the profile's.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "decisionsFile": {
+                  "description": "Each app's review decisions, relative to the app. Overrides the profile's.",
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "rendered": {
+              "description": "Rendered signatures measured in the system's Storybook (the review add-on).",
+              "type": "object",
+              "properties": {
+                "autoStart": {
+                  "type": "boolean"
+                },
+                "useStatic": {
+                  "description": "Measure the static Storybook build instead of starting Storybook.",
+                  "type": "boolean"
+                },
+                "storiesPerComponent": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "maxMinutes": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false
+            },
+            "shots": {
+              "description": "App screenshots for element review (the review add-on).",
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string"
+                },
+                "routes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "auto": {
+                  "description": "Take screenshots on every run.",
+                  "type": "boolean"
+                },
+                "reveal": {
+                  "description": "Open menus, tabs and sheets to find hidden elements (default on).",
+                  "type": "boolean"
+                },
+                "perGroup": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "perQuestion": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "maxPages": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "maxActions": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "maxDepth": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "maxMinutes": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "maxAgeDays": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "waitMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "additionalProperties": false
+            },
+            "modules": {
+              "description": "Optional modules. Off modules keep their settings; they just don't run.",
+              "type": "object",
+              "properties": {
+                "figma": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            },
+            "figma": {
+              "description": "Figma library usage (the figma add-on).",
+              "type": "object",
+              "properties": {
+                "teamIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "projectIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "fileKeys": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "libraries": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "fileKey": {
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "fileKey"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "links": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "url": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "editedWithinDays": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "maxFiles": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                }
+              },
+              "additionalProperties": false
+            },
+            "github": {
+              "type": "object",
+              "properties": {
+                "defaultRepo": {
+                  "description": "Repo that receives findings whose owner has none.",
+                  "type": "string"
+                },
+                "labels": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": false
+            },
+            "agents": {
+              "description": "Agent workbench (the agent add-on).",
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "enum": [
+                    "claude-code",
+                    "cursor"
+                  ]
+                },
+                "model": {
+                  "type": "string"
+                },
+                "cursorModel": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "advise",
+                    "try"
+                  ]
+                },
+                "timeoutMinutes": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false
+            },
+            "report": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "timeZone": {
+                  "description": "IANA time zone for dates in the report, e.g. \"America/Los_Angeles\".",
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "live": {
+              "type": "object",
+              "properties": {
+                "revision": {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "description": "The deployed commit SHA, when the deploy step writes it into the config.",
+                      "type": "string"
+                    },
+                    "env": {
+                      "description": "Environment variables that hold the deployed commit (default: the common CI ones, such as GITHUB_SHA and CI_COMMIT_SHA). false: don't read them.",
+                      "anyOf": [
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        {
+                          "type": "boolean",
+                          "const": false
+                        }
+                      ]
+                    },
+                    "endpoint": {
+                      "description": "A URL on the live site that reports its version (JSON or text), e.g. https://example.com/version.json.",
+                      "type": "string"
+                    },
+                    "field": {
+                      "description": "Where the commit is in the endpoint's JSON, as a dotted path (default: sha, commit, revision, version or git.sha).",
+                      "type": "string"
+                    },
+                    "liveAtField": {
+                      "description": "Where the time it went live is in the endpoint's JSON (default: deployedAt, builtAt, time or timestamp).",
+                      "type": "string"
+                    },
+                    "liveAt": {
+                      "description": "When this revision went live (ISO time), if the deploy step knows it.",
+                      "type": "string"
+                    },
+                    "sources": {
+                      "description": "The order to try revision sources in. Built in: \"value\", \"endpoint\", \"env\"; host adapters add their own (the GitHub one adds \"github-deployment\").",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "environment": {
+                      "description": "For a host adapter's deployment source: the environment name (GitHub: default \"github-pages\").",
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "onMismatch": {
+                  "default": "refuse",
+                  "description": "When the checkout isn't the live revision (another commit, or uncommitted changes): refuse to run, or run and label the report loudly.",
+                  "type": "string",
+                  "enum": [
+                    "refuse",
+                    "label"
+                  ]
+                },
+                "apps": {
+                  "description": "Per app, where its live version is. Apps not listed are started from the checkout as before, and labelled.",
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "url": {
+                        "description": "The deployed URL, e.g. https://example.com/app/. Used as is: nothing is started.",
+                        "type": "string"
+                      },
+                      "dir": {
+                        "description": "The built output folder that is deployed (dist, storybook-static), relative to the config root. dsa serves it on localhost for the run.",
+                        "type": "string"
+                      },
+                      "base": {
+                        "description": "With `dir`: the path the folder is mounted at on the live site, e.g. \"/app/\" (default \"/\").",
+                        "type": "string"
+                      },
+                      "auth": {
+                        "description": "A saved sign-in (browser storage state) for `url`, made once with `dsa login <url>`. Relative to the config root. Never commit it.",
+                        "type": "string"
+                      },
+                      "readApi": {
+                        "description": "Let the screenshot crawler read (GET) the site's own /api/ routes, so signed-in pages load their data. Writes stay blocked. Default on for `url`, off for `dir`.",
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "app": {
+                  "description": "Shorthand for every app without its own entry in `apps`.",
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "description": "The deployed URL, e.g. https://example.com/app/. Used as is: nothing is started.",
+                      "type": "string"
+                    },
+                    "dir": {
+                      "description": "The built output folder that is deployed (dist, storybook-static), relative to the config root. dsa serves it on localhost for the run.",
+                      "type": "string"
+                    },
+                    "base": {
+                      "description": "With `dir`: the path the folder is mounted at on the live site, e.g. \"/app/\" (default \"/\").",
+                      "type": "string"
+                    },
+                    "auth": {
+                      "description": "A saved sign-in (browser storage state) for `url`, made once with `dsa login <url>`. Relative to the config root. Never commit it.",
+                      "type": "string"
+                    },
+                    "readApi": {
+                      "description": "Let the screenshot crawler read (GET) the site's own /api/ routes, so signed-in pages load their data. Writes stay blocked. Default on for `url`, off for `dir`.",
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "storybook": {
+                  "description": "Where the system's live Storybook is: a deployed URL or the built storybook-static folder.",
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "description": "The deployed URL, e.g. https://example.com/app/. Used as is: nothing is started.",
+                      "type": "string"
+                    },
+                    "dir": {
+                      "description": "The built output folder that is deployed (dist, storybook-static), relative to the config root. dsa serves it on localhost for the run.",
+                      "type": "string"
+                    },
+                    "base": {
+                      "description": "With `dir`: the path the folder is mounted at on the live site, e.g. \"/app/\" (default \"/\").",
+                      "type": "string"
+                    },
+                    "auth": {
+                      "description": "A saved sign-in (browser storage state) for `url`, made once with `dsa login <url>`. Relative to the config root. Never commit it.",
+                      "type": "string"
+                    },
+                    "readApi": {
+                      "description": "Let the screenshot crawler read (GET) the site's own /api/ routes, so signed-in pages load their data. Writes stay blocked. Default on for `url`, off for `dir`.",
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "revision",
+                "onMismatch"
+              ],
+              "additionalProperties": false,
+              "description": "What is live in production. With this set, runs check the checkout against the live revision and screenshots come from the live site."
+            },
+            "host": {
+              "type": "object",
+              "properties": {
+                "adapter": {
+                  "default": "generic",
+                  "description": "Which host adapter turns the static dashboard's actions into requests: \"generic\" or \"github\" (add-ons may add more).",
+                  "type": "string"
+                },
+                "base": {
+                  "description": "The sub-path the dashboard is served under, e.g. \"/dsa/\" (default \"/\"). Used by dsa serve; dsa publish writes relative links that work under any path.",
+                  "type": "string"
+                },
+                "url": {
+                  "description": "Where people open the dashboard, e.g. https://example.com/dsa/. Shown in issues and messages.",
+                  "type": "string"
+                },
+                "schedule": {
+                  "description": "When scans run by themselves, as cron lines in UTC (\"47 9 * * 1-5\"), so the dashboard can show the next one. The github adapter reads them from the workflow file when this is unset.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "rescan": {
+                  "description": "The static dashboard's Re-scan button (generic adapter).",
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "description": "Where Re-scan goes: a page that starts the scan job (opened in a new tab), or a webhook (POSTed to)."
+                    },
+                    "method": {
+                      "default": "link",
+                      "type": "string",
+                      "enum": [
+                        "link",
+                        "post"
+                      ]
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "description": "With method \"post\": a URL that reports one run ({id} is filled in), so the page can show its progress. Answers { status: \"queued\"|\"running\"|\"done\"|\"failed\", steps?: { done, total, current }, url?, startedAt?, error? }.",
+                      "type": "string"
+                    },
+                    "active": {
+                      "description": "With method \"post\": a URL that lists the runs going now ({ runs: [...] }, same shape), so the page can show a scan that started elsewhere.",
+                      "type": "string"
+                    },
+                    "estimateSeconds": {
+                      "description": "How long a scan usually takes, when earlier runs can't tell.",
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "url",
+                    "method"
+                  ],
+                  "additionalProperties": false
+                },
+                "relay": {
+                  "description": "Where the published dashboard's Re-scan goes: a scan relay that holds the runner credential, so viewers only sign in. Also `dsa publish --relay <url>`.",
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "description": "The scan relay's address (https://relay.example.com/, or <dsa serve>/relay/). The published page signs viewers in there and Re-scan starts the scan through it. See docs/relay.md."
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": false
+                },
+                "decisions": {
+                  "description": "Where decisions made on the static dashboard go.",
+                  "type": "object",
+                  "properties": {
+                    "mode": {
+                      "description": "export: download a file; post: send it to `url`; issue / pr (the github adapter): file it as an issue that a workflow applies, committing it (issue) or opening a pull request (pr). Default: the adapter's (generic export, github issue).",
+                      "type": "string",
+                      "enum": [
+                        "export",
+                        "post",
+                        "issue",
+                        "pr"
+                      ]
+                    },
+                    "url": {
+                      "description": "For post: the webhook that receives the decisions file.",
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "github": {
+                  "type": "object",
+                  "properties": {
+                    "repo": {
+                      "description": "The repo \"owner/name\" whose workflow re-scans and receives decisions (default: github.defaultRepo).",
+                      "type": "string"
+                    },
+                    "workflow": {
+                      "default": "dsa.yml",
+                      "description": "The workflow file that runs the scan (needs a workflow_dispatch trigger).",
+                      "type": "string"
+                    },
+                    "dispatch": {
+                      "description": "No longer used: Re-scan goes through the scan relay (host.relay). Kept so older configs still load.",
+                      "type": "boolean"
+                    },
+                    "ref": {
+                      "description": "The branch the workflow runs on (default: the repo's default branch).",
+                      "type": "string"
+                    },
+                    "label": {
+                      "default": "dsa-decisions",
+                      "description": "The label on decision issues, which the apply workflow listens for.",
+                      "type": "string"
+                    },
+                    "server": {
+                      "default": "https://github.com",
+                      "description": "GitHub's web address (GitHub Enterprise Server: your host).",
+                      "type": "string"
+                    },
+                    "api": {
+                      "description": "GitHub's API address (default https://api.github.com, or <server>/api/v3 for a server).",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "workflow",
+                    "label",
+                    "server"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "adapter",
+                "github"
+              ],
+              "additionalProperties": false,
+              "description": "How the dashboard is hosted: the sub-path, and what its Re-scan and decision buttons do when it is a static site."
+            },
+            "history": {
+              "type": "object",
+              "properties": {
+                "adapter": {
+                  "default": "local",
+                  "description": "Where run history and the data folder persist between runs: \"local\" (stays in the data folder), \"git-branch\", or \"command\" (your own pull and push commands, e.g. for an object store).",
+                  "type": "string"
+                },
+                "branch": {
+                  "default": "dsa-data",
+                  "description": "git-branch: the branch that holds the data folder.",
+                  "type": "string"
+                },
+                "remote": {
+                  "default": "origin",
+                  "description": "git-branch: the remote to fetch from and push to.",
+                  "type": "string"
+                },
+                "keep": {
+                  "default": "all",
+                  "description": "git-branch: keep every push as a commit, or keep the branch at one commit (smaller; force-pushes the data branch).",
+                  "type": "string",
+                  "enum": [
+                    "all",
+                    "latest"
+                  ]
+                },
+                "pull": {
+                  "description": "command: the shell command that restores the data folder ({dir} is filled in).",
+                  "type": "string"
+                },
+                "push": {
+                  "description": "command: the shell command that saves it ({dir} is filled in).",
+                  "type": "string"
+                },
+                "exclude": {
+                  "description": "Data folder entries never persisted, on top of secrets.json, auth/, site/ and report/.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "adapter",
+                "branch",
+                "remote",
+                "keep"
+              ],
+              "additionalProperties": false,
+              "description": "Where run history (the DuckDB file) and the rest of the data folder persist between runs."
+            },
+            "settings": {
+              "description": "Rule settings on top of the metric catalog's defaults.",
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            },
+            "ratchet": {
+              "type": "object",
+              "properties": {
+                "baseline": {
+                  "default": ".dsa/baseline.json",
+                  "description": "Path of the correct-use baseline, relative to the config root.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "baseline"
+              ],
+              "additionalProperties": false
+            },
+            "output": {
+              "type": "object",
+              "properties": {
+                "dir": {
+                  "default": ".dsa",
+                  "description": "Directory the CLI writes JSON reports to, relative to the config root.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "dir"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "system",
+            "scan",
+            "hosts",
+            "patterns",
+            "correctUse",
+            "ratchet",
+            "output"
+          ],
+          "additionalProperties": false,
+          "description": "dsa.config.json — configuration for @snds/dsa."
+        },
+        "configPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "dsaVersion",
+        "generatedAt",
+        "config",
+        "configPath"
+      ],
+      "additionalProperties": false
+    },
+    "root": {
+      "type": "string"
+    },
+    "system": {
+      "type": "string"
+    },
+    "answersPath": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "measured": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "answered": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "unanswered": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "score": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "done + half of partial, over items that apply."
+        }
+      },
+      "required": [
+        "items",
+        "measured",
+        "answered",
+        "unanswered",
+        "score"
+      ],
+      "additionalProperties": false
+    },
+    "areas": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "applicable": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "done": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "partial": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "missing": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "unanswered": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "applicable",
+          "done",
+          "partial",
+          "missing",
+          "unanswered",
+          "score"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "area": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "about": {
+            "type": "string"
+          },
+          "size": {
+            "type": "string",
+            "enum": [
+              "S",
+              "M",
+              "L"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "done",
+              "partial",
+              "missing",
+              "na",
+              "unanswered"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "measured",
+              "answered",
+              "overridden",
+              "none"
+            ]
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "measured": {
+            "description": "What the scan found, when an answer overrode it.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "done",
+                  "partial",
+                  "missing"
+                ]
+              },
+              "evidence": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "status",
+              "evidence"
+            ],
+            "additionalProperties": false
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "area",
+          "title",
+          "about",
+          "size",
+          "status",
+          "source",
+          "evidence"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "unknownAnswers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "meta",
+    "root",
+    "system",
+    "answersPath",
+    "summary",
+    "areas",
+    "items",
+    "unknownAnswers"
+  ],
+  "additionalProperties": false,
+  "description": "Output of `dsa checklist`."
+}
