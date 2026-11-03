@@ -113,13 +113,13 @@ export async function openSurface(s: SurfaceConfig, root: string): Promise<OpenS
   if (storageState && !fs.existsSync(storageState)) throw new Error(`The saved sign-in ${s.auth} doesn't exist. Make it once with: dsa login ${s.url ?? "<url>"} --out ${s.auth}`);
   if (s.url) {
     const url = s.url.endsWith("/") || /\.[a-z0-9]+$/i.test(new URL(s.url).pathname) ? s.url : `${s.url}/`;
-    return { url, storageState, readApi: s.readApi ?? true, how: `live ${s.url}`, deployed: true, stop: () => {} };
+    return { url, storageState, readApi: s.readApi ?? true, readPaths: s.readPaths, signIn: s.signIn, how: `live ${s.url}`, deployed: true, stop: () => {} };
   }
   if (s.dir) {
     const dir = path.resolve(root, s.dir);
     if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) throw new Error(`The built folder ${s.dir} doesn't exist. Build it first (it is what gets deployed).`);
     const served = await serveStatic(dir, s.base);
-    return { url: served.url, storageState, readApi: s.readApi ?? false, how: `built folder ${s.dir}`, deployed: false, stop: served.stop };
+    return { url: served.url, storageState, readApi: s.readApi ?? false, readPaths: s.readPaths, signIn: s.signIn, how: `built folder ${s.dir}`, deployed: false, stop: served.stop };
   }
   throw new Error("A live surface needs `url` or `dir`.");
 }

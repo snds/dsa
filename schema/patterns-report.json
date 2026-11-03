@@ -1222,6 +1222,36 @@
                       "readApi": {
                         "description": "Let the screenshot crawler read (GET) the site's own /api/ routes, so signed-in pages load their data. Writes stay blocked. Default on for `url`, off for `dir`.",
                         "type": "boolean"
+                      },
+                      "readPaths": {
+                        "description": "Data paths the crawler may read (GET), as globs: \"/record-service/**\" on the app's own origin, or a full URL (\"https://gateway.example.com/data/**\") for another host. Every write (POST, PUT, PATCH, DELETE) to the app stays blocked.",
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "signIn": {
+                        "description": "For apps that keep their tokens in memory (OIDC with PKCE): `auth` keeps only the identity provider's cookies, so every fresh page starts signed out. The crawler signs in once per browser by clicking `click` on `path`, then moves around inside the app. Needs `auth` from `dsa login`.",
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string",
+                            "description": "The app's sign-in page, e.g. \"/login\". A page that lands there is signed in by clicking `click`."
+                          },
+                          "click": {
+                            "type": "string",
+                            "description": "The accessible name of the button (or link) that starts sign-in, e.g. \"Sign in with Acme ID\". With the identity provider's session from `auth`, it signs in without a password."
+                          },
+                          "idp": {
+                            "description": "The identity provider's origin, e.g. https://id.example.com. Taken from the sign-in redirect when not given.",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "click"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "additionalProperties": false
@@ -1250,6 +1280,36 @@
                     "readApi": {
                       "description": "Let the screenshot crawler read (GET) the site's own /api/ routes, so signed-in pages load their data. Writes stay blocked. Default on for `url`, off for `dir`.",
                       "type": "boolean"
+                    },
+                    "readPaths": {
+                      "description": "Data paths the crawler may read (GET), as globs: \"/record-service/**\" on the app's own origin, or a full URL (\"https://gateway.example.com/data/**\") for another host. Every write (POST, PUT, PATCH, DELETE) to the app stays blocked.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "signIn": {
+                      "description": "For apps that keep their tokens in memory (OIDC with PKCE): `auth` keeps only the identity provider's cookies, so every fresh page starts signed out. The crawler signs in once per browser by clicking `click` on `path`, then moves around inside the app. Needs `auth` from `dsa login`.",
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "description": "The app's sign-in page, e.g. \"/login\". A page that lands there is signed in by clicking `click`."
+                        },
+                        "click": {
+                          "type": "string",
+                          "description": "The accessible name of the button (or link) that starts sign-in, e.g. \"Sign in with Acme ID\". With the identity provider's session from `auth`, it signs in without a password."
+                        },
+                        "idp": {
+                          "description": "The identity provider's origin, e.g. https://id.example.com. Taken from the sign-in redirect when not given.",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "path",
+                        "click"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "additionalProperties": false
@@ -1277,6 +1337,36 @@
                     "readApi": {
                       "description": "Let the screenshot crawler read (GET) the site's own /api/ routes, so signed-in pages load their data. Writes stay blocked. Default on for `url`, off for `dir`.",
                       "type": "boolean"
+                    },
+                    "readPaths": {
+                      "description": "Data paths the crawler may read (GET), as globs: \"/record-service/**\" on the app's own origin, or a full URL (\"https://gateway.example.com/data/**\") for another host. Every write (POST, PUT, PATCH, DELETE) to the app stays blocked.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "signIn": {
+                      "description": "For apps that keep their tokens in memory (OIDC with PKCE): `auth` keeps only the identity provider's cookies, so every fresh page starts signed out. The crawler signs in once per browser by clicking `click` on `path`, then moves around inside the app. Needs `auth` from `dsa login`.",
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "description": "The app's sign-in page, e.g. \"/login\". A page that lands there is signed in by clicking `click`."
+                        },
+                        "click": {
+                          "type": "string",
+                          "description": "The accessible name of the button (or link) that starts sign-in, e.g. \"Sign in with Acme ID\". With the identity provider's session from `auth`, it signs in without a password."
+                        },
+                        "idp": {
+                          "description": "The identity provider's origin, e.g. https://id.example.com. Taken from the sign-in redirect when not given.",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "path",
+                        "click"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "additionalProperties": false

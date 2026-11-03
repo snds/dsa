@@ -65,6 +65,10 @@ export interface OpenSurface {
   storageState?: string | undefined;
   /** Let the crawler GET the site's own /api/ routes. */
   readApi: boolean;
+  /** Data paths the crawler may also GET (globs; a full URL for another host). */
+  readPaths?: string[] | undefined;
+  /** How to sign in an app that keeps its tokens in memory: click `click` on `path`. */
+  signIn?: { path: string; click: string; idp?: string | undefined } | undefined;
   /** "live https://…", "built folder dist" */
   how: string;
   /** True for a deployed URL, false for a local copy of the build. */

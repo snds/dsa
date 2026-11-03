@@ -8,7 +8,7 @@ import { appSurface, openSurface } from '@snds/dsa';
 import { detectApp, discoverRoutes, ensureBrowser, linkCoreForChild, routeConfig, startApp } from './apps.js';
 
 import { READ_STYLE } from './rendered.js';
-import { flowProblems, guardNetwork, routeUrl, runFlow, type Flow } from './flows.js';
+import { describeNetwork, flowProblems, guardNetwork, routeUrl, runFlow, type Flow, type GuardStats } from './flows.js';
 
 /**
  * Example screenshots for the element review. Not every instance: a few per recommendation
@@ -138,7 +138,7 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
 
   // Routes the app declares that need a value to open: listed in the result, so a person can name one.
   const needs = (target: string) => { const t = all.find(x => x.name === target); const v = t ? routeConfig(t.dir).needsValue : []; return v.length ? { needsValue: v } : {}; };
-  const sessions: { target: string; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; stop?: () => void; how?: string; need: ElementEval[]; storageState?: string | undefined; readApi?: boolean }[] = [];
+  const sessions: { target: string; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; stop?: () => void; how?: string; need: ElementEval[]; storageState?: string | undefined; readApi?: boolean; readPaths?: string[] | undefined; signIn?: SignIn | undefined }[] = [];
   const evalTargets = [...new Set(evals.filter(e => !e.exception).map(e => e.target))].filter(t => !opts.target || t === opts.target);
   if (opts.url) {
     const p = plan(evals.filter(e => !opts.target || e.target === opts.target));
@@ -164,7 +164,8 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
           const open = await openSurface(surface, opts.root);
           const routes = routesFor();
           log(`  ${open.how} · ${routes.length} route${routes.length === 1 ? '' : 's'} ${configured ? 'from config' : 'found in the source'}`);
-          sessions.push({ target: name, url: open.url, routes, first: extra, flows: opts.config.apps?.[name]?.flows as Flow[] | undefined, crawl: true, stop: open.stop, how: open.how, need: p.need, storageState: open.storageState, readApi: open.readApi });
+          sessions.push({ target: name, url: open.url, routes, first: extra, flows: opts.config.apps?.[name]?.flows as Flow[] | undefined, crawl: true, stop: open.stop, how: open.how, need: p.need, storageState: open.storageState, readApi: open.readApi, readPaths: open.readPaths, signIn: open.signIn });
+          if (open.signIn && !open.storageState) log(`  live.apps["${name}"].signIn needs a saved sign-in: run \`dsa login ${open.url}\` and set live.apps["${name}"].auth.`);
         } catch (e: any) { result.apps.push({ target: name, skipped: e.message.split('\n')[0] }); log(`  ${e.message}`); }
         continue;
       }
@@ -186,13 +187,15 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
       if (!s.need.length) { log('Nothing new to capture.'); continue; }
       log(`${s.target === '*' ? '' : s.target + ': '}${s.need.length} examples to find across ${new Set(s.need.map(e => groupKey(e))).size} groups.`);
       const sh = opts.config.shots ?? {};
-      const r: Awaited<ReturnType<typeof session>> & { signIn?: string } = await session(pw, { url: s.url, routes: s.routes, first: s.first, flows: s.flows, crawl: s.crawl, examples: s.need, dir, storageState: s.storageState, readApi: s.readApi, maxPages: sh.maxPages ?? 90, waitMs: sh.waitMs ?? 600, log, reveal: sh.reveal, maxActions: sh.maxActions ?? sh.maxTriggers, maxDepth: sh.maxDepth, maxMinutes: sh.maxMinutes });
+      const r: Awaited<ReturnType<typeof session>> & { signIn?: string; expired?: boolean } = await session(pw, { url: s.url, routes: s.routes, first: s.first, flows: s.flows, crawl: s.crawl, examples: s.need, dir, storageState: s.storageState, readApi: s.readApi, readPaths: s.readPaths, signIn: s.signIn, maxPages: sh.maxPages ?? 90, waitMs: sh.waitMs ?? 600, log, reveal: sh.reveal, maxActions: sh.maxActions ?? sh.maxTriggers, maxDepth: sh.maxDepth, maxMinutes: sh.maxMinutes });
       const at = new Date().toISOString();
       const byId = new Map(s.need.map(e => [e.id, e]));
       if (r.signIn && !Object.keys(r.shots).length) {
         // A sign-in wall isn't "not found": nothing was looked at. Say so, and remember no misses.
         const name = s.target === '*' ? 'name' : s.target;
-        log(`  Every page asked for sign-in. Run \`dsa login ${s.url}\` and set live.apps["${name}"].auth to the file it saves. (Pages went to ${r.signIn.replace(/[?#].*$/, '')}.)`);
+        if (r.expired) log(`  The saved sign-in expired. Run \`dsa login ${s.url}\` again.`);
+        else if (s.signIn) log(`  Every page asked for sign-in, and clicking “${s.signIn.click}” on ${s.signIn.path} didn't sign in. Check live.apps["${name}"].signIn and the saved sign-in (\`dsa login ${s.url}\`).`);
+        else log(`  Every page asked for sign-in. Run \`dsa login ${s.url}\` and set live.apps["${name}"].auth to the file it saves. (Pages went to ${r.signIn.replace(/[?#].*$/, '')}. If the app keeps its sign-in in memory and its sign-in page has one button, also set live.apps["${name}"].signIn to { "path": …, "click": … }.)`);
         result.apps.push({ target: s.target, url: s.url, how: s.how, routes: s.routes.length, captured: 0, signIn: r.signIn, ...needs(s.target) });
         continue;
       }
@@ -213,22 +216,51 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
   return result;
 }
 
+/** How to sign in an app that keeps its tokens in memory (live.apps[name].signIn). */
+type SignIn = { path: string; click: string; idp?: string | undefined };
+
+/**
+ * A saved sign-in from \`dsa login\`: Playwright's storage state, and the app's session storage beside it
+ * (Playwright keeps none). Read here so nothing in it is ever logged.
+ */
+export function readAuth(file: string): { state: { cookies: any[]; origins: any[] }; sessionStorage: Record<string, Record<string, string>> } | null {
+  try {
+    const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return { state: { cookies: j.cookies ?? [], origins: j.origins ?? [] }, sessionStorage: j.sessionStorage ?? {} };
+  } catch { return null; }
+}
+
+/**
+ * Runs in each page before its scripts: the app's saved session storage, on its own origin, where not
+ * already set. Source text (bundler helpers don't exist in the page); the data goes in as a JSON literal.
+ */
+const RESTORE_SESSION = `(d) => { if (location.origin !== d.origin) return; for (const [k, v] of Object.entries(d.items)) if (sessionStorage.getItem(k) == null) sessionStorage.setItem(k, v); }`;
+
 /** One interaction the explorer can take: click, hover, or right-click a control on the page. */
 interface Act { n: number; key: string; kind: 'click' | 'hover' | 'context'; label: string; why: string; prio: number }
 
-async function session(pw: any, o: { url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; examples: ElementEval[]; dir: string; storageState?: string | undefined; readApi?: boolean | undefined; maxPages: number; waitMs: number; log: (m: string) => void; reveal?: boolean; maxActions?: number; maxDepth?: number; maxMinutes?: number; maxReplays?: number }) {
+async function session(pw: any, o: { url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; examples: ElementEval[]; dir: string; storageState?: string | undefined; readApi?: boolean | undefined; readPaths?: string[] | undefined; signIn?: SignIn | undefined; maxPages: number; waitMs: number; log: (m: string) => void; reveal?: boolean; maxActions?: number; maxDepth?: number; maxMinutes?: number; maxReplays?: number }) {
   const shots: Record<string, any> = {};
   const pages: string[] = [];
   let browser: any, page: any;
   const base = new URL(o.url);
-  let net = { blocked: 0, last: [] as string[] };
+  let net: GuardStats = { blocked: 0, last: [], allowed: {}, denied: {}, idp: new Set() };
+  // The saved sign-in: cookies and local storage for Playwright, and the app's session storage, which
+  // Playwright doesn't keep (dsa login saves it; it's put back before the app's own scripts run).
+  const saved = o.storageState ? readAuth(o.storageState) : null;
+  // Signing in an app that keeps its tokens in memory (live.apps[name].signIn): once per browser.
+  const auth = { done: false, signing: false, attempts: 0, expired: false };
   const launch = async () => {
     browser = await pw.chromium.launch();
-    page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, ...(o.storageState ? { storageState: o.storageState } : {}) });
+    page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, ...(saved ? { storageState: saved.state } : {}) });
+    const items = saved?.sessionStorage?.[base.origin];
+    if (items && Object.keys(items).length) await page.addInitScript({ content: `(${RESTORE_SESSION})(${JSON.stringify({ origin: base.origin, items })});` });
     // alert/confirm/prompt: dismiss, so nothing the explorer opens can confirm an action.
     page.on('dialog', (d: any) => d.dismiss().catch(() => {}));
-    // Reads only: no writes, nothing under /api/, nothing to another host but images, fonts, and styles (flows.ts).
-    net = await guardNetwork(page, base.origin, { readApi: Boolean(o.readApi) });
+    // Reads only: no writes, nothing under /api/ (or readPaths), nothing to another host but images, fonts,
+    // and styles, and the identity provider while signing in (flows.ts).
+    net = await guardNetwork(page, base.origin, { readApi: Boolean(o.readApi), readPaths: o.readPaths, idp: o.signIn?.idp, signingIn: () => auth.signing });
+    auth.done = false;
   };
   await launch();
   // A page can crash or close under the crawler (a heavy view, a control that closes the window):
@@ -250,6 +282,58 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
       try { return await inPage<boolean>(page, SIGN_IN); } catch { await page.waitForTimeout(500); }
     }
     return false;
+  };
+  const onSignInPage = () => { if (!o.signIn) return false; try { const u = new URL(page.url()); return u.origin === base.origin && (u.pathname === o.signIn.path || u.pathname.startsWith(o.signIn.path.replace(/\/?$/, '/'))); } catch { return false; } };
+  /**
+   * Sign in by clicking the sign-in button: with the identity provider's saved session, that comes back
+   * signed in without a password. Done once per browser; after it the crawler moves inside the app
+   * (pushState), so tokens kept in memory survive. A password form at the provider: the session expired.
+   */
+  const signInOnce = async (): Promise<'ok' | 'expired' | 'failed'> => {
+    if (!o.signIn || auth.attempts >= 4) return 'failed';
+    auth.attempts++;
+    auth.signing = true;
+    try {
+      const name = o.signIn.click;
+      const target = [page.getByRole('button', { name, exact: true }), page.getByRole('link', { name, exact: true }), page.getByText(name, { exact: true })];
+      let clicked = false;
+      for (const t of target) { if (await t.count().catch(() => 0)) { await t.first().click({ timeout: 5000 }).catch(() => {}); clicked = true; break; } }
+      if (!clicked) { o.log(`  sign-in: no “${name}” on ${o.signIn.path}`); return 'failed'; }
+      const until = Date.now() + 20_000;
+      while (Date.now() < until) {
+        await page.waitForTimeout(250);
+        let here: URL; try { here = new URL(page.url()); } catch { continue; }
+        if (here.origin !== base.origin) {
+          // At the identity provider, asked for a password: the saved session is gone.
+          if (await inPage<boolean>(page, SIGN_IN).catch(() => false)) { auth.expired = true; return 'expired'; }
+          continue;
+        }
+        if (!onSignInPage() && !/\/(auth\/)?callback\b/.test(here.pathname)) { await page.waitForLoadState('load', { timeout: 5000 }).catch(() => {}); auth.done = true; return 'ok'; }
+      }
+      return 'failed';
+    } finally { auth.signing = false; }
+  };
+  /** Inside the app, without reloading it: history.pushState and popstate, as the app's own links do. */
+  const within = async (u: string) => {
+    await inPage(page, `(to) => { history.pushState(history.state, '', to); dispatchEvent(new PopStateEvent('popstate', { state: history.state })); }`, u);
+    await page.waitForTimeout(o.waitMs);
+  };
+  /**
+   * Open a route. Signed in with signIn, move inside the app (a reload would drop tokens kept in
+   * memory); landed on the sign-in page, sign in once and go on to the route wanted.
+   */
+  const open = async (u: string, timeout = 60000) => {
+    const inApp = (() => { try { return new URL(page.url()).origin === base.origin; } catch { return false; } })();
+    if (o.signIn && auth.done && inApp) await within(u);
+    else {
+      await page.goto(u, { waitUntil: 'domcontentloaded', timeout });
+      await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+      await page.waitForTimeout(o.waitMs);
+    }
+    if (o.signIn && onSignInPage() && !auth.expired) {
+      const r = await signInOnce();
+      if (r === 'ok') await within(u);
+    }
   };
   let remaining: Target[] = o.examples.map(e => ({ id: e.id, m: e.match, steps: e.reach?.steps?.map(x => ({ label: x.label, event: x.event })), hints: hintsOf(e), where: pathWords(e.file) }));
   const replayed = new Set<string>();
@@ -319,9 +403,8 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
       wall.tried++;
       try {
         // Dev servers can hold connections open; don't wait forever for "idle".
-        await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 60000 });
-        await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
-        await page.waitForTimeout(o.waitMs);
+        await open(u);
+        if (auth.expired) break;
       } catch (e: any) {
         // Sent to another host to sign in: the network guard stops the page there.
         const away = net.last.at(-1)?.match(/^GET (https?:\/\/[^/\s]+)(\S*)/);
@@ -377,9 +460,12 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
           if (done === steps!.length) replayed.add(key);
           await sweep(`opening ${steps!.slice(0, done).map(x => `“${x.label}”`).join(' › ')}`);
           // Reset whatever the clicks opened or switched on.
-          await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-          await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-          await page.waitForTimeout(o.waitMs);
+          if (o.signIn && auth.done) await open(u).catch(() => {});
+          else {
+            await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+            await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+            await page.waitForTimeout(o.waitMs);
+          }
         }
       }
       } catch (e: any) {
@@ -390,14 +476,13 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
     }
     // Pass 2: explore pages, most promising first (re-scored as elements are found), until time runs out.
     const done2 = new Set<string>();
-    while (remaining.length && Date.now() < deadline && o.reveal !== false && !signedOut()) {
+    while (remaining.length && Date.now() < deadline && o.reveal !== false && !signedOut() && !auth.expired) {
       const words = [...hints(), ...traced().map(t => t.toLowerCase())];
       const next = promising.filter(p => !done2.has(p.u)).sort((a, b) => b.score - a.score)[0];
       if (!next || !words.length && done2.size >= 20) break;
       done2.add(next.u);
       try {
-        await page.goto(next.u, { waitUntil: 'domcontentloaded', timeout: 60000 });
-        await page.waitForTimeout(o.waitMs);
+        await open(next.u);
         const sweep = sweeper(next.u);
         await sweep();
         if (remaining.length) await explore(next.u, sweep);
@@ -407,12 +492,12 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
         await relaunch();
       }
     }
-    if (net.blocked && !signedOut()) o.log(`  network guard blocked ${net.blocked} request(s) (last: ${net.last.join(', ')})`);
+    if ((net.blocked || Object.keys(net.allowed).length) && !signedOut()) o.log(`  network: ${describeNetwork(net, base.origin)}`);
     if (remaining.length && Date.now() >= deadline) o.log(`  time budget (shots.maxMinutes) used up with ${remaining.length} still to find.`);
   } finally {
     await browser.close().catch(() => {});
   }
-  return { shots, pages, missing: remaining.map(r => r.id), ...(signedOut() ? { signIn: wall.at } : {}) };
+  return { shots, pages, missing: remaining.map(r => r.id), ...(signedOut() || auth.expired ? { signIn: wall.at || o.url } : {}), ...(auth.expired ? { expired: true } : {}) };
 
   /**
    * Explore one page as a tree of UI states. From the loaded page, try each interaction (best first:
@@ -426,7 +511,7 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
     let budget = o.maxActions ?? 20;
     const maxDepth = o.maxDepth ?? 3;
     const pageStop = Math.min(deadline, Date.now() + 45_000);
-    const load = async () => { await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {}); await page.waitForTimeout(o.waitMs); };
+    const load = async () => { await open(u, 30000).catch(() => {}); };
     const sig = (): Promise<string> => page.evaluate(SIGNATURE).catch(() => '');
     const mark = (level: number) => inPage(page, MARK_SEEN, level).catch(() => {});
     const list = (level: number): Promise<Act[]> => inPage<Act[]>(page, CANDIDATES, { traced: traced(), hints: hints(), level, max: 50 }).catch(() => []);
