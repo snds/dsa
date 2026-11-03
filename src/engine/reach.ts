@@ -20,7 +20,13 @@ import { regionLabel, regionsOfAncestors, type Placement, type Region } from './
  * there's no picture when it still can't get there.
  */
 
-export interface Step { label: string; event: 'click' | 'dblclick'; file: string; line: number; pos?: number | undefined; component: string }
+/**
+ * One thing to do to reveal an element: click (or double-click) a control, pick a value in it (`choose`: a
+ * select or option list), or type into a field (`type`: a search box whose text the gate reads). `label` can
+ * be empty (an icon button, a swatch): the crawler then finds it by its source line. `handed`: found
+ * through a prop handed to another component (a toolbar's onAdd), so it may sit off the element's own files.
+ */
+export interface Step { label: string; event: 'click' | 'dblclick' | 'type' | 'choose'; file: string; line: number; /** Its column (from 1), so a control is told apart from its wrapper on the same line. */ col?: number | undefined; pos?: number | undefined; component: string; value?: string | undefined; handed?: boolean | undefined }
 export interface Reach {
   status: 'unused' | 'gated' | 'page';
   /** Component chain from the app's root to the element's component (App › MaterialsDetailView › DetailChrome). */
@@ -32,6 +38,12 @@ export interface Reach {
   why: string;
   /** Regions the components above it render it inside (placement.ts), innermost first. */
   placement?: Placement | undefined;
+  /** Saved-state keys the files on its chain read (localStorage, sessionStorage): clearing them shows what a first visit shows. */
+  storage?: string[] | undefined;
+  /** URL search parameters those files read (?q=): a value for one can reveal search results. */
+  params?: string[] | undefined;
+  /** What was looked for to reveal it, in plain words: each gate's state, its setter, and the control found (or not). */
+  looked?: string[] | undefined;
 }
 
 const SRC_EXT = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs']);
@@ -134,16 +146,16 @@ export function isUnused(g: Graph, file: string): boolean {
 
 // ---------------------------------------------------------------- per-file facts
 
-interface Handler { label: string; event: 'click' | 'dblclick'; line: number; pos: number; calls: Set<string>; component: string; tag: string }
+interface Handler { label: string; event: Step['event']; line: number; col: number; pos: number; calls: Set<string>; component: string; tag: string; /** Children with a literal value (a tab, a toggle item, an option): onValueChange={setMode} picks one. */ options?: { value: string; line: number; col: number; pos: number; label: string }[] }
 interface Usage { name: string; line: number; props: Map<string, { text: string; ids: string[] }>; gates: Gate[]; component: string; regions: Region[] }
 interface Comp { name: string; start: number; end: number; props: Set<string> }
-interface FileInfo { setters: Map<string, string>; fnCalls: Map<string, Set<string>>; handlers: Handler[]; usages: Usage[]; comps: Comp[]; fns: { name: string; start: number; end: number }[]; defaultExport?: string | undefined }
+interface FileInfo { setters: Map<string, string>; fnCalls: Map<string, Set<string>>; handlers: Handler[]; usages: Usage[]; comps: Comp[]; fns: { name: string; start: number; end: number }[]; defaultExport?: string | undefined; storage: Set<string>; params: Set<string> }
 
 function fileInfo(g: Graph, file: string): FileInfo | null {
   if (g.info.has(file)) return g.info.get(file)!;
   let src: string, ast: any;
   try { src = fs.readFileSync(file, 'utf8'); ast = babelParse(src, { sourceType: 'unambiguous', errorRecovery: true, plugins: ['jsx', 'typescript'] }); } catch { g.info.set(file, null); return null; }
-  const fi: FileInfo = { setters: new Map(), fnCalls: new Map(), handlers: [], usages: [], comps: [], fns: [] };
+  const fi: FileInfo = { setters: new Map(), fnCalls: new Map(), handlers: [], usages: [], comps: [], fns: [], storage: new Set(), params: new Set() };
   // setOpen(false) / setEditor(null) hide things: recorded as off:setOpen, not as a way to open.
   const off = (x: any) => { const a = x.arguments?.[0]; return a && ((a.type === 'BooleanLiteral' && !a.value) || a.type === 'NullLiteral' || (a.type === 'Identifier' && a.name === 'undefined')); };
   // setTab('media') is also recorded as setTab:media, so a gate `tab === 'media'` traces to the control that picks it.
@@ -172,13 +184,28 @@ function fileInfo(g: Graph, file: string): FileInfo | null {
       fi.fns.push({ name, start: n.start, end: n.end });
     }
     if (n.type === 'ExportDefaultDeclaration') fi.defaultExport = n.declaration?.id?.name ?? n.declaration?.name;
+    // Saved state (localStorage.getItem('setupDone'), useLocalStorage('k', …)) and URL search state (searchParams.get('q')).
+    if (n.type === 'CallExpression') {
+      const a0 = n.arguments?.[0]?.type === 'StringLiteral' ? n.arguments[0].value : null;
+      const c = n.callee;
+      if (a0 && c.type === 'MemberExpression' && /^(get|set|remove)Item$/.test(c.property?.name ?? '') && /(local|session)Storage$/.test(c.object?.name ?? c.object?.property?.name ?? '')) fi.storage.add(a0);
+      else if (a0 && c.type === 'Identifier' && /^use(Local|Session)Storage|^usePersist/.test(c.name)) fi.storage.add(a0);
+      else if (a0 && c.type === 'MemberExpression' && c.property?.name === 'get' && (/search|param|query/i.test(c.object?.name ?? c.object?.property?.name ?? '') || (c.object?.type === 'NewExpression' && c.object.callee?.name === 'URLSearchParams'))) fi.params.add(a0);
+      else if (a0 && c.type === 'Identifier' && /^use(QueryState|SearchParam)/.test(c.name)) fi.params.add(a0);
+    }
     if (n.type === 'JSXElement') {
       const open = n.openingElement;
       const tag = open.name.type === 'JSXIdentifier' ? open.name.name : open.name.type === 'JSXMemberExpression' ? open.name.property.name : '';
       for (const a of open.attributes) {
         const k = a.name?.name;
-        if (typeof k !== 'string' || !/^on(Click|DoubleClick|Select|PointerDown|MouseDown|CheckedChange)$/.test(k) || !a.value?.expression) continue;
-        fi.handlers.push({ label: labelOf(n), event: k === 'onDoubleClick' ? 'dblclick' : 'click', line: n.loc?.start.line ?? 0, pos: n.start, calls: callees(a.value.expression), component: '', tag });
+        // Clicks, and the change events that set state: a tab list, a toggle group, a dialog's open, a checkbox, a field.
+        if (typeof k !== 'string' || !/^on(Click|DoubleClick|Select|PointerDown|MouseDown|CheckedChange|ValueChange|OpenChange|PressedChange|Change|Input|Toggle)$/.test(k) || !a.value?.expression) continue;
+        const field = /^on(Change|Input)$/.test(k) && (/^(input|textarea)$/.test(tag) || /Input|Search|Field/.test(tag)) && !/checkbox|radio/.test(attrText(open, 'type'));
+        const choice = tag === 'select' || k === 'onValueChange';
+        // Children with a literal value: the tab, toggle item or option that onValueChange={setMode} picks.
+        const options: Handler['options'] = [];
+        if (choice) visit(n, (x: any) => { if (x !== n && x.type === 'JSXElement') { const v = attrText(x.openingElement, 'value'); if (v) options.push({ value: v, line: x.loc?.start.line ?? 0, col: (x.loc?.start.column ?? 0) + 1, pos: x.start, label: labelOf(x) }); } });
+        fi.handlers.push({ label: labelOf(n), event: k === 'onDoubleClick' ? 'dblclick' : field ? 'type' : tag === 'select' ? 'choose' : 'click', line: n.loc?.start.line ?? 0, col: (n.loc?.start.column ?? 0) + 1, pos: n.start, calls: callees(a.value.expression), component: '', tag, ...(options.length ? { options } : {}) });
       }
       if (/^[A-Z]/.test(tag)) {
         const props = new Map<string, { text: string; ids: string[] }>();
@@ -271,6 +298,7 @@ export function reachFor(g: Graph, file: string, line: number, ownGates: Gate[])
   const below = (i: number) => new Set(levels.slice(0, i).map(l => l.comp));
   const steps: Step[] = [];
   const gates: Reach['gates'] = [];
+  const looked: string[] = [];
   levels.forEach((lv, i) => {
     const fi = fileInfo(g, lv.file)!;
     for (const gt of lv.gates) gates.push({ ...gt, component: lv.comp, file: lv.file });
@@ -288,12 +316,14 @@ export function reachFor(g: Graph, file: string, line: number, ownGates: Gate[])
         const s = fi.setters.get((a ?? d)!);
         if (s) setters.add(`${s}:${b ?? c}`);
       }
-      if (!setters.size) continue;
+      if (!setters.size) { if (gt.kind !== 'overlay') looked.push(`“${test.slice(0, 40)}”: no state setter for ${ids.length ? ids.join(', ') : 'it'} in ${lv.comp || path.basename(lv.file)} (it may come from data or the URL)`); continue; }
       // Not a control inside what it's supposed to open (that one closes or re-targets it).
       const inside = below(i);
       // Not a control inside what the gate guards either (a Save button in the draft row it closes).
       const guarded = (s: Step) => s.file === lv.file && s.pos != null && lv.gates.some(x => x.at && s.pos! >= x.at[0] && s.pos! <= x.at[1]);
-      mine.push(...triggersFor(g, lv.file, setters, s => chainFiles.has(s.file) && !inside.has(s.component) && !guarded(s)).slice(0, 1));
+      const got = triggersFor(g, lv.file, setters, s => (chainFiles.has(s.file) || Boolean(s.handed)) && !inside.has(s.component) && !guarded(s)).slice(0, 1);
+      looked.push(`${[...setters].join(', ')} for “${test.slice(0, 40)}”: ${got.length ? got.map(s => `${s.event === 'type' ? 'typing in' : s.event === 'choose' ? `choosing “${s.value}” in` : 'clicking'} ${s.label ? `“${s.label}”` : 'an unlabelled control'} at ${path.basename(s.file)}:${s.line}`).join(', ') : 'no control found that calls it'}`);
+      mine.push(...got);
     }
     steps.unshift(...mine);
   });
@@ -301,7 +331,10 @@ export function reachFor(g: Graph, file: string, line: number, ownGates: Gate[])
   // gates were collected innermost first; the Reach lists them outermost first.
   const real = gates.filter(x => x.kind !== 'overlay' || x.trigger || x.test).reverse();
   const chain = levels.map(l => l.comp || path.basename(l.file).replace(/\.\w+$/, '')).reverse();
-  return { status: real.length ? 'gated' : 'page', via: chain, gates: real, steps: near, why: describeReach(real, near, chain), placement: placed.regions.length ? placed : undefined };
+  // Saved state and URL search state the files on its chain read.
+  const storage = [...new Set(levels.flatMap(l => [...(fileInfo(g, l.file)?.storage ?? [])]))].slice(0, 12);
+  const params = [...new Set(levels.flatMap(l => [...(fileInfo(g, l.file)?.params ?? [])]))].slice(0, 6);
+  return { status: real.length ? 'gated' : 'page', via: chain, gates: real, steps: near, why: describeReach(real, near, chain), placement: placed.regions.length ? placed : undefined, ...(storage.length ? { storage } : {}), ...(params.length ? { params } : {}), ...(looked.length ? { looked } : {}) };
 }
 
 /** A UI flag: identifiers, member access, negation, && between them. No comparisons, counts, or calls. */
@@ -312,7 +345,7 @@ const FLAG = /^[!\s\w.?&|]+$/;
  * handlers in this file; then, when the call is handed on (a hook returns openAdd, a parent passes
  * onAddImage={media.openAdd}), the components it's handed to and the files that use the hook.
  */
-function triggersFor(g: Graph, file: string, names: Set<string>, allow: (s: Step) => boolean = () => true, depth = 0, seen = new Set<string>()): Step[] {
+function triggersFor(g: Graph, file: string, names: Set<string>, allow: (s: Step) => boolean = () => true, depth = 0, seen = new Set<string>(), handed = false): Step[] {
   const key = file + '|' + [...names].sort().join(',');
   if (depth > 3 || seen.has(key)) return [];
   seen.add(key);
@@ -321,22 +354,35 @@ function triggersFor(g: Graph, file: string, names: Set<string>, allow: (s: Step
   // Local functions that call any of the names count as the names too.
   const all = new Set(names);
   for (let d = 0; d < 3; d++) for (const [fn, calls] of fi.fnCalls) if (!all.has(fn) && [...calls].some(c => all.has(c.replace(/^ref:/, '')))) all.add(fn);
-  const hits = fi.handlers.filter(h => usable(h.label) && [...expand(fi, h.calls)].some(c => all.has(c.replace(/^ref:/, ''))));
-  // Only controls the caller can use (on the element's own chain of files) count toward the caps below.
-  const out: Step[] = hits.map(h => ({ label: h.label, event: h.event, file, line: h.line, pos: h.pos, component: h.component })).filter(allow).slice(0, 3);
+  // A control with no words (an icon button, a swatch) still counts: the crawler finds it by its source line.
+  const ok = (l: string) => !l || usable(l);
+  const hits = fi.handlers.filter(h => ok(h.label) && [...expand(fi, h.calls)].some(c => all.has(c.replace(/^ref:/, ''))));
+  const found: Step[] = hits.map(h => ({ label: h.label, event: h.event, file, line: h.line, col: h.col, pos: h.pos, component: h.component, ...(handed ? { handed } : {}) }));
+  // setMode:edit wanted, and a tab list with onValueChange={setMode}: the child whose value is 'edit'.
+  for (const want of all) {
+    const m = want.match(/^([^:]+):(.+)$/);
+    if (!m || m[1]!.startsWith('off')) continue;
+    for (const h of fi.handlers) {
+      if (!h.options || ![...expand(fi, h.calls)].some(c => c.replace(/^ref:/, '') === m[1])) continue;
+      const o = h.options.find(x => x.value === m[2]);
+      if (o && ok(o.label)) found.push({ label: o.label, event: h.tag === 'select' ? 'choose' : 'click', file, line: o.line, col: o.col, pos: o.pos, component: h.component, ...(h.tag === 'select' ? { value: o.value } : {}), ...(handed ? { handed } : {}) });
+    }
+  }
+  // Only controls the caller can use (on the element's own chain of files, or handed a prop from it) count toward the caps below.
+  const out: Step[] = found.filter(allow).slice(0, 3);
   // Handed to a child as a prop: follow the prop name into the component that receives it.
   for (const u of fi.usages) {
     for (const [prop, v] of u.props) {
       if (!/^on[A-Z]/.test(prop) || !v.ids.some(i => all.has(i))) continue;
       const childFile = [file, ...(g.imports.get(file) ?? [])].find(cf => fileInfo(g, cf)?.comps.some(c => c.name === u.name));
-      if (childFile) out.push(...triggersFor(g, childFile, new Set([prop]), allow, depth + 1, seen));
+      if (childFile) out.push(...triggersFor(g, childFile, new Set([prop]), allow, depth + 1, seen, true));
       if (out.length >= 6) return dedupe(out);
     }
   }
   // Returned from a hook or exported: callers in the files that import this one use the same names.
   for (const imp of g.importers.get(file) ?? []) {
     if (out.length >= 6) break;
-    out.push(...triggersFor(g, imp, all, allow, depth + 1, seen));
+    out.push(...triggersFor(g, imp, all, allow, depth + 1, seen, handed));
   }
   return dedupe(out);
 }
@@ -351,14 +397,17 @@ function fanIn(fi: FileInfo, setter: string) {
 
 function propGated(c: Comp | undefined, u: Usage) { return !!c && [...u.props.keys()].some(k => /^(open|isOpen|show|visible|expanded)$/.test(k) && u.props.get(k)!.text !== 'true'); }
 const tidy = (l: string) => l.replace(/\(\s*\)/g, '').replace(/\s+/g, ' ').trim();
-const dedupe = (s: Step[]) => s.map(x => ({ ...x, label: tidy(x.label) })).filter(x => x.label).filter((x, i, a) => a.findIndex(y => y.label === x.label && y.event === x.event) === i);
+// The same control once: by its words and its place (two "Edit" buttons are two controls).
+const dedupe = (s: Step[]) => s.map(x => ({ ...x, label: tidy(x.label) })).filter(x => x.label || x.line).filter((x, i, a) => a.findIndex(y => y.label === x.label && y.event === x.event && y.file === x.file && y.line === x.line) === i);
+const attrText = (open: any, k: string): string => { const a = open.attributes?.find((x: any) => x.name?.name === k); return a?.value?.type === 'StringLiteral' ? a.value.value : a?.value?.expression?.type === 'StringLiteral' ? a.value.expression.value : ''; };
 
 function describeReach(gates: Reach['gates'], steps: Step[], chain: string[]): string {
   const path = chain.length > 1 ? ` (${chain.join(' › ')})` : '';
   if (!gates.length) return `Rendered directly on a page${path}.`;
   const g = gates[gates.length - 1]!;
   const inner = g.kind === 'overlay' ? `inside a ${g.overlay}${g.component ? ` in ${g.component}` : ''}` : `only when ${g.negated ? 'not ' : ''}\`${g.test}\`${g.component ? ` in ${g.component}` : ''}`;
-  const how = steps.length ? `, opened by ${steps.map(s => `“${s.label.length > 32 ? s.label.slice(0, 30) + '…' : s.label}”${s.event === 'dblclick' ? ' (double-click)' : ''}${s.component ? ` in ${s.component}` : ''}`).join(' then ')}` : '';
+  const name = (s: Step) => (s.label ? `“${s.label.length > 32 ? s.label.slice(0, 30) + '…' : s.label}”` : 'an unlabelled control');
+  const how = steps.length ? `, opened by ${steps.map(s => `${s.event === 'type' ? 'typing in ' : s.event === 'choose' ? `choosing “${s.value}” in ` : ''}${name(s)}${s.event === 'dblclick' ? ' (double-click)' : ''}${s.component ? ` in ${s.component}` : ''}`).join(' then ')}` : '';
   const outer = gates.length > 1 ? `; ${gates.length - 1} more condition${gates.length > 2 ? 's' : ''} above it` : '';
   return `Renders ${inner}${how}${outer}${path}.`;
 }
