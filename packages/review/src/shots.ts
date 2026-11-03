@@ -763,7 +763,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     // Drawing from the app's code needs /@dsa/mount: dsa's own Vite runner, or any Vite dev build with dsaTag on.
     let canMount = Boolean(d.mount);
     if (!canMount) {
-      await page.goto(at, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+      await open(at, 30000).catch(() => {});
       canMount = await inPage<boolean>(page, MOUNT_PROBE).catch(() => false);
     }
     o.log(`  drawing ${remaining.length} not reached live: ${canMount ? "from the app's code where its component can be mounted, else as markup" : "as markup only (this build doesn't serve /@dsa/mount; add dsaTag to its Vite dev build to draw from the app's code)"}`);
@@ -775,12 +775,13 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     const SECRET = /token|auth|session|user|jwt|cred|account|login|csrf|key|secret/i;
     // The page each is drawn on: one that renders its file, so the live providers there are its own.
     const queue = [...remaining].map(r => ({ r, u: pageFor(r) ?? at })).sort((a, b) => a.u.localeCompare(b.u));
-    let loaded = '';
-    const open = async (u: string) => {
-      if (loaded === u && page.url() === loaded) return;
-      await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      await page.waitForTimeout(o.waitMs);
-      loaded = page.url();
+    // The page loaded for (the route wanted) and where it landed; reloaded when either changes.
+    let loaded = '', loadedFor = '';
+    // The crawler's own open: inside a signed-in app it moves without reloading, so its tokens survive.
+    const visit = async (u: string) => {
+      if (loadedFor === u && page.url() === loaded) return;
+      await open(u, 30000);
+      loaded = page.url(); loadedFor = u;
     };
     for (const { r, u } of queue) {
       const out = (msg: string) => { note(r, msg); count(`not drawn (${short(msg.replace(/^not drawn: /, '').replace(/; not mounted.*$/, ''))})`); o.log(`  ${where(r)} ${msg}`); };
@@ -795,7 +796,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         if (!canMount) unmounted = "this build doesn't serve /@dsa/mount";
         else if (!r.e.within) unmounted = 'the scan found no component around it';
         else {
-          await open(u);
+          await visit(u);
           // A first visit's saved state, so state read from storage starts as the component's default.
           const keys = (r.e.reach?.storage ?? []).filter(k => !SECRET.test(k));
           if (keys.length) await inPage(page, CLEAR_KEYS, keys);
@@ -815,7 +816,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         if (!how) {
           const html = markupOf(code, r.e, r.id);
           if (!html) { out(`not drawn: no element at ${r.e.line}:${r.e.col} in its file as it is now${unmounted ? `; not mounted: ${unmounted}` : ''}`); continue; }
-          if (!loaded) await open(u);
+          if (!loaded) await visit(u);
           if (await inPage<boolean>(page, SHOW_MARKUP, html)) {
             await inPage(page, `(id) => { const el = document.querySelector('[data-dsa-drawn="' + CSS.escape(id) + '"]'); if (el) el.setAttribute('data-dsa-shot', id); }`, r.id);
             how = 'markup';
