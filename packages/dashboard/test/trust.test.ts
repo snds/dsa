@@ -88,10 +88,20 @@ test('a photo matched by its source tag is proof of place: shown, and "ready" on
   assert.ok(blank.rows[0]!.failed.includes('C2'));
 });
 
-test('a drawing from the code is shown, but it is not a photo: C1 fails, so it is never "ready" on it', () => {
-  const drawn = trustRubric({ elements: { ...payload.elements, evals: [ev('drawn', { shot: { ...shot(), drawn: 'mount' }, confidence: 0.8 })] } });
-  assert.ok(drawn.rows[0]!.failed.includes('C1'));
-  assert.ok(!drawn.rows[0]!.failed.includes('C9'), 'held under the bar, its confidence matches what can be seen');
+test('drawn from the app\'s code counts, labelled; markup only and a blank mount don\'t', () => {
+  const at = (o: object) => trustRubric({ elements: { ...payload.elements, evals: [ev('x', { shot: { ...shot(), ...o }, confidence: 0.95 })] } });
+  // Its component, mounted with the app's styles and found by its exact tag: C1, C2 and C9 hold.
+  const code = at({ drawn: 'mount', exact: true });
+  assert.deepEqual(code.rows[0]!.failed, []);
+  assert.deepEqual([code.rows[0]!.source, code.sources.code, code.sources.live], ['code', 1, 0], 'reported as its own source');
+  // Not found by its exact tag (a line match only): doesn't count.
+  assert.ok(at({ drawn: 'mount' }).rows[0]!.failed.includes('C1'));
+  // Markup only: shown, but not evidence.
+  const markup = at({ drawn: 'markup' });
+  assert.ok(markup.rows[0]!.failed.includes('C1'));
+  assert.equal(markup.sources.markup, 1);
+  // A blank mount: nothing to see.
+  assert.ok(at({ drawn: 'mount', exact: true, blank: true }).rows[0]!.failed.includes('C2'));
   // A live photo with a covering layer hidden is still a photo of the app.
   const uncovered = trustRubric({ elements: { ...payload.elements, evals: [ev('ok', { shot: { ...shot(), uncovered: 1 }, confidence: 0.95 })] } });
   assert.deepEqual(uncovered.rows[0]!.failed, []);

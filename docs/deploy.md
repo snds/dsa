@@ -167,27 +167,33 @@ lives from the code the scan already read:
   options that match what the hidden element needs first. It never submits, and the network guard blocks
   writes anyway.
 
-Each run says, per app, how many elements were reached live, how many were drawn by mounting or as
-markup, how many weren't shown at all, and why the rest weren't reached live: "no route reaches its
+Each run says, per app, how many elements were reached live, how many were drawn from the app's code or
+shown as markup only, how many weren't shown at all, and why the rest weren't reached live: "no route reaches its
 file", "its page needs a value (/orders/:id) and no page visited linked to one", "it shows only after a
 step the crawler couldn't take (when “editing”)", or "not reached in the time budget". Written-down
 `routes` and `flows` still work and still come first.
 
 ### What the review shows when there's no photo
 
-Each element on a card is shown the best way available, with one of two labels:
+Each element on a card is shown the best way available, under one of three labels:
 
-| Label | How it's made |
-|---|---|
-| Live app screenshot | A photo of the running app. |
-| Live app screenshot | The same, after hiding a layer that sat over the element (a toast, a sticky bar). Up to three layers are hidden, then put back. |
-| Drawn direct from code | The element's component, loaded through the app's own Vite dev server and drawn on one of its pages. Props come from the conditions the scan traced (`open && …` gets `open: true`). Only for apps dsa starts itself with Vite. |
-| Drawn direct from code | The element's own JSX as plain markup, shown on one of the app's pages so its style sheets apply. No app code runs. |
+| Label | How it's made | Counts as seeing it? |
+|---|---|---|
+| Live app screenshot | A photo of the running app. | Yes |
+| Live app screenshot | The same, after hiding a layer that sat over the element (a toast, a sticky bar). Up to three layers are hidden, then put back. | Yes |
+| Drawn from the app's code | The element's component, loaded through the app's own Vite dev server and drawn on one of its pages with the app's styles. Props come from the conditions the scan traced (`open && …` gets `open: true`). Only for apps dsa starts itself with Vite. | Yes, when it was found by its exact source tag and isn't blank |
+| Markup only | The element's own JSX as plain markup, shown on one of the app's pages so its style sheets apply. No app code runs. | No |
 
-A drawing is shown so the reviewer can see roughly what the element is. It is not a photo of the app, so it
-never counts as evidence that a person can see the element: the trust checks and the confidence cap treat
-it as "no photo". The element still reads as not found in the app, and it's looked for again when its file
-or the app's setup changes. Set `shots.draw: false` to turn drawings off.
+**Why a drawing from the app's code counts.** It runs the real component, from the app's own files, with
+the app's real styles, and the element is the one its exact source tag names. That makes it strong
+evidence of how the element looks. So it counts for the trust checks and the confidence cap, under its
+own label, and the card's tooltip says "Rendered from this file's component with the app's styles; not
+seen on a live page." The rubric reports it as its own source ("N live, M drawn from code").
+
+It isn't proof the element is reachable live. So it never feeds placement (which page and region it sits
+in), the element still reads as not found live, and it's looked for live again when its file or the app's
+setup changes. Markup only is a sketch: shown so a reviewer knows roughly what the element is, never
+counted. Set `shots.draw: false` to turn drawings off.
 
 ## `host`: how the dashboard is hosted
 

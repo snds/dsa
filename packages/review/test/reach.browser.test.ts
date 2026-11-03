@@ -63,5 +63,5 @@ test('every element reached without routes or flows written down, and the rest s
   assert.equal(idx.shots[id('Rebuild index')!]?.drawn, 'mount');
   const app = r.apps.find(a => a.target === 'orders')!;
   assert.ok(app.reach && app.reach.live >= 3 && app.reach.mounted >= 1 && app.reach.why['no route reaches its file'] === 1, JSON.stringify(app.reach));
-  assert.ok(logs.some(l => /orders: \d+ reached live, \d+ drawn by mounting/.test(l)), logs.join('\n'));
+  assert.ok(logs.some(l => /orders: \d+ reached live, \d+ drawn from the app's code/.test(l)), logs.join('\n'));
 });
