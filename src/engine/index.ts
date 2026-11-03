@@ -13,6 +13,8 @@ export * from './classify-region.js';
 export * from './classify-semantics.js';
 export * from './classify.js';
 export * from './config.js';
+export * from './plain.js';
+export * from './png.js';
 export * from './elements.js';
 export * from './evaluate.js';
 export * from './events.js';

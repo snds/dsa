@@ -4,18 +4,20 @@ import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { short, SYS } from "@/lib/dsa"
-import { Dims, Ring, desc, rec, useEl } from "./shared"
+import { Dims, Ring, desc, pickText, proposalFor, rec, revealedText, useEl } from "./shared"
 
 /**
  * Large, side by side, at the same scale: the element in the app and the system variant in Storybook.
  * Screenshots are 2× device pixels, so 1× is their on-screen size; Fit shows both at 2× and shrinks only
  * what doesn't fit, so sizes compare honestly. Click an image to step the zoom; ←/→ go through the set.
  */
-export function Lightbox({ ids, start, onClose }: { ids: string[]; start: number; onClose: () => void }) {
+export function Lightbox({ ids, start, decision, onClose }: { ids: string[]; start: number; decision?: any; onClose: () => void }) {
   const { byId } = useEl()
   const [i, setI] = React.useState(start)
   const [zoom, setZoom] = React.useState(0)
   const e = byId.get(ids[i]), r = e?.rendered
+  const want = decision ?? (e ? rec(e) : null)
+  const exact = proposalFor(want)?.url ? proposalFor(want) : null
   const step = (n: number) => setI(x => (x + n + ids.length) % ids.length)
   React.useEffect(() => {
     const on = (k: KeyboardEvent) => {
@@ -42,7 +44,7 @@ export function Lightbox({ ids, start, onClose }: { ids: string[]; start: number
         <DialogHeader className="flex-row flex-wrap items-center justify-between gap-3 pr-10">
           <div className="min-w-0">
             <DialogTitle className="font-mono text-sm">{short(e.file)}:{e.line}</DialogTitle>
-            <DialogDescription>&lt;{e.element}&gt; → {desc(rec(e))} · {Math.round(e.confidence * 100)}%</DialogDescription>
+            <DialogDescription>&lt;{e.element}&gt; → {want ? pickText(want) : desc(rec(e))} · {Math.round(e.confidence * 100)}% sure</DialogDescription>
           </div>
           <div className="flex items-center gap-2">
             <ButtonGroup>{[0, 1, 2, 4].map(z => <Button key={z} size="sm" variant={z === zoom ? "secondary" : "outline"} onClick={() => setZoom(z)}>{z ? `${z}×` : "Fit"}</Button>)}</ButtonGroup>
@@ -53,8 +55,10 @@ export function Lightbox({ ids, start, onClose }: { ids: string[]; start: number
           </div>
         </DialogHeader>
         <div className="flex min-h-0 flex-1 gap-4">
-          {panel(e.shot.url, `In the app${e.shot.revealedBy ? ` · after opening “${e.shot.revealedBy}”` : ""}`, e.shot.box)}
-          {r?.systemShot && panel(r.systemShot, `${SYS} ${e.use || ""} ${r.key} · Storybook${r.sizeMissing ? " · default size (that size has no story)" : ""}`)}
+          {panel(e.shot.url, `In the app · ${e.target} · match ${Math.round(e.shot.match * 100)}%${e.shot.revealedBy ? ` · ${revealedText(e.shot.revealedBy)}` : ""}`, e.shot.box)}
+          {/* The card's own proposal, with its exact props; the closest measured variant only when that isn't rendered, said as such. */}
+          {exact ? panel(exact.url, `Proposed · ${SYS} ${pickText(want)} · Storybook`)
+            : r?.systemShot && panel(r.systemShot, `Closest variant, not the proposal · ${SYS} ${e.use || ""} ${r.key} · Storybook${r.sizeMissing ? " · default size (that size has no story)" : ""}`)}
         </div>
         {d && <div className="text-xs"><b className="font-medium">Rendered parity {Math.round(d.score * 100)}%</b><Dims bad={d.diffs.map((x: any) => `${x.label}: ${x.element} vs ${x.system}`)} ok={d.same} /></div>}
       </DialogContent>

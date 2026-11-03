@@ -36,16 +36,17 @@ export function Elements() {
   // same pattern in several apps and one answer settles it everywhere; splitting it per app would ask twice.
   const target = useApp()
   const [picker, setPicker] = React.useState<{ ids: string[]; pattern?: string | null } | null>(null)
-  const [lb, setLb] = React.useState<{ ids: string[]; i: number } | null>(null)
+  const [lb, setLb] = React.useState<{ ids: string[]; i: number; decision?: any } | null>(null)
   const [code, setCode] = React.useState<string | null>(null)
   const applyLocal = (ids: string[], decided: any) => { for (const id of ids) { const e = byId.get(id); if (!e) continue; if (decided) e.decided = decided; else delete e.decided; e.needsHuman = !e.decided && e.confidence < th } }
-  const ctx = { th, byId, applyLocal, refresh, openPicker: setPicker, openLightbox: (ids: string[], i: number) => setLb({ ids, i }), openCode: setCode }
+  const ctx = { th, byId, applyLocal, refresh, openPicker: setPicker, openLightbox: (ids: string[], i: number, decision?: any) => setLb({ ids, i, decision }), openCode: setCode }
 
   const mine = E.evals.filter((e: any) => !target || e.target === target)
   const unused = mine.filter((e: any) => e.exception === "unused")
   const deferred = mine.filter((e: any) => e.exception && e.exception !== "unused" && e.exception !== "lab").length
   const lab = mine.filter((e: any) => e.exception === "lab").length
-  const qs = E.questions.filter((q: any) => !target || byId.get(q.ids[0])?.target === target)
+  // A question can cover several apps: it belongs to every app it holds an element of.
+  const qs = E.questions.filter((q: any) => !target || q.ids.some((id: string) => byId.get(id)?.target === target))
 
   const staged = useStaged()
   const stagedKeys = new Set(staged.map(x => x.key))
@@ -102,7 +103,7 @@ export function Elements() {
         {!D.serve && <StagedBar />}
       </div>
       {picker && <Picker target={picker} onClose={() => setPicker(null)} />}
-      {lb && <Lightbox ids={lb.ids} start={lb.i} onClose={() => setLb(null)} />}
+      {lb && <Lightbox ids={lb.ids} start={lb.i} decision={lb.decision} onClose={() => setLb(null)} />}
       {code && <CodeViewer id={code} onClose={() => setCode(null)} />}
     </ElCtx.Provider>
   )

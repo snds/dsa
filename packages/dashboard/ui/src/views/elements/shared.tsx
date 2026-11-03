@@ -17,7 +17,8 @@ export interface Ctx {
   applyLocal: (ids: string[], decided: any) => void
   refresh: () => void
   openPicker: (t: { ids: string[]; pattern?: string | null }) => void
-  openLightbox: (ids: string[], i: number) => void
+  /** `decision`: the answer the card shows, so the zoom view proposes the same thing. */
+  openLightbox: (ids: string[], i: number, decision?: any) => void
   openCode: (id: string) => void
 }
 export const ElCtx = React.createContext<Ctx>(null as any)
@@ -104,7 +105,7 @@ export function Shot({ e, group }: { e: any; group?: string[] }) {
   const open = () => { const ids = (group ?? [e.id]).filter(id => byId.get(id)?.shot); openLightbox(ids, Math.max(0, ids.indexOf(e.id))) }
   const b = e.shot.box
   const where = `${e.shot.page ? `on ${e.shot.page.replace(/^https?:\/\/[^/]+/, "") || "/"} ` : ""}(match ${Math.round(e.shot.match * 100)}%)`
-  const app = <Figure src={e.shot.url} alt={`Screenshot of ${e.snippet.slice(0, 60)}`} box={b} ratio={b ? `${b.cw}/${b.ch}` : undefined} onOpen={open} caption={<><Where e={e} /> · {where}{e.shot.revealedBy && ` · ${revealedText(e.shot.revealedBy)}`}</>} />
+  const app = <Figure src={e.shot.url} alt={`Screenshot of ${e.snippet.slice(0, 60)}`} box={b} ratio={b ? `${b.cw}/${b.ch}` : undefined} onOpen={open} caption={<><b className="font-medium text-foreground">In the app</b> · {e.target} · <Where e={e} /> · {where}{e.shot.revealedBy && ` · ${revealedText(e.shot.revealedBy)}`}</>} />
   const r = e.rendered
   if (!r?.systemShot) return app
   const d = r.diff
@@ -112,7 +113,7 @@ export function Shot({ e, group }: { e: any; group?: string[] }) {
     <div className="flex flex-col gap-2">
       <div className="grid gap-3 sm:grid-cols-2">
         {app}
-        <Figure src={r.systemShot} alt={`${SYS} ${e.use || ""} ${r.key}`} onOpen={open} caption={`${SYS} ${e.use || ""} ${r.key} (Storybook${r.sizeMissing ? `; no story shows size ${r.key.split("/")[1]}, so this is ${r.key.split("/")[0]} at its default size and only colors are compared` : r.composed ? "; size measured separately" : ""})`} />
+        <Figure src={r.systemShot} alt={`${SYS} ${e.use || ""} ${r.key}`} onOpen={open} caption={`Closest variant · ${SYS} ${e.use || ""} ${r.key} (Storybook${r.sizeMissing ? `; no story shows size ${r.key.split("/")[1]}, so this is ${r.key.split("/")[0]} at its default size and only colors are compared` : r.composed ? "; size measured separately" : ""})`} />
       </div>
       {d && (
         <div className="text-xs">
@@ -144,10 +145,15 @@ export function SigBlock({ e }: { e: any }) {
   )
 }
 
-export function Reasons({ e }: { e: any }) {
+/**
+ * Why the scanner thinks so, in plain words. A line that is code through and through (attribute names,
+ * .map()) is left to Technical details, which passes `raw` to show the scanner's own words.
+ */
+export function Reasons({ e, raw }: { e: any; raw?: boolean }) {
+  const lines = e.reasons.map((r: any) => ({ ...r, text: raw ? r.text : r.plain === undefined ? r.text : r.plain })).filter((r: any) => r.text)
   return (
-    <ul className="flex flex-col gap-1 text-sm">
-      {e.reasons.map((r: any, i: number) => (
+    <ul className={cn("flex flex-col gap-1", raw ? "font-mono text-xs" : "text-sm")}>
+      {lines.map((r: any, i: number) => (
         <li key={i} className="flex gap-2">
           <span className={cn("w-8 shrink-0 text-right font-mono text-xs tabular-nums", r.delta > 0 ? "text-success-soft-foreground" : r.delta < 0 ? "text-destructive" : "text-muted-foreground")}>{r.delta ? `${r.delta > 0 ? "+" : "−"}${Math.abs(Math.round(r.delta * 100))}` : "·"}</span>
           <span>{r.text}</span>
@@ -176,6 +182,7 @@ export function ElementRow({ e, group }: { e: any; group?: string[] }) {
         <CollapsibleTrigger className="flex min-w-0 items-center gap-1.5 text-left underline-offset-4 hover:underline">
           <span className={cn("truncate", !e.label && "text-muted-foreground")}>{nameOf(e)}</span>
           {e.regions?.length > 0 && <span className="shrink-0 text-xs text-muted-foreground">in {e.regions.join(", ")}</span>}
+          <Badge variant="outline" className="shrink-0 text-[10px] font-normal" title="The app this element is in">{e.target}</Badge>
         </CollapsibleTrigger>
         <button type="button" onClick={() => openCode(e.id)} className="truncate font-mono text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" title="Open the code">
           {short(e.file)}:{e.line}
