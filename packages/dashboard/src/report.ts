@@ -65,6 +65,16 @@ export async function renderReport(root: string, config: Config, dataDir: string
              round(100.0 * count(*) filter (where i.overrides <> '') / count(*), 1) overridden_pct,
              coalesce(any_value(l.n), 0) lookalikes
       from i left join l using (component) group by i.component order by instances desc, i.component`, [runId]);
+    // The same counts per app, so the dashboard's app selector shows one app's uses and look-alikes.
+    const compByTarget = numeric(await store.all<any>(`
+      with i as (select component, target, count(*) instances, count(*) filter (where overrides <> '') overridden, count(distinct file) files from instances where run_id=$1 group by 1, 2),
+      l as (select component, target, count(*) n from lookalikes where run_id=$1 group by 1, 2)
+      select coalesce(i.component, l.component) component, coalesce(i.target, l.target) app, coalesce(i.instances, 0) instances, coalesce(i.overridden, 0) overridden,
+             coalesce(i.files, 0) files, coalesce(l.n, 0) lookalikes
+      from i full join l on i.component = l.component and i.target = l.target`, [runId]), ['instances', 'overridden', 'files', 'lookalikes']);
+    const byTargetOf = (component: string) => Object.fromEntries(compByTarget.filter(r => r.component === component).map(r => [r.app, {
+      instances: r.instances, overridden_pct: r.instances ? Math.round((1000 * r.overridden) / r.instances) / 10 : 0, files: r.files, lookalikes: r.lookalikes,
+    }]));
     const orphanLookalikes = await store.all<any>(`select component, count(*) n from lookalikes where run_id=$1 and component not in (select distinct component from instances where run_id=$1) group by 1`, [runId]);
     const deprecated = config.deprecated ?? {};
 
@@ -102,6 +112,19 @@ export async function renderReport(root: string, config: Config, dataDir: string
         (select count(*) from instances i where i.run_id=r.run_id) instances
       from runs r order by r.taken_at`);
     for (const r of runs) { try { r.sources = typeof r.sources === 'string' ? JSON.parse(r.sources) : r.sources; } catch { r.sources = null; } }
+    // Each run's measures per app, for the app selector: Overview's cards and Trends' lines for one app.
+    const perApp = numeric(await store.all<any>(`
+      with m as (select run_id, subject,
+          max(value) filter (where metric_id='correct_use_rate') correct_use,
+          max(value) filter (where metric_id='token_compliance_new_code') token_compliance,
+          max(value) filter (where metric_id='version_currency') majors
+        from metrics where scope in ('consumer','child') group by 1, 2),
+      l as (select run_id, target subject, count(*) n from lookalikes group by 1, 2),
+      i as (select run_id, target subject, count(*) n from instances group by 1, 2)
+      select coalesce(m.run_id, l.run_id, i.run_id) run_id, coalesce(m.subject, l.subject, i.subject) subject, m.correct_use, m.token_compliance, m.majors,
+             coalesce(l.n, 0) lookalikes, coalesce(i.n, 0) instances
+      from m full join l on m.run_id = l.run_id and m.subject = l.subject full join i on coalesce(m.run_id, l.run_id) = i.run_id and coalesce(m.subject, l.subject) = i.subject`), ['correct_use', 'token_compliance', 'majors', 'lookalikes', 'instances']);
+    for (const r of runs) r.byTarget = Object.fromEntries(perApp.filter(p => p.run_id === r.run_id).map(p => [p.subject, { correct_use: p.correct_use, token_compliance: p.token_compliance, majors: p.majors, lookalikes: p.lookalikes, instances: p.instances }]));
     // DuckDB hands counts back as text ("0"), which a ratio would turn into NaN: make them numbers.
     numeric(runs, ['consumers', 'current_consumers', 'correct_use', 'token_compliance', 'lookalikes', 'instances']);
     const openAt = await store.all<any>(`select run_id, count(*) filter (where event in ('opened','reopened')) opened, count(*) filter (where event='resolved') resolved from finding_events where run_id is not null group by 1`);
@@ -219,8 +242,8 @@ export async function renderReport(root: string, config: Config, dataDir: string
       run: { id: runId, takenAt: run.taken_at, sources: typeof run.sources === 'string' ? JSON.parse(run.sources) : run.sources },
       budget: settings.weekly_queue_budget,
       findings: fOn ? findingsOut : findingsOut.filter((f: any) => f.rule !== 'figma-lookalike'),
-      components: components.map(c => ({ ...c, deprecated: c.component in deprecated, replacement: deprecated[c.component] ?? null })).concat(
-        orphanLookalikes.map(o => ({ component: o.component, library: '—', instances: 0, consumers: 0, overridden_pct: 0, lookalikes: o.n, deprecated: false, replacement: null }))),
+      components: components.map(c => ({ ...c, deprecated: c.component in deprecated, replacement: deprecated[c.component] ?? null, byTarget: byTargetOf(c.component) })).concat(
+        orphanLookalikes.map(o => ({ component: o.component, library: '—', instances: 0, consumers: 0, overridden_pct: 0, lookalikes: o.n, deprecated: false, replacement: null, byTarget: byTargetOf(o.component) }))),
       targets,
       figma: fOn ? figma : [],
       runs: runs.map(r => ({ ...r, ...(openAt.find(o => o.run_id === r.run_id) ?? { opened: 0, resolved: 0 }) })),

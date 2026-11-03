@@ -4,6 +4,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Panel, StatusDot } from "@/components/bits"
 import { D, band, fmt, pct, ratio } from "@/lib/dsa"
+import { AllAppsNote } from "@/components/app-select"
 
 const ST: Record<string, string> = { crawled: "Crawled", stale: "Not edited recently", library: "Library file (skipped)", capped: "Over max files", error: "Unreadable" }
 
@@ -19,6 +20,7 @@ export function Design({ onSettings }: { onSettings: () => void }) {
 
   return (
     <div className="flex flex-col gap-6">
+      <AllAppsNote>Figma usage covers every design file the crawl read; it isn't split by app yet.</AllAppsNote>
       {D.figma.length ? (
         <Panel title="Library usage in recently edited design files" description="Look-alike frames are a name-based detach proxy (sampled)" contentClassName="px-0">
           <Table>

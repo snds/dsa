@@ -1,11 +1,16 @@
 import * as React from "react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Panel, Stat, StatusDot } from "@/components/bits"
+import { Note, Panel, Stat, StatusDot } from "@/components/bits"
 import { D, SCOPES, band, fmt, pct, threshold } from "@/lib/dsa"
+import { useApp } from "@/lib/app"
 
 export function Federation() {
   const vc = threshold("version_currency"), cu = threshold("correct_use_rate"), tc = threshold("token_compliance_new_code")
-  const children = D.targets.filter((t: any) => t.role === "child"), consumers = D.targets.filter((t: any) => t.role === "consumer")
+  const app = useApp()
+  // One app chosen: its row only, and its own numbers in the cards.
+  const shown = D.targets.filter((t: any) => !app || t.name === app)
+  const children = shown.filter((t: any) => t.role === "child"), consumers = shown.filter((t: any) => t.role === "consumer")
+  const one = app ? shown[0] : null
   const current = consumers.filter((t: any) => t.worstMajors != null && t.worstMajors <= 1).length
   const off = (t: any, k: string, node: React.ReactNode) => (t.measures && t.measures[k] === false ? <span className="text-muted-foreground">Off</span> : node)
   const cell = (v: React.ReactNode, b: any) => <span className="inline-flex items-center gap-2">{v}<StatusDot band={b} /></span>
@@ -37,13 +42,21 @@ export function Federation() {
   )
   return (
     <div className="flex flex-col gap-6">
+      {app && !one ? <Note>The scan has no version or usage numbers for {app}: only Element Review read it.</Note> : one ? (
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Stat label="Majors behind" value={one.worstMajors ?? "—"} detail={one.versions.map((v: any) => `${v.pkg} ${v.resolved ?? "?"}`).join(", ") || "No packages found"} />
+          <Stat label="Used as intended" value={pct(one.correctUse)} detail={`${fmt(one.instances)} instances`} />
+          <Stat label="Open findings" value={one.openFindings} detail={`${SCOPES[one.role] ?? one.role} · ${fmt(one.lookalikes)} look-alikes`} />
+        </div>
+      ) : (
       <div className="grid gap-3 sm:grid-cols-3">
         <Stat label="Consumers" value={consumers.length} detail={`${children.length} child librar${children.length === 1 ? "y" : "ies"}`} />
         <Stat label="Within one major" value={consumers.length ? Math.round((100 * current) / consumers.length) + "%" : "—"} detail={`${current} of ${consumers.length} consumers`} />
         <Stat label="Libraries" value={D.libraries.length} detail={D.libraries.map((l: any) => l.name).join(", ")} />
       </div>
+      )}
       {children.length > 0 && <Panel title="Child libraries" description="Scored as consumers of core" contentClassName="px-0">{table(children)}</Panel>}
-      <Panel title="Consumers" description="Share each team's own row with it; leadership gets the aggregates" contentClassName="px-0">{table(consumers)}</Panel>
+      {(!one || consumers.length > 0) && <Panel title="Consumers" description="Share each team's own row with it; leadership gets the aggregates" contentClassName="px-0">{table(consumers)}</Panel>}
     </div>
   )
 }

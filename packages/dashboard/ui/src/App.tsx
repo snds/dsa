@@ -25,6 +25,8 @@ import { cn } from "cn"
 import { ACTIONS, rescan as hostRescan } from "@/lib/host"
 import { NextScan, ScanButton, ScanOverlay, SignInDialog } from "@/components/scan"
 import { canRun, detectRunning } from "@/lib/useScan"
+import { replaceRoute, routePath, useApp } from "@/lib/app"
+import { AppSelect } from "@/components/app-select"
 
 type ViewId = "overview" | "queue" | "system" | "federation" | "elements" | "usage" | "readiness" | "design" | "trends" | "settings"
 
@@ -45,7 +47,7 @@ const VIEWS: { id: ViewId; label: string; hint: string }[] = [
 const titleCase = (s: string) => s.split(/\s+/).map((w, i) => (i > 0 && /^(a|an|and|of|the|for|to|in|on|or|vs)$/i.test(w) ? w.toLowerCase() : /[A-Z]{2,}/.test(w) ? w : w.charAt(0).toUpperCase() + w.slice(1))).join(" ")
 
 function readHash(): { view: ViewId; section: SectionId } {
-  const [v0, s] = (location.hash || "").slice(1).split("/")
+  const [v0, s] = routePath().split("/")
   // Older links: #components is the System view now.
   const v = v0 === "components" ? "system" : v0
   const view = (v === "settings" || VIEWS.some(x => x.id === v) ? v : D.run ? "overview" : "settings") as ViewId
@@ -116,6 +118,7 @@ function LiveRevision() {
 
 function Shell() {
   const agent = useAgent()
+  const app = useApp()
   const [{ view, section }, setRoute] = React.useState(readHash)
   const [, tick] = React.useState(0)
   const [title, setTitle] = React.useState<string>(D.title || D.root)
@@ -126,8 +129,8 @@ function Shell() {
   React.useEffect(() => { const on = () => setRoute(readHash()); addEventListener("hashchange", on); return () => removeEventListener("hashchange", on) }, [])
   const go = (v: ViewId, s: SectionId = "general") => {
     // Keep a sub-path a view set itself (#queue/<id>, #system/check) when it is the view being opened.
-    const keep = location.hash.slice(1).split("/")[0] === v && location.hash.includes("/")
-    try { if (!keep) history.replaceState(null, "", "#" + (v === "settings" ? `settings/${s}` : v)) } catch { /* file:// in some browsers */ }
+    const keep = routePath().split("/")[0] === v && routePath().includes("/")
+    if (!keep) replaceRoute(v === "settings" ? `settings/${s}` : v)
     setRoute({ view: v, section: s })
     window.scrollTo({ top: 0 })
   }
@@ -167,7 +170,8 @@ function Shell() {
               ) : <>Snapshot from {fmtD(D.generatedAt)}</>}</span>}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+          <AppSelect />
           {D.serve && <AgentButton />}
           {canRun() ? <ScanButton /> : !D.serve && D.published && ACTIONS && <StaticRescan onPost={rerun} />}
           </div>
@@ -213,10 +217,10 @@ function Shell() {
         ) : !D.run ? (
           <Empty className="border"><EmptyHeader><EmptyTitle>Nothing scanned yet</EmptyTitle><EmptyDescription>Open Settings to check sources and tokens, then run the first scan.</EmptyDescription></EmptyHeader></Empty>
         ) : view === "overview" ? <Overview go={(v: string) => go(v as ViewId)} />
-          : view === "queue" ? <Queue key={location.hash} />
+          : view === "queue" ? <Queue key={routePath()} />
           : view === "system" ? <System />
           : view === "federation" ? <Federation />
-          : view === "elements" ? <Elements />
+          : view === "elements" ? <Elements key={app ?? ""} />
           : view === "readiness" ? <Readiness />
           : view === "usage" ? <Usage />
           : view === "design" ? <Design onSettings={() => go("settings", "general")} />

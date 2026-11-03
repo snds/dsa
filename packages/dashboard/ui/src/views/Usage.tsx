@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Code, Note, Panel, Stat } from "@/components/bits"
 import { D, SYS, copy, fmt, fmtDT } from "@/lib/dsa"
+import { AllAppsNote } from "@/components/app-select"
 
 /**
  * System Usage: where the system's tokens and components are used, per library, from the system's own
@@ -57,6 +58,7 @@ export function Usage() {
 
   return (
     <div className="flex flex-col gap-6">
+      <AllAppsNote>System usage comes from the design system's own usage scan, by library; it isn't split by the app chosen above yet.</AllAppsNote>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="flex flex-wrap gap-1.5">
           {r.libraries.map(l => <Badge key={l.id} variant={l.present ? "secondary" : "outline"}>{ROLE[l.role]} · {l.name}{l.present ? "" : " · not scanned"}</Badge>)}

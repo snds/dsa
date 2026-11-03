@@ -10,6 +10,8 @@ import { Facts, Note, Panel, StatusDot } from "@/components/bits"
 import { CodeReader, shortPath, type Place } from "@/components/code-reader"
 import { D, SYS, band, fmt, pct, threshold } from "@/lib/dsa"
 import { FOUND_BY } from "@/lib/insight"
+import { replaceRoute, routePath, useApp } from "@/lib/app"
+import { AllAppsNote } from "@/components/app-select"
 import { Components } from "@/views/Components"
 
 type Filter = "all" | "check" | "unused" | "deprecated"
@@ -26,33 +28,44 @@ const FILTERS: { id: Filter; label: string; hint: string }[] = [
  */
 export function System() {
   const m = D.model
-  const [, initial, linked] = location.hash.slice(1).split("/") as [string, Filter | undefined, string | undefined]
+  const [, initial, linked] = routePath().split("/") as [string, Filter | undefined, string | undefined]
   const [filter, setFilter] = React.useState<Filter>(FILTERS.some((f) => f.id === initial) ? initial! : "all")
   // One component open at a time, in the address bar (#system/<filter>/<key>) so a link opens it.
   const [opened, setOpened] = React.useState<string | null>(linked ? decodeURIComponent(linked) : null)
   const [reading, setReading] = React.useState<Place | null>(null)
-  const openRow = (key: string | null) => { setOpened(key); try { history.replaceState(null, "", `#system/${filter}${key ? `/${encodeURIComponent(key)}` : ""}`) } catch { /* file:// */ } }
+  const openRow = (key: string | null) => { setOpened(key); replaceRoute(`system/${filter}${key ? `/${encodeURIComponent(key)}` : ""}`) }
   const [q, setQ] = React.useState("")
+  const app = useApp()
   if (!m) return <Components />
 
-  const usage = new Map<string, any>((D.components ?? []).map((c: any) => [String(c.component).toLowerCase(), c]))
+  // One app chosen: each component's uses, overrides and look-alikes in that app. A report from before
+  // they were split by app keeps the all-apps numbers and says so.
+  const split = (m.components as any[]).some((c) => c.uses.byTarget) && (D.components ?? []).some((c: any) => c.byTarget)
+  const scoped = (u: any) => (!app || !split || !u ? u : { ...u, ...(u.byTarget?.[app] ?? { instances: 0, overridden_pct: 0, lookalikes: 0 }) })
+  const usesOf = (c: any) => (!app || !split ? c.uses : { ...c.uses, ...(c.uses.byTarget?.[app] ?? { consumer: 0, files: 0 }) })
+  const usage = new Map<string, any>((D.components ?? []).map((c: any) => [String(c.component).toLowerCase(), scoped(c)]))
   const cu = threshold("correct_use_rate")
   // The same test as the Overview: found by naming alone, known only from app code, or of an unclear kind.
   // A component with no recognised kind is not suspect: the archetypes cover the common kinds only.
   const needsCheck = (c: any) => c.inferred || c.evidence.tier === "convention" || c.kind?.ambiguous
-  const rows = (m.components as any[]).map((c) => ({ ...c, u: usage.get(c.name.toLowerCase()) }))
+  const rows = (m.components as any[]).map((c) => ({ ...c, uses: usesOf(c), u: usage.get(c.name.toLowerCase()) }))
     .filter((c) => filter === "all" || (filter === "check" && needsCheck(c)) || (filter === "unused" && !c.uses.consumer) || (filter === "deprecated" && c.u?.deprecated))
     .filter((c) => !q || c.name.toLowerCase().includes(q.toLowerCase()) || c.kind?.kind?.includes(q.toLowerCase()))
-  const count = (f: Filter) => (m.components as any[]).filter((c) => f === "all" || (f === "check" && needsCheck(c)) || (f === "unused" && !c.uses.consumer) || (f === "deprecated" && usage.get(c.name.toLowerCase())?.deprecated)).length
+    // The app's most-used components first, as the all-apps list leads with the most used overall.
+    .sort((a, b) => (app && split ? b.uses.consumer - a.uses.consumer : 0))
+  const count = (f: Filter) => (m.components as any[]).filter((c) => f === "all" || (f === "check" && needsCheck(c)) || (f === "unused" && !usesOf(c).consumer) || (f === "deprecated" && usage.get(c.name.toLowerCase())?.deprecated)).length
+
+  const label = (f: { id: Filter; label: string }) => (f.id === "unused" && app && split ? `Not used by ${app}` : f.label)
 
   return (
     <div className="flex flex-col gap-4">
+      {!split && <AllAppsNote>App uses, overrides and look-alikes here are across all apps; this report doesn't split them by app yet. Re-run the scan to split them.</AllAppsNote>}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <ToggleGroup value={[filter]} onValueChange={(v: any) => { const f = (Array.isArray(v) ? v[0] : v) as Filter; if (f) { setFilter(f); setOpened(null); try { history.replaceState(null, "", `#system/${f}`) } catch { /* file:// */ } } }} variant="outline" size="sm">
+        <ToggleGroup value={[filter]} onValueChange={(v: any) => { const f = (Array.isArray(v) ? v[0] : v) as Filter; if (f) { setFilter(f); setOpened(null); replaceRoute(`system/${f}`) } }} variant="outline" size="sm">
           {FILTERS.map((f) => (
             <Tooltip key={f.id}>
-              <TooltipTrigger render={<ToggleGroupItem value={f.id} aria-label={f.label} />}>{f.label} <span className="ml-1 tabular-nums text-muted-foreground">{fmt(count(f.id))}</span></TooltipTrigger>
-              <TooltipContent>{f.hint}</TooltipContent>
+              <TooltipTrigger render={<ToggleGroupItem value={f.id} aria-label={label(f)} />}>{label(f)} <span className="ml-1 tabular-nums text-muted-foreground">{fmt(count(f.id))}</span></TooltipTrigger>
+              <TooltipContent>{f.id === "unused" && app && split ? `${app} doesn't use it` : f.hint}</TooltipContent>
             </Tooltip>
           ))}
         </ToggleGroup>
@@ -64,7 +77,7 @@ export function System() {
           <TableHeader><TableRow>
             <TableHead className="pl-4">Component</TableHead>
             <TableHead>Kind</TableHead>
-            <TableHead className="text-right">App uses</TableHead>
+            <TableHead className="text-right">{app && split ? `Uses in ${app}` : "App uses"}</TableHead>
             <TableHead className="text-right">Used as intended</TableHead>
             <TableHead className="text-right">Look-alikes</TableHead>
             <TableHead className="pr-4">Found by</TableHead>

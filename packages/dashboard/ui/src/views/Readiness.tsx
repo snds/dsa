@@ -7,6 +7,8 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Code, Note, Panel, Pre, Stat } from "@/components/bits"
 import { D, SYS, fmtD, fmt, ratio } from "@/lib/dsa"
+import { useApp } from "@/lib/app"
+import { AllAppsNote } from "@/components/app-select"
 import { AskAgent } from "@/agent/AskAgent"
 
 /**
@@ -17,7 +19,9 @@ import { AskAgent } from "@/agent/AskAgent"
 const TIER_TONE: Record<string, string> = { "AI-native": "border-success-soft-border text-success-soft-foreground", Invested: "border-warning-soft-border text-warning-soft-foreground", Emerging: "border-destructive/40 text-destructive" }
 
 export function Readiness() {
-  const rows: any[] = D.readiness ?? []
+  const app = useApp()
+  // One app chosen: its repo's readiness. Bench runs are by checkout, not app, so they stay whole.
+  const rows: any[] = (D.readiness ?? []).filter((r: any) => !app || r.subject === app)
   if (!rows.length && !D.bench?.length) return (
     <Empty className="border"><EmptyHeader><EmptyTitle>No readiness data in this scan</EmptyTitle>
       <EmptyDescription>The audit runs with every scan when the design system's profile names its agent-readiness tool and the tool is installed. Re-run the scan.</EmptyDescription></EmptyHeader></Empty>
@@ -27,7 +31,9 @@ export function Readiness() {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {rows.map(r => <Stat key={r.subject} label={r.subject} value={`${r.score}`} detail={<span className="flex flex-wrap items-center gap-1.5"><Badge variant="outline" className={cn("text-[11px]", TIER_TONE[r.tier])}>{r.tier}</Badge>{r.kit ? "Agent kit installed" : "No agent kit"}</span>} />)}
       </div>
+      {app && !rows.length && <Note>No readiness audit for {app} in this scan.</Note>}
       {rows.map(r => <RepoCard key={r.subject} r={r} />)}
+      <AllAppsNote>Bench runs below cover every checkout; they aren't split by app yet.</AllAppsNote>
       <Bench />
     </div>
   )

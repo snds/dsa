@@ -182,7 +182,7 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
   const reading = opts.dsaConfig ? readRepo({ root: opts.root, config: opts.dsaConfig, include: ["**/*.{tsx,jsx,ts,js,mjs,vue,svelte,html,astro,njk,twig,hbs,liquid,erb,ejs}"], extraDirs: targets.filter((t) => t.role !== "core").map((t) => t.dir) }) : undefined;
   // What the system is, for the dashboard: inventory, kinds, facets, tokens, uses, and where its code was found.
   if (reading && opts.dsaConfig) {
-    try { fs.mkdirSync(opts.dataDir, { recursive: true }); fs.writeFileSync(path.join(opts.dataDir, "model-summary.json"), JSON.stringify(modelSummary(reading, opts.root, opts.dsaConfig))); }
+    try { fs.mkdirSync(opts.dataDir, { recursive: true }); fs.writeFileSync(path.join(opts.dataDir, "model-summary.json"), JSON.stringify(modelSummary(reading, opts.root, opts.dsaConfig, targets.filter((t) => t.role !== "core")))); }
     catch (e: any) { notes.push(`Model summary not written: ${String(e?.message ?? e).split("\n")[0]}`); }
   }
   for (const t of targets.filter(t => t.role !== 'core')) {

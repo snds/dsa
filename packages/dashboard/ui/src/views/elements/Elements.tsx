@@ -2,7 +2,6 @@ import * as React from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Note, SectionTitle, Stat } from "@/components/bits"
@@ -15,6 +14,7 @@ import { Lightbox } from "./Lightbox"
 import { CodeViewer } from "./CodeViewer"
 import { Destination } from "./Destination"
 import { NO_HOME, destinations, matches, styleName, unitsFor } from "./units"
+import { useApp } from "@/lib/app"
 
 /** Below this, the crawler's best on-page match may be a different element (shared classes, no shared label). */
 export const SHOT_MIN = 0.8
@@ -32,23 +32,20 @@ export function Elements() {
   const [, bump] = React.useState(0)
   const refresh = () => bump(x => x + 1)
   const byId = React.useMemo(() => new Map<string, any>(E.evals.map((e: any) => [e.id, e])), [E])
-  const targets = [...new Set<string>(E.evals.map((e: any) => e.target))]
-  // Open on the app with the most questions for a human (an app whose only open elements sit in unused files has none).
-  const [target, setTarget] = React.useState<string>(() => {
-    const asks = (t: string) => E.questions.filter((q: any) => E.evals.find((e: any) => e.id === q.ids[0])?.target === t).length
-    return [...targets].sort((a, b) => asks(b) - asks(a))[0] ?? targets[0]
-  })
+  // The app chosen in the header. All apps: every question at once, since one question can cover the
+  // same pattern in several apps and one answer settles it everywhere; splitting it per app would ask twice.
+  const target = useApp()
   const [picker, setPicker] = React.useState<{ ids: string[]; pattern?: string | null } | null>(null)
   const [lb, setLb] = React.useState<{ ids: string[]; i: number } | null>(null)
   const [code, setCode] = React.useState<string | null>(null)
   const applyLocal = (ids: string[], decided: any) => { for (const id of ids) { const e = byId.get(id); if (!e) continue; if (decided) e.decided = decided; else delete e.decided; e.needsHuman = !e.decided && e.confidence < th } }
   const ctx = { th, byId, applyLocal, refresh, openPicker: setPicker, openLightbox: (ids: string[], i: number) => setLb({ ids, i }), openCode: setCode }
 
-  const mine = E.evals.filter((e: any) => e.target === target)
+  const mine = E.evals.filter((e: any) => !target || e.target === target)
   const unused = mine.filter((e: any) => e.exception === "unused")
   const deferred = mine.filter((e: any) => e.exception && e.exception !== "unused" && e.exception !== "lab").length
   const lab = mine.filter((e: any) => e.exception === "lab").length
-  const qs = E.questions.filter((q: any) => byId.get(q.ids[0])?.target === target)
+  const qs = E.questions.filter((q: any) => !target || byId.get(q.ids[0])?.target === target)
 
   const staged = useStaged()
   const stagedKeys = new Set(staged.map(x => x.key))
@@ -79,13 +76,6 @@ export function Elements() {
   return (
     <ElCtx.Provider value={ctx}>
       <div className="flex flex-col">
-        {targets.length > 1 && (
-          <div className="mb-4">
-            <NativeSelect aria-label="App" value={target} onChange={e => setTarget(e.target.value)}>
-              {targets.map(t => <NativeSelectOption key={t} value={t}>{t}</NativeSelectOption>)}
-            </NativeSelect>
-          </div>
-        )}
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <Stat label="Need a decision" value={count("open")} detail={`${elementsIn("open")} elements`} active={show === "open"} onClick={() => pick(["open"])} />
           <Stat label="Ready to migrate" value={elementsIn("ready")} detail={`At or above ${Math.round(th * 100)}%, in ${count("ready")} groups`} active={show === "ready"} onClick={() => pick(["ready"])} />

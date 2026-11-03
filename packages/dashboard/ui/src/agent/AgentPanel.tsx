@@ -10,6 +10,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Pre } from "@/components/bits"
 import { api, ago } from "@/lib/dsa"
+import { hashFor } from "@/lib/app"
 import { BeforeAfter } from "./BeforeAfter"
 import { Markdown } from "./Markdown"
 import { useAgent, type Msg, type Proposal } from "./store"
@@ -76,7 +77,7 @@ export function AgentPanel() {
         {orphan.length > 0 && <div className="mt-4 flex flex-col gap-2">{orphan.map(p => <ProposalCard key={p.id} p={p} />)}</div>}
         {a.changes?.files.length ? <ChangesCard /> : null}
         {s?.kept && <p className="mt-4 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs"><GitBranchIcon className="size-4" />Kept on <code className="font-mono">{s.kept.branch}</code> ({s.kept.commit}) in your local {s.repo.name} repo. Push it and open a pull request as usual.</p>}
-        {a.error && <p role="alert" className="mt-4 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">{a.error} {/install|not on PATH|isn't installed/i.test(a.error) && <a href="#settings/agents" className="underline underline-offset-4">Settings › Agents</a>}</p>}
+        {a.error && <p role="alert" className="mt-4 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">{a.error} {/install|not on PATH|isn't installed/i.test(a.error) && <a href={hashFor("settings/agents")} className="underline underline-offset-4">Settings › Agents</a>}</p>}
         <div ref={end} />
       </div>
 

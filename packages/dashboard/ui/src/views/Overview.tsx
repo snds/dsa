@@ -8,6 +8,8 @@ import { Code, Disclosure, Facts, Note, Panel, StatusDot } from "@/components/bi
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { D, SYS, band, fmt, fmtDT, num, ratio, threshold, type Band } from "@/lib/dsa"
 import { CERTAINTY, classify, type Certainty } from "@/lib/insight"
+import { hashFor, inApp, openRoute, useApp } from "@/lib/app"
+import { AllAppsNote } from "@/components/app-select"
 
 /**
  * The first screen: is the system healthy, what should my team do next, and how far can I trust this scan.
@@ -18,19 +20,33 @@ export function Overview({ go }: { go: (view: string) => void }) {
   const runs: any[] = D.runs ?? []
   const last = runs[runs.length - 1] ?? null
   const prev = runs.length > 1 ? runs[runs.length - 2] : null
-  const items: any[] = (D.queue?.items ?? []).filter((i: any) => i.status === "open")
+  const app = useApp()
+  const items: any[] = (D.queue?.items ?? []).filter((i: any) => i.status === "open").filter(inApp(app))
   const definite = items.filter((i) => classify(i.rule).certainty === "definite")
   const decide = items.filter((i) => classify(i.rule).certainty === "recommendation")
   const cu = threshold("correct_use_rate"), tc = threshold("token_compliance_new_code")
   const currentShare = (r: any) => ratio(r?.current_consumers, r?.consumers)
+  const vc = threshold("version_currency")
+  // One app: its own measures in each run. A report from before runs carried them has this run's only.
+  const t = app ? D.targets?.find((x: any) => x.name === app) : null
+  const mine = (r: any, k: string, now: unknown) => (!r ? null : r.byTarget ? r.byTarget[app!]?.[k] ?? null : r === last ? now : null)
 
-  const kpis: Kpi[] = [
+  const kpis: Kpi[] = app ? [
+    { label: "Used as intended", value: mine(last, "correct_use", t?.correctUse), prev: mine(prev, "correct_use", null), unit: "%", up: true, band: band(mine(last, "correct_use", t?.correctUse), cu?.watch ?? 90, cu?.act ?? 75), how: "measured",
+      means: `Share of ${SYS} component uses in ${app}'s code with no class, style or spread-prop overrides.`, to: "federation" },
+    { label: "Majors behind", value: mine(last, "majors", t?.worstMajors), prev: mine(prev, "majors", null), unit: "", up: false, band: band(mine(last, "majors", t?.worstMajors), 0, (vc?.act ?? 2) - 1, false), how: "measured",
+      means: `How many major versions ${app}'s most out-of-date ${SYS} package is behind the latest release.`, to: "federation" },
+    { label: "Tokens in new code", value: mine(last, "token_compliance", t?.tokenCompliance), prev: mine(prev, "token_compliance", null), unit: "%", up: true, band: band(mine(last, "token_compliance", t?.tokenCompliance), tc?.watch ?? 95, tc?.act ?? 90), how: "measured",
+      means: `Share of colour, space and type values in ${app}'s recently changed files that use a token instead of a hard-coded value.`, to: "federation" },
+    { label: "Custom look-alikes", value: mine(last, "lookalikes", t?.lookalikes), prev: mine(prev, "lookalikes", null), unit: "", up: false, band: "", how: "estimated",
+      means: `Native elements and custom components in ${app} that look like a ${SYS} component. Found by resemblance, so each one is a recommendation to check.`, to: "queue" },
+  ] : [
     { label: "Used as intended", value: last?.correct_use, prev: prev?.correct_use, unit: "%", up: true, band: band(last?.correct_use, cu?.watch ?? 90, cu?.act ?? 75), how: "measured",
-      means: `Share of ${SYS} component uses in app code with no class, style or spread-prop overrides.`, to: "apps" },
+      means: `Share of ${SYS} component uses in app code with no class, style or spread-prop overrides.`, to: "federation" },
     { label: "Apps on a current version", value: currentShare(last), prev: currentShare(prev), unit: "%", up: true, band: band(currentShare(last), 100, 75), how: "measured",
-      means: `Apps within one major version of the latest ${SYS} release.`, to: "apps" },
+      means: `Apps within one major version of the latest ${SYS} release.`, to: "federation" },
     { label: "Tokens in new code", value: last?.token_compliance, prev: prev?.token_compliance, unit: "%", up: true, band: band(last?.token_compliance, tc?.watch ?? 95, tc?.act ?? 90), how: "measured",
-      means: "Share of colour, space and type values in recently changed files that use a token instead of a hard-coded value.", to: "apps" },
+      means: "Share of colour, space and type values in recently changed files that use a token instead of a hard-coded value.", to: "federation" },
     { label: "Custom look-alikes", value: last?.lookalikes, prev: prev?.lookalikes, unit: "", up: false, band: "", how: "estimated",
       means: `Native elements and custom components that look like a ${SYS} component. Found by resemblance, so each one is a recommendation to check.`, to: "queue" },
   ]
@@ -44,7 +60,7 @@ export function Overview({ go }: { go: (view: string) => void }) {
       </div>
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
-        <Panel title="What to do next" description="Open actions, highest impact first"
+        <Panel title="What to do next" description={app ? `Open actions for ${app}, highest impact first` : "Open actions, highest impact first"}
           action={<Button variant="ghost" size="sm" onClick={() => go("queue")}>All actions<ArrowRightIcon data-icon="inline-end" /></Button>}>
           <ActionGroup kind="definite" items={definite} go={go} />
           <ActionGroup kind="recommendation" items={decide} go={go} />
@@ -148,7 +164,7 @@ function ActionGroup({ kind, items, go }: { kind: Certainty; items: any[]; go: (
           const c = classify(i.rule)
           return (
             <li key={i.id}>
-              <a href={`#queue/${encodeURIComponent(i.id)}`} onClick={(e) => { e.preventDefault(); location.hash = `queue/${encodeURIComponent(i.id)}`; go("queue") }} className="flex items-start gap-3 py-2.5 hover:bg-muted/40">
+              <a href={hashFor(`queue/${encodeURIComponent(i.id)}`)} onClick={(e) => { e.preventDefault(); openRoute(`queue/${encodeURIComponent(i.id)}`); go("queue") }} className="flex items-start gap-3 py-2.5 hover:bg-muted/40">
                 <Badge variant={kind === "definite" ? "default" : "outline"} className="mt-0.5 shrink-0">{c.verb}</Badge>
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm">{i.title}</span>
@@ -181,13 +197,14 @@ function ScanConfidence({ go }: { go: (v: string) => void }) {
   const [howText, ok] = how[m.sources.how] ?? how.unknown!
   const rows: { ok: boolean; title: string; body: React.ReactNode; act?: [string, () => void] }[] = [
     { ok, title: "Where the system's code is", body: <>{howText}. {m.sources.read.length ? `${fmt(m.sources.read.length)} folder${m.sources.read.length === 1 ? "" : "s"} read.` : "Nothing is read yet."}</>,
-      act: ["Check sources", () => { location.hash = "settings/general" }] },
+      act: ["Check sources", () => openRoute("settings/general")] },
     { ok: true, title: `${fmt(m.counts.components)} components`, body: <>Plus {fmt(m.counts.parts)} parts (DialogTitle, MenuItem) and {fmt(m.counts.icons)} icons, counted apart.</>, act: ["See inventory", () => go("system")] },
-    { ok: check === 0, title: `${fmt(check)} need a check`, body: "Known only from how apps write them, found by naming alone, or of an unclear kind. Confirm or correct them.", act: ["Review", () => { location.hash = "system/check"; go("system") }] },
-    { ok: unused === 0, title: `${fmt(unused)} not used by any app`, body: "Candidates to promote, document, or retire. Some are building blocks used only inside the system.", act: ["Review", () => { location.hash = "system/unused"; go("system") }] },
+    { ok: check === 0, title: `${fmt(check)} need a check`, body: "Known only from how apps write them, found by naming alone, or of an unclear kind. Confirm or correct them.", act: ["Review", () => { openRoute("system/check"); go("system") }] },
+    { ok: unused === 0, title: `${fmt(unused)} not used by any app`, body: "Candidates to promote, document, or retire. Some are building blocks used only inside the system.", act: ["Review", () => { openRoute("system/unused"); go("system") }] },
   ]
   return (
     <Panel title="How sure is this scan" description="Read this before acting on a number">
+      <AllAppsNote className="mb-3">About the system itself, so it's the same for every app.</AllAppsNote>
       <ul className="flex flex-col gap-3">
         {rows.map((r) => (
           <li key={r.title} className="flex gap-3">
