@@ -25,10 +25,23 @@ export interface ShotResult {
     target: string; url?: string; how?: string; routes?: number; captured?: number; cached?: number; skipped?: string;
     /** Every page asked for sign-in (a login route, another host, a password form): where it sent the crawler. */
     signIn?: string;
+    /** The app didn't render on any page (it threw, its modules failed, or nothing showed): the first error. */
+    broken?: string;
     /** Routes the app declares that need a value (a :param, a splat): to open, list one in apps["name"].routes. */
     needsValue?: string[];
   }[];
 }
+
+/**
+ * Runs in the page: what an app that rendered shows. A blank page (an app that threw before it drew, or
+ * whose modules failed) has no visible text and nothing to interact with.
+ */
+const RENDERED = `() => {
+  const vis = (el) => { const r = el.getBoundingClientRect(); const st = getComputedStyle(el); return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' && st.display !== 'none'; };
+  const text = (document.body && document.body.innerText || '').trim().length;
+  const controls = Array.from(document.querySelectorAll('a[href], button, input, select, textarea, [role=button], [role=link], [role=tab], [tabindex]')).filter(vis).length;
+  return { text, controls };
+}`;
 
 /**
  * Runs in the page: is this a sign-in wall? A login-like path (login, signin, sso, auth, an OpenID
@@ -122,7 +135,19 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
     const surface: any = appSurface(opts.config.live, target);
     const built = surface?.dir ? (() => { try { return fs.statSync(path.join(path.resolve(opts.root, surface.dir), 'index.html')).mtimeMs; } catch { return 0; } })() : 0;
     const auth = surface?.auth ? (() => { try { return fs.statSync(path.resolve(opts.root, surface.auth)).mtimeMs; } catch { return 0; } })() : 0;
-    return crypto.createHash('sha1').update(JSON.stringify([opts.config.apps?.[target] ?? null, surface ?? null, opts.config.shots?.routes ?? null, opts.url ?? null, built, auth])).digest('hex').slice(0, 12);
+    return crypto.createHash('sha1').update(JSON.stringify([opts.config.apps?.[target] ?? null, surface ?? null, opts.config.shots?.routes ?? null, opts.url ?? null, built, auth, installOf(all.find(x => x.name === target)?.dir)])).digest('hex').slice(0, 12);
+  };
+  // The app's dependencies: its lockfile's contents and when node_modules was last installed (the app's
+  // own folder, then up to the root). Installing a missing package retries what a broken app hid.
+  const installOf = (dir?: string) => {
+    if (!dir) return null;
+    const out: (string | number)[] = [];
+    for (let d = path.resolve(dir); ; d = path.dirname(d)) {
+      for (const f of ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb']) { try { out.push(f, crypto.createHash('sha1').update(fs.readFileSync(path.join(d, f))).digest('hex').slice(0, 12)); } catch { /* none here */ } }
+      for (const f of ['node_modules/.package-lock.json', 'node_modules/.modules.yaml', 'node_modules/.yarn-state.yml']) { try { out.push(f, fs.statSync(path.join(d, f)).mtimeMs); } catch { /* none here */ } }
+      if (d === path.resolve(opts.root) || d === path.dirname(d)) break;
+    }
+    return out;
   };
   const setups = new Map<string, string>();
   const setupOf = (target: string) => { if (!setups.has(target)) setups.set(target, setupKey(target)); return setups.get(target)!; };
@@ -187,7 +212,7 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
       if (!s.need.length) { log('Nothing new to capture.'); continue; }
       log(`${s.target === '*' ? '' : s.target + ': '}${s.need.length} examples to find across ${new Set(s.need.map(e => groupKey(e))).size} groups.`);
       const sh = opts.config.shots ?? {};
-      const r: Awaited<ReturnType<typeof session>> & { signIn?: string; expired?: boolean } = await session(pw, { url: s.url, routes: s.routes, first: s.first, flows: s.flows, crawl: s.crawl, examples: s.need, dir, storageState: s.storageState, readApi: s.readApi, readPaths: s.readPaths, signIn: s.signIn, maxPages: sh.maxPages ?? 90, waitMs: sh.waitMs ?? 600, log, reveal: sh.reveal, maxActions: sh.maxActions ?? sh.maxTriggers, maxDepth: sh.maxDepth, maxMinutes: sh.maxMinutes });
+      const r: Awaited<ReturnType<typeof session>> & { signIn?: string; expired?: boolean; broken?: string } = await session(pw, { url: s.url, routes: s.routes, first: s.first, flows: s.flows, crawl: s.crawl, examples: s.need, dir, storageState: s.storageState, readApi: s.readApi, readPaths: s.readPaths, signIn: s.signIn, maxPages: sh.maxPages ?? 90, waitMs: sh.waitMs ?? 600, log, reveal: sh.reveal, maxActions: sh.maxActions ?? sh.maxTriggers, maxDepth: sh.maxDepth, maxMinutes: sh.maxMinutes });
       const at = new Date().toISOString();
       const byId = new Map(s.need.map(e => [e.id, e]));
       if (r.signIn && !Object.keys(r.shots).length) {
@@ -197,6 +222,12 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
         else if (s.signIn) log(`  Every page asked for sign-in, and clicking “${s.signIn.click}” on ${s.signIn.path} didn't sign in. Check live.apps["${name}"].signIn and the saved sign-in (\`dsa login ${s.url}\`).`);
         else log(`  Every page asked for sign-in. Run \`dsa login ${s.url}\` and set live.apps["${name}"].auth to the file it saves. (Pages went to ${r.signIn.replace(/[?#].*$/, '')}. If the app keeps its sign-in in memory and its sign-in page has one button, also set live.apps["${name}"].signIn to { "path": …, "click": … }.)`);
         result.apps.push({ target: s.target, url: s.url, how: s.how, routes: s.routes.length, captured: 0, signIn: r.signIn, ...needs(s.target) });
+        continue;
+      }
+      if (r.broken && !Object.keys(r.shots).length) {
+        // An app that didn't render hides every element: they weren't looked for, so none is "not found".
+        log(`  The app didn't render: ${r.broken}. Fix the app's install, then run again.`);
+        result.apps.push({ target: s.target, url: s.url, how: s.how, routes: s.routes.length, captured: 0, broken: r.broken, ...needs(s.target) });
         continue;
       }
       for (const [id, v] of Object.entries<any>(r.shots)) { index.shots[id] = { ...v, at, fileHash: hashOf(byId.get(id)!) }; delete misses[id]; }
@@ -261,7 +292,9 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
     // and styles, and the identity provider while signing in (flows.ts).
     net = await guardNetwork(page, base.origin, { readApi: Boolean(o.readApi), readPaths: o.readPaths, idp: o.signIn?.idp, signingIn: () => auth.signing });
     auth.done = false;
+    watchPage?.(page);
   };
+  let watchPage: ((pg: any) => void) | null = null;
   await launch();
   // A page can crash or close under the crawler (a heavy view, a control that closes the window):
   // start a fresh browser and carry on with the next page instead of losing the whole pass.
@@ -275,6 +308,28 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
   // Pages that asked for sign-in instead of showing the app, out of the pages tried.
   const wall = { tried: 0, walled: 0, at: '' };
   const signedOut = () => wall.tried >= 1 && wall.walled === wall.tried;
+  // Pages where the app itself didn't render, out of the pages tried, and why: its errors and its own module requests.
+  const broken = { pages: 0, first: '' };
+  const pageErrors: string[] = [];
+  const modules = { total: 0, failed: 0, first: '' };
+  const isBroken = () => wall.tried >= 1 && broken.pages === wall.tried;
+  const watch = (pg: any) => {
+    pg.on('pageerror', (e: any) => { pageErrors.push(String(e?.message ?? e).split('\n')[0]!); });
+    const own = (r: any) => { try { return new URL(r.url()).origin === base.origin && r.resourceType() === 'script'; } catch { return false; } };
+    pg.on('response', (r: any) => { if (!own(r.request())) return; modules.total++; if (r.status() >= 400) { modules.failed++; modules.first ||= `${new URL(r.url()).pathname} answered ${r.status()}`; } });
+    pg.on('requestfailed', (q: any) => { if (!own(q)) return; modules.total++; modules.failed++; modules.first ||= `${new URL(q.url()).pathname} failed (${q.failure()?.errorText ?? 'no answer'})`; });
+  };
+  watchPage = watch;
+  watch(page);
+  /** After a page loads: did the app render? Its own modules mostly failing, or nothing to see and use (and it threw, or showed no text). */
+  const didntRender = async (errorsBefore: number, mods: { total: number; failed: number }) => {
+    const seen = await inPage<{ text: number; controls: number }>(page, RENDERED).catch(() => ({ text: 1, controls: 1 }));
+    const total = modules.total - mods.total, failed = modules.failed - mods.failed;
+    const threw = pageErrors.length > errorsBefore;
+    const bad = (total > 0 && failed * 2 > total) || (seen.controls === 0 && (seen.text === 0 || threw));
+    if (bad && !broken.first) broken.first = (threw ? pageErrors[errorsBefore] : '') || modules.first || 'the page stayed blank';
+    return bad;
+  };
   // A redirect may still be on its way (a meta refresh, a script): let it land before looking.
   const signInWall = async () => {
     for (let i = 0; i < 2; i++) {
@@ -401,6 +456,7 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
       seen.add(u);
       try {
       wall.tried++;
+      const errorsBefore = pageErrors.length, mods = { total: modules.total, failed: modules.failed };
       try {
         // Dev servers can hold connections open; don't wait forever for "idle".
         await open(u);
@@ -418,6 +474,12 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
         wall.walled++; wall.at = page.url();
         // Three pages in, all of them sign-in: the rest will be too.
         if (signedOut() && wall.tried >= 3) break;
+        continue;
+      }
+      if (await didntRender(errorsBefore, mods)) {
+        broken.pages++;
+        // Three pages in and the app drew none of them: it's the app, not the pages.
+        if (isBroken() && wall.tried >= 3) break;
         continue;
       }
       pages.push(u);
@@ -476,7 +538,7 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
     }
     // Pass 2: explore pages, most promising first (re-scored as elements are found), until time runs out.
     const done2 = new Set<string>();
-    while (remaining.length && Date.now() < deadline && o.reveal !== false && !signedOut() && !auth.expired) {
+    while (remaining.length && Date.now() < deadline && o.reveal !== false && !signedOut() && !auth.expired && !isBroken()) {
       const words = [...hints(), ...traced().map(t => t.toLowerCase())];
       const next = promising.filter(p => !done2.has(p.u)).sort((a, b) => b.score - a.score)[0];
       if (!next || !words.length && done2.size >= 20) break;
@@ -492,12 +554,12 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
         await relaunch();
       }
     }
-    if ((net.blocked || Object.keys(net.allowed).length) && !signedOut()) o.log(`  network: ${describeNetwork(net, base.origin)}`);
+    if ((net.blocked || Object.keys(net.allowed).length) && !signedOut() && !isBroken()) o.log(`  network: ${describeNetwork(net, base.origin)}`);
     if (remaining.length && Date.now() >= deadline) o.log(`  time budget (shots.maxMinutes) used up with ${remaining.length} still to find.`);
   } finally {
     await browser.close().catch(() => {});
   }
-  return { shots, pages, missing: remaining.map(r => r.id), ...(signedOut() || auth.expired ? { signIn: wall.at || o.url } : {}), ...(auth.expired ? { expired: true } : {}) };
+  return { shots, pages, missing: remaining.map(r => r.id), ...(signedOut() || auth.expired ? { signIn: wall.at || o.url } : {}), ...(auth.expired ? { expired: true } : {}), ...(isBroken() ? { broken: broken.first } : {}) };
 
   /**
    * Explore one page as a tree of UI states. From the loaded page, try each interaction (best first:
