@@ -121,6 +121,14 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- An app that doesn't render no longer reads as hundreds of elements "not found". When every page
+  stays blank (no text and nothing to use, or it threw), or the app's own module requests mostly fail (a
+  dev server answering 500 for a package that isn't installed), `dsa shots` says "The app didn't render:
+  <its first error>. Fix the app's install, then run again.", stops early, and remembers no misses for
+  it. A page that renders but logs an error is fine.
+- Fixing an app's dependencies retries its misses without `--retry-missing`: the app's lockfile and its
+  `node_modules` install marker (`.package-lock.json`, pnpm's `.modules.yaml`, yarn's state file), from
+  the app's folder up to the root, are part of the setup a miss is remembered with.
 - `dsa login` no longer makes signing in impossible: it saved the session every 1.5 s, which in a visible
   browser took focus from the sign-in form. It now saves once a page has loaded and gone quiet (2 s),
   and once at the end; never on a timer. IndexedDB is left out of the saved session unless `--indexeddb`.
