@@ -210,6 +210,41 @@ in), the element still reads as not found live, and it's looked for live again w
 setup changes. Markup only is a sketch: shown so a reviewer knows roughly what the element is, never
 counted. Set `shots.draw: false` to turn drawings off.
 
+### How proposals are drawn
+
+Each card shows its proposal (the system component it recommends) drawn with the proposal's props and the
+element's own words and icon. dsa draws it from the design system's own source first, then from its
+stories:
+
+1. **From source.** The component is loaded straight from its file, through the system's own Vite, on a
+   small page that loads the system's Storybook preview file (`.storybook/preview.*`). That file is where
+   the system's CSS, providers and decorators come from, so the drawing looks the way the system's stories
+   do. No story is needed.
+   - A part that only shows inside something closed (a menu item, a sidebar button) is drawn inside its
+     family, opened: `Select` with `open`, `SidebarProvider`, `SelectContent`.
+   - A part that needs data gets empty lists to start. A table's own rows come from data the scan can't
+     read, so it's drawn empty and says so.
+   - An element with no words of its own is drawn with none, as it is.
+2. **From stories**, when the source didn't draw it exactly: a story that shows these props as written,
+   else one driven by its args.
+
+The element's own content comes from its photo when there is one. Without a photo, it comes from the
+source: its words, its accessible name, an icon component inside it (drawn by importing that icon), or an
+inline `<svg>` written in its JSX.
+
+**Props are checked on the drawn element.** First by its data attributes (`data-variant`, `data-size`).
+When a component shows none, by its classes: the classes its `cva` adds for each value must all be there.
+A drawing that shows other values is "closest". One whose props can't be read either way is "unverified".
+
+**What a card proposes and what's drawn always match.** The confidence cap can move an element into or out
+of a question, which can change what its card proposes. So after the photos, dsa caps, draws what's newly
+wanted, and repeats until nothing new is wanted. Drawings are cached, so a settled run draws nothing.
+
+Drawing from source needs Vite and React installed with the design system (they are wherever its
+Storybook runs on Vite). Without them, or with `rendered.harness: false`, proposals come from stories only.
+To see why proposals aren't drawn exactly on a published dashboard, run
+`node scripts/proposal-gaps.mjs <site>/index.html` from a checkout of dsa: it counts them by cause.
+
 ### Apps that keep their sign-in in memory (OIDC, PKCE)
 
 `dsa login` saves cookies, local storage, and the app's session storage. Many single-page apps

@@ -920,6 +920,10 @@
                   "minimum": 1,
                   "maximum": 9007199254740991
                 },
+                "harness": {
+                  "description": "Draw proposals from the design system's own source with its Vite and React, its Storybook preview file for CSS and providers (default true). false: from its stories only.",
+                  "type": "boolean"
+                },
                 "maxMinutes": {
                   "type": "number",
                   "minimum": 0

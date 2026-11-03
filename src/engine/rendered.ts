@@ -50,6 +50,8 @@ export interface Proposal {
   own?: boolean | undefined;
   /** When it couldn't be drawn with these props: the component's story as its authors wrote it, to show instead. */
   fallback?: string | undefined;
+  /** Drawn from the system's own source (harness.ts), or from one of its stories. */
+  via?: 'source' | 'story' | undefined;
 }
 
 /** Props that change how a component looks; `render` and `asChild` change what it's built from. */

@@ -8,6 +8,26 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- Proposals are drawn without depending on stories. The system's component is mounted straight from its
+  source through its own Vite, on a page that loads its Storybook preview file (CSS, providers,
+  decorators), with the proposal's props and the element's own words and icon. Parts that live inside
+  something closed are drawn inside their family, opened; parts that need data get empty lists, and a
+  table drawn without its rows says so. Stories are used when the source doesn't draw it exactly.
+  `rendered.harness: false` draws from stories only.
+- An element's own content comes from its source when it has no photo: the icon component inside it
+  (imported and drawn) or an inline `<svg>` from its JSX, beside its words and accessible name.
+- Props are confirmed from a drawn element's classes when it shows no `data-variant` or `data-size`:
+  signatures now record the classes each `cva` value adds (`axisClasses`).
+- `scripts/proposal-gaps.mjs` counts, on a published dashboard, why proposals aren't drawn exactly with
+  their element's own content.
+
+### Fixed
+
+- Cards showed a proposal with the story's sample content although the element had its own. The
+  confidence cap changes which question an element is in, and so what its card proposes, and the last cap
+  ran after the last drawing. Now dsa caps and draws until nothing new is wanted
+  (`settleProposals`), and wants each card's pick both as the elements stand and with the cap lifted.
+
 - The screenshot crawler reaches elements with no routes or flows written down. It reads the app's routes
   from the source (JSX routes, route objects with element, Component or lazy, React Router's route config,
   Next's file routes) and, with the scan's import graph, opens the routes that render each missing element

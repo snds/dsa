@@ -316,6 +316,7 @@ export const ConfigSchema = z
         autoStart: z.boolean().optional(),
         useStatic: z.boolean().optional().describe("Measure the static Storybook build instead of starting Storybook."),
         storiesPerComponent: z.number().int().min(1).optional(),
+        harness: z.boolean().optional().describe("Draw proposals from the design system's own source with its Vite and React, its Storybook preview file for CSS and providers (default true). false: from its stories only."),
         maxMinutes: z.number().min(0).optional(),
       })
       .optional()

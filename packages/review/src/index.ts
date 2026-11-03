@@ -5,14 +5,14 @@ import type { Command } from 'commander';
 import { defineAddon, liveGate, type AddonApi, type EngineContext } from '@snds/dsa';
 import { applyRenderedEvidence, capByEvidence, logEvent, materializeRemotes, openStore, pagePlacementKey, reevaluateElements, resolveTargets, type Config } from '@snds/dsa/engine';
 import { detectApp, ensureBrowser, installAppDeps, linkCoreForChild } from './apps.js';
-import { renderIfStale, renderProposals, renderSignatures } from './rendered.js';
+import { renderIfStale, renderProposals, renderSignatures, settleProposals } from './rendered.js';
 import { takeShots } from './shots.js';
 
 export { detectApp, discoverRoutes, ensureBrowser, freePort, installAppDeps, linkCoreForChild, startApp, type AppPlan, type RunningApp } from './apps.js';
 export { takeShots, captureSession, type ShotResult } from './shots.js';
 export { flowProblems, guardNetwork, routeUrl, runFlow, describeStep, NEVER, type Flow, type Step } from './flows.js';
 export { HARNESS, startProxy } from './sbproxy.js';
-export { READ_STYLE, argsParam, renderProposals, renderSignatures, renderIfStale, startStorybook, wantedProposals } from './rendered.js';
+export { READ_STYLE, argsParam, renderProposals, renderSignatures, renderIfStale, settleProposals, startStorybook, wantedProposals } from './rendered.js';
 
 export interface ShotOptions {
   url?: string | undefined;
@@ -167,9 +167,9 @@ export default defineAddon({
         }
         // Again, now that photos recorded each element's own content and the evidence may have changed a
         // pick: draw what the cards will propose. Everything already drawn is reused.
-        try { await renderProposals({ root, config, dataDir, log }); } catch (e) { notes.push(`proposed components not rendered: ${firstLine(e)}`); }
-        // What can now be seen decides how sure each recommendation may be.
-        await capByEvidence(dataDir, config.review?.threshold ?? 0.9).catch(() => {});
+        // What can now be seen decides how sure each recommendation may be, which can change what a card
+        // proposes: draw until the cards and the drawings agree.
+        try { await settleProposals({ root, config, dataDir, log }); } catch (e) { notes.push(`proposed components not rendered: ${firstLine(e)}`); await capByEvidence(dataDir, config.review?.threshold ?? 0.9).catch(() => {}); }
       },
     },
   ],
@@ -207,7 +207,7 @@ export default defineAddon({
         const r = await renderSignatures({ root: ctx.root, config: ctx.config, dataDir: ctx.dataDir, force: Boolean(o.force), log: api.out });
         for (const n of r.notes.slice(0, 5)) api.out(`note: ${n}`);
         await renderProposals({ root: ctx.root, config: ctx.config, dataDir: ctx.dataDir, force: Boolean(o.force), log: api.out });
-        await capByEvidence(ctx.dataDir, ctx.config.review?.threshold ?? 0.9);
+        await settleProposals({ root: ctx.root, config: ctx.config, dataDir: ctx.dataDir, log: api.out });
       });
 
     program

@@ -6,6 +6,7 @@
 //   node scripts/review-demo.mjs <out-dir> --score  …and prints the trust rubric's score for it
 //   … --score --card '{"photoLabels":false}'         scores what an older card showed, on the same data
 //   … --tag                                           photographs pages built with source tags (scripts/review-demo-tag.mjs)
+//   … --no-harness                                    draws proposals from the Storybook only, not the system's source
 //
 // The rubric is packages/dashboard/src/trust.ts.
 import fs from 'node:fs';
@@ -32,6 +33,11 @@ fs.cpSync(path.join(ROOT, 'test/fixtures/review-demo'), root, { recursive: true 
 const cfgFile = path.join(root, 'dsa.config.json');
 const raw = JSON.parse(fs.readFileSync(cfgFile, 'utf8'));
 raw.live = { apps: { billing: { dir: 'apps/billing/site' }, checkout: { dir: 'apps/checkout/site' } }, storybook: { dir: 'storybook-static' } };
+// Proposals are drawn from the system's own source when Vite and React are installed with it: here, the
+// dashboard's own install stands in for the demo's (--no-harness draws from the stories only).
+const kit = path.join(ROOT, 'packages/dashboard/ui/node_modules');
+if (process.argv.includes('--no-harness')) raw.rendered = { ...(raw.rendered ?? {}), harness: false };
+else if (fs.existsSync(path.join(kit, 'vite'))) fs.symlinkSync(kit, path.join(root, 'node_modules'), 'dir');
 fs.writeFileSync(cfgFile, JSON.stringify(raw, null, 2));
 if (process.argv.includes('--tag')) {
   // The built pages, built again with source tags, so the crawler matches by source line.
@@ -55,7 +61,7 @@ await review.renderProposals({ root, config, dataDir, log });
 // Again, now that the rendered evidence exists (shots are cached, so nothing is re-captured), then draw
 // what the cards now propose, with each element's own content, as `dsa run` does after its screenshots.
 await review.shotsAndEvidence(ctx, { perGroup: 3 }, log);
-await review.renderProposals({ root, config, dataDir, log });
+await review.settleProposals({ root, config, dataDir, log });
 fs.rmSync(out, { recursive: true, force: true });
 await dash.publish(root, config, dataDir, profile, out, null);
 log(`Review demo: ${path.join(out, 'index.html')}`);
