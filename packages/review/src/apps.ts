@@ -6,7 +6,6 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { htmlPages, walk, type Config, type Target } from '@snds/dsa/engine';
-import { MOUNT_MODULE } from './drawn.js';
 
 /**
  * Running the apps the scan looked at, so screenshots need no manual dev server:
@@ -57,7 +56,7 @@ export function tagPlan(plan: AppPlan, o: { root: string; dir: string; off?: boo
     const tag = core ? pathToFileURL(core).href : null;
     if (vite && tag) {
       const runner = path.join(os.tmpdir(), `dsa-vite-tagged-${process.pid}.mjs`);
-      fs.writeFileSync(runner, VITE_TAGGED.replace('__MOUNT__', () => JSON.stringify(MOUNT_MODULE)));
+      fs.writeFileSync(runner, VITE_TAGGED);
       return { ...plan, command: process.execPath, args: [runner, '{port}'], env: { ...env, DSA_TAG_VITE: pathToFileURL(vite).href, DSA_TAG_MODULE: tag }, tag: 'injected' };
     }
   }
@@ -66,19 +65,16 @@ export function tagPlan(plan: AppPlan, o: { root: string; dir: string; off?: boo
 
 /**
  * Started by tagPlan, in the app's folder: Vite's own config file, loaded the way vite loads it, with the
- * tagger first among its plugins (and /@dsa/mount, which draws one component for the crawler), served on the port it's given. Fixed text; the paths come in the environment.
+ * tagger first among its plugins (it also serves /@dsa/mount, which draws one component for the crawler), served on the port it's given. Fixed text; the paths come in the environment.
  */
 const VITE_TAGGED = `const vite = await import(process.env.DSA_TAG_VITE);
 const { dsaTag } = await import(process.env.DSA_TAG_MODULE);
 const port = Number(process.argv[2]);
 const loaded = await vite.loadConfigFromFile({ command: 'serve', mode: 'development' }, undefined, process.cwd());
 const config = loaded?.config ?? {};
-// /@dsa/mount: draws one component on a page, for elements the crawler can't photograph (drawn.ts).
-const MOUNT = __MOUNT__;
-const mount = { name: 'dsa:mount', resolveId: (id) => (id === '/@dsa/mount' ? '\\0dsa-mount.js' : null), load: (id) => (id === '\\0dsa-mount.js' ? MOUNT : null) };
 const server = await vite.createServer({
   ...config, configFile: false, root: config.root ?? process.cwd(),
-  plugins: [dsaTag({ when: true }), mount, ...(config.plugins ?? [])],
+  plugins: [dsaTag({ when: true }), ...(config.plugins ?? [])],
   server: { ...config.server, port, strictPort: true, host: '127.0.0.1' },
 });
 await server.listen();
@@ -202,9 +198,9 @@ export function discoverRoutes(dir: string, exclude: string[] = []): string[] {
  * `needsValue` are the ones with a parameter (`:id`) or a splat (`*`), which need a real value to open:
  * list one in apps["name"].routes. An optional segment (`:lang?`, `edit?`) is opened without it.
  */
-export function routeConfig(dir: string, files?: string[]): { file: string | null; routes: string[]; needsValue: string[] } {
+export function routeConfig(dir: string, files?: string[]): { file: string | null; routes: string[]; needsValue: string[]; /** Each route's module, as written (relative to the config's folder). */ files: Map<string, string> } {
   const list = files ?? walk(dir, new Set(['.ts', '.tsx', '.js', '.jsx']), [], true).slice(0, 6000);
-  const out = { file: null as string | null, routes: [] as string[], needsValue: [] as string[] };
+  const out = { file: null as string | null, routes: [] as string[], needsValue: [] as string[], files: new Map<string, string>() };
   for (const f of list) {
     if (!/routes\.[jt]sx?$/.test(f)) continue;
     let src: string;
@@ -215,7 +211,7 @@ export function routeConfig(dir: string, files?: string[]): { file: string | nul
     if (at < 0) continue;
     const open = src.indexOf('[', at);
     const found = new Set<string>(), params = new Set<string>();
-    walkRoutes(src, open, '', found, params);
+    walkRoutes(src, open, '', found, params, out.files);
     out.routes.push(...found);
     out.needsValue.push(...params);
   }
@@ -225,7 +221,7 @@ export function routeConfig(dir: string, files?: string[]): { file: string | nul
 }
 
 /** Read the array at `open` ("[…]"): each route(), index(), layout(), prefix() call, nested ones under their path. */
-function walkRoutes(src: string, open: number, base: string, found: Set<string>, params: Set<string>) {
+function walkRoutes(src: string, open: number, base: string, found: Set<string>, params: Set<string>, files?: Map<string, string>) {
   const close = matching(src, open);
   if (close < 0) return;
   let i = open + 1;
@@ -240,20 +236,20 @@ function walkRoutes(src: string, open: number, base: string, found: Set<string>,
     const str = (a?: { start: number; end: number }) => { const t = a ? src.slice(a.start, a.end).trim() : ''; const q = t.match(/^(['"`])(.*)\1$/s); return q ? q[2]! : null; };
     const child = (a?: { start: number; end: number }) => { if (!a) return -1; const t = src.slice(a.start, a.end).trimStart(); return t.startsWith('[') ? a.start + src.slice(a.start, a.end).indexOf('[') : -1; };
     const kind = hit[1];
-    if (kind === 'index') add(base, found, params);
+    if (kind === 'index') { add(base, found, params); const f = str(args[0]); if (f) files?.set(base || '/', f); }
     else if (kind === 'route') {
       const p = str(args[0]);
       const here = p == null ? base : join(base, p);
-      if (p != null) add(here, found, params);
+      if (p != null) { add(here, found, params); const f = str(args[1]); if (f) files?.set(here, f); }
       const kids = args.slice(2).map(child).find(x => x >= 0);
-      if (kids != null && kids >= 0) walkRoutes(src, kids, here, found, params);
+      if (kids != null && kids >= 0) walkRoutes(src, kids, here, found, params, files);
     } else if (kind === 'layout') {
       const kids = args.slice(1).map(child).find(x => x >= 0);
-      if (kids != null && kids >= 0) walkRoutes(src, kids, base, found, params);
+      if (kids != null && kids >= 0) walkRoutes(src, kids, base, found, params, files);
     } else if (kind === 'prefix') {
       const p = str(args[0]);
       const kids = args.slice(1).map(child).find(x => x >= 0);
-      if (kids != null && kids >= 0) walkRoutes(src, kids, p == null ? base : join(base, p), found, params);
+      if (kids != null && kids >= 0) walkRoutes(src, kids, p == null ? base : join(base, p), found, params, files);
     }
     i = argsClose + 1;
   }

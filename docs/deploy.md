@@ -148,6 +148,46 @@ A tagged photo counts as proof of place in the review: the card says "matched by
 read them. Tag internal dev and preview builds only, never a public production build. The tagger is
 off unless `DSA_TAG=1` or `when: true`, so a production build isn't tagged by accident.
 
+### How the crawler reaches each element, with no routes or flows written down
+
+You don't have to list routes or write flows for screenshots. The crawler works out where each element
+lives from the code the scan already read:
+
+- **Routes that render it.** It reads the app's routes from the source: `<Route path element>`, route
+  objects (`{ path, element | Component | lazy }`, nested through `children`), React Router's route
+  config, and Next's `pages/` and `app/` folders. With the scan's import graph, it knows which routes
+  render each element's file. Those routes are opened first, the ones with the most missing elements
+  ahead of the rest.
+- **Routes that need a value** (`/orders/:id`). It takes values from the pages it has already opened:
+  links that fit the pattern, and table rows that open a record when clicked. Up to three per pattern.
+- **Elements behind a state.** The scan traces the control that sets it, and on a page with source tags
+  the crawler uses that exact control, found by its own line and column, not by its words. It follows
+  the shapes real apps use: a control with no words (an icon button, a colour swatch) whose handler sets
+  the state; a setter handed to another component as a prop (a toolbar's `onAdd`); a mode set by
+  `onValueChange` on a segmented control or tabs (the child whose `value` matches); and a search field
+  whose text the condition reads (it types into it).
+- **Saved state and the URL.** When the code reads a saved flag (`localStorage.getItem('setupDone')`), the
+  crawler forgets it, as on a first visit, and looks again (never keys that look like sign-in). When it
+  reads a URL search parameter (`searchParams.get('report')`), it opens the page with a value in it.
+- **Form fields that appear on a choice.** It picks each option of a select and ticks boxes and radios,
+  options that match what the hidden element needs first. It never submits, and the network guard blocks
+  writes anyway.
+
+Each miss in the screenshot index keeps what was looked for and tried, in plain words ("setOpenColour for
+“openColour”: clicking an unlabelled control at Studio.jsx:15", then "clicked an unlabelled control (found
+by its line) on /: still not shown"), and each run counts the state-gated misses with no control found
+and those where a control was used but the element stayed hidden.
+
+Drawing from the app's code works on any Vite dev build with `dsaTag` on, not only on apps dsa starts:
+the tagger serves the mount itself. The run says which it is, and every element it couldn't draw, with
+the reason.
+
+Each run says, per app, how many elements were reached live, how many were drawn from the app's code or
+shown as markup only, how many weren't shown at all, and why the rest weren't reached live: "no route reaches its
+file", "its page needs a value (/orders/:id) and no page visited linked to one", "it shows only after a
+step the crawler couldn't take (when “editing”)", or "not reached in the time budget". Written-down
+`routes` and `flows` still work and still come first.
+
 ### What the review shows when there's no photo
 
 Each element on a card is shown the best way available, under one of three labels:

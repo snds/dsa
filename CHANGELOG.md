@@ -28,6 +28,15 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   ran after the last drawing. Now dsa caps and draws until nothing new is wanted
   (`settleProposals`), and wants each card's pick both as the elements stand and with the cap lifted.
 
+- The screenshot crawler reaches elements with no routes or flows written down. It reads the app's routes
+  from the source (JSX routes, route objects with element, Component or lazy, React Router's route config,
+  Next's file routes) and, with the scan's import graph, opens the routes that render each missing element
+  first, densest first. It fills routes like `/orders/:id` from links and clicked table rows on pages it
+  has seen, clicks the control the source traced for a state by its source tag, and picks form options
+  and ticks boxes to reveal fields, never submitting. Each run reports, per app, what was reached live,
+  drawn from the app's code, shown as markup only or not shown, and why the rest weren't reached live; each miss keeps
+  its reason.
+
 - Element Review shows every element the best way it can, under three labels. "Live app screenshot": a
   photo, or one taken again with a covering layer hidden (a toast, a sticky bar; up to three, then put
   back). "Drawn from the app's code": for an element the crawler can't reach, its component mounted

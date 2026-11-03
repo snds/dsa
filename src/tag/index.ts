@@ -15,6 +15,9 @@ import { parse as babelParse } from '@babel/parser';
  *   export default defineConfig({ plugins: [dsaTag({ when: process.env.DSA_TAG === '1' }), react()] });
  *
  * Babel (and Next.js through Babel): `plugins: ['@snds/dsa/tag/babel']`.
+ *
+ * While on, the Vite plugin also serves /@dsa/mount (MOUNT_MODULE), which the crawler uses to draw an
+ * element it can't reach live from the app's own component and styles.
  */
 export interface TagOptions {
   /** Tag this build. Default: DSA_TAG=1 in the environment. */
@@ -129,14 +132,48 @@ function walk(node: any, fn: (n: any) => void) {
 }
 
 /**
+ * /@dsa/mount, served by the tagger whenever it's on: mounts one component on the page with React, inside an
+ * error boundary, replacing the page's body, so the crawler can draw an element it can't reach live from
+ * the app's own code and styles. Fixed text; what it mounts comes in as arguments from the crawler, which
+ * tries each file URL in turn (/@fs/<abs>, then the path from the app's folder).
+ */
+export const MOUNT_MODULE = `import { createElement, Component } from 'react';
+import { createRoot } from 'react-dom/client';
+class Guard extends Component {
+  constructor(p) { super(p); this.state = { failed: false }; }
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(err) { window.__dsaMountError = String((err && err.message) || err).slice(0, 200); }
+  render() { return this.state.failed ? null : this.props.children; }
+}
+window.__dsaMount = async (files, name, props) => {
+  window.__dsaMountError = null;
+  let mod, err = '';
+  for (const f of [].concat(files)) { try { mod = await import(/* @vite-ignore */ f); break; } catch (e) { err = String((e && e.message) || e).slice(0, 160); } }
+  if (!mod) return 'its file did not load: ' + err;
+  const C = mod[name] || (mod.default && (name === 'default' || mod.default.name === name) ? mod.default : undefined);
+  if (!C) return 'its component is not exported';
+  const host = document.createElement('div');
+  host.id = 'dsa-mount';
+  host.style.padding = '24px';
+  document.body.replaceChildren(host);
+  createRoot(host).render(createElement(Guard, null, createElement(C, props)));
+  await new Promise((r) => setTimeout(r, 400));
+  return window.__dsaMountError ? 'its component failed to render: ' + window.__dsaMountError : 'ok';
+};
+`;
+
+/**
  * The Vite plugin (Vite, React Router v7, Remix on Vite). Runs before other plugins, on the source as
  * written, so its lines and columns are the scanner's. Does nothing unless tagging is on.
  */
-export function dsaTag(o: TagOptions = {}): { name: string; enforce: 'pre'; transform: (code: string, id: string) => { code: string; map: null } | null } {
+export function dsaTag(o: TagOptions = {}): { name: string; enforce: 'pre'; resolveId: (id: string) => string | null; load: (id: string) => string | null; transform: (code: string, id: string) => { code: string; map: null } | null } {
   const on = tagEnabled(o);
   return {
     name: 'dsa:tag',
     enforce: 'pre',
+    // /@dsa/mount (MOUNT_MODULE): only while tagging is on, so a production build never has it.
+    resolveId: (id) => (on && id === '/@dsa/mount' ? '\0dsa-mount.js' : null),
+    load: (id) => (on && id === '\0dsa-mount.js' ? MOUNT_MODULE : null),
     transform(code, id) {
       if (!on || id.startsWith('\0')) return null;
       const r = tagSource(code, id, { ...o, when: true });
