@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { CODE_TERMS, decodePng, isBlank } from '@snds/dsa/engine';
+import { BLANK_INSET, CODE_TERMS, decodePng, isBlank } from '@snds/dsa/engine';
 
 /**
  * Can a person trust a recommendation from the card alone? Ten checks, all of which must hold on the
@@ -32,7 +32,7 @@ export interface CardShows {
   placeOpens: boolean;
   /** Reasons and "how" lines in plain words on the face, the scanner's own words in Technical details. */
   plainReasons: boolean;
-  /** Where the exact proposal isn't rendered, a reason and the closest rendered variant in its place. */
+  /** Where the exact proposal isn't rendered, a reason and an image in its place (closest variant, or the story as written). */
   fallback: boolean;
 }
 
@@ -86,7 +86,7 @@ export function trustRubric(payload: any, opts: { card?: CardShows; dir?: string
     const f = path.join(opts.dir, e.shot.url);
     if (!visible.has(f)) {
       let v = false;
-      try { v = !isBlank(decodePng(fs.readFileSync(f)), e.shot.box); } catch { v = false; }
+      try { v = !isBlank(decodePng(fs.readFileSync(f)), e.shot.box, 2, BLANK_INSET); } catch { v = false; }
       visible.set(f, v);
     }
     return visible.get(f)!;
@@ -94,21 +94,26 @@ export function trustRubric(payload: any, opts: { card?: CardShows; dir?: string
   const rows = evals.map((e) => {
     const r = proposes.get(e.id) ?? (e.decided ? e.decided.decision : e);
     const replace = r?.verdict === 'replace' && Boolean(r.use);
-    const p = replace ? E.proposals?.[proposalKey(r.use, r.props)] ?? null : null;
-    const fallback = Boolean(e.rendered?.systemShot || e.systemPreview);
-    const shown = Boolean(e.shot && e.shot.match >= SHOT_MIN);
+    const key = replace ? proposalKey(r.use, r.props) : '';
+    const p = replace ? (e.ownHash && E.proposals?.[`${key}#${e.ownHash}`]) || E.proposals?.[key] || null : null;
+    const fallback = Boolean(e.rendered?.systemShot || e.systemPreview || p?.fallback || (p?.url && (p.check !== 'exact' || p.content)));
+    // A blank or covered photo isn't shown on the card (it says so instead).
+    const shown = Boolean(e.shot && e.shot.match >= SHOT_MIN && !e.shot.blank && !e.shot.covered);
+    // Its own words or icon to show: the proposal must carry them, not a story's sample. (Older reports
+    // carry no ownHash; an element with a label has content of its own.)
+    const hasOwn = e.ownHash !== undefined ? Boolean(e.ownHash) : Boolean(e.label);
     const c: Record<Criterion, boolean> = {} as any;
     c.C1 = shown;
     c.C2 = shown && seen(e);
     c.C3 = shown && card.photoLabels;
-    c.C4 = !replace || (p?.check === 'exact' && Boolean(p.url) && !p.content);
+    c.C4 = !replace || (p?.check === 'exact' && Boolean(p.url) && (hasOwn ? Boolean(p.own) : !p.content));
     c.C5 = !replace || (Boolean(p?.url) && card.proposalLabels);
     c.C6 = !replace ? shown : shown && Boolean(p?.url) && card.sameScale;
     const face = [...(e.reasons ?? []).map((x: any) => (card.plainReasons && x.plain !== undefined ? x.plain : x.text)), card.plainReasons ? e.how : e.howRaw ?? e.how].filter(Boolean);
     c.C7 = face.every((t: string) => !CODE_TERMS.test(t));
     c.C8 = card.placeOpens;
     c.C9 = e.confidence < th || (c.C2 && c.C4);
-    c.C10 = c.C4 || (card.fallback && fallback && Boolean(p?.note || !p?.url));
+    c.C10 = c.C4 || (card.fallback && fallback && Boolean(p?.note || p?.content || !p?.url || p.check !== 'exact'));
     const failed = CRITERIA.filter((k) => !c[k]);
     return { id: e.id, target: e.target, pass: !failed.length, failed };
   });

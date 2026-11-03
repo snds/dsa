@@ -99,6 +99,8 @@ export function discoverRoutes(dir: string, exclude: string[] = []): string[] {
   const hash = new Set<string>(), paths = new Set<string>();
   let hashRouter = false;
   const files = walk(dir, new Set(['.ts', '.tsx', '.js', '.jsx', '.vue', '.svelte']), exclude, true).slice(0, 6000);
+  // React Router's route config (app/routes.ts): every route it declares, those that need no value.
+  for (const r of routeConfig(dir, files).routes) paths.add(r);
   for (const f of files) {
     let src: string;
     try { src = fs.readFileSync(f, 'utf8'); } catch { continue; }
@@ -124,6 +126,115 @@ export function discoverRoutes(dir: string, exclude: string[] = []): string[] {
   for (const r of byLen) { const s0 = segs(r)[0] ?? ''; if (!sections.has(s0) && !isDetail(r)) { sections.add(s0); take(r); } }
   for (const r of byLen) take(r);
   return [...pages, ...out].slice(0, 150);
+}
+
+/**
+ * React Router's route config (`app/routes.ts`, built with route(), index(), layout() and prefix() from
+ * `@react-router/dev/routes`), read from its source. `routes` are the paths a crawler can open as they are;
+ * `needsValue` are the ones with a parameter (`:id`) or a splat (`*`), which need a real value to open:
+ * list one in apps["name"].routes. An optional segment (`:lang?`, `edit?`) is opened without it.
+ */
+export function routeConfig(dir: string, files?: string[]): { file: string | null; routes: string[]; needsValue: string[] } {
+  const list = files ?? walk(dir, new Set(['.ts', '.tsx', '.js', '.jsx']), [], true).slice(0, 6000);
+  const out = { file: null as string | null, routes: [] as string[], needsValue: [] as string[] };
+  for (const f of list) {
+    if (!/routes\.[jt]sx?$/.test(f)) continue;
+    let src: string;
+    try { src = fs.readFileSync(f, 'utf8'); } catch { continue; }
+    if (!/@react-router\/dev\/routes/.test(src)) continue;
+    out.file = f;
+    const at = src.search(/export\s+default\s*\[|=\s*\[/);
+    if (at < 0) continue;
+    const open = src.indexOf('[', at);
+    const found = new Set<string>(), params = new Set<string>();
+    walkRoutes(src, open, '', found, params);
+    out.routes.push(...found);
+    out.needsValue.push(...params);
+  }
+  out.routes = [...new Set(out.routes)].sort();
+  out.needsValue = [...new Set(out.needsValue)].sort();
+  return out;
+}
+
+/** Read the array at `open` ("[…]"): each route(), index(), layout(), prefix() call, nested ones under their path. */
+function walkRoutes(src: string, open: number, base: string, found: Set<string>, params: Set<string>) {
+  const close = matching(src, open);
+  if (close < 0) return;
+  let i = open + 1;
+  while (i < close) {
+    const m = /(?:\.\.\.\s*)?\b(route|index|layout|prefix)\s*\(/y;
+    m.lastIndex = i;
+    const hit = m.exec(src);
+    if (!hit) { i = skip(src, i); continue; }
+    const argsOpen = m.lastIndex - 1, argsClose = matching(src, argsOpen);
+    if (argsClose < 0) return;
+    const args = splitArgs(src, argsOpen + 1, argsClose);
+    const str = (a?: { start: number; end: number }) => { const t = a ? src.slice(a.start, a.end).trim() : ''; const q = t.match(/^(['"`])(.*)\1$/s); return q ? q[2]! : null; };
+    const child = (a?: { start: number; end: number }) => { if (!a) return -1; const t = src.slice(a.start, a.end).trimStart(); return t.startsWith('[') ? a.start + src.slice(a.start, a.end).indexOf('[') : -1; };
+    const kind = hit[1];
+    if (kind === 'index') add(base, found, params);
+    else if (kind === 'route') {
+      const p = str(args[0]);
+      const here = p == null ? base : join(base, p);
+      if (p != null) add(here, found, params);
+      const kids = args.slice(2).map(child).find(x => x >= 0);
+      if (kids != null && kids >= 0) walkRoutes(src, kids, here, found, params);
+    } else if (kind === 'layout') {
+      const kids = args.slice(1).map(child).find(x => x >= 0);
+      if (kids != null && kids >= 0) walkRoutes(src, kids, base, found, params);
+    } else if (kind === 'prefix') {
+      const p = str(args[0]);
+      const kids = args.slice(1).map(child).find(x => x >= 0);
+      if (kids != null && kids >= 0) walkRoutes(src, kids, p == null ? base : join(base, p), found, params);
+    }
+    i = argsClose + 1;
+  }
+}
+
+const join = (a: string, b: string) => ('/' + [a, b].join('/').split('/').filter(Boolean).join('/'));
+/** A route path: optional segments dropped; one with a :param or a splat needs a value. */
+function add(p: string, found: Set<string>, params: Set<string>) {
+  const segs = p.split('/').filter(Boolean);
+  const kept = segs.filter(s => !s.endsWith('?'));
+  if (kept.some(s => s.startsWith(':') || s === '*')) { params.add('/' + segs.join('/')); return; }
+  found.add('/' + kept.join('/'));
+  if (segs.some(s => s.endsWith('?') && !s.startsWith(':'))) found.add('/' + segs.map(s => s.replace(/\?$/, '')).join('/'));
+}
+
+/** Past one character, string or comment. */
+function skip(src: string, i: number): number {
+  const c = src[i];
+  if (c === '"' || c === "'" || c === '`') { let j = i + 1; while (j < src.length && src[j] !== c) j += src[j] === '\\' ? 2 : 1; return j + 1; }
+  if (c === '/' && src[i + 1] === '/') { const j = src.indexOf('\n', i); return j < 0 ? src.length : j; }
+  if (c === '/' && src[i + 1] === '*') { const j = src.indexOf('*/', i + 2); return j < 0 ? src.length : j + 2; }
+  return i + 1;
+}
+
+/** The index of the bracket that closes the one at `open` ((, [ or {), strings and comments skipped. */
+function matching(src: string, open: number): number {
+  const pairs: Record<string, string> = { '(': ')', '[': ']', '{': '}' };
+  const stack: string[] = [];
+  for (let i = open; i < src.length;) {
+    const c = src[i]!;
+    if (pairs[c]) { stack.push(pairs[c]!); i++; continue; }
+    if (c === ')' || c === ']' || c === '}') { if (stack.pop() !== c) return -1; if (!stack.length) return i; i++; continue; }
+    i = skip(src, i);
+  }
+  return -1;
+}
+
+/** The top-level arguments between `from` and `to`, as spans. */
+function splitArgs(src: string, from: number, to: number): { start: number; end: number }[] {
+  const out: { start: number; end: number }[] = [];
+  let start = from;
+  for (let i = from; i < to;) {
+    const c = src[i]!;
+    if (c === '(' || c === '[' || c === '{') { const j = matching(src, i); i = j < 0 ? to : j + 1; continue; }
+    if (c === ',') { out.push({ start, end: i }); start = i + 1; i++; continue; }
+    i = skip(src, i);
+  }
+  if (src.slice(start, to).trim()) out.push({ start, end: to });
+  return out;
 }
 
 /** Make sure Playwright's Chromium is installed; install it once if not. */

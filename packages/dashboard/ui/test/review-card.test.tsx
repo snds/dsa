@@ -37,14 +37,22 @@ beforeAll(async () => {
         el("b1", "ledger", "ledger/src/Toolbar.tsx"),
         el("b2", "atlas", "atlas/src/Bar.tsx"),
         el("t1", "ledger", "ledger/src/Filters.tsx", { use: "Toggle", props: {}, title: "Filter toggles", home: "Toggle", rendered: { key: "outline/default", systemShot: "rendered/closest.png" } }),
+        // Photographed but nothing drawn in its box; a row from a list, one of three alike; one drawn with its own label.
+        el("k1", "ledger", "ledger/src/Rows.tsx", { title: "Row actions", shot: { url: "shots/k1.png", match: 1, page: "/", box, blank: true } }),
+        el("k2", "ledger", "ledger/src/Rows.tsx", { title: "Row actions", styleSig: "look-k2", ownHash: "own123", label: "Open", shot: { url: "shots/k2.png", match: 0.95, page: "/", box, ties: 3, alike: 3 } }),
+        el("m1", "ledger", "ledger/src/Menu.tsx", { use: "MenuItem", props: {}, title: "Menu rows", home: "MenuItem" }),
       ],
       questions: [
         { key: "q1", kind: "group", title: "Ghost buttons", ask: "Replace with Button (variant ghost)?", home: "Button", ids: ["b1", "b2"], options: [{ label: "Button · variant ghost", decision: ghost }], auto: ghost, fit: null, parts: null, context: null, note: null },
+        { key: "q3", kind: "group", title: "Row actions", ask: "Replace with Button (variant ghost)?", home: "Button", ids: ["k1", "k2"], options: [{ label: "Button · variant ghost", decision: ghost }], auto: ghost, fit: null, parts: null, context: null, note: null },
+        { key: "q4", kind: "group", title: "Menu rows", ask: "Replace with MenuItem?", home: "MenuItem", ids: ["m1"], options: [{ label: "MenuItem", decision: { verdict: "replace", role: "button", use: "MenuItem", props: {} } }], auto: { verdict: "replace", role: "button", use: "MenuItem", props: {} }, fit: null, parts: null, context: null, note: null },
         { key: "q2", kind: "group", title: "Filter toggles", ask: "Replace with Toggle?", home: "Toggle", ids: ["t1"], options: [{ label: "Toggle", decision: { verdict: "replace", role: "button", use: "Toggle", props: {} } }], auto: { verdict: "replace", role: "button", use: "Toggle", props: {} }, fit: null, parts: null, context: null, note: null },
       ],
       proposals: {
         "Button|variant=ghost": { use: "Button", props: { variant: "ghost" }, check: "exact", url: "rendered/ghost.png", content: null },
         Toggle: { use: "Toggle", props: {}, check: "none", url: null, note: "No Toggle story." },
+        "Button|variant=ghost#own123": { use: "Button", props: { variant: "ghost" }, check: "exact", url: "rendered/own.png", content: null, own: true },
+        MenuItem: { use: "MenuItem", props: {}, check: "none", url: null, note: "MenuItem doesn't show in its stories: it may only appear inside something closed, like a menu or a dialog, and opening it didn't show it. Its story as written is shown instead.", fallback: "rendered/fallback-menu.png" },
       },
       sources: {},
     },
@@ -126,7 +134,7 @@ test("no exact render: the closest variant stands in, said as such, with why", a
   await mount()
   const p = card("Filter toggles").querySelector('[data-pane="proposed"]')!
   expect(p.textContent).toContain("Closest variant")
-  expect(p.textContent).toContain("The exact props aren't rendered yet")
+  expect(p.textContent).toContain("No Toggle story.")
   expect(p.querySelector("img")!.getAttribute("src")).toBe("rendered/closest.png")
   expect(m.CARD.fallback).toBe(true)
 })
@@ -152,4 +160,33 @@ test("one app chosen: its evidence only, and the answer says what else it covers
   await act(async () => root.render(<m.Elements key="atlas" />))
   expect(card("Ghost buttons")).toBeTruthy()
   expect(card("Ghost buttons").textContent).toContain("That includes 1 in ledger, not shown here.")
+})
+
+test("a photo with nothing drawn in it isn't shown as evidence: the card says it was captured but blank", async () => {
+  await mount()
+  const c = card("Row actions")
+  expect(c.textContent).toContain("Captured but blank.")
+  expect([...c.querySelectorAll("img")].map(i => i.getAttribute("src"))).not.toContain("shots/k1.png")
+})
+
+test("a proposal drawn with the element's own content is the one shown, and says so", async () => {
+  await mount()
+  const p = card("Row actions").querySelector('[data-pane="proposed"]')!
+  expect(p.querySelector("img")!.getAttribute("src")).toBe("rendered/own.png")
+  expect(p.textContent).toContain("with this element's own content")
+})
+
+test("a tie among identical elements is shown, and labelled as one of them", async () => {
+  await mount()
+  const a = card("Row actions").querySelector('[data-pane="app"]')!
+  expect(a.textContent).toContain("match 95%")
+  expect(a.textContent).toContain("one of 3 alike on the page")
+})
+
+test("no render with these props: the story as written stands in, with the reason in plain words", async () => {
+  await mount()
+  const p = card("Menu rows").querySelector('[data-pane="proposed"]')!
+  expect(p.textContent).toContain("Its story as written")
+  expect(p.textContent).toContain("it may only appear inside something closed")
+  expect(p.querySelector("img")!.getAttribute("src")).toBe("rendered/fallback-menu.png")
 })

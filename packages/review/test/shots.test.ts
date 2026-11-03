@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fixtureCopy, loadConfig, NOW, runPipeline } from '../../../test/engine/fixture.js';
 import { discoverRoutes } from '../src/apps.js';
-import { matchConfidence, takeShots } from '../src/shots.js';
+import { matchConfidence, pathWords, takeShots } from '../src/shots.js';
 
 // Screenshots for the element review: the crawler starts each app itself (here, a tiny dev server),
 // visits routes it finds in the source, captures examples, stops the app, and caches by source.
@@ -43,10 +43,23 @@ test('screenshots start the app themselves, find routes in the source, and stop 
   assert.ok(r3.apps.find(x => x.target === 'checkout')!.url, 'changed source restarts the app');
 });
 
-test('a match tied with other elements is only as sure as a guess among them', () => {
+test('a match tied with different-looking elements is only as sure as a guess among them', () => {
   assert.equal(matchConfidence(0.9, 1), 0.9);
   // Two ties keep the old 15% discount's ceiling; hundreds fall far below placement's 0.8.
   assert.equal(matchConfidence(1, 2), 0.5);
   assert.ok(matchConfidence(1, 299) < 0.01);
   assert.equal(matchConfidence(0.5, 2), 0.425);
+  // 3 tied, 2 of them alike: a guess between the 2 different looks.
+  assert.equal(matchConfidence(1, 3, 2), 0.5);
+});
+
+test('a tie among identical elements still shows how the element looks; a control two source lines claim is a guess', () => {
+  // Rows from a list: any of them is the look. A small cost, not a cap (it stays over the 80% shown).
+  assert.equal(matchConfidence(1, 3, 3), 0.95);
+  assert.equal(matchConfidence(1, 299, 299), 0.95);
+  // Identical "Export" buttons in two files on one page: which line is which is 1 in 2.
+  assert.equal(matchConfidence(1, 2, 2, 2), 0.5);
+  assert.equal(matchConfidence(1, 1, 1, 3), 1 / 3);
+  // The page's route names a file: its words decide which line it is.
+  assert.deepEqual(pathWords('apps/billing/src/orders/OrderRow.tsx'), ['billing', 'orders', 'order']);
 });

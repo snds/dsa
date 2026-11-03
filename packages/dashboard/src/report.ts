@@ -2,7 +2,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { DEFAULT_THRESHOLD, openStore, plainText, withPlain, withMetrics, appSettings, closestRendered, compareRendered, computeFit, effectiveSettings, familyKey, figmaEnabled, homeOf, loadCatalog, patterns as stylePatterns, pushedThisWeek, questions, readEvents, readProposals, readRendered, renderIssue, renderedFor as composeRendered, resolveTargets, rowToFinding, sourceExcerpts, placeExcerpts, titleOf, type Config } from '@snds/dsa/engine';
+import { DEFAULT_THRESHOLD, autoPick, contentHash, ownOf, openStore, plainText, withPlain, withMetrics, appSettings, closestRendered, compareRendered, effectiveSettings, familyKey, figmaEnabled, homeOf, loadCatalog, patterns as stylePatterns, pushedThisWeek, questions, readEvents, readProposals, readRendered, renderIssue, renderedFor as composeRendered, resolveTargets, rowToFinding, sourceExcerpts, placeExcerpts, titleOf, type Config } from '@snds/dsa/engine';
 
 import { scanEstimate, type PageActions, type ResolvedProfile } from '@snds/dsa';
 import { buildQueue, PKG_DIR } from './queue.js';
@@ -141,6 +141,10 @@ export async function renderReport(root: string, config: Config, dataDir: string
     const shotIdx = fs.existsSync(shotsFile) ? JSON.parse(fs.readFileSync(shotsFile, 'utf8')) : { shots: {} };
     const base = opts.base ?? '/';
     const shotUrl = (f: string) => (opts.serve ? `${base}shots/${f}` : opts.site ? `shots/${f}` : `../shots/${f}`);
+    // A photo, and what the capture checked: blank (nothing painted in the box), covered (another layer on
+    // top), how it was made to show (hover, focus), and ties (one of N alike; N source lines claim it).
+    const shotOf = (s: any) => ({ url: shotUrl(s.file), match: s.matchScore, page: s.page, box: s.box ?? null, revealedBy: s.revealedBy ?? null,
+      ...(s.blank ? { blank: true } : {}), ...(s.covered ? { covered: true } : {}), ...(s.via ? { via: s.via } : {}), ...(s.ties > 1 ? { ties: s.ties, alike: s.alike ?? 1 } : {}), ...(s.shared ? { shared: s.shared } : {}) });
     const renderedSet = readRendered(dataDir);
     const renderedUrl = (f: string) => (opts.serve ? `${base}rendered/${f}` : opts.site ? `rendered/${f}` : `../rendered/${f}`);
     // Element (as rendered in the app) vs the recommended system variant/size (as rendered in Storybook).
@@ -159,9 +163,6 @@ export async function renderReport(root: string, config: Config, dataDir: string
         closest: closest ? { key: closest.key, score: closest.diff.score, shot: comp[closest.key]?.shot ? renderedUrl(comp[closest.key].shot!) : null } : null,
       };
     };
-    let sigList: any[] = [];
-    try { sigList = JSON.parse(fs.readFileSync(path.join(dataDir, 'signatures.json'), 'utf8')); } catch { /* none yet */ }
-    const sigDefaults = (c: string) => sigList.find(x => x.component === c)?.defaults?.size ?? 'default';
     const systemPreview = (e: any) => {
       const comp = e.signature && renderedSet?.components[e.signature.component];
       const t = comp && composeRendered(comp, e.signature.variant, e.signature.size);
@@ -177,7 +178,9 @@ how: e.how ?? null, parent: e.parent ?? null, recipe: e.recipe ?? null,
         family: familyKey(e), title: titleOf(e), home: homeOf(e.decided?.decision ?? e),
         // What a person sees on it (its text, aria-label, or title), and how many lines its source spans: for the element list and code viewer.
         label: e.match?.text || e.match?.ariaLabel || e.match?.title || null, span: typeof e.source === 'string' ? e.source.split('\n').length : 1,
-        shot: shotIdx.shots[e.id] ? { url: shotUrl(shotIdx.shots[e.id].file), match: shotIdx.shots[e.id].matchScore, page: shotIdx.shots[e.id].page, box: shotIdx.shots[e.id].box ?? null, revealedBy: shotIdx.shots[e.id].revealedBy ?? null } : null,
+        shot: shotIdx.shots[e.id] ? shotOf(shotIdx.shots[e.id]) : null,
+        // Its own content's key: its proposal drawn with its words and icon is stored under proposalKey#ownHash.
+        ownHash: contentHash(ownOf(e, shotIdx.shots[e.id])),
         shotMissing: !shotIdx.shots[e.id] && (shotIdx.missing ?? []).includes(e.id),
         rendered: renderedFor(e),
         // What it takes to see the element (reach.ts), and the system's replacement as rendered, for cards without a screenshot.
@@ -187,20 +190,8 @@ how: e.how ?? null, parent: e.parent ?? null, recipe: e.recipe ?? null,
         // Closest measured size for the recommended component, when the pick doesn't already match it.
         // The automated pick takes the closest measured size when the evaluator didn't name one
         // (or named one that measures clearly worse), so "Approve" means the size too.
-        const autoFor = (items: typeof q.items, rec: any) => {
-          let fit: any = null;
-          if (rec?.verdict === 'replace' && rec.use) {
-            const f = computeFit(dataDir, items, rec.use, rec.props ?? {});
-            const sz = f?.axes?.size;
-            if (sz && f!.best.size) fit = { best: f!.best.size, score: sz[f!.best.size].score, recSize: rec.props?.size ?? sigDefaults(rec.use), source: sz[f!.best.size].source };
-          }
-          let auto = rec;
-          if (fit && rec && fit.best !== fit.recSize && fit.source !== 'static') {
-            const recScore = computeFit(dataDir, items, rec.use!, rec.props ?? {})?.axes?.size?.[fit.recSize]?.score ?? 0;
-            if (!rec.props?.size || fit.score - recScore >= 0.03) auto = { ...rec, props: { ...(rec.props ?? {}), size: fit.best } };
-          }
-          return { auto, fit };
-        };
+        // The card's pick (engine autopick.ts): the recommendation with the closest measured size; dsa render draws the same.
+        const autoFor = (items: typeof q.items, rec: any) => autoPick(dataDir, items, rec);
         const { auto, fit } = autoFor(q.items, q.options[0]?.decision);
         return {
           key: q.key, kind: q.kind, title: q.title, ask: plainText(q.ask) ?? 'Choose the answer.', home: q.home, note: plainText(q.note), noteRaw: q.note ?? null, ids: q.items.map(i => i.id), options: q.options, auto, fit,
@@ -215,7 +206,7 @@ how: e.how ?? null, parent: e.parent ?? null, recipe: e.recipe ?? null,
       shotsTaken: shotIdx.takenAt ?? null,
       rendered: renderedSet ? { takenAt: renderedSet.takenAt, source: renderedSet.source, combos: Object.values(renderedSet.components).reduce((a, c) => a + Object.keys(c).length, 0) } : null,
       // Each proposed replacement rendered with its exact props (dsa render), keyed like proposalKey: the review shows the options as they would look.
-      proposals: Object.fromEntries(Object.entries(readProposals(dataDir)).map(([k, p]) => [k, { use: p.use, props: p.props, check: p.check, url: p.shot ? renderedUrl(p.shot) : null, story: p.story ?? null, content: p.content ?? null, actual: p.actual ?? null, note: p.note ?? null }])),
+      proposals: Object.fromEntries(Object.entries(readProposals(dataDir)).map(([k, p]) => [k, { use: p.use, props: p.props, check: p.check, url: p.shot ? renderedUrl(p.shot) : null, story: p.story ?? null, content: p.content ?? null, actual: p.actual ?? null, note: p.note ?? null, own: p.own ?? false, fallback: p.fallback ? renderedUrl(p.fallback) : null }])),
     });
     // Agent readiness: this run per repo (audit checks, the profile's usage checker by kind, reconciled with look-alikes), the trend, and bench runs.
     const provider = profile.readiness;

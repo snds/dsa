@@ -17,7 +17,7 @@ export function Lightbox({ ids, start, decision, onClose }: { ids: string[]; sta
   const [zoom, setZoom] = React.useState(0)
   const e = byId.get(ids[i]), r = e?.rendered
   const want = decision ?? (e ? rec(e) : null)
-  const exact = proposalFor(want)?.url ? proposalFor(want) : null
+  const exact = proposalFor(want, e)?.url ? proposalFor(want, e) : null
   const step = (n: number) => setI(x => (x + n + ids.length) % ids.length)
   React.useEffect(() => {
     const on = (k: KeyboardEvent) => {

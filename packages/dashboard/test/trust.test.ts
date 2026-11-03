@@ -19,7 +19,7 @@ const payload = {
       ev('code', { shot: shot(), reasons: [{ text: 'aria-pressed: a latch.', plain: 'It works as a latch.' }] }),
       // No exact render: the closest variant stands in, with the reason.
       ev('closest', { shot: shot(), use: 'Toggle', props: {}, rendered: { systemShot: 'rendered/t.png' } }),
-      // Captured but blank.
+      // Captured but blank: the card doesn't show it, it says so.
       ev('blank', { shot: { ...shot(), blank: true } }),
       // Not reviewed: an exception and unused code.
       ev('skip', { exception: 'allowed' }),
@@ -41,11 +41,11 @@ test('ten checks per recommendation; one failing check fails it', () => {
   assert.deepEqual(row('weak').failed, ['C1', 'C2', 'C3', 'C6', 'C9']);
   assert.deepEqual(row('code').failed, []);
   assert.deepEqual(row('closest').failed, ['C4', 'C5', 'C6'], 'a reason and a fallback image keep C10');
-  assert.deepEqual(row('blank').failed, ['C2']);
+  assert.deepEqual(row('blank').failed, ['C1', 'C2', 'C3', 'C6']);
   assert.equal(s.passing, 2);
   assert.equal(s.rate, 40);
-  assert.equal(s.criteria.C1.pass, 4);
-  assert.deepEqual(s.blocking.slice(0, 2).map((b) => [b.criterion, b.failing]), [['C2', 2], ['C6', 2]], 'most failed first');
+  assert.equal(s.criteria.C1.pass, 3);
+  assert.deepEqual(s.blocking.slice(0, 2).map((b) => [b.criterion, b.failing]), [['C6', 3], ['C1', 2]], 'most failed first');
 });
 
 test('an older card, on the same data: unlabelled photos, two scales, code in the reasons, no fallback', () => {
@@ -62,4 +62,17 @@ test("a question's card proposes its auto-pick, which may be a size no one rende
   p.elements.questions = [{ ids: ['ok'], auto: { verdict: 'replace', use: 'Button', props: { variant: 'ghost', size: 'sm' } } }];
   const r = trustRubric(p).rows.find((x) => x.id === 'ok')!;
   assert.deepEqual(r.failed, ['C4', 'C5', 'C6', 'C9', 'C10']);
+});
+
+test("an element with its own words passes only on a render that carries them, not the story's sample", () => {
+  const p = structuredClone(payload) as any;
+  const ok = p.elements.evals.find((e: any) => e.id === 'ok');
+  ok.ownHash = 'abc123';
+  assert.deepEqual(trustRubric(p).rows.find((x) => x.id === 'ok')!.failed, ['C4', 'C9', 'C10'], 'the generic render shows the story label');
+  p.elements.proposals['Button|variant=ghost#abc123'] = { use: 'Button', props: { variant: 'ghost' }, check: 'exact', url: 'rendered/own.png', own: true };
+  assert.deepEqual(trustRubric(p).rows.find((x) => x.id === 'ok')!.failed, []);
+  // Drawn exactly, but with a stand-in icon: not the element.
+  p.elements.proposals['Button|variant=ghost#abc123'] = { use: 'Button', props: { variant: 'ghost' }, check: 'exact', url: 'rendered/own.png', own: false, content: "stand-in icon: the app's own icon wasn't captured" };
+  const r = trustRubric(p).rows.find((x) => x.id === 'ok')!;
+  assert.ok(r.failed.includes('C4') && !r.failed.includes('C10'), 'it says why, and shows a render');
 });
