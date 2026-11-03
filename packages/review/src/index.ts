@@ -118,10 +118,10 @@ const firstLine = (e: any) => String(e?.message ?? e).split('\n')[0];
 
 function printShots(r: Awaited<ReturnType<typeof shotsAndEvidence>>, label: string, log: (m: string) => void) {
   for (const a of r.shots.apps) {
-    log(a.skipped ? `  ${a.target}: skipped — ${a.skipped}` : a.signIn ? `  ${a.target}: every page asked for sign-in. Run \`dsa login ${a.url}\` and set live.apps["${a.target}"].auth.` : a.url ? `  ${a.target}: ${a.captured} new screenshots via ${a.how ?? a.url} (${a.routes} routes)` : `  ${a.target}: ${a.cached} cached, nothing new`);
+    log(a.skipped ? `  ${a.target}: skipped — ${a.skipped}` : a.broken ? `  ${a.target}: the app didn't render: ${a.broken}. Fix the app's install, then run again.` : a.signIn ? `  ${a.target}: every page asked for sign-in. Run \`dsa login ${a.url}\` and set live.apps["${a.target}"].auth.` : a.url ? `  ${a.target}: ${a.captured} new screenshots via ${a.how ?? a.url} (${a.routes} routes)` : `  ${a.target}: ${a.cached} cached, nothing new`);
     if (a.needsValue?.length) log(`  ${a.target}: ${a.needsValue.length} route${a.needsValue.length === 1 ? ' needs' : 's need'} a value to open (${a.needsValue.slice(0, 6).join(', ')}${a.needsValue.length > 6 ? ', …' : ''}). List real ones in apps["${a.target}"].routes.`);
   }
-  if (r.shots.apps.length && r.shots.apps.every(a => a.signIn || a.skipped)) log(`${r.shots.captured} screenshots: no page could be seen without signing in.`);
+  if (r.shots.apps.length && r.shots.apps.every(a => a.signIn || a.broken || a.skipped)) log(`${r.shots.captured} screenshots: no app could be seen (${r.shots.apps.some(a => a.broken) ? "it didn't render" : 'it asked for sign-in'}), so nothing counts as "not found".`);
   else log(`${r.shots.captured} screenshots; ${r.shots.missing} examples not found (${r.shots.pages} pages). On each page the crawler opened menus, popovers, and disclosures, switched tabs and views, hovered rows, and followed what those revealed (shots.maxDepth deep); what's left needs a specific flow (a selected record, a filled form) or a route to list in apps["name"].routes.`);
   const ev = r.evidence;
   if (ev.measured) log(`Rendered evidence: ${ev.measured} elements measured against ${label} in the browser · ${ev.confirmed} confirmed · ${ev.switched} variant switched (sent to a human).`);
