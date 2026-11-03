@@ -31,8 +31,19 @@ function evidenceOf(dataDir: string, evals: ElementEval[], threshold: number): E
 /** The element with its scanner score back (a copy). */
 const uncapped = (e: ElementEval): ElementEval => ((e as any).evidenceCap ? { ...e, confidence: (e as any).evidenceCap.from } : e);
 
-// A drawing from the code (shots drawn: mount, markup) is shown on the card but isn't a photo of the app.
-const visible = (s: any) => Boolean(s && !s.drawn && (s.tagged || (s.matchScore ?? 0) >= PHOTO_MIN_MATCH) && !s.blank && !s.covered);
+/**
+ * Is this capture evidence of the element, as a person would see it? A photo of the live app is. So is a
+ * drawing from the app's own code (Sean's call, "count it, labelled"): its component mounted through the
+ * app's own Vite server and styles, found by its exact source tag, and not blank. It runs the real
+ * component with the real styles, so it shows how the element looks, though not that it's reachable live
+ * (placement still ignores it). Static markup doesn't count.
+ */
+export function seenInApp(s: any): boolean {
+  if (!s || s.blank || s.covered) return false;
+  if (s.drawn) return s.drawn === 'mount' && Boolean(s.exact);
+  return Boolean(s.tagged || (s.matchScore ?? 0) >= PHOTO_MIN_MATCH);
+}
+const visible = seenInApp;
 
 /** What's missing for a person to see this recommendation, in plain words; empty when nothing is. */
 export function evidenceGaps(e: ElementEval, ev: Evidence, evals: ElementEval[]): string[] {
@@ -41,7 +52,7 @@ export function evidenceGaps(e: ElementEval, ev: Evidence, evals: ElementEval[])
   // A photo of the element, or of one that looks the same (the card shows one photo per look).
   const sameLook = e.styleSig ? evals.filter((x) => x.styleSig === e.styleSig && x.id !== e.id).some((x) => visible(ev.shots[x.id])) : false;
   if (!visible(own) && !sameLook) {
-    why.push(!own || own.drawn ? 'there is no photo of it in the app'
+    why.push(!own || (own.drawn && !seenInApp({ ...own, blank: false })) ? 'there is no photo of it in the app'
       : own.blank ? "its photo shows nothing (it may need a state the crawler couldn't set)"
       : own.covered ? 'something else covers it in its photo'
       : 'its photo may be a different element');

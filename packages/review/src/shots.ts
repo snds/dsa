@@ -455,6 +455,7 @@ async function session(pw: any, o: { draw?: DrawWith | undefined; url: string; r
       const code = readSource(d.root, r.e.file, d.dir);
       if (!code) continue;
       let how: 'mount' | 'markup' | null = null;
+      let exact = false;
       try {
         if (d.mount && r.e.within) {
           await page.goto(at, { waitUntil: 'domcontentloaded', timeout: 30000 });
@@ -463,7 +464,7 @@ async function session(pw: any, o: { draw?: DrawWith | undefined; url: string; r
           const said: string = await inPage(page, MOUNT_IN_PAGE, ['/@fs' + abs.split(path.sep).join('/'), r.e.within, gateProps(r.e)]).catch((e: any) => String(e?.message ?? e).split('\n')[0]);
           if (said === 'ok') {
             const hit: any[] = await inPage(page, FIND_IN_PAGE, [{ ...r, e: undefined }]);
-            if (hit.length) how = 'mount';
+            if (hit.length) { how = 'mount'; exact = Boolean(hit[0].exact); }
           } else o.log(`  ${r.id}: not mounted (${said})`);
         }
         if (!how) {
@@ -482,11 +483,12 @@ async function session(pw: any, o: { draw?: DrawWith | undefined; url: string; r
         const content = await inPage(page, OWN_CONTENT, r.id).catch(() => null);
         const cap = await capture(page, r.id, path.join(o.dir, file));
         if (!cap) continue;
-        shots[r.id] = { file, page: at, matchScore: 1, drawn: how, box: cap.box, content, ...(cap.blank ? { blank: true } : {}) };
+        // A mount found by its exact source tag, and not blank, counts as seeing the element (seenInApp).
+        shots[r.id] = { file, page: at, matchScore: 1, drawn: how, ...(how === 'mount' && exact ? { exact: true } : {}), box: cap.box, content, ...(cap.blank ? { blank: true } : {}) };
         drawnIds.push(r.id);
         remaining = remaining.filter(x => x.id !== r.id);
         n++;
-        o.log(`  ${r.id} drawn direct from code (${how === 'mount' ? "its component, in the app's build" : "its markup, with the app's styles"})${cap.blank ? ' · blank' : ''}`);
+        o.log(`  ${r.id} ${how === 'mount' ? "drawn from the app's code (its component, in the app's build)" : "drawn as markup only (with the app's styles)"}${cap.blank ? ' · blank' : ''}`);
       } catch (e: any) {
         if (/closed|crash|Target/i.test(String(e?.message))) await relaunch();
       }
@@ -792,7 +794,7 @@ const FIND_IN_PAGE = `(targets) => {
       const pick = pool.find(el => !el.closest('[data-dsa-shot]'));
       if (!pick) continue;
       pick.setAttribute('data-dsa-shot', t.id);
-      out.push({ id: t.id, score: 1, ties: pool.length, alike: pool.length, with: [], tagged: true });
+      out.push({ id: t.id, score: 1, ties: pool.length, alike: pool.length, with: [], tagged: true, exact: exact.length > 0 });
     }
     return out;
   }
