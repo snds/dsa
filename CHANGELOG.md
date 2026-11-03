@@ -39,6 +39,16 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   heuristic, and each run says how much of each app was tagged. A tagged photo is proof of place for
   the trust rubric (C1, C2) and the confidence cap, and the card says "matched by source tag". SWC isn't
   covered yet.
+- Screenshots of signed-in single-page apps that keep their tokens in memory (OIDC with PKCE).
+  `live.apps[name].signIn` (`{ "path": "/login", "click": "Sign in with Acme ID" }`) signs in once per
+  browser by clicking that button, and comes back through the identity provider without a password
+  using the saved session. The crawler then moves inside the app without reloading, so in-memory tokens
+  survive. A password form at the provider means the saved sign-in expired, and dsa says so.
+  `live.apps[name].readPaths` lists data paths the crawler may read (globs; a full URL for another
+  host). The network guard lets the identity provider be read, and posted to at its token endpoint only.
+  Every write to the app stays blocked, and what was allowed and blocked is logged by path, never with
+  values. `dsa login` also saves the app's session storage, and the crawler puts it back. See
+  docs/deploy.md.
 
 - Confidence never outruns the evidence. Nothing reaches Element Review's "ready" band (the review
   threshold, 90% by default) without a visible photo of it in the app (its own, or one of the same look)
