@@ -83,23 +83,85 @@ export function routeUrl(route: string, base: URL): string {
   return new URL(route, base).toString();
 }
 
-export async function guardNetwork(page: any, origin: string, opts: { readApi?: boolean } = {}): Promise<{ blocked: number; last: string[] }> {
-  const stats = { blocked: 0, last: [] as string[] };
+export interface GuardOptions {
+  /** GET the app's own /api/ routes. */
+  readApi?: boolean | undefined;
+  /** Data paths to GET besides: globs on the app's origin ("/record-service/**") or full URLs for another host. */
+  readPaths?: string[] | undefined;
+  /** The identity provider's origin, when known. */
+  idp?: string | undefined;
+  /** True while the crawler is signing in: a page sent to another host then is the identity provider. */
+  signingIn?: () => boolean;
+}
+
+export interface GuardStats {
+  blocked: number;
+  last: string[];
+  /** Requests let through for sign-in and data reads ("GET https://id.example.com/realms/x/protocol/…"), by count. Paths only: no query strings, no bodies. */
+  allowed: Record<string, number>;
+  /** Requests stopped, by method and path, by count. */
+  denied: Record<string, number>;
+  /** Identity provider origins: given, or learned from the sign-in redirect. */
+  idp: Set<string>;
+}
+
+/** "/record-service/**" → a RegExp over the origin and path. A glob without a host is on `origin`. */
+export function globMatcher(globs: string[] | undefined, origin: string): (u: URL) => boolean {
+  const res = (globs ?? []).map(g => {
+    const full = /^https?:\/\//.test(g) ? g : origin + (g.startsWith('/') ? g : '/' + g);
+    const src = full.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*\*/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\u0000/g, '.*');
+    return new RegExp(`^${src}$`);
+  });
+  return (u: URL) => res.some(r => r.test(u.origin + u.pathname));
+}
+
+/** A token endpoint: where an OIDC or OAuth client trades its code for tokens. */
+const TOKEN = /\/(protocol\/openid-connect\/token|oauth2?\/token|connect\/token|token)$/;
+
+/**
+ * Read-only browsing. Reads (GET, HEAD) of the app's own pages pass, and of its /api/ only with readApi
+ * or a readPaths entry; another host's images, fonts, styles and media pass. To sign in, the identity
+ * provider may be read, and posted to at its token endpoint only. Everything else is stopped: every
+ * write to the app, every other host. What was let through for sign-in or data, and what was stopped,
+ * is counted by method and path (never a query string or a body, so no token or code is ever kept).
+ */
+export async function guardNetwork(page: any, origin: string, opts: GuardOptions = {}): Promise<GuardStats> {
+  const stats: GuardStats = { blocked: 0, last: [], allowed: {}, denied: {}, idp: new Set(opts.idp ? [new URL(opts.idp).origin] : []) };
+  const reads = globMatcher(opts.readPaths, origin);
+  const count = (m: Record<string, number>, k: string) => { m[k] = (m[k] ?? 0) + 1; };
   await page.route('**/*', (route: any) => {
     const r = route.request();
     let u: URL | null = null;
     try { u = new URL(r.url()); } catch { /* data:, blob: */ }
     const method = r.method();
+    const read = method === 'GET' || method === 'HEAD';
     const local = !u || u.origin === origin || /^(data|blob):$/.test(u.protocol);
     const passive = ['image', 'font', 'stylesheet', 'media'].includes(r.resourceType());
-    // A live, signed-in site loads its data from its own API: reads may pass (readApi), writes never do.
-    const ok = (method === 'GET' || method === 'HEAD') && (local ? opts.readApi || !(u && u.pathname.startsWith('/api/')) : passive);
-    if (ok) return route.continue();
+    const key = `${method} ${u ? u.origin + u.pathname : r.url().slice(0, 40)}`;
+    let ok = false, special = false;
+    if (local) {
+      // A live, signed-in site loads its data from its own API: reads may pass (readApi, readPaths), writes never do.
+      ok = read && (opts.readApi || !(u && u.pathname.startsWith('/api/')) || (special = Boolean(u && reads(u))));
+    } else if (u) {
+      // A page sent to another host while signing in is the identity provider (learned from the redirect).
+      if (!stats.idp.has(u.origin) && opts.signingIn?.() && r.isNavigationRequest() && r.frame() === page.mainFrame()) stats.idp.add(u.origin);
+      if (stats.idp.has(u.origin)) { ok = read || ((method === 'POST' || method === 'OPTIONS') && TOKEN.test(u.pathname)); special = ok; }
+      else if (read && reads(u)) { ok = true; special = true; }
+      else ok = read && passive;
+    }
+    if (ok) { if (special) count(stats.allowed, key); return route.continue(); }
     stats.blocked++;
-    stats.last = [...stats.last.slice(-4), `${method} ${u ? u.origin + u.pathname : r.url().slice(0, 40)}`];
+    count(stats.denied, key);
+    stats.last = [...stats.last.slice(-4), key];
     return route.abort('blockedbyclient');
   });
   return stats;
+}
+
+/** "allowed GET https://id.example.com/auth (2), POST …/token (1) · blocked POST /record-service/save (3)": paths only. */
+export function describeNetwork(n: GuardStats, origin: string): string {
+  const list = (m: Record<string, number>) => Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, c]) => `${k.replace(' ' + origin, ' ')}${c > 1 ? ` (${c})` : ''}`).join(', ');
+  return [Object.keys(n.allowed).length ? `allowed ${list(n.allowed)}` : '', Object.keys(n.denied).length ? `blocked ${list(n.denied)}` : ''].filter(Boolean).join(' · ');
 }
 
 /**
