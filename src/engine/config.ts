@@ -218,6 +218,8 @@ export interface AppSettings {
   flows?: unknown[] | undefined;
   /** false = never start this app for screenshots. */
   screenshots?: boolean | undefined;
+  /** false = start this app without source tags (data-dsa-src); by default dsa adds them when it starts it. */
+  tag?: boolean | undefined;
 }
 export const MEASURES = ['versions', 'components', 'lookalikes', 'tokens'] as const;
 export type Measure = typeof MEASURES[number];
@@ -225,5 +227,5 @@ export type Measure = typeof MEASURES[number];
 /** Effective switches for one app: everything on unless the config says otherwise. */
 export function appSettings(c: Config, name: string): { [K in keyof AppSettings]-?: NonNullable<AppSettings[K]> } {
   const a = c.apps?.[name] ?? {};
-  return { versions: a.versions !== false, components: a.components !== false, lookalikes: a.lookalikes !== false, tokens: a.tokens !== false, tokenSkip: a.tokenSkip ?? [], start: a.start ?? '', url: a.url ?? '', routes: a.routes ?? [], extraRoutes: a.extraRoutes ?? [], flows: a.flows ?? [], screenshots: a.screenshots !== false };
+  return { versions: a.versions !== false, components: a.components !== false, lookalikes: a.lookalikes !== false, tokens: a.tokens !== false, tokenSkip: a.tokenSkip ?? [], start: a.start ?? '', url: a.url ?? '', routes: a.routes ?? [], extraRoutes: a.extraRoutes ?? [], flows: a.flows ?? [], screenshots: a.screenshots !== false, tag: a.tag !== false };
 }

@@ -79,6 +79,7 @@ const AppSchema = z.object({
     .optional()
     .describe("Written-down UI sequences that reveal elements only a filled field or an upload shows."),
   screenshots: z.boolean().optional().describe("false: never start this app for screenshots."),
+  tag: z.boolean().optional().describe("false: start this app without source tags (data-dsa-src). By default dsa adds them when it starts the app, so screenshots match each element by its source line."),
 });
 
 /** Where to see one live surface (an app or the system's Storybook): a deployed URL, or the built folder that gets deployed. */

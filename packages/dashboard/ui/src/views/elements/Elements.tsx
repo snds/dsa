@@ -23,7 +23,7 @@ export const SHOT_MIN = 0.8
 // A photo that shows nothing (blank) or something else (covered) isn't evidence either: keep it aside, and say which.
 for (const e of D.elements?.evals ?? []) {
   if (e.shot && (e.shot.blank || e.shot.covered)) { e.badShot = e.shot; e.shot = null }
-  else if (e.shot && e.shot.match < SHOT_MIN) { e.weakShot = e.shot; e.shot = null }
+  else if (e.shot && !e.shot.tagged && e.shot.match < SHOT_MIN) { e.weakShot = e.shot; e.shot = null }
 }
 
 /**

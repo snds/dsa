@@ -9,6 +9,7 @@ export default defineConfig({
     alias: [
       { find: /^@snds\/dsa$/, replacement: at("./src/index.ts") },
       { find: /^@snds\/dsa\/engine$/, replacement: at("./src/engine/index.ts") },
+      { find: /^@snds\/dsa\/tag$/, replacement: at("./src/tag/index.ts") },
       { find: /^@snds\/dsa\/relay$/, replacement: at("./src/relay/index.ts") },
       { find: /^@snds\/dsa\/relay\/node$/, replacement: at("./src/relay/node.ts") },
       // The dashboard app's own imports, for its component tests.

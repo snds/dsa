@@ -97,6 +97,57 @@ never let history push it (it never does: see [`history`](#history-where-run-his
 Sessions expire. A CI job can't sign in by itself, so in CI prefer `dir`. If you must use `url` in
 CI, store the file as a secret and write it out before the run.
 
+### Exact matches: tagging an app's dev deploy
+
+The crawler has to find each element on the page. Without help it guesses, from the tag, the classes
+and the words, and identical controls in two files can't be told apart. Source tags make the match
+exact: each element the app renders carries `data-dsa-src="<file>:<line>:<col>"`, the place the
+scanner records for it. The path is relative to the scan root. It is never an absolute path.
+
+**Apps dsa starts itself** (`apps[name].start`, or a Vite app it detects) are tagged with no change to
+their files. A Vite app is started through Vite's own API, with its config file as written and the
+tagger added first among its plugins. Anything else is started with `DSA_TAG=1`, which tags it if its
+build adds the tagger. The run log says which apps were tagged. Set `apps[name].tag: false` to start
+one without tags.
+
+**Your own dev or preview deploy** (a `live` URL): add one line to the build, so tags appear only when
+`DSA_TAG=1` is set while you build it.
+
+```ts
+// vite.config.ts (Vite, React Router v7, Remix on Vite)
+import { dsaTag } from '@snds/dsa/tag';
+export default defineConfig({ plugins: [dsaTag({ when: process.env.DSA_TAG === '1' }), react()] });
+```
+
+```js
+// babel.config.js (Babel, and Next.js through Babel)
+module.exports = { presets: ['next/babel'], plugins: ['@snds/dsa/tag/babel'] };
+```
+
+The Babel plugin does nothing unless `DSA_TAG=1` is set, or you pass `{ when: true }`. It is an ES
+module, which Babel loads when it runs asynchronously, as babel-loader and Next.js do. Next.js
+switches from SWC to Babel when it finds a Babel config. There is no SWC plugin yet.
+
+Only host elements are tagged (`button`, `input`, `a`…). Components are left alone, because their
+props may never reach the page. For a component that passes unknown props through to the page, use
+`dsaTag({ components: ['Card'] })`, or `true` for all of them.
+
+What the crawler does with tags:
+
+- A page with tags is matched only by them. The element at the exact file:line:col is a 100% match,
+  with no tie with other lines. The column tells apart two elements on one line.
+- A line that renders a list (a `.map()`) makes several nodes. Any one of them stands for it, and the
+  card says "one of N rendered by this line".
+- A tagged page without the line hasn't got the element. The crawler doesn't fall back to a guess.
+- Pages without tags are matched as before. Each run says how much of each app was tagged, for
+  example "ledger: 0% of pages tagged; add dsaTag to its dev build for exact matches".
+
+A tagged photo counts as proof of place in the review: the card says "matched by source tag".
+
+**Privacy.** Tags put your source file paths in that build's page, where anyone who can open it can
+read them. Tag internal dev and preview builds only, never a public production build. The tagger is
+off unless `DSA_TAG=1` or `when: true`, so a production build isn't tagged by accident.
+
 ## `host`: how the dashboard is hosted
 
 There are two hosting modes, sharing one dashboard.
@@ -382,6 +433,8 @@ Built in: [`generic`](../src/deploy/host.ts), [`github`](../src/deploy/adapters/
 
 ## What isn't covered yet
 
+- **Source tags with SWC.** Next.js on SWC (its default) and other SWC builds aren't tagged. Add a
+  Babel config to use the Babel plugin, or match without tags as before.
 - **Live previews in the component picker need `dsa serve` on the same machine as the browser.**
   The picker loads Storybook through a second proxy on localhost, which a remote proxy doesn't
   reach. Behind one, the picker's live previews don't load. The review's measured renderings and

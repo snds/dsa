@@ -31,7 +31,7 @@ function evidenceOf(dataDir: string, evals: ElementEval[], threshold: number): E
 /** The element with its scanner score back (a copy). */
 const uncapped = (e: ElementEval): ElementEval => ((e as any).evidenceCap ? { ...e, confidence: (e as any).evidenceCap.from } : e);
 
-const visible = (s: any) => Boolean(s && (s.matchScore ?? 0) >= PHOTO_MIN_MATCH && !s.blank && !s.covered);
+const visible = (s: any) => Boolean(s && (s.tagged || (s.matchScore ?? 0) >= PHOTO_MIN_MATCH) && !s.blank && !s.covered);
 
 /** What's missing for a person to see this recommendation, in plain words; empty when nothing is. */
 export function evidenceGaps(e: ElementEval, ev: Evidence, evals: ElementEval[]): string[] {

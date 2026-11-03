@@ -76,3 +76,14 @@ test("an element with its own words passes only on a render that carries them, n
   const r = trustRubric(p).rows.find((x) => x.id === 'ok')!;
   assert.ok(r.failed.includes('C4') && !r.failed.includes('C10'), 'it says why, and shows a render');
 });
+
+test('a photo matched by its source tag is proof of place: shown, and "ready" once the exact render is there', () => {
+  // A crawler score under the 80% bar, but found by the line that made it: the place is exact.
+  const tagged = { elements: { ...payload.elements, evals: [ev('tag', { shot: { ...shot(0.5), tagged: true }, confidence: 0.95 }), ev('guess', { shot: shot(0.5), confidence: 0.95 })] } };
+  const s = trustRubric(tagged);
+  assert.deepEqual(s.rows.find((r) => r.id === 'tag')!.failed, [], 'C1, C2 and C9 hold on a tagged photo and an exact render');
+  assert.ok(s.rows.find((r) => r.id === 'guess')!.failed.includes('C1'));
+  // Still a photo of nothing when it's blank: a tag proves the place, not what was painted.
+  const blank = trustRubric({ elements: { ...payload.elements, evals: [ev('tag', { shot: { ...shot(), tagged: true, blank: true }, confidence: 0.95 })] } });
+  assert.ok(blank.rows[0]!.failed.includes('C2'));
+});

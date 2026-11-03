@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { htmlPages, walk, type Config, type Target } from '@snds/dsa/engine';
 
 /**
@@ -13,7 +14,12 @@ import { htmlPages, walk, type Config, type Target } from '@snds/dsa/engine';
  * in the source, and make sure the headless browser is installed.
  */
 
-export interface AppPlan { target: string; cwd: string; command: string; args: string[]; url: (port: number) => string; how: string }
+export interface AppPlan {
+  target: string; cwd: string; command: string; args: string[]; url: (port: number) => string; how: string;
+  env?: Record<string, string>;
+  /** Source tags: added inside Vite by dsa (`injected`), or asked for with DSA_TAG=1 (`env`: tagged if the app's build adds dsaTag). */
+  tag?: 'injected' | 'env';
+}
 
 export function detectApp(t: Target, config: Config): AppPlan | { target: string; reason: string } {
   const app = config.apps?.[t.name];
@@ -33,6 +39,64 @@ export function detectApp(t: Target, config: Config): AppPlan | { target: string
   if (/storybook dev/.test(dev)) return { target: t.name, cwd: t.dir, command: 'npx', args: ['storybook', 'dev', '-p', '{port}', '--ci', '--no-open'], url, how: 'storybook dev' };
   if (dev) return { target: t.name, cwd: t.dir, command: 'npm', args: ['run', 'dev', '--', '--port', '{port}'], url, how: 'npm run dev' };
   return { target: t.name, reason: 'no dev script or known framework' };
+}
+
+/**
+ * Source tags for an app dsa starts, with no change to its files. A Vite app is started through Vite's own
+ * API, with its config file as written and the tagger put first among its plugins. Anything else is
+ * started as configured with DSA_TAG=1, which tags it when its build adds dsaTag. `apps[name].tag: false`
+ * leaves it untagged. The tag paths are relative to `root`, as the scanner stores them.
+ */
+export function tagPlan(plan: AppPlan, o: { root: string; dir: string; off?: boolean | undefined }): AppPlan {
+  if (o.off) return plan;
+  const env = { DSA_TAG: '1', DSA_TAG_ROOT: o.root, DSA_TAG_DIR: o.dir };
+  if (plan.how === 'vite') {
+    const vite = packageEntry(plan.cwd, 'vite');
+    const core = packageEntry(path.dirname(fileURLToPath(import.meta.url)), '@snds/dsa', './tag');
+    const tag = core ? pathToFileURL(core).href : null;
+    if (vite && tag) {
+      const runner = path.join(os.tmpdir(), `dsa-vite-tagged-${process.pid}.mjs`);
+      fs.writeFileSync(runner, VITE_TAGGED);
+      return { ...plan, command: process.execPath, args: [runner, '{port}'], env: { ...env, DSA_TAG_VITE: pathToFileURL(vite).href, DSA_TAG_MODULE: tag }, tag: 'injected' };
+    }
+  }
+  return { ...plan, env: { ...plan.env, ...env }, tag: 'env' };
+}
+
+/**
+ * Started by tagPlan, in the app's folder: Vite's own config file, loaded the way vite loads it, with the
+ * tagger first among its plugins, served on the port it's given. Fixed text; the paths come in the environment.
+ */
+const VITE_TAGGED = `const vite = await import(process.env.DSA_TAG_VITE);
+const { dsaTag } = await import(process.env.DSA_TAG_MODULE);
+const port = Number(process.argv[2]);
+const loaded = await vite.loadConfigFromFile({ command: 'serve', mode: 'development' }, undefined, process.cwd());
+const config = loaded?.config ?? {};
+const server = await vite.createServer({
+  ...config, configFile: false, root: config.root ?? process.cwd(),
+  plugins: [dsaTag({ when: true }), ...(config.plugins ?? [])],
+  server: { ...config.server, port, strictPort: true, host: '127.0.0.1' },
+});
+await server.listen();
+console.log('dsa: vite with source tags on ' + port);
+`;
+
+/**
+ * A package's ESM entry (or one of its subpaths), installed in `dir` or a folder above it: its exports'
+ * import, else module, else main. Null when it isn't installed or doesn't export that path.
+ */
+export function packageEntry(dir: string, name: string, sub = '.'): string | null {
+  for (let d = path.resolve(dir); ; d = path.dirname(d)) {
+    const pkgDir = path.join(d, 'node_modules', name);
+    try {
+      const pj = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8'));
+      const ex = typeof pj.exports === 'string' && sub === '.' ? pj.exports : pj.exports?.[sub] ?? (sub === '.' ? pj.exports : undefined);
+      const pick = (x: any): string | undefined => typeof x === 'string' ? x : x && (pick(x.import) ?? pick(x.default) ?? pick(x.node));
+      const rel = pick(ex) ?? (sub === '.' ? pj.module ?? pj.main ?? 'index.js' : undefined);
+      if (rel) return fs.realpathSync(path.join(pkgDir, rel));
+    } catch { /* not here */ }
+    if (path.dirname(d) === d) return null;
+  }
 }
 
 const readPkg = (dir: string) => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')); } catch { return null; } };
@@ -62,7 +126,7 @@ export async function startApp(plan: AppPlan, timeoutMs = 90000): Promise<Runnin
   const port = await freePort();
   const args = plan.args.map(a => a.replace('{port}', String(port)));
   let out = '';
-  const child: ChildProcess = spawn(plan.command, args, { cwd: plan.cwd, env: { ...process.env, BROWSER: 'none', CI: '1', FORCE_COLOR: '0' }, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+  const child: ChildProcess = spawn(plan.command, args, { cwd: plan.cwd, env: { ...process.env, ...plan.env, BROWSER: 'none', CI: '1', FORCE_COLOR: '0' }, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
   const keep = (b: Buffer) => { out = (out + b.toString()).slice(-4000); };
   child.stdout?.on('data', keep);
   child.stderr?.on('data', keep);

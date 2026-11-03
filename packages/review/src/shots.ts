@@ -5,7 +5,7 @@ import path from 'node:path';
 import { BLANK_INSET, decodePng, groupKey, isBlank, latestEvals, materializeRemotes, resolveTargets, targetRelative, type Config, type ElementEval } from '@snds/dsa/engine';
 import { appSurface, openSurface } from '@snds/dsa';
 
-import { detectApp, discoverRoutes, ensureBrowser, linkCoreForChild, routeConfig, startApp } from './apps.js';
+import { detectApp, discoverRoutes, ensureBrowser, linkCoreForChild, routeConfig, startApp, tagPlan } from './apps.js';
 
 import { READ_STYLE } from './rendered.js';
 import { flowProblems, guardNetwork, routeUrl, runFlow, type Flow } from './flows.js';
@@ -14,9 +14,10 @@ import { flowProblems, guardNetwork, routeUrl, runFlow, type Flow } from './flow
  * Example screenshots for the element review. Not every instance: a few per recommendation
  * group, plus the ones that need a human (people decide faster when they can see the thing).
  *
- * Needs a running app (dev server or preview). Elements are found by what the static scan
- * knows (tag, classes, text, aria-label), so each capture carries a match score: a weak match
- * is labelled as such instead of being passed off as the element.
+ * Needs a running app (dev server or preview). On a page with source tags (`data-dsa-src`, from
+ * @snds/dsa/tag) an element is found by the file:line:col that made it: exact. Elsewhere it's found by
+ * what the static scan knows (tag, classes, text, aria-label), so each capture carries a match score:
+ * a weak match is labelled as such instead of being passed off as the element.
  */
 
 export interface ShotResult {
@@ -27,6 +28,8 @@ export interface ShotResult {
     signIn?: string;
     /** Routes the app declares that need a value (a :param, a splat): to open, list one in apps["name"].routes. */
     needsValue?: string[];
+    /** The share of pages visited that carried source tags (0 to 1). */
+    tagged?: number;
   }[];
 }
 
@@ -51,9 +54,9 @@ async function inPage<T = any>(page: any, src: string, arg?: unknown): Promise<T
 }
 
 /** Bump when finding or revealing elements changes, so earlier misses get another try. */
-const CRAWLER = 7;
+const CRAWLER = 8;
 
-interface Target { id: string; m: ElementEval['match']; steps?: { label: string; event: 'click' | 'dblclick' }[]; hints: string[]; where: string[] }
+interface Target { id: string; m: ElementEval['match']; /** Its source tag: file:line:col, as the scanner and the tagger write it. */ src: string; steps?: { label: string; event: 'click' | 'dblclick' }[]; hints: string[]; where: string[] }
 
 /**
  * Words that point at the UI state an element needs: string literals in its gates (`viewMode === 'gallery'`,
@@ -169,9 +172,11 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
         continue;
       }
       if (t.role === 'child') linkCoreForChild(t.dir, opts.root, opts.config.designSystem.core.packages, log);
-      const ap = detectApp(t, opts.config);
-      if ('reason' in ap) { result.apps.push({ target: name, skipped: ap.reason }); continue; }
-      log(`Starting ${name} (${ap.how})…`);
+      const found = detectApp(t, opts.config);
+      if ('reason' in found) { result.apps.push({ target: name, skipped: found.reason }); continue; }
+      // Source tags, so each element is matched by the line that made it (apps[name].tag: false leaves them off).
+      const ap = tagPlan(found, { root: opts.root, dir: t.dir, off: opts.config.apps?.[name]?.tag === false });
+      log(`Starting ${name} (${ap.how}${ap.tag === 'injected' ? ', with source tags added' : ap.tag === 'env' ? ', DSA_TAG=1 set' : ''})…`);
       try {
         const app = await startApp(ap);
         const routes = routesFor();
@@ -197,10 +202,13 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
         continue;
       }
       for (const [id, v] of Object.entries<any>(r.shots)) { index.shots[id] = { ...v, at, fileHash: hashOf(byId.get(id)!) }; delete misses[id]; }
+      // How much of the app carried source tags: matches there are exact, the rest are the crawler's best guess.
+      const tagged = r.tagged.of ? Math.round((100 * r.tagged.pages) / r.tagged.of) / 100 : undefined;
+      if (tagged !== undefined) log(`  ${s.target === '*' ? 'this app' : s.target}: ${Math.round(tagged * 100)}% of pages tagged${tagged === 0 ? '; add dsaTag to its dev build for exact matches' : tagged < 1 ? ' (exact matches there, a best guess elsewhere)' : ' (every match exact)'}`);
       for (const id of r.missing) misses[id] = { at, fileHash: hashOf(byId.get(id)!), crawler: CRAWLER, steps: stepsKey(byId.get(id)!), setup: setupOf(byId.get(id)!.target) };
       index.missing.push(...r.missing);
       index.pages.push(...r.pages);
-      result.apps.push({ target: s.target, url: s.url, how: s.how, routes: s.routes.length, captured: Object.keys(r.shots).length, ...needs(s.target) });
+      result.apps.push({ target: s.target, url: s.url, how: s.how, routes: s.routes.length, captured: Object.keys(r.shots).length, ...(tagged !== undefined ? { tagged } : {}), ...needs(s.target) });
     } finally { s.stop?.(); }
   }
   // Report "not found" for every cached miss too, so the review can say why there's no picture.
@@ -219,6 +227,7 @@ interface Act { n: number; key: string; kind: 'click' | 'hover' | 'context'; lab
 async function session(pw: any, o: { url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; examples: ElementEval[]; dir: string; storageState?: string | undefined; readApi?: boolean | undefined; maxPages: number; waitMs: number; log: (m: string) => void; reveal?: boolean; maxActions?: number; maxDepth?: number; maxMinutes?: number; maxReplays?: number }) {
   const shots: Record<string, any> = {};
   const pages: string[] = [];
+  let taggedPages = 0;
   let browser: any, page: any;
   const base = new URL(o.url);
   let net = { blocked: 0, last: [] as string[] };
@@ -251,7 +260,7 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
     }
     return false;
   };
-  let remaining: Target[] = o.examples.map(e => ({ id: e.id, m: e.match, steps: e.reach?.steps?.map(x => ({ label: x.label, event: x.event })), hints: hintsOf(e), where: pathWords(e.file) }));
+  let remaining: Target[] = o.examples.map(e => ({ id: e.id, m: e.match, src: `${e.file}:${e.line}:${e.col}`, steps: e.reach?.steps?.map(x => ({ label: x.label, event: x.event })), hints: hintsOf(e), where: pathWords(e.file) }));
   const replayed = new Set<string>();
   let replays = 0;
   const deadline = Date.now() + (o.maxMinutes ?? 12) * 60_000;
@@ -268,14 +277,15 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
     queue.sort((a, b) => score(b) - score(a));
   };
   const sweeper = (u: string) => async (revealedBy?: string) => {
-    const found: { id: string; score: number; ties: number; alike: number; with: string[] }[] = await inPage(page, FIND_IN_PAGE, remaining);
+    const found: { id: string; score: number; ties: number; alike: number; with: string[]; tagged?: true }[] = await inPage(page, FIND_IN_PAGE, remaining);
     // Which line is which, when several want the same controls: the page's route names one of them, or it's a guess.
     const onRoute = (id: string) => { const t = remaining.find(r => r.id === id); const at = decodeURIComponent(new URL(u).pathname + new URL(u).hash).toLowerCase(); return Boolean(t?.where.some(w => at.includes(w))); };
     for (const f of found) {
+      // Matched by its source tag: exact. Several nodes from one line (a .map() list) each stand for it.
       const claim = [f.id, ...f.with];
       const named = claim.filter(onRoute);
-      const claimants = named.length === 1 ? (named[0] === f.id ? 1 : claim.length) : claim.length;
-      f.score = matchConfidence(f.score, f.ties, f.alike, claimants);
+      const claimants = f.tagged ? 1 : named.length === 1 ? (named[0] === f.id ? 1 : claim.length) : claim.length;
+      if (!f.tagged) f.score = matchConfidence(f.score, f.ties, f.alike, claimants);
       (f as any).claimants = claimants;
       const file = `${f.id}.png`;
       // Measure before capturing (capture clears the marker): the same properties rendered signatures record,
@@ -285,8 +295,8 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
       const content = await inPage(page, OWN_CONTENT, f.id).catch(() => null);
       const cap = await capture(page, f.id, path.join(o.dir, file));
       if (!cap) continue;
-      shots[f.id] = { file, page: u, matchScore: Math.round(f.score * 100) / 100, ties: f.ties, alike: f.alike, ...((f as any).claimants > 1 ? { shared: (f as any).claimants } : {}), styles, placement, box: cap.box, revealedBy, content, ...(cap.blank ? { blank: true } : {}), ...(cap.covered ? { covered: true } : {}), ...(cap.via ? { via: cap.via } : {}) };
-      o.log(`  ${f.id} on ${u.replace(base.origin, '')}${revealedBy ? ` after ${revealedBy}` : ''} (match ${Math.round(f.score * 100)}%${(f as any).claimants > 1 ? `, ${(f as any).claimants} source lines want the same control` : f.ties > 1 ? (f.alike >= f.ties ? `, one of ${f.ties} alike on the page` : `, a guess among ${f.ties} similar elements on the page`) : ''})${cap.blank ? ' · captured but blank' : cap.covered ? ' · covered by another layer' : cap.via ? ` · shows on ${cap.via}` : ''}`);
+      shots[f.id] = { file, page: u, matchScore: Math.round(f.score * 100) / 100, ties: f.ties, alike: f.alike, ...(f.tagged ? { tagged: true } : {}), ...((f as any).claimants > 1 ? { shared: (f as any).claimants } : {}), styles, placement, box: cap.box, revealedBy, content, ...(cap.blank ? { blank: true } : {}), ...(cap.covered ? { covered: true } : {}), ...(cap.via ? { via: cap.via } : {}) };
+      o.log(`  ${f.id} on ${u.replace(base.origin, '')}${revealedBy ? ` after ${revealedBy}` : ''} (${f.tagged ? `matched by source tag${f.ties > 1 ? `, one of ${f.ties} rendered by this line` : ''}` : `match ${Math.round(f.score * 100)}%`}${f.tagged ? '' : (f as any).claimants > 1 ? `, ${(f as any).claimants} source lines want the same control` : f.ties > 1 ? (f.alike >= f.ties ? `, one of ${f.ties} alike on the page` : `, a guess among ${f.ties} similar elements on the page`) : ''})${cap.blank ? ' · captured but blank' : cap.covered ? ' · covered by another layer' : cap.via ? ` · shows on ${cap.via}` : ''}`);
     }
     remaining = remaining.filter(r => !shots[r.id]);
   };
@@ -338,6 +348,7 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
         continue;
       }
       pages.push(u);
+      if (await page.evaluate(`Boolean(document.querySelector('[data-dsa-src]'))`).catch(() => false)) taggedPages++;
       if (o.crawl) {
         const links: string[] = await page.evaluate(`Array.from(document.querySelectorAll('a[href]')).map(a => a.href)`);
         for (const l of links) {
@@ -412,7 +423,7 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
   } finally {
     await browser.close().catch(() => {});
   }
-  return { shots, pages, missing: remaining.map(r => r.id), ...(signedOut() ? { signIn: wall.at } : {}) };
+  return { shots, pages, missing: remaining.map(r => r.id), tagged: { pages: taggedPages, of: pages.length }, ...(signedOut() ? { signIn: wall.at } : {}) };
 
   /**
    * Explore one page as a tree of UI states. From the loaded page, try each interaction (best first:
@@ -699,6 +710,24 @@ export function matchConfidence(score: number, ties: number, alike = 1, claimant
  */
 const FIND_IN_PAGE = `(targets) => {
   const out = [];
+  // Source tags on the page (data-dsa-src="file:line:col"): each element is the node its own line made, or
+  // it isn't on this page. No guessing from look-alikes, and no ties with other lines.
+  if (document.querySelector('[data-dsa-src]')) {
+    const tagged = Array.from(document.querySelectorAll('[data-dsa-src]'));
+    const shown = (el) => { const r = el.getBoundingClientRect(); if (!r.width || !r.height) return false; const st = getComputedStyle(el); return st.display !== 'none' && (st.visibility !== 'hidden' || Boolean(el.closest('[class*="group"]'))); };
+    for (const t of targets) {
+      const line = t.src.slice(0, t.src.lastIndexOf(':') + 1);
+      const onLine = tagged.filter(el => el.getAttribute('data-dsa-src').startsWith(line));
+      // The column tells apart two elements on one line; one from this line with the right tag is it.
+      const exact = onLine.filter(el => el.getAttribute('data-dsa-src') === t.src);
+      const pool = (exact.length ? exact : onLine.filter(el => el.tagName.toLowerCase() === t.m.tag)).filter(shown);
+      const pick = pool.find(el => !el.closest('[data-dsa-shot]'));
+      if (!pick) continue;
+      pick.setAttribute('data-dsa-shot', t.id);
+      out.push({ id: t.id, score: 1, ties: pool.length, alike: pool.length, with: [], tagged: true });
+    }
+    return out;
+  }
   const norm = (s) => s.replace(/\\s+/g, ' ').trim();
   // A button's words without its icons: icon fonts render their name as text ("add Colour").
   const words = (el) => { const c = el.cloneNode(true); c.querySelectorAll('[data-slot=icon], .material-symbols-outlined, .material-symbols-rounded, .material-icons, svg, [aria-hidden=true]').forEach(x => x.remove()); return c.textContent || ''; };
