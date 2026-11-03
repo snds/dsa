@@ -111,8 +111,8 @@ export function Shot({ e, group }: { e: any; group?: string[] }) {
   if (!e.shot) return <NoShot e={e} />
   const open = () => { const ids = (group ?? [e.id]).filter(id => byId.get(id)?.shot); openLightbox(ids, Math.max(0, ids.indexOf(e.id))) }
   const b = e.shot.box
-  const where = `${e.shot.page ? `on ${e.shot.page.replace(/^https?:\/\/[^/]+/, "") || "/"} ` : ""}(${e.shot.tagged ? "matched by source tag" : `match ${Math.round(e.shot.match * 100)}%`})`
-  const app = <Figure src={e.shot.url} alt={`Screenshot of ${e.snippet.slice(0, 60)}`} box={b} ratio={b ? `${b.cw}/${b.ch}` : undefined} onOpen={open} caption={<><b className="font-medium text-foreground">In the app</b> · {e.target} · <Where e={e} /> · {where}{e.shot.revealedBy && ` · ${revealedText(e.shot.revealedBy)}`}</>} />
+  const where = e.shot.drawn ? "" : `${e.shot.page ? `on ${e.shot.page.replace(/^https?:\/\/[^/]+/, "") || "/"} ` : ""}(${e.shot.tagged ? "matched by source tag" : `match ${Math.round(e.shot.match * 100)}%`})`
+  const app = <Figure src={e.shot.url} alt={`Screenshot of ${e.snippet.slice(0, 60)}`} box={b} ratio={b ? `${b.cw}/${b.ch}` : undefined} onOpen={open} caption={<><b className="font-medium text-foreground" title={sourceTip(e.shot)}>{sourceLabel(e.shot)}</b> · {e.target} · <Where e={e} />{where && ` · ${where}`}{e.shot.revealedBy && ` · ${revealedText(e.shot.revealedBy)}`}</>} />
   const r = e.rendered
   if (!r?.systemShot) return app
   const d = r.diff
@@ -385,3 +385,11 @@ export function ReviewControls({ items, auto, pattern, options, label }: { items
     </div>
   )
 }
+
+/**
+ * What the element's picture is, in three labels: a photo of the live app; drawn from the app's code (its
+ * component, mounted with the app's styles, found by its exact tag: counts as seeing it); or markup only
+ * (its JSX written out: shown, doesn't count).
+ */
+export const sourceLabel = (s: any) => (s?.drawn === "mount" ? "Drawn from the app's code" : s?.drawn ? "Markup only" : "Live app screenshot")
+export const sourceTip = (s: any) => (s?.drawn === "mount" ? "Rendered from this file's component with the app's styles; not seen on a live page." : s?.drawn ? "This element's code written out as plain markup with the app's styles; no component ran." : undefined)

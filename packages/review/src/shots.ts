@@ -8,6 +8,7 @@ import { appSurface, openSurface } from '@snds/dsa';
 import { detectApp, discoverRoutes, ensureBrowser, linkCoreForChild, routeConfig, startApp, tagPlan } from './apps.js';
 
 import { READ_STYLE } from './rendered.js';
+import { SHOW_MARKUP, gateProps, markupOf, readSource } from './drawn.js';
 import { describeNetwork, flowProblems, guardNetwork, routeUrl, runFlow, type Flow, type GuardStats } from './flows.js';
 
 /**
@@ -32,6 +33,8 @@ export interface ShotResult {
     needsValue?: string[];
     /** The share of pages visited that carried source tags (0 to 1). */
     tagged?: number;
+    /** Elements drawn direct from code, because they couldn't be photographed. */
+    drawn?: number;
   }[];
 }
 
@@ -69,7 +72,7 @@ async function inPage<T = any>(page: any, src: string, arg?: unknown): Promise<T
 /** Bump when finding or revealing elements changes, so earlier misses get another try. */
 const CRAWLER = 8;
 
-interface Target { id: string; m: ElementEval['match']; /** Its source tag: file:line:col, as the scanner and the tagger write it. */ src: string; steps?: { label: string; event: 'click' | 'dblclick' }[]; hints: string[]; where: string[] }
+interface Target { id: string; e: ElementEval; m: ElementEval['match']; /** Its source tag: file:line:col, as the scanner and the tagger write it. */ src: string; steps?: { label: string; event: 'click' | 'dblclick' }[]; hints: string[]; where: string[] }
 
 /**
  * Words that point at the UI state an element needs: string literals in its gates (`viewMode === 'gallery'`,
@@ -158,7 +161,8 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
   index.misses ??= {};
   const misses = index.misses;
   const plan = (mine: ElementEval[]) => {
-    const cached = new Set(mine.filter(e => fresh(index.shots[e.id], e) && fs.existsSync(path.join(dir, index.shots[e.id].file))).map(e => e.id));
+    // A drawing isn't a photo: it stays until its miss is tried again (a changed file or setup).
+    const cached = new Set(mine.filter(e => fresh(index.shots[e.id], e) && !index.shots[e.id].drawn && fs.existsSync(path.join(dir, index.shots[e.id].file))).map(e => e.id));
     const picked = pickExamples(mine, perGroup, cached, opts.config.shots?.perQuestion ?? 40);
     const need = picked.filter(e => !cached.has(e.id) && !freshMiss(misses[e.id], e));
     return { picked, need, cached: picked.filter(e => cached.has(e.id)).length };
@@ -166,14 +170,17 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
 
   // Routes the app declares that need a value to open: listed in the result, so a person can name one.
   const needs = (target: string) => { const t = all.find(x => x.name === target); const v = t ? routeConfig(t.dir).needsValue : []; return v.length ? { needsValue: v } : {}; };
-  const sessions: { target: string; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; stop?: () => void; how?: string; need: ElementEval[]; storageState?: string | undefined; readApi?: boolean; readPaths?: string[] | undefined; signIn?: SignIn | undefined }[] = [];
+  const sessions: { target: string; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; stop?: () => void; how?: string; need: ElementEval[]; storageState?: string | undefined; readApi?: boolean; readPaths?: string[] | undefined; signIn?: SignIn | undefined; draw?: DrawWith }[] = [];
+  // Elements that can't be photographed are drawn from the code (shots.draw: false turns it off).
+  const drawOn = opts.config.shots?.draw !== false;
+  const drawFor = (dir?: string, mount?: boolean): DrawWith | undefined => (drawOn ? { root: opts.root, dir, mount } : undefined);
   const evalTargets = [...new Set(evals.filter(e => !e.exception).map(e => e.target))].filter(t => !opts.target || t === opts.target);
   if (opts.url) {
     const p = plan(evals.filter(e => !opts.target || e.target === opts.target));
     // An app already running elsewhere: still crawl the routes its source declares, when we know which app it is.
     const t = opts.target ? all.find(x => x.name === opts.target) : undefined;
     const routes = opts.routes ?? opts.config.shots?.routes ?? (t ? ['', ...discoverRoutes(t.dir, t.exclude ?? [])] : ['']);
-    sessions.push({ target: opts.target ?? '*', url: opts.url, routes, crawl: !opts.routes, need: p.need });
+    sessions.push({ target: opts.target ?? '*', url: opts.url, routes, crawl: !opts.routes, need: p.need, draw: drawFor(t?.dir) });
   } else {
     for (const name of evalTargets) {
       const t = all.find(x => x.name === name);
@@ -192,7 +199,7 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
           const open = await openSurface(surface, opts.root);
           const routes = routesFor();
           log(`  ${open.how} · ${routes.length} route${routes.length === 1 ? '' : 's'} ${configured ? 'from config' : 'found in the source'}`);
-          sessions.push({ target: name, url: open.url, routes, first: extra, flows: opts.config.apps?.[name]?.flows as Flow[] | undefined, crawl: true, stop: open.stop, how: open.how, need: p.need, storageState: open.storageState, readApi: open.readApi, readPaths: open.readPaths, signIn: open.signIn });
+          sessions.push({ target: name, url: open.url, routes, first: extra, flows: opts.config.apps?.[name]?.flows as Flow[] | undefined, crawl: true, stop: open.stop, how: open.how, need: p.need, storageState: open.storageState, readApi: open.readApi, readPaths: open.readPaths, signIn: open.signIn, draw: drawFor(t.dir) });
           if (open.signIn && !open.storageState) log(`  live.apps["${name}"].signIn needs a saved sign-in: run \`dsa login ${open.url}\` and set live.apps["${name}"].auth.`);
         } catch (e: any) { result.apps.push({ target: name, skipped: e.message.split('\n')[0] }); log(`  ${e.message}`); }
         continue;
@@ -207,7 +214,7 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
         const app = await startApp(ap);
         const routes = routesFor();
         log(`  ${app.url} · ${routes.length} route${routes.length === 1 ? '' : 's'} ${configured ? 'from config' : 'found in the source'}${extra.length ? ` (${extra.length} extra, visited first)` : ''}`);
-        sessions.push({ target: name, url: app.url, routes, first: extra, flows: opts.config.apps?.[name]?.flows as Flow[] | undefined, crawl: true, stop: app.stop, how: ap.how, need: p.need });
+        sessions.push({ target: name, url: app.url, routes, first: extra, flows: opts.config.apps?.[name]?.flows as Flow[] | undefined, crawl: true, stop: app.stop, how: ap.how, need: p.need, draw: drawFor(t.dir, ap.tag === 'injected') });
       } catch (e: any) { result.apps.push({ target: name, skipped: e.message.split('\n')[0] }); log(`  ${e.message}`); }
     }
   }
@@ -217,7 +224,7 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
       if (!s.need.length) { log('Nothing new to capture.'); continue; }
       log(`${s.target === '*' ? '' : s.target + ': '}${s.need.length} examples to find across ${new Set(s.need.map(e => groupKey(e))).size} groups.`);
       const sh = opts.config.shots ?? {};
-      const r: Awaited<ReturnType<typeof session>> & { signIn?: string; expired?: boolean; broken?: string } = await session(pw, { url: s.url, routes: s.routes, first: s.first, flows: s.flows, crawl: s.crawl, examples: s.need, dir, storageState: s.storageState, readApi: s.readApi, readPaths: s.readPaths, signIn: s.signIn, maxPages: sh.maxPages ?? 90, waitMs: sh.waitMs ?? 600, log, reveal: sh.reveal, maxActions: sh.maxActions ?? sh.maxTriggers, maxDepth: sh.maxDepth, maxMinutes: sh.maxMinutes });
+      const r: Awaited<ReturnType<typeof session>> & { signIn?: string; expired?: boolean; broken?: string } = await session(pw, { draw: s.draw, url: s.url, routes: s.routes, first: s.first, flows: s.flows, crawl: s.crawl, examples: s.need, dir, storageState: s.storageState, readApi: s.readApi, readPaths: s.readPaths, signIn: s.signIn, maxPages: sh.maxPages ?? 90, waitMs: sh.waitMs ?? 600, log, reveal: sh.reveal, maxActions: sh.maxActions ?? sh.maxTriggers, maxDepth: sh.maxDepth, maxMinutes: sh.maxMinutes });
       const at = new Date().toISOString();
       const byId = new Map(s.need.map(e => [e.id, e]));
       if (r.signIn && !Object.keys(r.shots).length) {
@@ -235,14 +242,15 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
         result.apps.push({ target: s.target, url: s.url, how: s.how, routes: s.routes.length, captured: 0, broken: r.broken, ...needs(s.target) });
         continue;
       }
-      for (const [id, v] of Object.entries<any>(r.shots)) { index.shots[id] = { ...v, at, fileHash: hashOf(byId.get(id)!) }; delete misses[id]; }
+      // Drawn from the code: kept beside the element's "not found", which still stands.
+      for (const [id, v] of Object.entries<any>(r.shots)) { index.shots[id] = { ...v, at, fileHash: hashOf(byId.get(id)!) }; if (!v.drawn) delete misses[id]; }
       // How much of the app carried source tags: matches there are exact, the rest are the crawler's best guess.
       const tagged = r.tagged.of ? Math.round((100 * r.tagged.pages) / r.tagged.of) / 100 : undefined;
       if (tagged !== undefined) log(`  ${s.target === '*' ? 'this app' : s.target}: ${Math.round(tagged * 100)}% of pages tagged${tagged === 0 ? '; add dsaTag to its dev build for exact matches' : tagged < 1 ? ' (exact matches there, a best guess elsewhere)' : ' (every match exact)'}`);
       for (const id of r.missing) misses[id] = { at, fileHash: hashOf(byId.get(id)!), crawler: CRAWLER, steps: stepsKey(byId.get(id)!), setup: setupOf(byId.get(id)!.target) };
       index.missing.push(...r.missing);
       index.pages.push(...r.pages);
-      result.apps.push({ target: s.target, url: s.url, how: s.how, routes: s.routes.length, captured: Object.keys(r.shots).length, ...(tagged !== undefined ? { tagged } : {}), ...needs(s.target) });
+      result.apps.push({ target: s.target, url: s.url, how: s.how, routes: s.routes.length, captured: Object.values<any>(r.shots).filter(v => !v.drawn).length, ...(r.drawn ? { drawn: r.drawn } : {}), ...(tagged !== undefined ? { tagged } : {}), ...needs(s.target) });
     } finally { s.stop?.(); }
   }
   // Report "not found" for every cached miss too, so the review can say why there's no picture.
@@ -278,10 +286,17 @@ const RESTORE_SESSION = `(d) => { if (location.origin !== d.origin) return; for 
 /** One interaction the explorer can take: click, hover, or right-click a control on the page. */
 interface Act { n: number; key: string; kind: 'click' | 'hover' | 'context'; label: string; why: string; prio: number }
 
-async function session(pw: any, o: { url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; examples: ElementEval[]; dir: string; storageState?: string | undefined; readApi?: boolean | undefined; readPaths?: string[] | undefined; signIn?: SignIn | undefined; maxPages: number; waitMs: number; log: (m: string) => void; reveal?: boolean; maxActions?: number; maxDepth?: number; maxMinutes?: number; maxReplays?: number }) {
+/**
+ * How to draw what can't be photographed (drawn.ts): the scan root (to read each element's source), its
+ * app's folder, and whether the app runs on dsa's own Vite runner (which serves /@dsa/mount).
+ */
+interface DrawWith { root: string; dir?: string | undefined; mount?: boolean | undefined; max?: number | undefined }
+
+async function session(pw: any, o: { draw?: DrawWith | undefined; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; examples: ElementEval[]; dir: string; storageState?: string | undefined; readApi?: boolean | undefined; readPaths?: string[] | undefined; signIn?: SignIn | undefined; maxPages: number; waitMs: number; log: (m: string) => void; reveal?: boolean; maxActions?: number; maxDepth?: number; maxMinutes?: number; maxReplays?: number }) {
   const shots: Record<string, any> = {};
   const pages: string[] = [];
   let taggedPages = 0;
+  const drawnIds: string[] = [];
   let browser: any, page: any;
   const base = new URL(o.url);
   let net: GuardStats = { blocked: 0, last: [], allowed: {}, denied: {}, idp: new Set() };
@@ -399,7 +414,7 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
       if (r === 'ok') await within(u);
     }
   };
-  let remaining: Target[] = o.examples.map(e => ({ id: e.id, m: e.match, src: `${e.file}:${e.line}:${e.col}`, steps: e.reach?.steps?.map(x => ({ label: x.label, event: x.event })), hints: hintsOf(e), where: pathWords(e.file) }));
+  let remaining: Target[] = o.examples.map(e => ({ id: e.id, e, m: e.match, src: `${e.file}:${e.line}:${e.col}`, steps: e.reach?.steps?.map(x => ({ label: x.label, event: x.event })), hints: hintsOf(e), where: pathWords(e.file) }));
   const replayed = new Set<string>();
   let replays = 0;
   const deadline = Date.now() + (o.maxMinutes ?? 12) * 60_000;
@@ -416,7 +431,7 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
     queue.sort((a, b) => score(b) - score(a));
   };
   const sweeper = (u: string) => async (revealedBy?: string) => {
-    const found: { id: string; score: number; ties: number; alike: number; with: string[]; tagged?: true }[] = await inPage(page, FIND_IN_PAGE, remaining);
+    const found: { id: string; score: number; ties: number; alike: number; with: string[]; tagged?: true }[] = await inPage(page, FIND_IN_PAGE, remaining.map(({ e: _, ...t }) => t));
     // Which line is which, when several want the same controls: the page's route names one of them, or it's a guess.
     const onRoute = (id: string) => { const t = remaining.find(r => r.id === id); const at = decodeURIComponent(new URL(u).pathname + new URL(u).hash).toLowerCase(); return Boolean(t?.where.some(w => at.includes(w))); };
     for (const f of found) {
@@ -434,8 +449,8 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
       const content = await inPage(page, OWN_CONTENT, f.id).catch(() => null);
       const cap = await capture(page, f.id, path.join(o.dir, file));
       if (!cap) continue;
-      shots[f.id] = { file, page: u, matchScore: Math.round(f.score * 100) / 100, ties: f.ties, alike: f.alike, ...(f.tagged ? { tagged: true } : {}), ...((f as any).claimants > 1 ? { shared: (f as any).claimants } : {}), styles, placement, box: cap.box, revealedBy, content, ...(cap.blank ? { blank: true } : {}), ...(cap.covered ? { covered: true } : {}), ...(cap.via ? { via: cap.via } : {}) };
-      o.log(`  ${f.id} on ${u.replace(base.origin, '')}${revealedBy ? ` after ${revealedBy}` : ''} (${f.tagged ? `matched by source tag${f.ties > 1 ? `, one of ${f.ties} rendered by this line` : ''}` : `match ${Math.round(f.score * 100)}%`}${f.tagged ? '' : (f as any).claimants > 1 ? `, ${(f as any).claimants} source lines want the same control` : f.ties > 1 ? (f.alike >= f.ties ? `, one of ${f.ties} alike on the page` : `, a guess among ${f.ties} similar elements on the page`) : ''})${cap.blank ? ' · captured but blank' : cap.covered ? ' · covered by another layer' : cap.via ? ` · shows on ${cap.via}` : ''}`);
+      shots[f.id] = { file, page: u, matchScore: Math.round(f.score * 100) / 100, ties: f.ties, alike: f.alike, ...(f.tagged ? { tagged: true } : {}), ...((f as any).claimants > 1 ? { shared: (f as any).claimants } : {}), styles, placement, box: cap.box, revealedBy, content, ...(cap.blank ? { blank: true } : {}), ...(cap.covered ? { covered: true } : {}), ...(cap.uncovered ? { uncovered: cap.uncovered } : {}), ...(cap.via ? { via: cap.via } : {}) };
+      o.log(`  ${f.id} on ${u.replace(base.origin, '')}${revealedBy ? ` after ${revealedBy}` : ''} (${f.tagged ? `matched by source tag${f.ties > 1 ? `, one of ${f.ties} rendered by this line` : ''}` : `match ${Math.round(f.score * 100)}%`}${f.tagged ? '' : (f as any).claimants > 1 ? `, ${(f as any).claimants} source lines want the same control` : f.ties > 1 ? (f.alike >= f.ties ? `, one of ${f.ties} alike on the page` : `, a guess among ${f.ties} similar elements on the page`) : ''})${cap.blank ? ' · captured but blank' : cap.covered ? ' · covered by another layer' : cap.uncovered ? ` · ${cap.uncovered} covering layer${cap.uncovered > 1 ? 's' : ''} hidden` : cap.via ? ` · shows on ${cap.via}` : ''}`);
     }
     remaining = remaining.filter(r => !shots[r.id]);
   };
@@ -565,12 +580,67 @@ async function session(pw: any, o: { url: string; routes: string[]; first?: stri
         await relaunch();
       }
     }
+    if (remaining.length && o.draw && pages.length && !signedOut() && !isBroken()) await drawRest(o.draw, pages[0]!);
     if ((net.blocked || Object.keys(net.allowed).length) && !signedOut() && !isBroken()) o.log(`  network: ${describeNetwork(net, base.origin)}`);
     if (remaining.length && Date.now() >= deadline) o.log(`  time budget (shots.maxMinutes) used up with ${remaining.length} still to find.`);
   } finally {
     await browser.close().catch(() => {});
   }
-  return { shots, pages, missing: remaining.map(r => r.id), tagged: { pages: taggedPages, of: pages.length }, ...(signedOut() || auth.expired ? { signIn: wall.at || o.url } : {}), ...(auth.expired ? { expired: true } : {}), ...(isBroken() ? { broken: broken.first } : {}) };
+  return { shots, pages, missing: [...remaining.map(r => r.id), ...drawnIds], drawn: drawnIds.length, tagged: { pages: taggedPages, of: pages.length }, ...(signedOut() || auth.expired ? { signIn: wall.at || o.url } : {}), ...(auth.expired ? { expired: true } : {}), ...(isBroken() ? { broken: broken.first } : {}) };
+
+  /**
+   * What's still missing after both passes, drawn direct from code on one of the app's pages, so its style
+   * sheets apply: its component mounted through the app's Vite build when dsa runs it (found by its source
+   * tag), else its own JSX as static markup. Each is labelled a drawing, never a photo, and stays "not
+   * found" in the app.
+   */
+  async function drawRest(d: DrawWith, at: string) {
+    const stop = Date.now() + 3 * 60_000;
+    let n = 0;
+    for (const r of [...remaining]) {
+      if (n >= (d.max ?? 40) || Date.now() > stop) break;
+      const code = readSource(d.root, r.e.file, d.dir);
+      if (!code) continue;
+      let how: 'mount' | 'markup' | null = null;
+      let exact = false;
+      try {
+        if (d.mount && r.e.within) {
+          await page.goto(at, { waitUntil: 'domcontentloaded', timeout: 30000 });
+          await page.waitForTimeout(o.waitMs);
+          const abs = path.resolve(d.root, r.e.file);
+          const said: string = await inPage(page, MOUNT_IN_PAGE, ['/@fs' + abs.split(path.sep).join('/'), r.e.within, gateProps(r.e)]).catch((e: any) => String(e?.message ?? e).split('\n')[0]);
+          if (said === 'ok') {
+            const hit: any[] = await inPage(page, FIND_IN_PAGE, [{ ...r, e: undefined }]);
+            if (hit.length) { how = 'mount'; exact = Boolean(hit[0].exact); }
+          } else o.log(`  ${r.id}: not mounted (${said})`);
+        }
+        if (!how) {
+          const html = markupOf(code, r.e, r.id);
+          if (html) {
+            await page.goto(at, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            await page.waitForTimeout(o.waitMs);
+            if (await inPage<boolean>(page, SHOW_MARKUP, html)) {
+              await inPage(page, `(id) => { const el = document.querySelector('[data-dsa-drawn="' + CSS.escape(id) + '"]'); if (el) el.setAttribute('data-dsa-shot', id); }`, r.id);
+              how = 'markup';
+            }
+          }
+        }
+        if (!how) continue;
+        const file = `${r.id}.png`;
+        const content = await inPage(page, OWN_CONTENT, r.id).catch(() => null);
+        const cap = await capture(page, r.id, path.join(o.dir, file));
+        if (!cap) continue;
+        // A mount found by its exact source tag, and not blank, counts as seeing the element (seenInApp).
+        shots[r.id] = { file, page: at, matchScore: 1, drawn: how, ...(how === 'mount' && exact ? { exact: true } : {}), box: cap.box, content, ...(cap.blank ? { blank: true } : {}) };
+        drawnIds.push(r.id);
+        remaining = remaining.filter(x => x.id !== r.id);
+        n++;
+        o.log(`  ${r.id} ${how === 'mount' ? "drawn from the app's code (its component, in the app's build)" : "drawn as markup only (with the app's styles)"}${cap.blank ? ' · blank' : ''}`);
+      } catch (e: any) {
+        if (/closed|crash|Target/i.test(String(e?.message))) await relaunch();
+      }
+    }
+  }
 
   /**
    * Explore one page as a tree of UI states. From the loaded page, try each interaction (best first:
@@ -871,7 +941,7 @@ const FIND_IN_PAGE = `(targets) => {
       const pick = pool.find(el => !el.closest('[data-dsa-shot]'));
       if (!pick) continue;
       pick.setAttribute('data-dsa-shot', t.id);
-      out.push({ id: t.id, score: 1, ties: pool.length, alike: pool.length, with: [], tagged: true });
+      out.push({ id: t.id, score: 1, ties: pool.length, alike: pool.length, with: [], tagged: true, exact: exact.length > 0 });
     }
     return out;
   }
@@ -968,6 +1038,8 @@ export interface Captured {
   covered?: true;
   /** What made it paint: hovering or focusing it. */
   via?: 'hover' | 'focus';
+  /** Layers hidden because they covered it (a toast, a sticky bar): the photo is still the app's page. */
+  uncovered?: number;
 }
 
 /**
@@ -1025,18 +1097,51 @@ async function capture(page: any, id: string, file: string): Promise<Captured | 
       const again = await shoot();
       if ((!again.blank && again.top) || (shot.blank && !again.blank)) { shot = again; via = how; }
     }
+    // Still under another layer (a toast, a sticky bar, a scrim): hide that layer, up to three, and look
+    // again. The page, its styles and its layout are the app's own; only what covered it is gone.
+    let uncovered = 0;
+    while (!shot.top && uncovered < 3 && await inPage<boolean>(page, HIDE_COVER, sel).catch(() => false)) {
+      uncovered++;
+      await page.waitForTimeout(150);
+      shot = await shoot();
+    }
     fs.writeFileSync(file, shot.buf);
-    return { box: rel, ...(shot.blank ? { blank: true as const } : {}), ...(!shot.top ? { covered: true as const } : {}), ...(via ? { via } : {}) };
+    return { box: rel, ...(shot.blank ? { blank: true as const } : {}), ...(!shot.top ? { covered: true as const } : uncovered ? { uncovered } : {}), ...(via ? { via } : {}) };
   } catch { return null; }
   finally {
     await inPage(page, `(sel) => { const el = document.querySelector(sel); if (el) el.removeAttribute('data-dsa-shot'); }`, sel).catch(() => {});
+    await page.evaluate(RESTORE_COVER).catch(() => {});
     await page.mouse.move(0, 0).catch(() => {});
     await page.evaluate(`document.activeElement && document.activeElement.blur && document.activeElement.blur()`).catch(() => {});
   }
 }
 
+/**
+ * Runs in the page: hide the layer over the element's centre (the outermost box that holds what's on top
+ * and not the element), so a photo shows the element. Restored by RESTORE_COVER after the capture.
+ */
+const HIDE_COVER = `(sel) => {
+  const el = document.querySelector(sel);
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  if (!hit || hit === el || el.contains(hit) || hit.contains(el)) return false;
+  let layer = hit;
+  while (layer.parentElement && layer.parentElement !== document.body && !layer.parentElement.contains(el)) layer = layer.parentElement;
+  if (layer === document.body || layer === document.documentElement || layer.contains(el)) return false;
+  layer.setAttribute('data-dsa-hid', layer.getAttribute('style') || '');
+  layer.style.setProperty('visibility', 'hidden', 'important');
+  layer.style.setProperty('opacity', '0', 'important');
+  layer.style.setProperty('pointer-events', 'none', 'important');
+  return true;
+}`;
+const RESTORE_COVER = `document.querySelectorAll('[data-dsa-hid]').forEach((x) => { const s = x.getAttribute('data-dsa-hid'); if (s) x.setAttribute('style', s); else x.removeAttribute('style'); x.removeAttribute('data-dsa-hid'); })`;
+
+/** Runs in the page: load /@dsa/mount from the app's own Vite server and mount one component (drawn.ts). */
+const MOUNT_IN_PAGE = `async ([file, name, props]) => { await import('/@dsa/mount'); return window.__dsaMount(file, name, props); }`;
+
 /** For tests: the in-page scripts and the helper that runs them. */
-export const __test = { inPage, FIND_IN_PAGE, CANDIDATES, MARK_SEEN, PLACE_IN_PAGE, TOP_AT_CENTER, OWN_CONTENT, capture };
+export const __test = { inPage, FIND_IN_PAGE, CANDIDATES, MARK_SEEN, PLACE_IN_PAGE, TOP_AT_CENTER, OWN_CONTENT, HIDE_COVER, capture };
 
 /** One headless capture pass over a running app (the workbench's before/after uses it on two copies of the app). */
 export const captureSession = session;

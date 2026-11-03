@@ -1,12 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { BLANK_INSET, CODE_TERMS, decodePng, isBlank } from '@snds/dsa/engine';
+import { BLANK_INSET, CODE_TERMS, decodePng, isBlank, seenInApp } from '@snds/dsa/engine';
 
 /**
  * Can a person trust a recommendation from the card alone? Ten checks, all of which must hold on the
  * card where the person approves it (the review QA rubric):
  *
- *   C1  the current element is shown (a photo matched by its source tag, or at or over the 80% match the page shows)
+ *   C1  the current element is shown: a photo of the live app (matched by its source tag, or at or over the
+ *       80% match the page shows), or a drawing from the app's code (its component mounted with the app's
+ *       styles, found by its exact tag). Markup only doesn't count.
  *   C2  …and it is visible (the ringed box has painted pixels)
  *   C3  …and labelled (in the app, which app, file:line, match)
  *   C4  the proposal is rendered with the exact props and the element's own content
@@ -61,8 +63,14 @@ export interface TrustScore {
   criteria: Record<Criterion, { pass: number; rate: number }>;
   /** Each criterion with how many recommendations fail it, most first. */
   blocking: { criterion: Criterion; text: string; failing: number }[];
-  rows: { id: string; target: string; pass: boolean; failed: Criterion[] }[];
+  rows: { id: string; target: string; pass: boolean; failed: Criterion[]; source: Source }[];
+  /** Where each element's picture came from, so a report can say "N live, M drawn from code". */
+  sources: Record<Source, number>;
 }
+
+/** live: a photo of the running app. code: drawn from the app's code (counts). markup: markup only (doesn't). none: no picture. */
+export type Source = 'live' | 'code' | 'markup' | 'none';
+const sourceOf = (s: any): Source => (!s ? 'none' : s.drawn === 'mount' ? 'code' : s.drawn ? 'markup' : 'live');
 
 /**
  * Score every recommendation in a report payload. `dir` is where the published page sits, to read the
@@ -99,7 +107,7 @@ export function trustRubric(payload: any, opts: { card?: CardShows; dir?: string
     const fallback = Boolean(e.rendered?.systemShot || e.systemPreview || p?.fallback || (p?.url && (p.check !== 'exact' || p.content)));
     // A blank or covered photo isn't shown on the card (it says so instead). A source tag is proof of place:
     // the photo is of the node that line made, whatever any score says.
-    const shown = Boolean(e.shot && (e.shot.tagged || e.shot.match >= SHOT_MIN) && !e.shot.blank && !e.shot.covered);
+    const shown = Boolean(e.shot && seenInApp({ ...e.shot, matchScore: e.shot.match }));
     // Its own words or icon to show: the proposal must carry them, not a story's sample. (Older reports
     // carry no ownHash; an element with a label has content of its own.)
     const hasOwn = e.ownHash !== undefined ? Boolean(e.ownHash) : Boolean(e.label);
@@ -116,7 +124,7 @@ export function trustRubric(payload: any, opts: { card?: CardShows; dir?: string
     c.C9 = e.confidence < th || (c.C2 && c.C4);
     c.C10 = c.C4 || (card.fallback && fallback && Boolean(p?.note || p?.content || !p?.url || p.check !== 'exact'));
     const failed = CRITERIA.filter((k) => !c[k]);
-    return { id: e.id, target: e.target, pass: !failed.length, failed };
+    return { id: e.id, target: e.target, pass: !failed.length, failed, source: sourceOf(e.shot) };
   });
   const n = rows.length;
   const rate = (k: number) => (n ? Math.round((1000 * k) / n) / 10 : 0);
@@ -126,5 +134,6 @@ export function trustRubric(payload: any, opts: { card?: CardShows; dir?: string
     recommendations: n, passing, rate: rate(passing), criteria,
     blocking: CRITERIA.map((k) => ({ criterion: k, text: CRITERION_TEXT[k], failing: n - criteria[k].pass })).filter((b) => b.failing).sort((a, b) => b.failing - a.failing),
     rows,
+    sources: { live: rows.filter((r) => r.source === 'live').length, code: rows.filter((r) => r.source === 'code').length, markup: rows.filter((r) => r.source === 'markup').length, none: rows.filter((r) => r.source === 'none').length },
   };
 }

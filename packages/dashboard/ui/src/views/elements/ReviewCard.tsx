@@ -8,7 +8,7 @@ import { Code, Disclosure, Pre } from "@/components/bits"
 import { D, short, SYS } from "@/lib/dsa"
 import { stageKey, useStaged } from "@/lib/staged"
 import { AskAgent } from "@/agent/AskAgent"
-import { Conf, ElementRow, NoShot, Reasons, ReviewControls, contentText, desc, nameOf, pickText, proposalCheck, proposalFor, revealedText, useEl, useReviewState } from "./shared"
+import { Conf, ElementRow, NoShot, Reasons, ReviewControls, contentText, desc, nameOf, pickText, proposalCheck, proposalFor, revealedText, sourceLabel, sourceTip, useEl, useReviewState } from "./shared"
 import { SameScale } from "./SameScale"
 import { useApp } from "@/lib/app"
 import { styleName } from "./units"
@@ -322,16 +322,17 @@ function LookTile({ look, group, target, proposal, compare, measure }: { look: L
   return (
     <figure className={cn("m-0 flex min-w-0 flex-col gap-2 rounded-lg border bg-muted/20 p-2", wide && "md:col-span-2 xl:col-span-3")}>
       <SameScale
-        app={{ url: e.shot.url, box: e.shot.box, alt: `In the app: ${e.snippet.slice(0, 60)}`, onOpen: () => openAt(e.id) }}
+        app={{ url: e.shot.url, box: e.shot.box, alt: `${sourceLabel(e.shot)}: ${e.snippet.slice(0, 60)}`, onOpen: () => openAt(e.id) }}
         proposed={compare ? (exact ? { url: exact.url, alt: `Proposed: ${SYS} ${pickText(target)}` } : closest ? { url: closest.url, alt: `Closest ${SYS} variant: ${target.use} ${closest.key}` } : null) : undefined}
         appLabel={
           <>
-            <span className="font-medium text-foreground">In the app</span>
+            {/* A photo of the running app (a covering layer may have been hidden), drawn from the app's code, or markup only. */}
+            <span className="font-medium text-foreground" title={sourceTip(e.shot)}>{sourceLabel(e.shot)}</span>
             <Badge variant="outline" className="text-[10px] font-normal" title="The app this element is in">{e.target}</Badge>
             <button type="button" onClick={() => openCode(e.id)} className="truncate font-mono text-[11px] underline-offset-4 hover:text-foreground hover:underline" title="Open the code">{short(e.file)}:{e.line}</button>
-            {e.shot.tagged ? <span title="The app was built with source tags: this is the node this line of code made">matched by source tag</span>
+            {e.shot.drawn ? null : e.shot.tagged ? <span title="The app was built with source tags: this is the node this line of code made">matched by source tag</span>
               : <span className="tabular-nums" title="How sure the crawler is that this is the element">match {Math.round(e.shot.match * 100)}%</span>}
-            {e.shot.tagged ? (e.shot.ties > 1 ? <span title="This line renders several nodes (a list); any of them stands for it">one of {e.shot.ties} rendered by this line</span> : null)
+            {e.shot.drawn ? null : e.shot.tagged ? (e.shot.ties > 1 ? <span title="This line renders several nodes (a list); any of them stands for it">one of {e.shot.ties} rendered by this line</span> : null)
               : e.shot.shared > 1 ? <span title="Identical controls in other files match the same place on the page; which is which is a guess">one of {e.shot.shared} lines that look the same</span>
               : e.shot.ties > 1 && e.shot.alike >= e.shot.ties ? <span title="Several identical elements on the page match it; any of them shows how it looks">one of {e.shot.ties} alike on the page</span> : null}
             {e.shot.via && <span>shown on {e.shot.via}</span>}

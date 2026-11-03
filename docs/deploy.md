@@ -148,6 +148,28 @@ A tagged photo counts as proof of place in the review: the card says "matched by
 read them. Tag internal dev and preview builds only, never a public production build. The tagger is
 off unless `DSA_TAG=1` or `when: true`, so a production build isn't tagged by accident.
 
+### What the review shows when there's no photo
+
+Each element on a card is shown the best way available, under one of three labels:
+
+| Label | How it's made | Counts as seeing it? |
+|---|---|---|
+| Live app screenshot | A photo of the running app. | Yes |
+| Live app screenshot | The same, after hiding a layer that sat over the element (a toast, a sticky bar). Up to three layers are hidden, then put back. | Yes |
+| Drawn from the app's code | The element's component, loaded through the app's own Vite dev server and drawn on one of its pages with the app's styles. Props come from the conditions the scan traced (`open && …` gets `open: true`). Only for apps dsa starts itself with Vite. | Yes, when it was found by its exact source tag and isn't blank |
+| Markup only | The element's own JSX as plain markup, shown on one of the app's pages so its style sheets apply. No app code runs. | No |
+
+**Why a drawing from the app's code counts.** It runs the real component, from the app's own files, with
+the app's real styles, and the element is the one its exact source tag names. That makes it strong
+evidence of how the element looks. So it counts for the trust checks and the confidence cap, under its
+own label, and the card's tooltip says "Rendered from this file's component with the app's styles; not
+seen on a live page." The rubric reports it as its own source ("N live, M drawn from code").
+
+It isn't proof the element is reachable live. So it never feeds placement (which page and region it sits
+in), the element still reads as not found live, and it's looked for live again when its file or the app's
+setup changes. Markup only is a sketch: shown so a reviewer knows roughly what the element is, never
+counted. Set `shots.draw: false` to turn drawings off.
+
 ### Apps that keep their sign-in in memory (OIDC, PKCE)
 
 `dsa login` saves cookies, local storage, and the app's session storage. Many single-page apps
