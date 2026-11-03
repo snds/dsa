@@ -171,7 +171,7 @@ export async function renderReport(root: string, config: Config, dataDir: string
     const elements = plainHows({
       threshold: config.review?.threshold ?? DEFAULT_THRESHOLD,
       evals: evals.map((e: any) => ({ id: e.id, target: e.target, file: e.file, line: e.line, element: e.element, verdict: e.verdict, role: e.role, use: e.use, from: e.from, props: e.props, gap: e.gap,
-        confidence: e.confidence, needsHuman: e.needsHuman, decided: e.decided, exception: e.exception, ruleId: e.ruleId, reasons: withPlain(e.reasons ?? []), alternatives: e.alternatives, signature: e.signature,
+        confidence: e.confidence, needsHuman: e.needsHuman, evidenceCap: e.evidenceCap ?? null, decided: e.decided, exception: e.exception, ruleId: e.ruleId, reasons: withPlain(e.reasons ?? []), alternatives: e.alternatives, signature: e.signature,
         snippet: e.snippet, a11y: e.a11y, styleKey: e.styleKey, styleSig: e.styleSig, regions: e.regions ?? null,
 how: e.how ?? null, parent: e.parent ?? null, recipe: e.recipe ?? null,
         // Design identity (identity.ts): the family it belongs to, its name in designer words, and where its answer lands.

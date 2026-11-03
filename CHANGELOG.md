@@ -8,6 +8,15 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- Confidence never outruns the evidence. Nothing reaches Element Review's "ready" band (the review
+  threshold, 90% by default) without a visible photo of it in the app (its own, or one of the same look)
+  and, for a replacement, the proposal drawn exactly with its own content. Missing either, a
+  recommendation is held at 89%, joins a question, and its card says why in plain words ("Held under
+  90% (the scanner said 92%): there is no photo of it in the app; …"); when the evidence arrives, the
+  scanner's score comes back. Decisions a person or agent recorded are never held. Applied by the scan,
+  after screenshots, and after `dsa render` (`applyEvidenceCap`, `capByEvidence`; stored as
+  `evidenceCap` on each evaluation, so the CLI, the agent and the dashboard agree).
+
 - Element Review photos and proposals are checked, not assumed. A capture waits for fonts, checks the
   element is the top layer at its centre (`elementFromPoint`) and that its box has painted pixels, and
   tries hover, then focus, before it records the photo as blank or covered; the card then says "Captured

@@ -59,6 +59,8 @@ export interface Policy {
 export interface DecisionsFile { file: string; decisions: Decision[]; policies: Policy[] }
 
 export interface ElementEval extends Evaluation {
+  /** Held under the review threshold for want of evidence a person can see (evidence-cap.ts): the scanner's score and why. */
+  evidenceCap?: { from: number; why: string[] } | undefined;
   id: string;
   target: string;
   file: string;

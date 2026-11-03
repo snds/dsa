@@ -3,7 +3,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import type { Command } from 'commander';
 import { defineAddon, liveGate, type AddonApi, type EngineContext } from '@snds/dsa';
-import { applyRenderedEvidence, logEvent, materializeRemotes, openStore, pagePlacementKey, reevaluateElements, resolveTargets, type Config } from '@snds/dsa/engine';
+import { applyRenderedEvidence, capByEvidence, logEvent, materializeRemotes, openStore, pagePlacementKey, reevaluateElements, resolveTargets, type Config } from '@snds/dsa/engine';
 import { detectApp, ensureBrowser, installAppDeps, linkCoreForChild } from './apps.js';
 import { renderIfStale, renderProposals, renderSignatures } from './rendered.js';
 import { takeShots } from './shots.js';
@@ -42,6 +42,7 @@ export async function shotsAndEvidence(ctx: EngineContext, o: ShotOptions, log: 
   });
   if (pagePlacementKey(dataDir) !== placedBefore) await reevaluateElements({ root, dataDir, config, profile: ctx.profile, configDir: ctx.configDir, store: d => openStore(d), log });
   const ev = await applyRenderedEvidence(dataDir, config.review?.threshold ?? 0.9);
+  await capByEvidence(dataDir, config.review?.threshold ?? 0.9);
   return { shots: r, evidence: ev };
 }
 
@@ -152,6 +153,8 @@ export default defineAddon({
         // Again, now that photos recorded each element's own content and the evidence may have changed a
         // pick: draw what the cards will propose. Everything already drawn is reused.
         try { await renderProposals({ root, config, dataDir, log }); } catch (e) { notes.push(`proposed components not rendered: ${firstLine(e)}`); }
+        // What can now be seen decides how sure each recommendation may be.
+        await capByEvidence(dataDir, config.review?.threshold ?? 0.9).catch(() => {});
       },
     },
   ],
@@ -189,6 +192,7 @@ export default defineAddon({
         const r = await renderSignatures({ root: ctx.root, config: ctx.config, dataDir: ctx.dataDir, force: Boolean(o.force), log: api.out });
         for (const n of r.notes.slice(0, 5)) api.out(`note: ${n}`);
         await renderProposals({ root: ctx.root, config: ctx.config, dataDir: ctx.dataDir, force: Boolean(o.force), log: api.out });
+        await capByEvidence(ctx.dataDir, ctx.config.review?.threshold ?? 0.9);
       });
 
     program
