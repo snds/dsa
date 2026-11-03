@@ -7,7 +7,8 @@ import { detectApp, startApp, tagPlan } from '../src/apps.js';
 
 // Four ways to show an element, best first. 1: a photo of the live app. 2: the same, with a layer that covers
 // it hidden. 3: its component mounted in the app's own Vite build. 4: its JSX drawn as markup with the app's
-// styles. 1–2 are "Live app screenshot"; 3–4 are "Drawn direct from code" and never count as a photo.
+// styles. 1–2 are "Live app screenshot"; 3 is "Drawn from the app's code" and counts when found by its exact
+// tag and not blank; 4 is "Markup only" and doesn't count.
 // Skipped without a headless browser (`dsa setup`).
 
 const browser = process.env.DSA_NO_BROWSER ? null : await (async () => {
@@ -67,8 +68,10 @@ test('3 and 4: what the crawler can\'t reach is drawn from the code, in the app\
     const r: any = await captureSession(pw, { url: app.url, routes: [''], crawl: false, examples, dir: out, maxPages: 3, waitMs: 300, log: (m: string) => logs.push(m), reveal: false, maxMinutes: 1, draw: { root, dir, mount: true } });
     // 3: its component, mounted with the props its gate needs, and found by its source tag.
     assert.equal(r.shots['E-mount']?.drawn, 'mount', logs.join('\n'));
+    assert.equal(r.shots['E-mount']?.exact, true, 'found by its exact source tag, so it counts');
     // 4: not exported, so not mountable: its own markup, with the app's style sheet.
     assert.equal(r.shots['E-markup']?.drawn, 'markup', logs.join('\n'));
+    assert.equal(r.shots['E-markup']?.exact, undefined);
     for (const id of ['E-mount', 'E-markup']) {
       assert.ok(fs.statSync(path.join(out, r.shots[id].file)).size > 500, id);
       assert.ok(!r.shots[id].blank, `${id} isn't blank: the app's styles drew it`);
@@ -76,7 +79,7 @@ test('3 and 4: what the crawler can\'t reach is drawn from the code, in the app\
     // Both are still "not found" in the app: a drawing isn't a photo.
     assert.deepEqual([...r.missing].sort(), ['E-markup', 'E-mount']);
     assert.equal(r.drawn, 2);
-    assert.ok(logs.some(l => /E-mount drawn direct from code \(its component, in the app's build\)/.test(l)), logs.join('\n'));
+    assert.ok(logs.some(l => /E-mount drawn from the app's code \(its component, in the app's build\)/.test(l)), logs.join('\n'));
     // The app's files are untouched.
     assert.equal(fs.readFileSync(path.join(dir, 'src/Filters.jsx'), 'utf8'), filters);
   } finally { app.stop(); }

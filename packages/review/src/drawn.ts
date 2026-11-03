@@ -5,7 +5,7 @@ import type { ElementEval } from '@snds/dsa/engine';
 
 /**
  * Elements the crawler can't photograph (a condition it couldn't meet, a page it never reached) are drawn
- * from the code instead, and the card says "Drawn direct from code". Two ways, best first:
+ * from the code instead. Two ways, best first:
  *
  *  3. Mounted: the element's component, loaded through the app's own Vite dev server and rendered with
  *     React on one of the app's pages, so its real styles and its own imports apply. Props come from the
@@ -14,7 +14,9 @@ import type { ElementEval } from '@snds/dsa/engine';
  *     resolved them, its words), shown on one of the app's pages so the app's style sheets apply. No app
  *     code runs.
  *
- * Neither is a photo of the app: a drawing never counts as evidence that a person can see the element.
+ * Labelled "Drawn from the app's code" (3) and "Markup only" (4). A mount found by its exact source tag,
+ * and not blank, counts as seeing the element (seenInApp): it's the real component with the real styles.
+ * Markup never counts. Neither feeds placement, and both stay "not found live".
  */
 
 /** Props that meet the element's own component's gates: `open` → true, `!open` → false, `mode === 'edit'` → 'edit'. */
