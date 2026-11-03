@@ -87,7 +87,20 @@ export async function login(url: string, out: string, log: (m: string) => void, 
   // Reading the storage state touches the page; doing it while someone types steals focus (a Keycloak
   // form lost its password field to a 1.5 s timer). So: only once a page has finished loading, after it
   // has been quiet for a moment, and once more at the end. Never on a timer while the page sits idle.
-  const save = async () => { try { state = await context.storageState({ indexedDB: Boolean(opts.indexedDB) }); saves++; opts.onSave?.(saves); } catch { /* closing */ } };
+  // Session storage too, for the app's own origin: Playwright's storage state leaves it out, and some apps
+  // keep their tokens there. The last one read on the app's origin is kept (at the end the window may
+  // be elsewhere). Tokens kept only in memory can't be saved: those apps need live.apps[name].signIn.
+  const appOrigin = new URL(url).origin;
+  let session: Record<string, string> | null = null;
+  const save = async () => {
+    try {
+      state = await context.storageState({ indexedDB: Boolean(opts.indexedDB) });
+      for (const p of context.pages()) {
+        try { if (new URL(p.url()).origin === appOrigin) session = await p.evaluate('Object.fromEntries(Object.entries(sessionStorage))'); } catch { /* elsewhere or closing */ }
+      }
+      saves++; opts.onSave?.(saves);
+    } catch { /* closing */ }
+  };
   const later = () => { if (timer) clearTimeout(timer); timer = setTimeout(() => { timer = null; void save(); }, opts.debounceMs ?? 2000); };
   page.on('load', later);
   page.on('framenavigated', (f: any) => { if (f === page.mainFrame()) later(); });
@@ -104,7 +117,9 @@ export async function login(url: string, out: string, log: (m: string) => void, 
   await browser.close().catch(() => {});
   if (!state) throw new Error('No session was saved: the window closed before the page loaded.');
   fs.mkdirSync(path.dirname(out), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(out, JSON.stringify(state, null, 1), { mode: 0o600 });
+  const saved = session && Object.keys(session).length ? { ...(state as object), sessionStorage: { [appOrigin]: session } } : state;
+  fs.writeFileSync(out, JSON.stringify(saved, null, 1), { mode: 0o600 });
+  fs.chmodSync(out, 0o600);
 }
 
 export interface LoginOptions {
@@ -118,10 +133,10 @@ const firstLine = (e: any) => String(e?.message ?? e).split('\n')[0];
 
 function printShots(r: Awaited<ReturnType<typeof shotsAndEvidence>>, label: string, log: (m: string) => void) {
   for (const a of r.shots.apps) {
-    log(a.skipped ? `  ${a.target}: skipped — ${a.skipped}` : a.signIn ? `  ${a.target}: every page asked for sign-in. Run \`dsa login ${a.url}\` and set live.apps["${a.target}"].auth.` : a.url ? `  ${a.target}: ${a.captured} new screenshots via ${a.how ?? a.url} (${a.routes} routes)` : `  ${a.target}: ${a.cached} cached, nothing new`);
+    log(a.skipped ? `  ${a.target}: skipped — ${a.skipped}` : a.broken ? `  ${a.target}: the app didn't render: ${a.broken}. Fix the app's install, then run again.` : a.signIn ? `  ${a.target}: every page asked for sign-in. Run \`dsa login ${a.url}\` and set live.apps["${a.target}"].auth.` : a.url ? `  ${a.target}: ${a.captured} new screenshots via ${a.how ?? a.url} (${a.routes} routes)` : `  ${a.target}: ${a.cached} cached, nothing new`);
     if (a.needsValue?.length) log(`  ${a.target}: ${a.needsValue.length} route${a.needsValue.length === 1 ? ' needs' : 's need'} a value to open (${a.needsValue.slice(0, 6).join(', ')}${a.needsValue.length > 6 ? ', …' : ''}). List real ones in apps["${a.target}"].routes.`);
   }
-  if (r.shots.apps.length && r.shots.apps.every(a => a.signIn || a.skipped)) log(`${r.shots.captured} screenshots: no page could be seen without signing in.`);
+  if (r.shots.apps.length && r.shots.apps.every(a => a.signIn || a.broken || a.skipped)) log(`${r.shots.captured} screenshots: no app could be seen (${r.shots.apps.some(a => a.broken) ? "it didn't render" : 'it asked for sign-in'}), so nothing counts as "not found".`);
   else log(`${r.shots.captured} screenshots; ${r.shots.missing} examples not found (${r.shots.pages} pages). On each page the crawler opened menus, popovers, and disclosures, switched tabs and views, hovered rows, and followed what those revealed (shots.maxDepth deep); what's left needs a specific flow (a selected record, a filled form) or a route to list in apps["name"].routes.`);
   const ev = r.evidence;
   if (ev.measured) log(`Rendered evidence: ${ev.measured} elements measured against ${label} in the browser · ${ev.confirmed} confirmed · ${ev.switched} variant switched (sent to a human).`);

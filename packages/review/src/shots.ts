@@ -10,7 +10,7 @@ import { detectApp, discoverRoutes, ensureBrowser, linkCoreForChild, routeConfig
 import { READ_STYLE } from './rendered.js';
 import { SHOW_MARKUP, markupOf, mountProps, readSource } from './drawn.js';
 import { needsValue, patternTest, routeFiles, routesReaching } from './routes.js';
-import { flowProblems, guardNetwork, routeUrl, runFlow, type Flow } from './flows.js';
+import { describeNetwork, flowProblems, guardNetwork, routeUrl, runFlow, type Flow, type GuardStats } from './flows.js';
 
 /**
  * Example screenshots for the element review. Not every instance: a few per recommendation
@@ -28,6 +28,8 @@ export interface ShotResult {
     target: string; url?: string; how?: string; routes?: number; captured?: number; cached?: number; skipped?: string;
     /** Every page asked for sign-in (a login route, another host, a password form): where it sent the crawler. */
     signIn?: string;
+    /** The app didn't render on any page (it threw, its modules failed, or nothing showed): the first error. */
+    broken?: string;
     /** Routes the app declares that need a value (a :param, a splat): to open, list one in apps["name"].routes. */
     needsValue?: string[];
     /** The share of pages visited that carried source tags (0 to 1). */
@@ -38,6 +40,17 @@ export interface ShotResult {
     reach?: { live: number; mounted: number; markup: number; unreachable: number; why: Record<string, number> };
   }[];
 }
+
+/**
+ * Runs in the page: what an app that rendered shows. A blank page (an app that threw before it drew, or
+ * whose modules failed) has no visible text and nothing to interact with.
+ */
+const RENDERED = `() => {
+  const vis = (el) => { const r = el.getBoundingClientRect(); const st = getComputedStyle(el); return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' && st.display !== 'none'; };
+  const text = (document.body && document.body.innerText || '').trim().length;
+  const controls = Array.from(document.querySelectorAll('a[href], button, input, select, textarea, [role=button], [role=link], [role=tab], [tabindex]')).filter(vis).length;
+  return { text, controls };
+}`;
 
 /**
  * Runs in the page: is this a sign-in wall? A login-like path (login, signin, sso, auth, an OpenID
@@ -131,7 +144,19 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
     const surface: any = appSurface(opts.config.live, target);
     const built = surface?.dir ? (() => { try { return fs.statSync(path.join(path.resolve(opts.root, surface.dir), 'index.html')).mtimeMs; } catch { return 0; } })() : 0;
     const auth = surface?.auth ? (() => { try { return fs.statSync(path.resolve(opts.root, surface.auth)).mtimeMs; } catch { return 0; } })() : 0;
-    return crypto.createHash('sha1').update(JSON.stringify([opts.config.apps?.[target] ?? null, surface ?? null, opts.config.shots?.routes ?? null, opts.url ?? null, built, auth])).digest('hex').slice(0, 12);
+    return crypto.createHash('sha1').update(JSON.stringify([opts.config.apps?.[target] ?? null, surface ?? null, opts.config.shots?.routes ?? null, opts.url ?? null, built, auth, installOf(all.find(x => x.name === target)?.dir)])).digest('hex').slice(0, 12);
+  };
+  // The app's dependencies: its lockfile's contents and when node_modules was last installed (the app's
+  // own folder, then up to the root). Installing a missing package retries what a broken app hid.
+  const installOf = (dir?: string) => {
+    if (!dir) return null;
+    const out: (string | number)[] = [];
+    for (let d = path.resolve(dir); ; d = path.dirname(d)) {
+      for (const f of ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb']) { try { out.push(f, crypto.createHash('sha1').update(fs.readFileSync(path.join(d, f))).digest('hex').slice(0, 12)); } catch { /* none here */ } }
+      for (const f of ['node_modules/.package-lock.json', 'node_modules/.modules.yaml', 'node_modules/.yarn-state.yml']) { try { out.push(f, fs.statSync(path.join(d, f)).mtimeMs); } catch { /* none here */ } }
+      if (d === path.resolve(opts.root) || d === path.dirname(d)) break;
+    }
+    return out;
   };
   const setups = new Map<string, string>();
   const setupOf = (target: string) => { if (!setups.has(target)) setups.set(target, setupKey(target)); return setups.get(target)!; };
@@ -148,7 +173,7 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
 
   // Routes the app declares that need a value to open: listed in the result, so a person can name one.
   const needs = (target: string) => { const t = all.find(x => x.name === target); const v = t ? routeConfig(t.dir).needsValue : []; return v.length ? { needsValue: v } : {}; };
-  const sessions: { target: string; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; stop?: () => void; how?: string; need: ElementEval[]; storageState?: string | undefined; readApi?: boolean; draw?: DrawWith; reach?: ReachPlan | undefined }[] = [];
+  const sessions: { target: string; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; stop?: () => void; how?: string; need: ElementEval[]; storageState?: string | undefined; readApi?: boolean; readPaths?: string[] | undefined; signIn?: SignIn | undefined; draw?: DrawWith; reach?: ReachPlan | undefined }[] = [];
   // Which routes render each element's file, from the scan's import graph and the routes in the source
   // (routes.ts): no config. Undefined when the app declares no routes we can read.
   const reachFor = (t: (typeof all)[number] | undefined, need: ElementEval[]): ReachPlan | undefined => {
@@ -190,7 +215,8 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
           const open = await openSurface(surface, opts.root);
           const routes = routesFor();
           log(`  ${open.how} · ${routes.length} route${routes.length === 1 ? '' : 's'} ${configured ? 'from config' : 'found in the source'}`);
-          sessions.push({ target: name, url: open.url, routes, first: extra, flows: opts.config.apps?.[name]?.flows as Flow[] | undefined, crawl: true, stop: open.stop, how: open.how, need: p.need, storageState: open.storageState, readApi: open.readApi, draw: drawFor(t.dir), reach: reachFor(t, p.need) });
+          sessions.push({ target: name, url: open.url, routes, first: extra, flows: opts.config.apps?.[name]?.flows as Flow[] | undefined, crawl: true, stop: open.stop, how: open.how, need: p.need, storageState: open.storageState, readApi: open.readApi, readPaths: open.readPaths, signIn: open.signIn, draw: drawFor(t.dir), reach: reachFor(t, p.need) });
+          if (open.signIn && !open.storageState) log(`  live.apps["${name}"].signIn needs a saved sign-in: run \`dsa login ${open.url}\` and set live.apps["${name}"].auth.`);
         } catch (e: any) { result.apps.push({ target: name, skipped: e.message.split('\n')[0] }); log(`  ${e.message}`); }
         continue;
       }
@@ -214,14 +240,22 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
       if (!s.need.length) { log('Nothing new to capture.'); continue; }
       log(`${s.target === '*' ? '' : s.target + ': '}${s.need.length} examples to find across ${new Set(s.need.map(e => groupKey(e))).size} groups.`);
       const sh = opts.config.shots ?? {};
-      const r: Awaited<ReturnType<typeof session>> & { signIn?: string } = await session(pw, { reach: s.reach, draw: s.draw, url: s.url, routes: s.routes, first: s.first, flows: s.flows, crawl: s.crawl, examples: s.need, dir, storageState: s.storageState, readApi: s.readApi, maxPages: sh.maxPages ?? 90, waitMs: sh.waitMs ?? 600, log, reveal: sh.reveal, maxActions: sh.maxActions ?? sh.maxTriggers, maxDepth: sh.maxDepth, maxMinutes: sh.maxMinutes });
+      const r: Awaited<ReturnType<typeof session>> & { signIn?: string; expired?: boolean; broken?: string } = await session(pw, { reach: s.reach, draw: s.draw, url: s.url, routes: s.routes, first: s.first, flows: s.flows, crawl: s.crawl, examples: s.need, dir, storageState: s.storageState, readApi: s.readApi, readPaths: s.readPaths, signIn: s.signIn, maxPages: sh.maxPages ?? 90, waitMs: sh.waitMs ?? 600, log, reveal: sh.reveal, maxActions: sh.maxActions ?? sh.maxTriggers, maxDepth: sh.maxDepth, maxMinutes: sh.maxMinutes });
       const at = new Date().toISOString();
       const byId = new Map(s.need.map(e => [e.id, e]));
       if (r.signIn && !Object.keys(r.shots).length) {
         // A sign-in wall isn't "not found": nothing was looked at. Say so, and remember no misses.
         const name = s.target === '*' ? 'name' : s.target;
-        log(`  Every page asked for sign-in. Run \`dsa login ${s.url}\` and set live.apps["${name}"].auth to the file it saves. (Pages went to ${r.signIn.replace(/[?#].*$/, '')}.)`);
+        if (r.expired) log(`  The saved sign-in expired. Run \`dsa login ${s.url}\` again.`);
+        else if (s.signIn) log(`  Every page asked for sign-in, and clicking “${s.signIn.click}” on ${s.signIn.path} didn't sign in. Check live.apps["${name}"].signIn and the saved sign-in (\`dsa login ${s.url}\`).`);
+        else log(`  Every page asked for sign-in. Run \`dsa login ${s.url}\` and set live.apps["${name}"].auth to the file it saves. (Pages went to ${r.signIn.replace(/[?#].*$/, '')}. If the app keeps its sign-in in memory and its sign-in page has one button, also set live.apps["${name}"].signIn to { "path": …, "click": … }.)`);
         result.apps.push({ target: s.target, url: s.url, how: s.how, routes: s.routes.length, captured: 0, signIn: r.signIn, ...needs(s.target) });
+        continue;
+      }
+      if (r.broken && !Object.keys(r.shots).length) {
+        // An app that didn't render hides every element: they weren't looked for, so none is "not found".
+        log(`  The app didn't render: ${r.broken}. Fix the app's install, then run again.`);
+        result.apps.push({ target: s.target, url: s.url, how: s.how, routes: s.routes.length, captured: 0, broken: r.broken, ...needs(s.target) });
         continue;
       }
       // Drawn from the code: kept beside the element's "not found", which still stands.
@@ -259,6 +293,26 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
   return result;
 }
 
+/** How to sign in an app that keeps its tokens in memory (live.apps[name].signIn). */
+type SignIn = { path: string; click: string; idp?: string | undefined };
+
+/**
+ * A saved sign-in from \`dsa login\`: Playwright's storage state, and the app's session storage beside it
+ * (Playwright keeps none). Read here so nothing in it is ever logged.
+ */
+export function readAuth(file: string): { state: { cookies: any[]; origins: any[] }; sessionStorage: Record<string, Record<string, string>> } | null {
+  try {
+    const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return { state: { cookies: j.cookies ?? [], origins: j.origins ?? [] }, sessionStorage: j.sessionStorage ?? {} };
+  } catch { return null; }
+}
+
+/**
+ * Runs in each page before its scripts: the app's saved session storage, on its own origin, where not
+ * already set. Source text (bundler helpers don't exist in the page); the data goes in as a JSON literal.
+ */
+const RESTORE_SESSION = `(d) => { if (location.origin !== d.origin) return; for (const [k, v] of Object.entries(d.items)) if (sessionStorage.getItem(k) == null) sessionStorage.setItem(k, v); }`;
+
 /** One interaction the explorer can take: click, hover, or right-click a control on the page. */
 interface Act { n: number; key: string; kind: 'click' | 'hover' | 'context' | 'choose'; label: string; why: string; prio: number; /** For choose: the option to pick in a select. */ value?: string }
 
@@ -287,7 +341,7 @@ function callersOf(d: DrawWith, name: string, own: string): string[] {
 /** What the scan knows about reaching each element (routes.ts): the routes that render its file, and the patterns that need a value. */
 interface ReachPlan { byId: Record<string, string[]>; patterns: string[] }
 
-async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawWith | undefined; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; examples: ElementEval[]; dir: string; storageState?: string | undefined; readApi?: boolean | undefined; maxPages: number; waitMs: number; log: (m: string) => void; reveal?: boolean; maxActions?: number; maxDepth?: number; maxMinutes?: number; maxReplays?: number }) {
+async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawWith | undefined; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; examples: ElementEval[]; dir: string; storageState?: string | undefined; readApi?: boolean | undefined; readPaths?: string[] | undefined; signIn?: SignIn | undefined; maxPages: number; waitMs: number; log: (m: string) => void; reveal?: boolean; maxActions?: number; maxDepth?: number; maxMinutes?: number; maxReplays?: number }) {
   const shots: Record<string, any> = {};
   const pages: string[] = [];
   let taggedPages = 0;
@@ -310,15 +364,26 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   const base = new URL(o.url);
   // A traced control's own line, as its source tag reads ("apps/ledger/src/Bar.tsx:12:"), when it's inside the scan root.
   const stepSrc = (file: string, line: number, col?: number) => { if (!o.draw?.root || !file) return undefined; const rel = path.relative(o.draw.root, file); return rel.startsWith('..') || path.isAbsolute(rel) ? undefined : `${rel.split(path.sep).join('/')}:${line}:${col ?? ''}`; };
-  let net = { blocked: 0, last: [] as string[] };
+  let net: GuardStats = { blocked: 0, last: [], allowed: {}, denied: {}, idp: new Set() };
+  // The saved sign-in: cookies and local storage for Playwright, and the app's session storage, which
+  // Playwright doesn't keep (dsa login saves it; it's put back before the app's own scripts run).
+  const saved = o.storageState ? readAuth(o.storageState) : null;
+  // Signing in an app that keeps its tokens in memory (live.apps[name].signIn): once per browser.
+  const auth = { done: false, signing: false, attempts: 0, expired: false };
   const launch = async () => {
     browser = await pw.chromium.launch();
-    page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, ...(o.storageState ? { storageState: o.storageState } : {}) });
+    page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, ...(saved ? { storageState: saved.state } : {}) });
+    const items = saved?.sessionStorage?.[base.origin];
+    if (items && Object.keys(items).length) await page.addInitScript({ content: `(${RESTORE_SESSION})(${JSON.stringify({ origin: base.origin, items })});` });
     // alert/confirm/prompt: dismiss, so nothing the explorer opens can confirm an action.
     page.on('dialog', (d: any) => d.dismiss().catch(() => {}));
-    // Reads only: no writes, nothing under /api/, nothing to another host but images, fonts, and styles (flows.ts).
-    net = await guardNetwork(page, base.origin, { readApi: Boolean(o.readApi) });
+    // Reads only: no writes, nothing under /api/ (or readPaths), nothing to another host but images, fonts,
+    // and styles, and the identity provider while signing in (flows.ts).
+    net = await guardNetwork(page, base.origin, { readApi: Boolean(o.readApi), readPaths: o.readPaths, idp: o.signIn?.idp, signingIn: () => auth.signing });
+    auth.done = false;
+    watchPage?.(page);
   };
+  let watchPage: ((pg: any) => void) | null = null;
   await launch();
   // A page can crash or close under the crawler (a heavy view, a control that closes the window):
   // start a fresh browser and carry on with the next page instead of losing the whole pass.
@@ -350,6 +415,28 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   // Pages that asked for sign-in instead of showing the app, out of the pages tried.
   const wall = { tried: 0, walled: 0, at: '' };
   const signedOut = () => wall.tried >= 1 && wall.walled === wall.tried;
+  // Pages where the app itself didn't render, out of the pages tried, and why: its errors and its own module requests.
+  const broken = { pages: 0, first: '' };
+  const pageErrors: string[] = [];
+  const modules = { total: 0, failed: 0, first: '' };
+  const isBroken = () => wall.tried >= 1 && broken.pages === wall.tried;
+  const watch = (pg: any) => {
+    pg.on('pageerror', (e: any) => { pageErrors.push(String(e?.message ?? e).split('\n')[0]!); });
+    const own = (r: any) => { try { return new URL(r.url()).origin === base.origin && r.resourceType() === 'script'; } catch { return false; } };
+    pg.on('response', (r: any) => { if (!own(r.request())) return; modules.total++; if (r.status() >= 400) { modules.failed++; modules.first ||= `${new URL(r.url()).pathname} answered ${r.status()}`; } });
+    pg.on('requestfailed', (q: any) => { if (!own(q)) return; modules.total++; modules.failed++; modules.first ||= `${new URL(q.url()).pathname} failed (${q.failure()?.errorText ?? 'no answer'})`; });
+  };
+  watchPage = watch;
+  watch(page);
+  /** After a page loads: did the app render? Its own modules mostly failing, or nothing to see and use (and it threw, or showed no text). */
+  const didntRender = async (errorsBefore: number, mods: { total: number; failed: number }) => {
+    const seen = await inPage<{ text: number; controls: number }>(page, RENDERED).catch(() => ({ text: 1, controls: 1 }));
+    const total = modules.total - mods.total, failed = modules.failed - mods.failed;
+    const threw = pageErrors.length > errorsBefore;
+    const bad = (total > 0 && failed * 2 > total) || (seen.controls === 0 && (seen.text === 0 || threw));
+    if (bad && !broken.first) broken.first = (threw ? pageErrors[errorsBefore] : '') || modules.first || 'the page stayed blank';
+    return bad;
+  };
   // A redirect may still be on its way (a meta refresh, a script): let it land before looking.
   const signInWall = async () => {
     for (let i = 0; i < 2; i++) {
@@ -357,6 +444,58 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       try { return await inPage<boolean>(page, SIGN_IN); } catch { await page.waitForTimeout(500); }
     }
     return false;
+  };
+  const onSignInPage = () => { if (!o.signIn) return false; try { const u = new URL(page.url()); return u.origin === base.origin && (u.pathname === o.signIn.path || u.pathname.startsWith(o.signIn.path.replace(/\/?$/, '/'))); } catch { return false; } };
+  /**
+   * Sign in by clicking the sign-in button: with the identity provider's saved session, that comes back
+   * signed in without a password. Done once per browser; after it the crawler moves inside the app
+   * (pushState), so tokens kept in memory survive. A password form at the provider: the session expired.
+   */
+  const signInOnce = async (): Promise<'ok' | 'expired' | 'failed'> => {
+    if (!o.signIn || auth.attempts >= 4) return 'failed';
+    auth.attempts++;
+    auth.signing = true;
+    try {
+      const name = o.signIn.click;
+      const target = [page.getByRole('button', { name, exact: true }), page.getByRole('link', { name, exact: true }), page.getByText(name, { exact: true })];
+      let clicked = false;
+      for (const t of target) { if (await t.count().catch(() => 0)) { await t.first().click({ timeout: 5000 }).catch(() => {}); clicked = true; break; } }
+      if (!clicked) { o.log(`  sign-in: no “${name}” on ${o.signIn.path}`); return 'failed'; }
+      const until = Date.now() + 20_000;
+      while (Date.now() < until) {
+        await page.waitForTimeout(250);
+        let here: URL; try { here = new URL(page.url()); } catch { continue; }
+        if (here.origin !== base.origin) {
+          // At the identity provider, asked for a password: the saved session is gone.
+          if (await inPage<boolean>(page, SIGN_IN).catch(() => false)) { auth.expired = true; return 'expired'; }
+          continue;
+        }
+        if (!onSignInPage() && !/\/(auth\/)?callback\b/.test(here.pathname)) { await page.waitForLoadState('load', { timeout: 5000 }).catch(() => {}); auth.done = true; return 'ok'; }
+      }
+      return 'failed';
+    } finally { auth.signing = false; }
+  };
+  /** Inside the app, without reloading it: history.pushState and popstate, as the app's own links do. */
+  const within = async (u: string) => {
+    await inPage(page, `(to) => { history.pushState(history.state, '', to); dispatchEvent(new PopStateEvent('popstate', { state: history.state })); }`, u);
+    await page.waitForTimeout(o.waitMs);
+  };
+  /**
+   * Open a route. Signed in with signIn, move inside the app (a reload would drop tokens kept in
+   * memory); landed on the sign-in page, sign in once and go on to the route wanted.
+   */
+  const open = async (u: string, timeout = 60000) => {
+    const inApp = (() => { try { return new URL(page.url()).origin === base.origin; } catch { return false; } })();
+    if (o.signIn && auth.done && inApp) await within(u);
+    else {
+      await page.goto(u, { waitUntil: 'domcontentloaded', timeout });
+      await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+      await page.waitForTimeout(o.waitMs);
+    }
+    if (o.signIn && onSignInPage() && !auth.expired) {
+      const r = await signInOnce();
+      if (r === 'ok') await within(u);
+    }
   };
   let remaining: Target[] = o.examples.map(e => ({ id: e.id, e, m: e.match, src: `${e.file}:${e.line}:${e.col}`, steps: e.reach?.steps?.map(x => ({ label: x.label, event: x.event, value: x.value, src: stepSrc(x.file, x.line, x.col) })), routes: o.reach?.byId[e.id], hints: hintsOf(e), where: pathWords(e.file) }));
   const everyone = [...remaining];
@@ -432,11 +571,11 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       seen.add(u);
       try {
       wall.tried++;
+      const errorsBefore = pageErrors.length, mods = { total: modules.total, failed: modules.failed };
       try {
         // Dev servers can hold connections open; don't wait forever for "idle".
-        await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 60000 });
-        await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
-        await page.waitForTimeout(o.waitMs);
+        await open(u);
+        if (auth.expired) break;
       } catch (e: any) {
         // Sent to another host to sign in: the network guard stops the page there.
         const away = net.last.at(-1)?.match(/^GET (https?:\/\/[^/\s]+)(\S*)/);
@@ -450,6 +589,12 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         wall.walled++; wall.at = page.url();
         // Three pages in, all of them sign-in: the rest will be too.
         if (signedOut() && wall.tried >= 3) break;
+        continue;
+      }
+      if (await didntRender(errorsBefore, mods)) {
+        broken.pages++;
+        // Three pages in and the app drew none of them: it's the app, not the pages.
+        if (isBroken() && wall.tried >= 3) break;
         continue;
       }
       pages.push(u);
@@ -511,9 +656,12 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
           await sweep(`opening ${steps!.slice(0, done).map(x => stepName(x)).join(' › ')}`);
           for (const r of mine) if (remaining.includes(r)) note(r, `${steps!.slice(0, done).map(x => `${x.event === 'type' ? 'typed in' : x.event === 'choose' ? 'chose' : 'clicked'} ${stepName(x)}${x.src ? ' (found by its line)' : ''}`).join(', then ')} on ${routeOf(u)}: still not shown${stuck ? `; then ${stuck}` : ''}`);
           // Reset whatever the clicks opened or switched on.
-          await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-          await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-          await page.waitForTimeout(o.waitMs);
+          if (o.signIn && auth.done) await open(u).catch(() => {});
+          else {
+            await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+            await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+            await page.waitForTimeout(o.waitMs);
+          }
         }
       }
       } catch (e: any) {
@@ -524,14 +672,13 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     }
     // Pass 2: explore pages, most promising first (re-scored as elements are found), until time runs out.
     const done2 = new Set<string>();
-    while (remaining.length && Date.now() < deadline && o.reveal !== false && !signedOut()) {
+    while (remaining.length && Date.now() < deadline && o.reveal !== false && !signedOut() && !auth.expired && !isBroken()) {
       const words = [...hints(), ...traced().map(t => t.toLowerCase())];
       const next = promising.filter(p => !done2.has(p.u)).sort((a, b) => b.score - a.score)[0];
       if (!next || !words.length && done2.size >= 20) break;
       done2.add(next.u);
       try {
-        await page.goto(next.u, { waitUntil: 'domcontentloaded', timeout: 60000 });
-        await page.waitForTimeout(o.waitMs);
+        await open(next.u);
         const sweep = sweeper(next.u);
         await sweep();
         if (remaining.length) await explore(next.u, sweep);
@@ -542,16 +689,16 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       }
     }
     // Saved state and URL search state the source reads: a first visit, or a search with something in it.
-    if (remaining.length && !signedOut()) await stateAndSearch();
+    if (remaining.length && !signedOut() && !isBroken()) await stateAndSearch();
     // Why each one still missing wasn't photographed, in plain words, before any is drawn.
     for (const r of remaining) why[r.id] = reasonOf(r);
-    if (remaining.length && o.draw && pages.length && !signedOut()) await drawRest(o.draw, pages[0]!);
-    if (net.blocked && !signedOut()) o.log(`  network guard blocked ${net.blocked} request(s) (last: ${net.last.join(', ')})`);
+    if (remaining.length && o.draw && pages.length && !signedOut() && !isBroken()) await drawRest(o.draw, pages[0]!);
+    if ((net.blocked || Object.keys(net.allowed).length) && !signedOut() && !isBroken()) o.log(`  network: ${describeNetwork(net, base.origin)}`);
     if (remaining.length && Date.now() >= deadline) o.log(`  time budget (shots.maxMinutes) used up with ${remaining.length} still to find.`);
   } finally {
     await browser.close().catch(() => {});
   }
-  return { shots, pages, missing: [...remaining.map(r => r.id), ...drawnIds], drawn: drawnIds.length, why, tried: Object.fromEntries(everyone.filter(r => r.tried?.length).map(r => [r.id, r.tried!])), tagged: { pages: taggedPages, of: pages.length }, ...(signedOut() ? { signIn: wall.at } : {}) };
+  return { shots, pages, missing: [...remaining.map(r => r.id), ...drawnIds], drawn: drawnIds.length, why, tried: Object.fromEntries(everyone.filter(r => r.tried?.length).map(r => [r.id, r.tried!])), tagged: { pages: taggedPages, of: pages.length }, ...(signedOut() || auth.expired ? { signIn: wall.at || o.url } : {}), ...(auth.expired ? { expired: true } : {}), ...(isBroken() ? { broken: broken.first } : {}) };
 
   /** A page that renders this element: a route the scan says renders its file (one with a value found, if it needs one), else the first page. */
   function pageFor(r: Target): string | undefined {
@@ -708,7 +855,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     let budget = o.maxActions ?? 20;
     const maxDepth = o.maxDepth ?? 3;
     const pageStop = Math.min(deadline, Date.now() + 45_000);
-    const load = async () => { await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {}); await page.waitForTimeout(o.waitMs); };
+    const load = async () => { await open(u, 30000).catch(() => {}); };
     const sig = (): Promise<string> => page.evaluate(SIGNATURE).catch(() => '');
     const mark = (level: number) => inPage(page, MARK_SEEN, level).catch(() => {});
     const list = (level: number): Promise<Act[]> => inPage<Act[]>(page, CANDIDATES, { traced: traced(), hints: hints(), level, max: 50 }).catch(() => []);
