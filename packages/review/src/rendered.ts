@@ -287,7 +287,8 @@ export async function renderProposals(opts: { root: string; config: Config; data
       if (!s) { items[k] = { ...noOwn(p), check: 'none', note: `${p.use} isn't a component dsa found in the design system's source, so it can't be drawn.`, hash: hashOf(p.use) }; continue; }
       let best: Proposal | null = null;
       if (await source()) best = await fromSource(hpage, s, p, k, dir, hashOf(p.use));
-      const done = (b: Proposal | null) => Boolean(b && b.check === 'exact' && b.shot && (!p.own || b.own));
+      // Done: exact, with the element's own content, or (with none of its own) without a stand-in label.
+      const done = (b: Proposal | null) => Boolean(b && b.check === 'exact' && b.shot && (p.own ? b.own : !b.content));
       if (!done(best) && (await storybook())) best = pickBetter(best, await fromStories(sbs!, s, p, k, dir, hashOf(p.use), rendered === 0));
       items[k] = best ?? { ...noOwn(p), check: 'none', note: `${p.use} couldn't be drawn${sbWhy ? `: there's no Storybook to draw it from (${sbWhy})` : ''}.`, hash: hashOf(p.use) };
       rendered++;
@@ -305,10 +306,10 @@ export async function renderProposals(opts: { root: string; config: Config; data
 }
 
 const ORDER: Record<Proposal['check'], number> = { exact: 0, unverified: 1, closest: 2, none: 3 };
-/** The better of two drawings: the surer props, then the one with the element's own content, then one with a picture. */
+/** The better of two drawings: the surer props, then the element's own content, then no stand-in content, then a picture. */
 function pickBetter(a: Proposal | null, b: Proposal | null): Proposal | null {
   if (!a || !b) return a ?? b;
-  const d = ORDER[a.check] - ORDER[b.check] || Number(Boolean(b.own)) - Number(Boolean(a.own)) || Number(Boolean(b.shot)) - Number(Boolean(a.shot));
+  const d = ORDER[a.check] - ORDER[b.check] || Number(Boolean(b.own)) - Number(Boolean(a.own)) || Number(Boolean(a.content)) - Number(Boolean(b.content)) || Number(Boolean(b.shot)) - Number(Boolean(a.shot));
   return d > 0 ? b : a;
 }
 
@@ -319,6 +320,7 @@ const DATA_TAGS = /^(table|thead|tbody|tr|ul|ol|dl)$/;
 async function fromSource(page: any, s: any, p: Wanted, k: string, dir: string, hash: string): Promise<Proposal> {
   const dataTag = DATA_TAGS.test(s.tag ?? '');
   const icon = p.own?.iconName && p.iconFile ? { file: harnessUrlFor(p.iconFile), name: p.own.iconName } : null;
+  // With no words of its own, it's drawn with none: that is the element (no stand-in label it doesn't have).
   const r = await run<{ ok: boolean; why?: string }>(page, DRAW, { file: harnessUrlFor(s.file), name: s.component, props: p.props, text: dataTag ? null : p.own?.text ?? null, icon, slot: s.slot, empty: true }).catch((e: any) => ({ ok: false, why: String(e?.message ?? e).split('\n')[0] }));
   if (!r.ok) return { ...noOwn(p), check: 'none', via: 'source', note: `${p.use} couldn't be drawn from the system's source: ${r.why}.`, hash };
   const found: Found[] = await run(page, SCAN, { slot: s.slot, want: p.props, classes: s.axisClasses ?? null });
@@ -339,7 +341,8 @@ async function fromSource(page: any, s: any, p: Wanted, k: string, dir: string, 
   }
   const file = `proposal-${sha(k).slice(0, 12)}.png`;
   const shot = await shoot(page, sel, path.join(dir, file));
-  return { ...noOwn(p), check, via: 'source', shot: shot ? file : undefined, styles: top.styles, ...(own?.own ? { own: true } : {}), ...(own && !own.own && own.why ? { content: own.why } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
+  const content = own && !own.own && own.why ? own.why : undefined;
+  return { ...noOwn(p), check, via: 'source', shot: shot ? file : undefined, styles: top.styles, ...(own?.own ? { own: true } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
 }
 
 /** Runs in the page: did the element's own words and icon show, and set its accessible name. */
@@ -452,6 +455,9 @@ const SCAN = `({ slot, want, classes }) => {
 
 /** Runs in the harness page: draw one component (harness.ts). */
 const DRAW = `(a) => window.__dsaDraw(a)`;
+
+/** For tests: the in-page prop check and the helper that runs it. */
+export const __test = { SCAN, run };
 
 /** A proposal as stored: its component and props; the content it was asked to show isn't kept. */
 const noOwn = (p: Wanted) => ({ use: p.use, props: p.props });

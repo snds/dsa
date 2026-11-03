@@ -22,7 +22,8 @@ export interface Harness { url: string; stop: () => Promise<void>; how: string }
 
 /** Where the system's components live (the core target holding most of their files). */
 function coreDir(root: string, config: Config, files: string[]): string | null {
-  const cores = resolveTargets(root, config).filter(t => t.role === 'core');
+  let cores: { dir: string }[] = [];
+  try { cores = resolveTargets(root, config).filter(t => t.role === 'core'); } catch { /* no design system configured: the components' own folder */ }
   const score = (d: string) => files.filter(f => f.startsWith(d + path.sep)).length;
   return cores.sort((a, b) => score(b.dir) - score(a.dir))[0]?.dir ?? (files[0] ? path.dirname(files[0]) : null);
 }

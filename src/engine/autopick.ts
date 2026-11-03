@@ -72,7 +72,7 @@ export function ownKey(use: string, props: Record<string, unknown> | null | unde
  */
 export function ownOf(e: Pick<ElementEval, 'match'> & { source?: string | undefined; snippet?: string | undefined }, shot?: { content?: OwnContent | null } | null): OwnContent | null {
   const c = shot?.content ?? null;
-  const icon = c?.icon || undefined;
+  const icon = c?.icon || svgInSource(e);
   const own: OwnContent = { text: c?.text || e.match?.text || undefined, ariaLabel: c?.ariaLabel || e.match?.ariaLabel || undefined, icon, iconName: icon ? undefined : iconInSource(e) };
   if (!own.iconName) delete own.iconName;
   return own.text || own.ariaLabel || own.icon || own.iconName ? own : null;
@@ -84,4 +84,33 @@ export function iconInSource(e: { source?: string | undefined; snippet?: string 
   const inner = e.snippet && src.startsWith(e.snippet) ? src.slice(e.snippet.length) : '';
   const m = inner.match(/<([A-Z][\w]*(?:\.[A-Z][\w]*)?)\b[^<>]*?\/>/);
   return m?.[1];
+}
+
+const SVG_ATTR: Record<string, string> = { className: 'class', strokeWidth: 'stroke-width', strokeLinecap: 'stroke-linecap', strokeLinejoin: 'stroke-linejoin', fillRule: 'fill-rule', clipRule: 'clip-rule', viewBox: 'viewBox' };
+
+/**
+ * An icon written inline in the element's JSX (`<svg viewBox="0 0 16 16"><path d="…" /></svg>`), as markup:
+ * only its written-out attributes (no handlers, no expressions, no classes, no styles), its line drawn in
+ * the text's colour when it sets none. Undefined when there's none, or it's large.
+ */
+export function svgInSource(e: { source?: string | undefined; snippet?: string | undefined }): string | undefined {
+  const src = e.source ?? '';
+  const inner = e.snippet && src.startsWith(e.snippet) ? src.slice(e.snippet.length) : '';
+  const m = inner.match(/<svg\b[\s\S]*?<\/svg>/);
+  if (!m || m[0].length > 4000 || /\{/.test(m[0].replace(/\{["'][^"']*["']\}/g, ''))) return undefined;
+  let painted = false;
+  const tag = (name: string, attrs: string, close: string) => {
+    const kept: string[] = [];
+    for (const a of attrs.matchAll(/([\w:-]+)=(?:"([^"]*)"|\{["']([^"']*)["']\})/g)) {
+      const k = SVG_ATTR[a[1]!] ?? a[1]!;
+      if (/^on/i.test(k) || k === 'class' || k === 'style' || /javascript:/i.test(a[2] ?? a[3] ?? '')) continue;
+      if (k === 'fill' || k === 'stroke') painted = true;
+      kept.push(`${k}="${(a[2] ?? a[3] ?? '').replace(/"/g, '&quot;')}"`);
+    }
+    return `<${name}${kept.length ? ' ' + kept.join(' ') : ''}${close}`;
+  };
+  let out = m[0].replace(/<([a-zA-Z][\w-]*)((?:\s+[\w:-]+=(?:"[^"]*"|\{["'][^"']*["']\}))*)\s*(\/?>)/g, (_, n, a, c) => (/^(script|foreignObject)$/i.test(n) ? '' : tag(n, a, c === '/>' ? '/>' : '>')));
+  if (/<(script|foreignObject)/i.test(out)) return undefined;
+  if (!painted) out = out.replace(/^<svg/, '<svg fill="none" stroke="currentColor" stroke-width="1.5"');
+  return out.replace(/^<svg/, /^<svg[^>]*\swidth=/.test(out) ? '<svg data-slot="icon"' : '<svg data-slot="icon" width="16" height="16"');
 }
