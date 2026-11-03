@@ -2,13 +2,14 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { BLANK_INSET, decodePng, groupKey, isBlank, latestEvals, materializeRemotes, resolveTargets, targetRelative, type Config, type ElementEval } from '@snds/dsa/engine';
+import { BLANK_INSET, buildGraph, decodePng, groupKey, isBlank, latestEvals, materializeRemotes, resolveTargets, targetRelative, type Config, type ElementEval } from '@snds/dsa/engine';
 import { appSurface, openSurface } from '@snds/dsa';
 
 import { detectApp, discoverRoutes, ensureBrowser, linkCoreForChild, routeConfig, startApp, tagPlan } from './apps.js';
 
 import { READ_STYLE } from './rendered.js';
 import { SHOW_MARKUP, gateProps, markupOf, readSource } from './drawn.js';
+import { needsValue, patternTest, routeFiles, routesReaching } from './routes.js';
 import { flowProblems, guardNetwork, routeUrl, runFlow, type Flow } from './flows.js';
 
 /**
@@ -33,6 +34,8 @@ export interface ShotResult {
     tagged?: number;
     /** Elements drawn direct from code, because they couldn't be photographed. */
     drawn?: number;
+    /** How each element looked for was reached: live (a photo), drawn (mounted, markup), or not at all, and why. */
+    reach?: { live: number; mounted: number; markup: number; unreachable: number; why: Record<string, number> };
   }[];
 }
 
@@ -57,9 +60,9 @@ async function inPage<T = any>(page: any, src: string, arg?: unknown): Promise<T
 }
 
 /** Bump when finding or revealing elements changes, so earlier misses get another try. */
-const CRAWLER = 8;
+const CRAWLER = 9;
 
-interface Target { id: string; e: ElementEval; m: ElementEval['match']; /** Its source tag: file:line:col, as the scanner and the tagger write it. */ src: string; steps?: { label: string; event: 'click' | 'dblclick' }[]; hints: string[]; where: string[] }
+interface Target { id: string; e: ElementEval; m: ElementEval['match']; /** Its source tag: file:line:col, as the scanner and the tagger write it. */ src: string; steps?: { label: string; event: 'click' | 'dblclick'; /** The control's own source line ("file:line:"), to find it by its tag. */ src?: string }[]; /** The routes whose component renders its file (routes.ts); empty: none does. */ routes?: string[]; hints: string[]; where: string[] }
 
 /**
  * Words that point at the UI state an element needs: string literals in its gates (`viewMode === 'gallery'`,
@@ -145,7 +148,20 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
 
   // Routes the app declares that need a value to open: listed in the result, so a person can name one.
   const needs = (target: string) => { const t = all.find(x => x.name === target); const v = t ? routeConfig(t.dir).needsValue : []; return v.length ? { needsValue: v } : {}; };
-  const sessions: { target: string; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; stop?: () => void; how?: string; need: ElementEval[]; storageState?: string | undefined; readApi?: boolean; draw?: DrawWith }[] = [];
+  const sessions: { target: string; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; stop?: () => void; how?: string; need: ElementEval[]; storageState?: string | undefined; readApi?: boolean; draw?: DrawWith; reach?: ReachPlan | undefined }[] = [];
+  // Which routes render each element's file, from the scan's import graph and the routes in the source
+  // (routes.ts): no config. Undefined when the app declares no routes we can read.
+  const reachFor = (t: (typeof all)[number] | undefined, need: ElementEval[]): ReachPlan | undefined => {
+    if (!t) return undefined;
+    try {
+      const routes = routeFiles(t.dir, t.exclude ?? []);
+      if (!routes.length) return undefined;
+      const g = buildGraph(t.dir, t.exclude ?? [], (t as any).aliases);
+      const byId: Record<string, string[]> = {};
+      for (const e of need) byId[e.id] = routesReaching(routes, g, path.join(t.dir, targetRelative(opts.root, e.file, t.dir)));
+      return { byId, patterns: [...new Set(routes.map(r => r.path).filter(needsValue))] };
+    } catch { return undefined; }
+  };
   // Elements that can't be photographed are drawn from the code (shots.draw: false turns it off).
   const drawOn = opts.config.shots?.draw !== false;
   const drawFor = (dir?: string, mount?: boolean): DrawWith | undefined => (drawOn ? { root: opts.root, dir, mount } : undefined);
@@ -155,7 +171,7 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
     // An app already running elsewhere: still crawl the routes its source declares, when we know which app it is.
     const t = opts.target ? all.find(x => x.name === opts.target) : undefined;
     const routes = opts.routes ?? opts.config.shots?.routes ?? (t ? ['', ...discoverRoutes(t.dir, t.exclude ?? [])] : ['']);
-    sessions.push({ target: opts.target ?? '*', url: opts.url, routes, crawl: !opts.routes, need: p.need, draw: drawFor(t?.dir) });
+    sessions.push({ target: opts.target ?? '*', url: opts.url, routes, crawl: !opts.routes, need: p.need, draw: drawFor(t?.dir), reach: reachFor(t, p.need) });
   } else {
     for (const name of evalTargets) {
       const t = all.find(x => x.name === name);
@@ -174,7 +190,7 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
           const open = await openSurface(surface, opts.root);
           const routes = routesFor();
           log(`  ${open.how} · ${routes.length} route${routes.length === 1 ? '' : 's'} ${configured ? 'from config' : 'found in the source'}`);
-          sessions.push({ target: name, url: open.url, routes, first: extra, flows: opts.config.apps?.[name]?.flows as Flow[] | undefined, crawl: true, stop: open.stop, how: open.how, need: p.need, storageState: open.storageState, readApi: open.readApi, draw: drawFor(t.dir) });
+          sessions.push({ target: name, url: open.url, routes, first: extra, flows: opts.config.apps?.[name]?.flows as Flow[] | undefined, crawl: true, stop: open.stop, how: open.how, need: p.need, storageState: open.storageState, readApi: open.readApi, draw: drawFor(t.dir), reach: reachFor(t, p.need) });
         } catch (e: any) { result.apps.push({ target: name, skipped: e.message.split('\n')[0] }); log(`  ${e.message}`); }
         continue;
       }
@@ -188,7 +204,7 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
         const app = await startApp(ap);
         const routes = routesFor();
         log(`  ${app.url} · ${routes.length} route${routes.length === 1 ? '' : 's'} ${configured ? 'from config' : 'found in the source'}${extra.length ? ` (${extra.length} extra, visited first)` : ''}`);
-        sessions.push({ target: name, url: app.url, routes, first: extra, flows: opts.config.apps?.[name]?.flows as Flow[] | undefined, crawl: true, stop: app.stop, how: ap.how, need: p.need, draw: drawFor(t.dir, ap.tag === 'injected') });
+        sessions.push({ target: name, url: app.url, routes, first: extra, flows: opts.config.apps?.[name]?.flows as Flow[] | undefined, crawl: true, stop: app.stop, how: ap.how, need: p.need, draw: drawFor(t.dir, ap.tag === 'injected'), reach: reachFor(t, p.need) });
       } catch (e: any) { result.apps.push({ target: name, skipped: e.message.split('\n')[0] }); log(`  ${e.message}`); }
     }
   }
@@ -198,7 +214,7 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
       if (!s.need.length) { log('Nothing new to capture.'); continue; }
       log(`${s.target === '*' ? '' : s.target + ': '}${s.need.length} examples to find across ${new Set(s.need.map(e => groupKey(e))).size} groups.`);
       const sh = opts.config.shots ?? {};
-      const r: Awaited<ReturnType<typeof session>> & { signIn?: string } = await session(pw, { draw: s.draw, url: s.url, routes: s.routes, first: s.first, flows: s.flows, crawl: s.crawl, examples: s.need, dir, storageState: s.storageState, readApi: s.readApi, maxPages: sh.maxPages ?? 90, waitMs: sh.waitMs ?? 600, log, reveal: sh.reveal, maxActions: sh.maxActions ?? sh.maxTriggers, maxDepth: sh.maxDepth, maxMinutes: sh.maxMinutes });
+      const r: Awaited<ReturnType<typeof session>> & { signIn?: string } = await session(pw, { reach: s.reach, draw: s.draw, url: s.url, routes: s.routes, first: s.first, flows: s.flows, crawl: s.crawl, examples: s.need, dir, storageState: s.storageState, readApi: s.readApi, maxPages: sh.maxPages ?? 90, waitMs: sh.waitMs ?? 600, log, reveal: sh.reveal, maxActions: sh.maxActions ?? sh.maxTriggers, maxDepth: sh.maxDepth, maxMinutes: sh.maxMinutes });
       const at = new Date().toISOString();
       const byId = new Map(s.need.map(e => [e.id, e]));
       if (r.signIn && !Object.keys(r.shots).length) {
@@ -213,10 +229,18 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
       // How much of the app carried source tags: matches there are exact, the rest are the crawler's best guess.
       const tagged = r.tagged.of ? Math.round((100 * r.tagged.pages) / r.tagged.of) / 100 : undefined;
       if (tagged !== undefined) log(`  ${s.target === '*' ? 'this app' : s.target}: ${Math.round(tagged * 100)}% of pages tagged${tagged === 0 ? '; add dsaTag to its dev build for exact matches' : tagged < 1 ? ' (exact matches there, a best guess elsewhere)' : ' (every match exact)'}`);
-      for (const id of r.missing) misses[id] = { at, fileHash: hashOf(byId.get(id)!), crawler: CRAWLER, steps: stepsKey(byId.get(id)!), setup: setupOf(byId.get(id)!.target) };
+      for (const id of r.missing) misses[id] = { at, fileHash: hashOf(byId.get(id)!), crawler: CRAWLER, steps: stepsKey(byId.get(id)!), setup: setupOf(byId.get(id)!.target), ...(r.why[id] ? { why: r.why[id] } : {}) };
+      // How each element looked for was reached, and why the rest weren't, by reason.
+      const vals = Object.values<any>(r.shots);
+      const reasons: Record<string, number> = {};
+      for (const id of r.missing) if (r.why[id]) reasons[r.why[id]!] = (reasons[r.why[id]!] ?? 0) + 1;
+      const reach = { live: vals.filter(v => !v.drawn).length, mounted: vals.filter(v => v.drawn === 'mount').length, markup: vals.filter(v => v.drawn === 'markup').length, unreachable: 0, why: reasons };
+      reach.unreachable = r.missing.length - reach.mounted - reach.markup;
+      log(`  ${s.target === '*' ? 'this app' : s.target}: ${reach.live} reached live, ${reach.mounted} drawn by mounting, ${reach.markup} drawn as markup, ${reach.unreachable} not shown at all; why the ${r.missing.length} not reached live weren't${Object.keys(reasons).length ? ':' : ''}`);
+      for (const [w, n] of Object.entries(reasons).sort((a, b) => b[1] - a[1])) log(`    ${n} · ${w}`);
       index.missing.push(...r.missing);
       index.pages.push(...r.pages);
-      result.apps.push({ target: s.target, url: s.url, how: s.how, routes: s.routes.length, captured: Object.values<any>(r.shots).filter(v => !v.drawn).length, ...(r.drawn ? { drawn: r.drawn } : {}), ...(tagged !== undefined ? { tagged } : {}), ...needs(s.target) });
+      result.apps.push({ target: s.target, url: s.url, how: s.how, routes: s.routes.length, captured: Object.values<any>(r.shots).filter(v => !v.drawn).length, ...(r.drawn ? { drawn: r.drawn } : {}), reach, ...(tagged !== undefined ? { tagged } : {}), ...needs(s.target) });
     } finally { s.stop?.(); }
   }
   // Report "not found" for every cached miss too, so the review can say why there's no picture.
@@ -230,7 +254,7 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
 }
 
 /** One interaction the explorer can take: click, hover, or right-click a control on the page. */
-interface Act { n: number; key: string; kind: 'click' | 'hover' | 'context'; label: string; why: string; prio: number }
+interface Act { n: number; key: string; kind: 'click' | 'hover' | 'context' | 'choose'; label: string; why: string; prio: number; /** For choose: the option to pick in a select. */ value?: string }
 
 /**
  * How to draw what can't be photographed (drawn.ts): the scan root (to read each element's source), its
@@ -238,13 +262,29 @@ interface Act { n: number; key: string; kind: 'click' | 'hover' | 'context'; lab
  */
 interface DrawWith { root: string; dir?: string | undefined; mount?: boolean | undefined; max?: number | undefined }
 
-async function session(pw: any, o: { draw?: DrawWith | undefined; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; examples: ElementEval[]; dir: string; storageState?: string | undefined; readApi?: boolean | undefined; maxPages: number; waitMs: number; log: (m: string) => void; reveal?: boolean; maxActions?: number; maxDepth?: number; maxMinutes?: number; maxReplays?: number }) {
+/** What the scan knows about reaching each element (routes.ts): the routes that render its file, and the patterns that need a value. */
+interface ReachPlan { byId: Record<string, string[]>; patterns: string[] }
+
+async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawWith | undefined; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; examples: ElementEval[]; dir: string; storageState?: string | undefined; readApi?: boolean | undefined; maxPages: number; waitMs: number; log: (m: string) => void; reveal?: boolean; maxActions?: number; maxDepth?: number; maxMinutes?: number; maxReplays?: number }) {
   const shots: Record<string, any> = {};
   const pages: string[] = [];
   let taggedPages = 0;
   const drawnIds: string[] = [];
+  const why: Record<string, string> = {};
+  const reasonOf = (r: Target): string => {
+    const rs = r.routes;
+    if (rs && !rs.length) return 'no route reaches its file';
+    if (rs?.length && rs.every(needsValue) && !rs.some(p => filled.get(p)?.size)) return `its page needs a value (${rs[0]}) and no page visited linked to one`;
+    if (rs?.length && !rs.some(p => needsValue(p) ? filled.get(p)?.size : seen.has(routeUrl(p, base)) || seen.has(routeUrl('#' + p, base)))) return 'its route was not visited in the time budget';
+    const g = r.e.reach?.status === 'gated' ? r.e.reach.gates[0] : undefined;
+    if (g) return `it shows only after a step the crawler couldn't take (${g.overlay ? `opening ${g.overlay}` : `when ${g.negated ? 'not ' : ''}“${g.test.slice(0, 40)}”`})`;
+    if (Date.now() >= deadline) return 'not reached in the time budget';
+    return 'not on the pages that render it';
+  };
   let browser: any, page: any;
   const base = new URL(o.url);
+  // A traced control's own line, as its source tag reads ("apps/ledger/src/Bar.tsx:12:"), when it's inside the scan root.
+  const stepSrc = (file: string, line: number) => { if (!o.draw?.root || !file) return undefined; const rel = path.relative(o.draw.root, file); return rel.startsWith('..') || path.isAbsolute(rel) ? undefined : `${rel.split(path.sep).join('/')}:${line}:`; };
   let net = { blocked: 0, last: [] as string[] };
   const launch = async () => {
     browser = await pw.chromium.launch();
@@ -262,6 +302,24 @@ async function session(pw: any, o: { draw?: DrawWith | undefined; url: string; r
     await launch();
   };
   const queue: string[] = o.routes.map(r => routeUrl(r, base));
+  // Every route the scan says renders a missing element, even one the source scan of paths missed.
+  const hashed = o.routes.some(r => r.startsWith('#'));
+  for (const p of new Set(Object.values(o.reach?.byId ?? {}).flat())) if (!needsValue(p)) { const u = routeUrl(hashed ? '#' + p : p, base); if (!queue.includes(u)) queue.push(u); }
+  // Values for routes like /orders/:id, from links on the pages visited (up to 3 per pattern).
+  const harvest = (urls: string[]) => {
+    const want = wantRoute();
+    for (const pat of o.reach?.patterns ?? []) {
+      if (!want.get(pat)) continue;
+      const got = filled.get(pat) ?? new Set<string>();
+      const t = patternTest(pat);
+      for (const l of urls) {
+        if (got.size >= 3) break;
+        try { const lu = new URL(l); if (lu.origin !== base.origin) continue; const at = routeOf(lu.toString()); if (t.test(at) && !got.has(at)) { got.add(at); const s = lu.toString(); if (!seen.has(s) && !queue.includes(s)) queue.unshift(s); } } catch { /* ignore */ }
+      }
+      filled.set(pat, got);
+    }
+  };
+  const unfilled = () => (o.reach?.patterns ?? []).some(p => wantRoute().get(p) && (filled.get(p)?.size ?? 0) < 3);
   const firstUrls = new Set((o.first ?? []).map(r => routeUrl(r, base)));
   const seen = new Set<string>();
   // Pages that asked for sign-in instead of showing the app, out of the pages tried.
@@ -275,7 +333,7 @@ async function session(pw: any, o: { draw?: DrawWith | undefined; url: string; r
     }
     return false;
   };
-  let remaining: Target[] = o.examples.map(e => ({ id: e.id, e, m: e.match, src: `${e.file}:${e.line}:${e.col}`, steps: e.reach?.steps?.map(x => ({ label: x.label, event: x.event })), hints: hintsOf(e), where: pathWords(e.file) }));
+  let remaining: Target[] = o.examples.map(e => ({ id: e.id, e, m: e.match, src: `${e.file}:${e.line}:${e.col}`, steps: e.reach?.steps?.map(x => ({ label: x.label, event: x.event, src: stepSrc(x.file, x.line) })), routes: o.reach?.byId[e.id], hints: hintsOf(e), where: pathWords(e.file) }));
   const replayed = new Set<string>();
   let replays = 0;
   const deadline = Date.now() + (o.maxMinutes ?? 12) * 60_000;
@@ -284,11 +342,17 @@ async function session(pw: any, o: { draw?: DrawWith | undefined; url: string; r
   const traced = () => [...new Set(remaining.flatMap(r => r.steps?.map(s => s.label) ?? []))];
   const hints = () => [...new Set(remaining.flatMap(r => r.hints))];
   // Routes that mention what's still missing go first (stable: ties keep the source order).
+  // Routes whose component renders what's still missing, by how many: where the misses are densest.
+  const wantRoute = () => { const n = new Map<string, number>(); for (const r of remaining) for (const p of r.routes ?? []) n.set(p, (n.get(p) ?? 0) + 1); return n; };
+  const routeOf = (u: string) => { const x = new URL(u); return (x.hash.startsWith('#/') ? x.hash.slice(1) : x.pathname).replace(/(.)\/$/, '$1') || '/'; };
+  const filled = new Map<string, Set<string>>();
   const rank = () => {
     const h = hints();
-    if (!h.length) return;
+    const want = wantRoute();
+    if (!h.length && !want.size) return;
     // Configured extra routes stay ahead of everything the hints rank.
-    const score = (u: string) => { const s = decodeURIComponent(u).toLowerCase(); return (firstUrls.has(u) ? 1000 : 0) + h.filter(w => s.includes(w)).length; };
+    const byPattern = (path: string) => { let n = want.get(path) ?? 0; for (const [p, k] of want) if (needsValue(p) && filled.get(p)?.has(path)) n += k; return n; };
+    const score = (u: string) => { const s = decodeURIComponent(u).toLowerCase(); return (firstUrls.has(u) ? 1000 : 0) + 10 * byPattern(routeOf(u)) + h.filter(w => s.includes(w)).length; };
     queue.sort((a, b) => score(b) - score(a));
   };
   const sweeper = (u: string) => async (revealedBy?: string) => {
@@ -364,10 +428,22 @@ async function session(pw: any, o: { draw?: DrawWith | undefined; url: string; r
       }
       pages.push(u);
       if (await page.evaluate(`Boolean(document.querySelector('[data-dsa-src]'))`).catch(() => false)) taggedPages++;
+      const links: string[] = await page.evaluate(`Array.from(document.querySelectorAll('a[href]')).map(a => a.href)`).catch(() => []);
       if (o.crawl) {
-        const links: string[] = await page.evaluate(`Array.from(document.querySelectorAll('a[href]')).map(a => a.href)`);
         for (const l of links) {
           try { const lu = new URL(l); if (lu.origin === base.origin && !seen.has(lu.toString())) queue.push(lu.toString()); } catch { /* ignore */ }
+        }
+      }
+      harvest(links);
+      // A table row that opens a record (no link, a click handler): click up to two, note where they go, come back.
+      if (unfilled()) {
+        const rows: number = await page.evaluate(ROW_MARK).catch(() => 0);
+        for (let i = 0; i < Math.min(rows, 2); i++) {
+          try {
+            await page.locator(`[data-dsa-row="${i}"]`).first().click({ timeout: 2000 });
+            await page.waitForTimeout(500);
+            if (page.url() !== u) { harvest([page.url()]); await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 }); await page.waitForTimeout(o.waitMs); await page.evaluate(ROW_MARK).catch(() => 0); }
+          } catch { /* not clickable */ }
         }
       }
       const sweep = sweeper(u);
@@ -388,7 +464,7 @@ async function session(pw: any, o: { draw?: DrawWith | undefined; url: string; r
           if (replayed.has(key) || !remaining.some(r => r.steps && r.steps.map(x => x.event + ':' + x.label).join(' › ') === key)) continue;
           let done = 0;
           for (const st of steps!) {
-            const hit = await inPage(page, FIND_CONTROL, st.label).catch(() => false);
+            const hit = await inPage(page, FIND_CONTROL, { label: st.label, src: st.src }).catch(() => false);
             if (!hit) break;
             try {
               const loc = page.locator('[data-dsa-step]').first();
@@ -433,13 +509,15 @@ async function session(pw: any, o: { draw?: DrawWith | undefined; url: string; r
         await relaunch();
       }
     }
+    // Why each one still missing wasn't photographed, in plain words, before any is drawn.
+    for (const r of remaining) why[r.id] = reasonOf(r);
     if (remaining.length && o.draw && pages.length && !signedOut()) await drawRest(o.draw, pages[0]!);
     if (net.blocked && !signedOut()) o.log(`  network guard blocked ${net.blocked} request(s) (last: ${net.last.join(', ')})`);
     if (remaining.length && Date.now() >= deadline) o.log(`  time budget (shots.maxMinutes) used up with ${remaining.length} still to find.`);
   } finally {
     await browser.close().catch(() => {});
   }
-  return { shots, pages, missing: [...remaining.map(r => r.id), ...drawnIds], drawn: drawnIds.length, tagged: { pages: taggedPages, of: pages.length }, ...(signedOut() ? { signIn: wall.at } : {}) };
+  return { shots, pages, missing: [...remaining.map(r => r.id), ...drawnIds], drawn: drawnIds.length, why, tagged: { pages: taggedPages, of: pages.length }, ...(signedOut() ? { signIn: wall.at } : {}) };
 
   /**
    * What's still missing after both passes, drawn direct from code on one of the app's pages, so its style
@@ -513,6 +591,7 @@ async function session(pw: any, o: { draw?: DrawWith | undefined; url: string; r
     const perform = async (a: Act) => {
       const loc = page.locator(`[data-dsa-act="${a.n}"]`).first();
       if (a.kind === 'hover') await loc.hover({ timeout: 2000, force: true });
+      else if (a.kind === 'choose') await loc.selectOption(a.value!, { timeout: 2000 });
       else if (a.kind === 'context') await loc.click({ button: 'right', timeout: 2000 });
       else await loc.click({ timeout: 2000 });
       await page.waitForTimeout(a.kind === 'hover' ? 250 : 400);
@@ -529,7 +608,7 @@ async function session(pw: any, o: { draw?: DrawWith | undefined; url: string; r
       }
       return true;
     };
-    const describe = (path: Act[]) => path.map(a => `${a.kind === 'hover' ? 'hovering' : a.kind === 'context' ? 'right-clicking' : 'opening'} “${a.label}”`).join(' › ');
+    const describe = (path: Act[]) => path.map(a => `${a.kind === 'hover' ? 'hovering' : a.kind === 'context' ? 'right-clicking' : a.kind === 'choose' ? 'choosing' : 'opening'} “${a.label}”`).join(' › ');
 
     const walk = async (path: Act[], level: number, before: string): Promise<boolean> => {
       // At the top, every control on the page; below it, only what the last interaction revealed.
@@ -574,6 +653,15 @@ const SIGNATURE = `(() => {
   const ctrls = Array.from(document.querySelectorAll('button,[role=button],a[href],input,select,textarea,[role=tab],[role=menuitem],[role=option],[role=gridcell]')).filter(vis).length;
   const overlays = document.querySelectorAll('[role=dialog],[role=alertdialog],[role=menu],[role=listbox],[data-state=open],[aria-expanded=true],[aria-selected=true]').length;
   return location.href + '|' + overlays + '|' + ctrls + '|' + ((document.body && document.body.innerText.length) >> 5);
+})()`;
+
+/** Runs in the page: mark up to five table rows that may open a record (no destructive control in them). */
+const ROW_MARK = `(() => {
+  document.querySelectorAll('[data-dsa-row]').forEach(e => e.removeAttribute('data-dsa-row'));
+  const bad = /delete|remove|archive|discard|approve|reject|pay|send/i;
+  const rows = Array.from(document.querySelectorAll('tbody tr, [role=row]')).filter(r => { const b = r.getBoundingClientRect(); return b.width && b.height && !r.querySelector('th') && !bad.test(r.textContent || '') && !r.closest('thead'); }).slice(0, 5);
+  rows.forEach((r, i) => r.setAttribute('data-dsa-row', String(i)));
+  return rows.length;
 })()`;
 
 /** Runs in the page: mark every element present now, so the next level only tries what an interaction revealed. */
@@ -628,6 +716,22 @@ const CANDIDATES = `(o) => {
   q('button, [role=button], [role=menuitem]', el => { if (reveal.test(labelOf(el))) push(el, 'click', 'reveal', 22); });
   // Any control whose label the source traced or the gates hint at (prio 0 unless it matches).
   if (traced.length || hints.length) q('button, [role=button], [role=menuitem], [role=option], [role=tab], a[href^="#"], [tabindex="0"]', el => push(el, 'click', 'hint', 0));
+  // Forms: a choice can reveal fields (a payment type, "other"). Pick each option of a select, tick a box or
+  // a radio; never submit (the guard blocks writes too).
+  let picks = 0;
+  q('select', el => {
+    if (picks >= 12 || !vis(el) || el.disabled) return;
+    const name = norm(el.getAttribute('aria-label') || el.name || (el.labels && el.labels[0] && el.labels[0].textContent) || 'select').slice(0, 30);
+    Array.from(el.options).slice(0, 6).forEach((opt) => {
+      if (opt.selected || opt.disabled || picks >= 12) return;
+      const l = norm(opt.textContent).slice(0, 30), lo = l.toLowerCase();
+      const p = 18 + (hints.some(h => lo.includes(h)) ? 30 : 0);
+      if (prev && el.hasAttribute(prev)) return;
+      out.push({ el, key: 'choose|select|' + name.toLowerCase() + '|' + opt.value, kind: 'choose', label: name + ': ' + l, why: 'form', prio: p, value: opt.value });
+      picks++;
+    });
+  });
+  q('input[type=checkbox]:not(:checked), input[type=radio]:not(:checked), [role=checkbox][aria-checked="false"], [role=switch][aria-checked="false"]', el => push(el, 'click', 'form', 16));
   // Hover: tooltips, hover cards, and rows or cards whose actions appear on hover.
   q('[data-slot="tooltip-trigger"], [data-slot="hover-card-trigger"]', el => push(el, 'hover', 'hover', 10));
   let rows = 0;
@@ -643,7 +747,7 @@ const CANDIDATES = `(o) => {
   q('[role=gridcell], td', el => { if (cells >= 2 || !vis(el)) return; cells++; push(el, 'context', 'cell menu', 9); push(el, 'click', 'cell', 7); });
   const keep = out.sort((a, b) => b.prio - a.prio).slice(0, o.max);
   keep.forEach((x, i) => x.el.setAttribute('data-dsa-act', String(i)));
-  return keep.map((x, i) => ({ n: i, key: x.key, kind: x.kind, label: x.label, why: x.why, prio: x.prio }));
+  return keep.map((x, i) => ({ n: i, key: x.key, kind: x.kind, label: x.label, why: x.why, prio: x.prio, value: x.value }));
 }`;
 
 /**
@@ -731,7 +835,17 @@ export function pickExamples(evals: ElementEval[], perGroup: number, prefer: Set
 }
 
 /** Runs in the page: mark the visible, enabled control with this label (exact text, aria-label, or title). */
-const FIND_CONTROL = `(label) => {
+const FIND_CONTROL = `({ label, src }) => {
+  // On a tagged page, the control the source traced is the one its own line made: no guessing by its words.
+  if (src && document.querySelector('[data-dsa-src]')) {
+    for (const el of document.querySelectorAll('[data-dsa-src]')) {
+      if (!el.getAttribute('data-dsa-src').startsWith(src)) continue;
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height || el.closest(':disabled,[aria-disabled="true"]')) continue;
+      el.setAttribute('data-dsa-step', '1');
+      return true;
+    }
+  }
   const norm = (s) => (s || '').replace(/\\s+/g, ' ').replace(/\\(\\s*\\)/g, '').trim().toLowerCase();
   const want = norm(label);
   // A button's words without its icons: icon fonts render their name as text ("add Colour").

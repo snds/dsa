@@ -8,6 +8,15 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- The screenshot crawler reaches elements with no routes or flows written down. It reads the app's routes
+  from the source (JSX routes, route objects with element, Component or lazy, React Router's route config,
+  Next's file routes) and, with the scan's import graph, opens the routes that render each missing element
+  first, densest first. It fills routes like `/orders/:id` from links and clicked table rows on pages it
+  has seen, clicks the control the source traced for a state by its source tag, and picks form options
+  and ticks boxes to reveal fields, never submitting. Each run reports, per app, what was reached live,
+  drawn by mounting, drawn as markup or not shown, and why the rest weren't reached live; each miss keeps
+  its reason.
+
 - Element Review shows every element the best way it can, labelled "Live app screenshot" or "Drawn direct
   from code". A photo whose element sits under another layer (a toast, a sticky bar) is taken again with
   that layer hidden, up to three, then put back. An element the crawler can't reach is drawn from the code:

@@ -148,6 +148,31 @@ A tagged photo counts as proof of place in the review: the card says "matched by
 read them. Tag internal dev and preview builds only, never a public production build. The tagger is
 off unless `DSA_TAG=1` or `when: true`, so a production build isn't tagged by accident.
 
+### How the crawler reaches each element, with no routes or flows written down
+
+You don't have to list routes or write flows for screenshots. The crawler works out where each element
+lives from the code the scan already read:
+
+- **Routes that render it.** It reads the app's routes from the source: `<Route path element>`, route
+  objects (`{ path, element | Component | lazy }`, nested through `children`), React Router's route
+  config, and Next's `pages/` and `app/` folders. With the scan's import graph, it knows which routes
+  render each element's file. Those routes are opened first, the ones with the most missing elements
+  ahead of the rest.
+- **Routes that need a value** (`/orders/:id`). It takes values from the pages it has already opened:
+  links that fit the pattern, and table rows that open a record when clicked. Up to three per pattern.
+- **Elements behind a state.** The scan traced the control that sets it (the button whose handler sets
+  `open`). On a page with source tags, the crawler clicks that exact control, found by its own line,
+  not by its words.
+- **Form fields that appear on a choice.** It picks each option of a select and ticks boxes and radios,
+  options that match what the hidden element needs first. It never submits, and the network guard blocks
+  writes anyway.
+
+Each run says, per app, how many elements were reached live, how many were drawn by mounting or as
+markup, how many weren't shown at all, and why the rest weren't reached live: "no route reaches its
+file", "its page needs a value (/orders/:id) and no page visited linked to one", "it shows only after a
+step the crawler couldn't take (when “editing”)", or "not reached in the time budget". Written-down
+`routes` and `flows` still work and still come first.
+
 ### What the review shows when there's no photo
 
 Each element on a card is shown the best way available, with one of two labels:

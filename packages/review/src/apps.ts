@@ -202,9 +202,9 @@ export function discoverRoutes(dir: string, exclude: string[] = []): string[] {
  * `needsValue` are the ones with a parameter (`:id`) or a splat (`*`), which need a real value to open:
  * list one in apps["name"].routes. An optional segment (`:lang?`, `edit?`) is opened without it.
  */
-export function routeConfig(dir: string, files?: string[]): { file: string | null; routes: string[]; needsValue: string[] } {
+export function routeConfig(dir: string, files?: string[]): { file: string | null; routes: string[]; needsValue: string[]; /** Each route's module, as written (relative to the config's folder). */ files: Map<string, string> } {
   const list = files ?? walk(dir, new Set(['.ts', '.tsx', '.js', '.jsx']), [], true).slice(0, 6000);
-  const out = { file: null as string | null, routes: [] as string[], needsValue: [] as string[] };
+  const out = { file: null as string | null, routes: [] as string[], needsValue: [] as string[], files: new Map<string, string>() };
   for (const f of list) {
     if (!/routes\.[jt]sx?$/.test(f)) continue;
     let src: string;
@@ -215,7 +215,7 @@ export function routeConfig(dir: string, files?: string[]): { file: string | nul
     if (at < 0) continue;
     const open = src.indexOf('[', at);
     const found = new Set<string>(), params = new Set<string>();
-    walkRoutes(src, open, '', found, params);
+    walkRoutes(src, open, '', found, params, out.files);
     out.routes.push(...found);
     out.needsValue.push(...params);
   }
@@ -225,7 +225,7 @@ export function routeConfig(dir: string, files?: string[]): { file: string | nul
 }
 
 /** Read the array at `open` ("[…]"): each route(), index(), layout(), prefix() call, nested ones under their path. */
-function walkRoutes(src: string, open: number, base: string, found: Set<string>, params: Set<string>) {
+function walkRoutes(src: string, open: number, base: string, found: Set<string>, params: Set<string>, files?: Map<string, string>) {
   const close = matching(src, open);
   if (close < 0) return;
   let i = open + 1;
@@ -240,20 +240,20 @@ function walkRoutes(src: string, open: number, base: string, found: Set<string>,
     const str = (a?: { start: number; end: number }) => { const t = a ? src.slice(a.start, a.end).trim() : ''; const q = t.match(/^(['"`])(.*)\1$/s); return q ? q[2]! : null; };
     const child = (a?: { start: number; end: number }) => { if (!a) return -1; const t = src.slice(a.start, a.end).trimStart(); return t.startsWith('[') ? a.start + src.slice(a.start, a.end).indexOf('[') : -1; };
     const kind = hit[1];
-    if (kind === 'index') add(base, found, params);
+    if (kind === 'index') { add(base, found, params); const f = str(args[0]); if (f) files?.set(base || '/', f); }
     else if (kind === 'route') {
       const p = str(args[0]);
       const here = p == null ? base : join(base, p);
-      if (p != null) add(here, found, params);
+      if (p != null) { add(here, found, params); const f = str(args[1]); if (f) files?.set(here, f); }
       const kids = args.slice(2).map(child).find(x => x >= 0);
-      if (kids != null && kids >= 0) walkRoutes(src, kids, here, found, params);
+      if (kids != null && kids >= 0) walkRoutes(src, kids, here, found, params, files);
     } else if (kind === 'layout') {
       const kids = args.slice(1).map(child).find(x => x >= 0);
-      if (kids != null && kids >= 0) walkRoutes(src, kids, base, found, params);
+      if (kids != null && kids >= 0) walkRoutes(src, kids, base, found, params, files);
     } else if (kind === 'prefix') {
       const p = str(args[0]);
       const kids = args.slice(1).map(child).find(x => x >= 0);
-      if (kids != null && kids >= 0) walkRoutes(src, kids, p == null ? base : join(base, p), found, params);
+      if (kids != null && kids >= 0) walkRoutes(src, kids, p == null ? base : join(base, p), found, params, files);
     }
     i = argsClose + 1;
   }
