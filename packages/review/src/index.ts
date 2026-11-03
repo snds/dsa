@@ -87,7 +87,20 @@ export async function login(url: string, out: string, log: (m: string) => void, 
   // Reading the storage state touches the page; doing it while someone types steals focus (a Keycloak
   // form lost its password field to a 1.5 s timer). So: only once a page has finished loading, after it
   // has been quiet for a moment, and once more at the end. Never on a timer while the page sits idle.
-  const save = async () => { try { state = await context.storageState({ indexedDB: Boolean(opts.indexedDB) }); saves++; opts.onSave?.(saves); } catch { /* closing */ } };
+  // Session storage too, for the app's own origin: Playwright's storage state leaves it out, and some apps
+  // keep their tokens there. The last one read on the app's origin is kept (at the end the window may
+  // be elsewhere). Tokens kept only in memory can't be saved: those apps need live.apps[name].signIn.
+  const appOrigin = new URL(url).origin;
+  let session: Record<string, string> | null = null;
+  const save = async () => {
+    try {
+      state = await context.storageState({ indexedDB: Boolean(opts.indexedDB) });
+      for (const p of context.pages()) {
+        try { if (new URL(p.url()).origin === appOrigin) session = await p.evaluate('Object.fromEntries(Object.entries(sessionStorage))'); } catch { /* elsewhere or closing */ }
+      }
+      saves++; opts.onSave?.(saves);
+    } catch { /* closing */ }
+  };
   const later = () => { if (timer) clearTimeout(timer); timer = setTimeout(() => { timer = null; void save(); }, opts.debounceMs ?? 2000); };
   page.on('load', later);
   page.on('framenavigated', (f: any) => { if (f === page.mainFrame()) later(); });
@@ -104,7 +117,9 @@ export async function login(url: string, out: string, log: (m: string) => void, 
   await browser.close().catch(() => {});
   if (!state) throw new Error('No session was saved: the window closed before the page loaded.');
   fs.mkdirSync(path.dirname(out), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(out, JSON.stringify(state, null, 1), { mode: 0o600 });
+  const saved = session && Object.keys(session).length ? { ...(state as object), sessionStorage: { [appOrigin]: session } } : state;
+  fs.writeFileSync(out, JSON.stringify(saved, null, 1), { mode: 0o600 });
+  fs.chmodSync(out, 0o600);
 }
 
 export interface LoginOptions {
