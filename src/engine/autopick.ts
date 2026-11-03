@@ -47,12 +47,17 @@ export function cardPicks(dataDir: string, evals: ElementEval[], threshold?: num
  * An element's own content, to render its proposal with: its words, its accessible name, and its icon
  * (markup taken from the page when it was photographed). Missing pieces stay missing; nothing is invented.
  */
-export interface OwnContent { text?: string | undefined; ariaLabel?: string | undefined; icon?: string | undefined }
+export interface OwnContent {
+  text?: string | undefined; ariaLabel?: string | undefined; icon?: string | undefined;
+  /** No icon captured from a page: the icon component its JSX holds (`<PlusIcon />`), to draw that one. */
+  iconName?: string | undefined;
+}
 
 /** A short hash of an element's own content; null when it has none to give. */
 export function contentHash(own: OwnContent | null | undefined): string | null {
-  if (!own || (!own.text && !own.ariaLabel && !own.icon)) return null;
-  return crypto.createHash('sha1').update(JSON.stringify([own.text ?? '', own.ariaLabel ?? '', own.icon ?? ''])).digest('hex').slice(0, 10);
+  if (!own || (!own.text && !own.ariaLabel && !own.icon && !own.iconName)) return null;
+  // An icon named in the source (no markup) hashes as its name, so content without one hashes as before.
+  return crypto.createHash('sha1').update(JSON.stringify([own.text ?? '', own.ariaLabel ?? '', own.icon ?? (own.iconName ? `name:${own.iconName}` : '')])).digest('hex').slice(0, 10);
 }
 
 /** The key a proposal drawn with an element's own content is stored under: the proposal's key, then the content's hash. */
@@ -61,9 +66,22 @@ export function ownKey(use: string, props: Record<string, unknown> | null | unde
   return h ? `${proposalKey(use, props)}#${h}` : proposalKey(use, props);
 }
 
-/** An element's own content: what its photo recorded from the page, else what the source says (its text, its aria-label). */
-export function ownOf(e: Pick<ElementEval, 'match'>, shot?: { content?: OwnContent | null } | null): OwnContent | null {
+/**
+ * An element's own content: what its photo recorded from the page, else what the source says (its text,
+ * its aria-label, and the icon component inside it). A drawing from the code (drawn.ts) records content too.
+ */
+export function ownOf(e: Pick<ElementEval, 'match'> & { source?: string | undefined; snippet?: string | undefined }, shot?: { content?: OwnContent | null } | null): OwnContent | null {
   const c = shot?.content ?? null;
-  const own: OwnContent = { text: c?.text || e.match?.text || undefined, ariaLabel: c?.ariaLabel || e.match?.ariaLabel || undefined, icon: c?.icon || undefined };
-  return own.text || own.ariaLabel || own.icon ? own : null;
+  const icon = c?.icon || undefined;
+  const own: OwnContent = { text: c?.text || e.match?.text || undefined, ariaLabel: c?.ariaLabel || e.match?.ariaLabel || undefined, icon, iconName: icon ? undefined : iconInSource(e) };
+  if (!own.iconName) delete own.iconName;
+  return own.text || own.ariaLabel || own.icon || own.iconName ? own : null;
+}
+
+/** The icon component an element's JSX holds: the first self-closing component inside it (`<PlusIcon className="size-4" />`). */
+export function iconInSource(e: { source?: string | undefined; snippet?: string | undefined }): string | undefined {
+  const src = e.source ?? '';
+  const inner = e.snippet && src.startsWith(e.snippet) ? src.slice(e.snippet.length) : '';
+  const m = inner.match(/<([A-Z][\w]*(?:\.[A-Z][\w]*)?)\b[^<>]*?\/>/);
+  return m?.[1];
 }

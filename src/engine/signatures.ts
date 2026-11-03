@@ -43,6 +43,11 @@ export interface ComponentSig {
   slot?: string | undefined;
   axes: Record<string, string[]>;
   defaults: Record<string, string>;
+  /**
+   * The classes each prop value adds (cva's variants: size → sm → "h-8 px-3"), so a rendered element's
+   * props can be confirmed from its class list when it shows no data-variant or data-size.
+   */
+  axisClasses?: Record<string, Record<string, string[]>> | undefined;
   sigs: Signature[];
 }
 
@@ -376,7 +381,9 @@ export function buildSignatures(packages: { dir: string; name: string }[]): Sign
           sigs.push({ component: c.name, from, variant: v, size: s, tag, role, childSlots, iconOnly: /icon/.test(s), props: normalize(tokens, aliases) });
         }
         const deeper = path.dirname(file) !== src;
-        if (!components.has(c.name) || (c.cvaRefs.length && !deeper)) components.set(c.name, { component: c.name, from, file, tag, role, childSlots, slot: c.slots[0] ?? stock?.slots[0], axes, defaults, sigs });
+        const axisClasses: Record<string, Record<string, string[]>> = {};
+        for (const l of layers) if (l.cva) for (const [a, vs] of Object.entries(l.cva.variants)) for (const [v, t] of Object.entries(vs)) ((axisClasses[a] ??= {})[v] = [...new Set([...(axisClasses[a][v] ?? []), ...t])]);
+        if (!components.has(c.name) || (c.cvaRefs.length && !deeper)) components.set(c.name, { component: c.name, from, file, tag, role, childSlots, slot: c.slots[0] ?? stock?.slots[0], axes, defaults, ...(Object.keys(axisClasses).length ? { axisClasses } : {}), sigs });
       }
     }
   }
@@ -527,7 +534,7 @@ export function describeDim(d: Dim): string {
 /** Serializable view for the report and `dsa signatures`. */
 export function signatureSummary(set: SignatureSet) {
   return [...set.components.values()].map(c => ({
-    component: c.component, from: c.from, file: c.file, slot: c.slot, tag: c.tag, role: c.role, childSlots: c.childSlots, axes: c.axes, defaults: c.defaults,
+    component: c.component, from: c.from, file: c.file, slot: c.slot, tag: c.tag, role: c.role, childSlots: c.childSlots, axes: c.axes, defaults: c.defaults, ...(c.axisClasses ? { axisClasses: c.axisClasses } : {}),
     sigs: c.sigs.map(s => ({ variant: s.variant, size: s.size, props: Object.fromEntries(s.props) })),
   }));
 }

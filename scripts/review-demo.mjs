@@ -55,7 +55,7 @@ await review.renderProposals({ root, config, dataDir, log });
 // Again, now that the rendered evidence exists (shots are cached, so nothing is re-captured), then draw
 // what the cards now propose, with each element's own content, as `dsa run` does after its screenshots.
 await review.shotsAndEvidence(ctx, { perGroup: 3 }, log);
-await review.renderProposals({ root, config, dataDir, log });
+await review.settleProposals({ root, config, dataDir, log });
 fs.rmSync(out, { recursive: true, force: true });
 await dash.publish(root, config, dataDir, profile, out, null);
 log(`Review demo: ${path.join(out, 'index.html')}`);
