@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parse as babelParse } from '@babel/parser';
 import type { ElementEval } from '@snds/dsa/engine';
+export { MOUNT_MODULE } from '@snds/dsa/tag';
 
 /**
  * Elements the crawler can't photograph (a condition it couldn't meet, a page it never reached) are drawn
@@ -114,34 +115,6 @@ export function readSource(root: string, file: string, dir?: string): string | n
   return null;
 }
 
-/**
- * Served by the app's own Vite dev server (the tagging runner adds it): mounts one component on the page
- * with React, inside an error boundary, replacing the page's body. Fixed text; what it mounts comes in as
- * arguments from the crawler.
- */
-export const MOUNT_MODULE = `import { createElement, Component } from 'react';
-import { createRoot } from 'react-dom/client';
-class Guard extends Component {
-  constructor(p) { super(p); this.state = { failed: false }; }
-  static getDerivedStateFromError() { return { failed: true }; }
-  componentDidCatch(err) { window.__dsaMountError = String((err && err.message) || err).slice(0, 200); }
-  render() { return this.state.failed ? null : this.props.children; }
-}
-window.__dsaMount = async (file, name, props) => {
-  window.__dsaMountError = null;
-  let mod;
-  try { mod = await import(/* @vite-ignore */ file); } catch (e) { return 'its file did not load: ' + String((e && e.message) || e).slice(0, 160); }
-  const C = mod[name] || (mod.default && (name === 'default' || mod.default.name === name) ? mod.default : undefined);
-  if (!C) return 'its component is not exported';
-  const host = document.createElement('div');
-  host.id = 'dsa-mount';
-  host.style.padding = '24px';
-  document.body.replaceChildren(host);
-  createRoot(host).render(createElement(Guard, null, createElement(C, props)));
-  await new Promise((r) => setTimeout(r, 400));
-  return window.__dsaMountError ? 'its component failed to render: ' + window.__dsaMountError : 'ok';
-};
-`;
 
 /** Runs in the page: show static markup alone, on the app's page (its style sheets stay in the head). */
 export const SHOW_MARKUP = `(html) => {

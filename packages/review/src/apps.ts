@@ -6,7 +6,6 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { htmlPages, walk, type Config, type Target } from '@snds/dsa/engine';
-import { MOUNT_MODULE } from './drawn.js';
 
 /**
  * Running the apps the scan looked at, so screenshots need no manual dev server:
@@ -57,7 +56,7 @@ export function tagPlan(plan: AppPlan, o: { root: string; dir: string; off?: boo
     const tag = core ? pathToFileURL(core).href : null;
     if (vite && tag) {
       const runner = path.join(os.tmpdir(), `dsa-vite-tagged-${process.pid}.mjs`);
-      fs.writeFileSync(runner, VITE_TAGGED.replace('__MOUNT__', () => JSON.stringify(MOUNT_MODULE)));
+      fs.writeFileSync(runner, VITE_TAGGED);
       return { ...plan, command: process.execPath, args: [runner, '{port}'], env: { ...env, DSA_TAG_VITE: pathToFileURL(vite).href, DSA_TAG_MODULE: tag }, tag: 'injected' };
     }
   }
@@ -66,19 +65,16 @@ export function tagPlan(plan: AppPlan, o: { root: string; dir: string; off?: boo
 
 /**
  * Started by tagPlan, in the app's folder: Vite's own config file, loaded the way vite loads it, with the
- * tagger first among its plugins (and /@dsa/mount, which draws one component for the crawler), served on the port it's given. Fixed text; the paths come in the environment.
+ * tagger first among its plugins (it also serves /@dsa/mount, which draws one component for the crawler), served on the port it's given. Fixed text; the paths come in the environment.
  */
 const VITE_TAGGED = `const vite = await import(process.env.DSA_TAG_VITE);
 const { dsaTag } = await import(process.env.DSA_TAG_MODULE);
 const port = Number(process.argv[2]);
 const loaded = await vite.loadConfigFromFile({ command: 'serve', mode: 'development' }, undefined, process.cwd());
 const config = loaded?.config ?? {};
-// /@dsa/mount: draws one component on a page, for elements the crawler can't photograph (drawn.ts).
-const MOUNT = __MOUNT__;
-const mount = { name: 'dsa:mount', resolveId: (id) => (id === '/@dsa/mount' ? '\\0dsa-mount.js' : null), load: (id) => (id === '\\0dsa-mount.js' ? MOUNT : null) };
 const server = await vite.createServer({
   ...config, configFile: false, root: config.root ?? process.cwd(),
-  plugins: [dsaTag({ when: true }), mount, ...(config.plugins ?? [])],
+  plugins: [dsaTag({ when: true }), ...(config.plugins ?? [])],
   server: { ...config.server, port, strictPort: true, host: '127.0.0.1' },
 });
 await server.listen();

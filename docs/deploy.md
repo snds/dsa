@@ -160,12 +160,27 @@ lives from the code the scan already read:
   ahead of the rest.
 - **Routes that need a value** (`/orders/:id`). It takes values from the pages it has already opened:
   links that fit the pattern, and table rows that open a record when clicked. Up to three per pattern.
-- **Elements behind a state.** The scan traced the control that sets it (the button whose handler sets
-  `open`). On a page with source tags, the crawler clicks that exact control, found by its own line,
-  not by its words.
+- **Elements behind a state.** The scan traces the control that sets it, and on a page with source tags
+  the crawler uses that exact control, found by its own line and column, not by its words. It follows
+  the shapes real apps use: a control with no words (an icon button, a colour swatch) whose handler sets
+  the state; a setter handed to another component as a prop (a toolbar's `onAdd`); a mode set by
+  `onValueChange` on a segmented control or tabs (the child whose `value` matches); and a search field
+  whose text the condition reads (it types into it).
+- **Saved state and the URL.** When the code reads a saved flag (`localStorage.getItem('setupDone')`), the
+  crawler forgets it, as on a first visit, and looks again (never keys that look like sign-in). When it
+  reads a URL search parameter (`searchParams.get('report')`), it opens the page with a value in it.
 - **Form fields that appear on a choice.** It picks each option of a select and ticks boxes and radios,
   options that match what the hidden element needs first. It never submits, and the network guard blocks
   writes anyway.
+
+Each miss in the screenshot index keeps what was looked for and tried, in plain words ("setOpenColour for
+“openColour”: clicking an unlabelled control at Studio.jsx:15", then "clicked an unlabelled control (found
+by its line) on /: still not shown"), and each run counts the state-gated misses with no control found
+and those where a control was used but the element stayed hidden.
+
+Drawing from the app's code works on any Vite dev build with `dsaTag` on, not only on apps dsa starts:
+the tagger serves the mount itself. The run says which it is, and every element it couldn't draw, with
+the reason.
 
 Each run says, per app, how many elements were reached live, how many were drawn from the app's code or
 shown as markup only, how many weren't shown at all, and why the rest weren't reached live: "no route reaches its

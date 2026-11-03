@@ -62,7 +62,7 @@ async function inPage<T = any>(page: any, src: string, arg?: unknown): Promise<T
 /** Bump when finding or revealing elements changes, so earlier misses get another try. */
 const CRAWLER = 9;
 
-interface Target { id: string; e: ElementEval; m: ElementEval['match']; /** Its source tag: file:line:col, as the scanner and the tagger write it. */ src: string; steps?: { label: string; event: 'click' | 'dblclick'; /** The control's own source line ("file:line:"), to find it by its tag. */ src?: string }[]; /** The routes whose component renders its file (routes.ts); empty: none does. */ routes?: string[]; hints: string[]; where: string[] }
+interface Target { id: string; e: ElementEval; /** What was tried to reveal it, in plain words (kept with its miss). */ tried?: string[]; m: ElementEval['match']; /** Its source tag: file:line:col, as the scanner and the tagger write it. */ src: string; steps?: { label: string; event: 'click' | 'dblclick' | 'type' | 'choose'; value?: string | undefined; /** The control's own source line ("file:line:"), to find it by its tag. */ src?: string | undefined }[]; /** The routes whose component renders its file (routes.ts); empty: none does. */ routes?: string[]; hints: string[]; where: string[] }
 
 /**
  * Words that point at the UI state an element needs: string literals in its gates (`viewMode === 'gallery'`,
@@ -229,7 +229,13 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
       // How much of the app carried source tags: matches there are exact, the rest are the crawler's best guess.
       const tagged = r.tagged.of ? Math.round((100 * r.tagged.pages) / r.tagged.of) / 100 : undefined;
       if (tagged !== undefined) log(`  ${s.target === '*' ? 'this app' : s.target}: ${Math.round(tagged * 100)}% of pages tagged${tagged === 0 ? '; add dsaTag to its dev build for exact matches' : tagged < 1 ? ' (exact matches there, a best guess elsewhere)' : ' (every match exact)'}`);
-      for (const id of r.missing) misses[id] = { at, fileHash: hashOf(byId.get(id)!), crawler: CRAWLER, steps: stepsKey(byId.get(id)!), setup: setupOf(byId.get(id)!.target), ...(r.why[id] ? { why: r.why[id] } : {}) };
+      for (const id of r.missing) misses[id] = { at, fileHash: hashOf(byId.get(id)!), crawler: CRAWLER, steps: stepsKey(byId.get(id)!), setup: setupOf(byId.get(id)!.target), ...(r.why[id] ? { why: r.why[id] } : {}), ...tracedFor(id) };
+      // What the scan looked for (each gate's setter and the control found) and what the crawler then tried.
+      function tracedFor(id: string) { const t = [...(byId.get(id)!.reach?.looked ?? []), ...(r.tried[id] ?? [])]; return t.length ? { tried: t } : {}; }
+      const gated = r.missing.map(id => byId.get(id)!).filter(e => e.reach?.status === 'gated');
+      const noSetter = gated.filter(e => (e.reach?.looked ?? []).length && (e.reach!.looked!).every(l => /no control found|no state setter/.test(l))).length;
+      const usedNoLuck = gated.filter(e => (r.tried[e.id] ?? []).some(t => /still not shown/.test(t))).length;
+      if (gated.length) log(`  ${gated.length} behind a state: ${noSetter} with no control found that sets it, ${usedNoLuck} where a control was used but it stayed hidden (each miss lists what was tried)`);
       // How each element looked for was reached, and why the rest weren't, by reason.
       const vals = Object.values<any>(r.shots);
       const reasons: Record<string, number> = {};
@@ -270,6 +276,9 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   const pages: string[] = [];
   let taggedPages = 0;
   const drawnIds: string[] = [];
+  // What was tried for each element, in plain words, kept with its miss (no duplicates, capped).
+  const note = (r: Target, t: string) => { r.tried ??= []; if (!r.tried.includes(t) && r.tried.length < 12) r.tried.push(t); };
+  const stepName = (x: { label: string; event: string; value?: string | undefined }) => (x.event === 'choose' && x.value ? `“${x.value}” in ${x.label ? `“${x.label}”` : 'a list'}` : x.label ? `“${x.label}”` : 'an unlabelled control');
   const why: Record<string, string> = {};
   const reasonOf = (r: Target): string => {
     const rs = r.routes;
@@ -284,7 +293,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   let browser: any, page: any;
   const base = new URL(o.url);
   // A traced control's own line, as its source tag reads ("apps/ledger/src/Bar.tsx:12:"), when it's inside the scan root.
-  const stepSrc = (file: string, line: number) => { if (!o.draw?.root || !file) return undefined; const rel = path.relative(o.draw.root, file); return rel.startsWith('..') || path.isAbsolute(rel) ? undefined : `${rel.split(path.sep).join('/')}:${line}:`; };
+  const stepSrc = (file: string, line: number, col?: number) => { if (!o.draw?.root || !file) return undefined; const rel = path.relative(o.draw.root, file); return rel.startsWith('..') || path.isAbsolute(rel) ? undefined : `${rel.split(path.sep).join('/')}:${line}:${col ?? ''}`; };
   let net = { blocked: 0, last: [] as string[] };
   const launch = async () => {
     browser = await pw.chromium.launch();
@@ -333,7 +342,8 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     }
     return false;
   };
-  let remaining: Target[] = o.examples.map(e => ({ id: e.id, e, m: e.match, src: `${e.file}:${e.line}:${e.col}`, steps: e.reach?.steps?.map(x => ({ label: x.label, event: x.event, src: stepSrc(x.file, x.line) })), routes: o.reach?.byId[e.id], hints: hintsOf(e), where: pathWords(e.file) }));
+  let remaining: Target[] = o.examples.map(e => ({ id: e.id, e, m: e.match, src: `${e.file}:${e.line}:${e.col}`, steps: e.reach?.steps?.map(x => ({ label: x.label, event: x.event, value: x.value, src: stepSrc(x.file, x.line, x.col) })), routes: o.reach?.byId[e.id], hints: hintsOf(e), where: pathWords(e.file) }));
+  const everyone = [...remaining];
   const replayed = new Set<string>();
   let replays = 0;
   const deadline = Date.now() + (o.maxMinutes ?? 12) * 60_000;
@@ -458,26 +468,32 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       // (reach.ts). Replay those clicks where the first control is on this page, look, then reload.
       if (remaining.length && o.reveal !== false) {
         const seqs = new Map<string, Target['steps']>();
-        for (const r of remaining) if (r.steps?.length) seqs.set(r.steps.map(x => x.event + ':' + x.label).join(' › '), r.steps);
+        const seqKey = (st: NonNullable<Target['steps']>) => st.map(x => `${x.event}:${x.label}:${x.src ?? ''}:${x.value ?? ''}`).join(' › ');
+        for (const r of remaining) if (r.steps?.length) seqs.set(seqKey(r.steps), r.steps);
         for (const [key, steps] of seqs) {
           if (!remaining.length || replays >= (o.maxReplays ?? 40)) break;
-          if (replayed.has(key) || !remaining.some(r => r.steps && r.steps.map(x => x.event + ':' + x.label).join(' › ') === key)) continue;
-          let done = 0;
+          const mine = remaining.filter(r => r.steps && seqKey(r.steps) === key);
+          if (replayed.has(key) || !mine.length) continue;
+          let done = 0, stuck = '';
           for (const st of steps!) {
-            const hit = await inPage(page, FIND_CONTROL, { label: st.label, src: st.src }).catch(() => false);
-            if (!hit) break;
+            const hit = await inPage<string | false>(page, FIND_CONTROL, { label: st.label, src: st.src }).catch(() => false);
+            if (!hit) { stuck = `${stepName(st)} isn't on ${routeOf(u)}`; break; }
             try {
               const loc = page.locator('[data-dsa-step]').first();
-              if (st.event === 'dblclick') await loc.dblclick({ timeout: 2000 }); else await loc.click({ timeout: 2000 });
+              if (st.event === 'dblclick') await loc.dblclick({ timeout: 2000 });
+              else if (st.event === 'type') await loc.fill('a', { timeout: 2000 });
+              else if (st.event === 'choose' && st.value) await loc.selectOption(st.value, { timeout: 2000 });
+              else await loc.click({ timeout: 2000 });
               done++;
               await page.waitForTimeout(400);
-            } catch { break; }
+            } catch (e: any) { stuck = `${stepName(st)} couldn't be used (${String(e?.message ?? e).split('\n')[0]!.slice(0, 60)})`; break; }
             finally { await page.evaluate(`document.querySelectorAll('[data-dsa-step]').forEach(e => e.removeAttribute('data-dsa-step'))`).catch(() => {}); }
           }
-          if (!done) continue;
+          if (!done) { if (stuck) for (const r of mine) note(r, stuck); continue; }
           replays++;
           if (done === steps!.length) replayed.add(key);
-          await sweep(`opening ${steps!.slice(0, done).map(x => `“${x.label}”`).join(' › ')}`);
+          await sweep(`opening ${steps!.slice(0, done).map(x => stepName(x)).join(' › ')}`);
+          for (const r of mine) if (remaining.includes(r)) note(r, `${steps!.slice(0, done).map(x => `${x.event === 'type' ? 'typed in' : x.event === 'choose' ? 'chose' : 'clicked'} ${stepName(x)}${x.src ? ' (found by its line)' : ''}`).join(', then ')} on ${routeOf(u)}: still not shown${stuck ? `; then ${stuck}` : ''}`);
           // Reset whatever the clicks opened or switched on.
           await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
           await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
@@ -509,6 +525,8 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         await relaunch();
       }
     }
+    // Saved state and URL search state the source reads: a first visit, or a search with something in it.
+    if (remaining.length && !signedOut()) await stateAndSearch();
     // Why each one still missing wasn't photographed, in plain words, before any is drawn.
     for (const r of remaining) why[r.id] = reasonOf(r);
     if (remaining.length && o.draw && pages.length && !signedOut()) await drawRest(o.draw, pages[0]!);
@@ -517,7 +535,56 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   } finally {
     await browser.close().catch(() => {});
   }
-  return { shots, pages, missing: [...remaining.map(r => r.id), ...drawnIds], drawn: drawnIds.length, why, tagged: { pages: taggedPages, of: pages.length }, ...(signedOut() ? { signIn: wall.at } : {}) };
+  return { shots, pages, missing: [...remaining.map(r => r.id), ...drawnIds], drawn: drawnIds.length, why, tried: Object.fromEntries(everyone.filter(r => r.tried?.length).map(r => [r.id, r.tried!])), tagged: { pages: taggedPages, of: pages.length }, ...(signedOut() ? { signIn: wall.at } : {}) };
+
+  /** A page that renders this element: a route the scan says renders its file (one with a value found, if it needs one), else the first page. */
+  function pageFor(r: Target): string | undefined {
+    for (const p of r.routes ?? []) {
+      if (needsValue(p)) { const v = [...(filled.get(p) ?? [])][0]; if (v) return routeUrl(hashed ? '#' + v : v, base); }
+      else return routeUrl(hashed ? '#' + p : p, base);
+    }
+    return pages[0];
+  }
+
+  /**
+   * Elements hidden by saved state (a dismissed onboarding, a "set up" flag kept in localStorage) or by URL
+   * search state (?q=): clear the keys the source reads, or open the page with a value in the parameter,
+   * and look again. Never keys that look like sign-in.
+   */
+  async function stateAndSearch() {
+    const stop = Date.now() + 2 * 60_000;
+    const SECRET = /token|auth|session|user|jwt|cred|account|login|csrf|key|secret/i;
+    const groups = new Map<string, Target[]>();
+    for (const r of remaining) {
+      if (!(r.e.reach?.storage?.length || r.e.reach?.params?.length)) continue;
+      const at = pageFor(r);
+      if (at) groups.set(at, [...(groups.get(at) ?? []), r]);
+    }
+    for (const [at, rs] of groups) {
+      if (Date.now() > stop || !remaining.length) break;
+      const keys = [...new Set(rs.flatMap(r => r.e.reach?.storage ?? []))].filter(k => !SECRET.test(k));
+      try {
+        if (keys.length) {
+          await page.goto(at, { waitUntil: 'domcontentloaded', timeout: 30000 });
+          await inPage(page, CLEAR_KEYS, keys);
+          await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
+          await page.waitForTimeout(o.waitMs);
+          await sweeper(at)(`clearing saved state (${keys.join(', ')})`);
+          for (const r of rs) if (remaining.includes(r)) note(r, `cleared saved state (${keys.join(', ')}) on ${routeOf(at)}: still not shown`);
+        }
+        for (const k of [...new Set(rs.flatMap(r => r.e.reach?.params ?? []))]) {
+          if (!rs.some(r => remaining.includes(r))) break;
+          const u2 = new URL(at); u2.searchParams.set(k, 'a');
+          await page.goto(u2.toString(), { waitUntil: 'domcontentloaded', timeout: 30000 });
+          await page.waitForTimeout(o.waitMs);
+          await sweeper(u2.toString())(`with ?${k}=a`);
+          for (const r of rs) if (remaining.includes(r)) note(r, `opened ${routeOf(at)} with ?${k}=a: still not shown`);
+        }
+      } catch (e: any) {
+        if (/closed|crash|Target/i.test(String(e?.message))) await relaunch();
+      }
+    }
+  }
 
   /**
    * What's still missing after both passes, drawn direct from code on one of the app's pages, so its style
@@ -528,26 +595,42 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   async function drawRest(d: DrawWith, at: string) {
     const stop = Date.now() + 3 * 60_000;
     let n = 0;
+    // Drawing from the app's code needs /@dsa/mount: dsa's own Vite runner, or any Vite dev build with dsaTag on.
+    let canMount = Boolean(d.mount);
+    if (!canMount) {
+      await page.goto(at, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+      canMount = await inPage<boolean>(page, MOUNT_PROBE).catch(() => false);
+    }
+    o.log(`  drawing ${remaining.length} not reached live: ${canMount ? "from the app's code where its component can be mounted, else as markup" : "as markup only (this build doesn't serve /@dsa/mount; add dsaTag to its Vite dev build to draw from the app's code)"}`);
+    const skipped = new Map<string, number>();
+    const skip = (r: Target, why: string) => { note(r, `not drawn: ${why}`); const k = why.replace(/\(.*\)/, '').trim(); skipped.set(k, (skipped.get(k) ?? 0) + 1); };
+    const SECRET = /token|auth|session|user|jwt|cred|account|login|csrf|key|secret/i;
     for (const r of [...remaining]) {
-      if (n >= (d.max ?? 40) || Date.now() > stop) break;
+      if (n >= (d.max ?? 40) || Date.now() > stop) { skip(r, n >= (d.max ?? 40) ? `over the ${d.max ?? 40} drawings per app` : 'out of time for drawings'); continue; }
       const code = readSource(d.root, r.e.file, d.dir);
-      if (!code) continue;
+      if (!code) { skip(r, `its source file wasn't found (${r.e.file})`); continue; }
       let how: 'mount' | 'markup' | null = null;
       let exact = false;
       try {
-        if (d.mount && r.e.within) {
+        if (canMount && r.e.within) {
           await page.goto(at, { waitUntil: 'domcontentloaded', timeout: 30000 });
           await page.waitForTimeout(o.waitMs);
+          // A first visit's saved state, so state read from storage starts as the component's default.
+          const keys = (r.e.reach?.storage ?? []).filter(k => !SECRET.test(k));
+          if (keys.length) await inPage(page, CLEAR_KEYS, keys);
           const abs = path.resolve(d.root, r.e.file);
-          const said: string = await inPage(page, MOUNT_IN_PAGE, ['/@fs' + abs.split(path.sep).join('/'), r.e.within, gateProps(r.e)]).catch((e: any) => String(e?.message ?? e).split('\n')[0]);
+          const files = ['/@fs' + abs.split(path.sep).join('/'), ...(d.dir && !path.relative(d.dir, abs).startsWith('..') ? ['/' + path.relative(d.dir, abs).split(path.sep).join('/')] : [])];
+          const said: string = await inPage(page, MOUNT_IN_PAGE, [files, r.e.within, gateProps(r.e)]).catch((e: any) => String(e?.message ?? e).split('\n')[0]);
           if (said === 'ok') {
             const hit: any[] = await inPage(page, FIND_IN_PAGE, [{ ...r, e: undefined }]);
             if (hit.length) { how = 'mount'; exact = Boolean(hit[0].exact); }
-          } else o.log(`  ${r.id}: not mounted (${said})`);
-        }
+            else note(r, `mounted ${r.e.within} with ${JSON.stringify(gateProps(r.e))}: the element wasn't in what it drew`);
+          } else note(r, `${r.e.within} not mounted: ${said}`);
+        } else if (canMount && !r.e.within) note(r, 'not mounted: the scan found no component around it');
         if (!how) {
           const html = markupOf(code, r.e, r.id);
-          if (html) {
+          if (!html) { skip(r, `no element at ${r.e.line}:${r.e.col} in its file as it is now`); continue; }
+          {
             await page.goto(at, { waitUntil: 'domcontentloaded', timeout: 30000 });
             await page.waitForTimeout(o.waitMs);
             if (await inPage<boolean>(page, SHOW_MARKUP, html)) {
@@ -556,11 +639,11 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
             }
           }
         }
-        if (!how) continue;
+        if (!how) { skip(r, "its markup didn't show on the page"); continue; }
         const file = `${r.id}.png`;
         const content = await inPage(page, OWN_CONTENT, r.id).catch(() => null);
         const cap = await capture(page, r.id, path.join(o.dir, file));
-        if (!cap) continue;
+        if (!cap) { skip(r, 'the drawing had no size to photograph'); continue; }
         // A mount found by its exact source tag, and not blank, counts as seeing the element (seenInApp).
         shots[r.id] = { file, page: at, matchScore: 1, drawn: how, ...(how === 'mount' && exact ? { exact: true } : {}), box: cap.box, content, ...(cap.blank ? { blank: true } : {}) };
         drawnIds.push(r.id);
@@ -568,9 +651,11 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         n++;
         o.log(`  ${r.id} ${how === 'mount' ? "drawn from the app's code (its component, in the app's build)" : "drawn as markup only (with the app's styles)"}${cap.blank ? ' · blank' : ''}`);
       } catch (e: any) {
+        skip(r, `the page failed while drawing (${String(e?.message ?? e).split('\n')[0]!.slice(0, 80)})`);
         if (/closed|crash|Target/i.test(String(e?.message))) await relaunch();
       }
     }
+    if (skipped.size) o.log(`  not drawn: ${[...skipped].sort((a, b) => b[1] - a[1]).map(([w, k]) => `${k} ${w}`).join('; ')}`);
   }
 
   /**
@@ -838,35 +923,44 @@ export function pickExamples(evals: ElementEval[], perGroup: number, prefer: Set
 
 /** Runs in the page: mark the visible, enabled control with this label (exact text, aria-label, or title). */
 const FIND_CONTROL = `({ label, src }) => {
-  // On a tagged page, the control the source traced is the one its own line made: no guessing by its words.
+  // On a tagged page, the control the source traced is the one its own place made: no guessing by its words.
+  // With a column, exactly that element; with only a line, an interactive one on it first (not its wrapper).
   if (src && document.querySelector('[data-dsa-src]')) {
-    for (const el of document.querySelectorAll('[data-dsa-src]')) {
-      if (!el.getAttribute('data-dsa-src').startsWith(src)) continue;
-      const r = el.getBoundingClientRect();
-      if (!r.width || !r.height || el.closest(':disabled,[aria-disabled="true"]')) continue;
-      el.setAttribute('data-dsa-step', '1');
-      return true;
+    const exact = /:\\d+$/.test(src);
+    const onLine = Array.from(document.querySelectorAll('[data-dsa-src]')).filter((el) => exact ? el.getAttribute('data-dsa-src') === src : el.getAttribute('data-dsa-src').startsWith(src));
+    const live = 'button, a, input, select, textarea, summary, option, [role=button], [role=tab], [role=menuitem], [role=checkbox], [role=switch], [role=radio], [tabindex]';
+    onLine.sort((a, b) => Number(b.matches(live)) - Number(a.matches(live)));
+    for (const el of onLine) {
+      // An option is picked through its list.
+      const c = el.tagName === 'OPTION' ? el.closest('select') : el;
+      if (!c) continue;
+      const r = c.getBoundingClientRect();
+      if (!r.width || !r.height || c.closest(':disabled,[aria-disabled="true"]')) continue;
+      c.setAttribute('data-dsa-step', '1');
+      return 'tag ' + c.tagName.toLowerCase() + ' ' + el.getAttribute('data-dsa-src');
     }
   }
   const norm = (s) => (s || '').replace(/\\s+/g, ' ').replace(/\\(\\s*\\)/g, '').trim().toLowerCase();
   const want = norm(label);
+  // No words and no tag to go by: nothing to find.
+  if (!want) return false;
   // A button's words without its icons: icon fonts render their name as text ("add Colour").
   const words = (el) => { const c = el.cloneNode(true); c.querySelectorAll('[data-slot=icon], .material-symbols-outlined, .material-symbols-rounded, .material-icons, svg, [aria-hidden=true]').forEach(x => x.remove()); return c.textContent || ''; };
 
   const bad = /delete|remove|discard|archive|sign ?out|log ?out|reset|submit|save|send|publish|approve|reject|confirm/i;
-  const sel = 'button, [role=button], a, [role=menuitem], [role=tab], [role=switch], [role=checkbox], summary, [aria-haspopup], [data-slot$="-trigger"], [tabindex]';
+  const sel = 'button, [role=button], a, [role=menuitem], [role=tab], [role=switch], [role=checkbox], summary, [aria-haspopup], [data-slot$="-trigger"], [tabindex], input, select, textarea';
   let best = null;
   for (const el of document.querySelectorAll(sel)) {
     const r = el.getBoundingClientRect();
     if (!r.width || !r.height || el.closest(':disabled,[aria-disabled="true"]')) continue;
-    const names = [el.getAttribute('aria-label'), el.getAttribute('title'), el.textContent, words(el)].map(norm);
+    const names = [el.getAttribute('aria-label'), el.getAttribute('title'), el.getAttribute('placeholder'), /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName) ? '' : el.textContent, words(el)].map(norm);
     if (!names.includes(want)) continue;
     if (bad.test(names.join(' '))) continue;
     best = el; break;
   }
   if (!best) return false;
   best.setAttribute('data-dsa-step', '1');
-  return true;
+  return 'label';
 }`;
 
 /**
@@ -1104,11 +1198,15 @@ const HIDE_COVER = `(sel) => {
 }`;
 const RESTORE_COVER = `document.querySelectorAll('[data-dsa-hid]').forEach((x) => { const s = x.getAttribute('data-dsa-hid'); if (s) x.setAttribute('style', s); else x.removeAttribute('style'); x.removeAttribute('data-dsa-hid'); })`;
 
-/** Runs in the page: load /@dsa/mount from the app's own Vite server and mount one component (drawn.ts). */
-const MOUNT_IN_PAGE = `async ([file, name, props]) => { await import('/@dsa/mount'); return window.__dsaMount(file, name, props); }`;
+/** Runs in the page: load /@dsa/mount from the app's own Vite server and mount one component (drawn.ts), trying each file URL. */
+const MOUNT_IN_PAGE = `async ([files, name, props]) => { await import('/@dsa/mount'); return window.__dsaMount(files, name, props); }`;
+/** Runs in the page: does this build serve /@dsa/mount (dsa's runner, or dsaTag on)? */
+const MOUNT_PROBE = `async () => { try { await import('/@dsa/mount'); return typeof window.__dsaMount === 'function'; } catch { return false; } }`;
+/** Runs in the page: forget these saved-state keys, as on a first visit. */
+const CLEAR_KEYS = `(keys) => { for (const k of keys) { try { localStorage.removeItem(k); sessionStorage.removeItem(k); } catch {} } return true; }`;
 
 /** For tests: the in-page scripts and the helper that runs them. */
-export const __test = { inPage, FIND_IN_PAGE, CANDIDATES, MARK_SEEN, PLACE_IN_PAGE, TOP_AT_CENTER, OWN_CONTENT, HIDE_COVER, capture };
+export const __test = { inPage, FIND_IN_PAGE, FIND_CONTROL, CANDIDATES, MARK_SEEN, PLACE_IN_PAGE, TOP_AT_CENTER, OWN_CONTENT, HIDE_COVER, capture };
 
 /** One headless capture pass over a running app (the workbench's before/after uses it on two copies of the app). */
 export const captureSession = session;
