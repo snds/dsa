@@ -55,7 +55,7 @@ export function Lightbox({ ids, start, decision, onClose }: { ids: string[]; sta
           </div>
         </DialogHeader>
         <div className="flex min-h-0 flex-1 gap-4">
-          {panel(e.shot.url, `In the app · ${e.target} · match ${Math.round(e.shot.match * 100)}%${e.shot.revealedBy ? ` · ${revealedText(e.shot.revealedBy)}` : ""}`, e.shot.box)}
+          {panel(e.shot.url, `In the app · ${e.target} · ${e.shot.tagged ? "matched by source tag" : `match ${Math.round(e.shot.match * 100)}%`}${e.shot.revealedBy ? ` · ${revealedText(e.shot.revealedBy)}` : ""}`, e.shot.box)}
           {/* The card's own proposal, with its exact props; the closest measured variant only when that isn't rendered, said as such. */}
           {exact ? panel(exact.url, `Proposed · ${SYS} ${pickText(want)} · Storybook`)
             : r?.systemShot && panel(r.systemShot, `Closest variant, not the proposal · ${SYS} ${e.use || ""} ${r.key} · Storybook${r.sizeMissing ? " · default size (that size has no story)" : ""}`)}

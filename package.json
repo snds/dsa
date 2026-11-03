@@ -31,6 +31,14 @@
       "types": "./dist/engine/index.d.ts",
       "import": "./dist/engine/index.js"
     },
+    "./tag": {
+      "types": "./dist/tag/index.d.ts",
+      "import": "./dist/tag/index.js"
+    },
+    "./tag/babel": {
+      "types": "./dist/tag/babel.d.ts",
+      "import": "./dist/tag/babel.js"
+    },
     "./relay": {
       "types": "./dist/relay/index.d.ts",
       "import": "./dist/relay/index.js"
@@ -81,6 +89,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@babel/core": "7.29.7",
     "@types/node": "^22.20.5",
     "@types/semver": "7.8.0",
     "happy-dom": "20.0.0",

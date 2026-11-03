@@ -5,6 +5,7 @@
 //   node scripts/review-demo.mjs <out-dir>          writes <out-dir>/index.html and its images
 //   node scripts/review-demo.mjs <out-dir> --score  …and prints the trust rubric's score for it
 //   … --score --card '{"photoLabels":false}'         scores what an older card showed, on the same data
+//   … --tag                                           photographs pages built with source tags (scripts/review-demo-tag.mjs)
 //
 // The rubric is packages/dashboard/src/trust.ts.
 import fs from 'node:fs';
@@ -32,6 +33,14 @@ const cfgFile = path.join(root, 'dsa.config.json');
 const raw = JSON.parse(fs.readFileSync(cfgFile, 'utf8'));
 raw.live = { apps: { billing: { dir: 'apps/billing/site' }, checkout: { dir: 'apps/checkout/site' } }, storybook: { dir: 'storybook-static' } };
 fs.writeFileSync(cfgFile, JSON.stringify(raw, null, 2));
+if (process.argv.includes('--tag')) {
+  // The built pages, built again with source tags, so the crawler matches by source line.
+  const { tagDemoSites } = await import(path.join(ROOT, 'scripts/review-demo-tag.mjs'));
+  const { createRequire } = await import('node:module');
+  const req = createRequire(path.join(ROOT, 'packages/review/package.json'));
+  const tags = await tagDemoSites(root, { tagSource: (await import(path.join(ROOT, 'dist/tag/index.js'))).tagSource, ts: req(path.join(ROOT, 'node_modules/typescript')), React: req('react'), renderToStaticMarkup: req('react-dom/server').renderToStaticMarkup });
+  log(`Source tags: ${Object.entries(tags).map(([a, t]) => `${a} ${t.length}`).join(', ')}`);
+}
 
 const loaded = core.loadConfig({ cwd: root });
 const profile = core.NEUTRAL_PROFILE;

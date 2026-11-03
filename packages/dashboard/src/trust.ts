@@ -6,7 +6,7 @@ import { BLANK_INSET, CODE_TERMS, decodePng, isBlank } from '@snds/dsa/engine';
  * Can a person trust a recommendation from the card alone? Ten checks, all of which must hold on the
  * card where the person approves it (the review QA rubric):
  *
- *   C1  the current element is shown (a photo at or over the 80% match the page shows)
+ *   C1  the current element is shown (a photo matched by its source tag, or at or over the 80% match the page shows)
  *   C2  …and it is visible (the ringed box has painted pixels)
  *   C3  …and labelled (in the app, which app, file:line, match)
  *   C4  the proposal is rendered with the exact props and the element's own content
@@ -97,8 +97,9 @@ export function trustRubric(payload: any, opts: { card?: CardShows; dir?: string
     const key = replace ? proposalKey(r.use, r.props) : '';
     const p = replace ? (e.ownHash && E.proposals?.[`${key}#${e.ownHash}`]) || E.proposals?.[key] || null : null;
     const fallback = Boolean(e.rendered?.systemShot || e.systemPreview || p?.fallback || (p?.url && (p.check !== 'exact' || p.content)));
-    // A blank or covered photo isn't shown on the card (it says so instead).
-    const shown = Boolean(e.shot && e.shot.match >= SHOT_MIN && !e.shot.blank && !e.shot.covered);
+    // A blank or covered photo isn't shown on the card (it says so instead). A source tag is proof of place:
+    // the photo is of the node that line made, whatever any score says.
+    const shown = Boolean(e.shot && (e.shot.tagged || e.shot.match >= SHOT_MIN) && !e.shot.blank && !e.shot.covered);
     // Its own words or icon to show: the proposal must carry them, not a story's sample. (Older reports
     // carry no ownHash; an element with a label has content of its own.)
     const hasOwn = e.ownHash !== undefined ? Boolean(e.ownHash) : Boolean(e.label);

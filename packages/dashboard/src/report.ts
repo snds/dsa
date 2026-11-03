@@ -143,8 +143,9 @@ export async function renderReport(root: string, config: Config, dataDir: string
     const shotUrl = (f: string) => (opts.serve ? `${base}shots/${f}` : opts.site ? `shots/${f}` : `../shots/${f}`);
     // A photo, and what the capture checked: blank (nothing painted in the box), covered (another layer on
     // top), how it was made to show (hover, focus), and ties (one of N alike; N source lines claim it).
+    // Tagged: found by its source tag, so the place is exact (ties are then the nodes its one line made).
     const shotOf = (s: any) => ({ url: shotUrl(s.file), match: s.matchScore, page: s.page, box: s.box ?? null, revealedBy: s.revealedBy ?? null,
-      ...(s.blank ? { blank: true } : {}), ...(s.covered ? { covered: true } : {}), ...(s.via ? { via: s.via } : {}), ...(s.ties > 1 ? { ties: s.ties, alike: s.alike ?? 1 } : {}), ...(s.shared ? { shared: s.shared } : {}) });
+      ...(s.blank ? { blank: true } : {}), ...(s.covered ? { covered: true } : {}), ...(s.via ? { via: s.via } : {}), ...(s.ties > 1 ? { ties: s.ties, alike: s.alike ?? 1 } : {}), ...(s.shared ? { shared: s.shared } : {}), ...(s.tagged ? { tagged: true } : {}) });
     const renderedSet = readRendered(dataDir);
     const renderedUrl = (f: string) => (opts.serve ? `${base}rendered/${f}` : opts.site ? `rendered/${f}` : `../rendered/${f}`);
     // Element (as rendered in the app) vs the recommended system variant/size (as rendered in Storybook).

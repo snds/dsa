@@ -111,7 +111,7 @@ export function Shot({ e, group }: { e: any; group?: string[] }) {
   if (!e.shot) return <NoShot e={e} />
   const open = () => { const ids = (group ?? [e.id]).filter(id => byId.get(id)?.shot); openLightbox(ids, Math.max(0, ids.indexOf(e.id))) }
   const b = e.shot.box
-  const where = `${e.shot.page ? `on ${e.shot.page.replace(/^https?:\/\/[^/]+/, "") || "/"} ` : ""}(match ${Math.round(e.shot.match * 100)}%)`
+  const where = `${e.shot.page ? `on ${e.shot.page.replace(/^https?:\/\/[^/]+/, "") || "/"} ` : ""}(${e.shot.tagged ? "matched by source tag" : `match ${Math.round(e.shot.match * 100)}%`})`
   const app = <Figure src={e.shot.url} alt={`Screenshot of ${e.snippet.slice(0, 60)}`} box={b} ratio={b ? `${b.cw}/${b.ch}` : undefined} onOpen={open} caption={<><b className="font-medium text-foreground">In the app</b> · {e.target} · <Where e={e} /> · {where}{e.shot.revealedBy && ` · ${revealedText(e.shot.revealedBy)}`}</>} />
   const r = e.rendered
   if (!r?.systemShot) return app

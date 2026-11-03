@@ -859,6 +859,10 @@
           "screenshots": {
             "description": "false: never start this app for screenshots.",
             "type": "boolean"
+          },
+          "tag": {
+            "description": "false: start this app without source tags (data-dsa-src). By default dsa adds them when it starts the app, so screenshots match each element by its source line.",
+            "type": "boolean"
           }
         },
         "additionalProperties": false

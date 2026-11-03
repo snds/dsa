@@ -8,6 +8,18 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- Source tags make Element Review's matches exact. `@snds/dsa/tag` stamps every host JSX element with
+  `data-dsa-src="<file>:<line>:<col>"`, the place the scanner records (paths relative to the scan root,
+  never absolute). It ships as a Vite plugin (`dsaTag`; Vite, React Router v7, Remix on Vite) and a
+  Babel plugin (`@snds/dsa/tag/babel`; Next.js through Babel). Both are off unless `DSA_TAG=1` or
+  `when: true`. Components stay untagged unless `components` names them. Apps dsa starts itself are
+  tagged with no change to their files: Vite through its API, with the app's own config and the tagger
+  added inline; anything else with `DSA_TAG=1` (`apps[name].tag: false` turns it off). On a tagged
+  page the crawler matches only by tag: the exact line is 100%, with no ties; a `.map()` line is "one of
+  N rendered by this line"; a missing line is "not on this page", never a guess. Untagged pages keep the
+  heuristic, and each run says how much of each app was tagged. A tagged photo is proof of place for
+  the trust rubric (C1, C2) and the confidence cap, and the card says "matched by source tag". SWC isn't
+  covered yet.
 - Screenshots of signed-in single-page apps that keep their tokens in memory (OIDC with PKCE).
   `live.apps[name].signIn` (`{ "path": "/login", "click": "Sign in with Acme ID" }`) signs in once per
   browser by clicking that button, and comes back through the identity provider without a password

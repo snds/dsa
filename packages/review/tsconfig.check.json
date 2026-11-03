@@ -11,6 +11,9 @@
       "@snds/dsa/engine": [
         "../../src/engine/index.ts"
       ],
+      "@snds/dsa/tag": [
+        "../../src/tag/index.ts"
+      ],
       "@snds/dsa-dashboard": [
         "../dashboard/src/index.ts"
       ],
