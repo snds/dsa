@@ -112,10 +112,27 @@ export function tagSource(code: string, file: string, o: TagOptions = {}): { cod
     edits.push({ at: n.name.end, text: ` ${TAG_ATTR}=${JSON.stringify(value)}` });
     tags.push({ element: name, value, line, col });
   });
-  if (!edits.length) return null;
+  // The file's own components, exported or not, kept by its tag path so /@dsa/mount can draw one that
+  // isn't exported (a row, a panel defined beside its parent). A global, not an export: Fast Refresh stays.
+  const local = localComponents(ast);
+  if (!edits.length && !local.length) return null;
   let out = code;
   for (const e of edits.sort((a, b) => b.at - a.at)) out = out.slice(0, e.at) + e.text + out.slice(e.at);
+  // On the file's last line when it ends in a newline, so no line moves and the count stays.
+  if (local.length) out += `${out.endsWith('\n') ? '' : '\n'};(globalThis.__dsaLocal ??= {})[${JSON.stringify(rel)}] = { ${local.join(', ')} };`;
   return { code: out, tags };
+}
+
+/** Top-level components declared in the file (a capitalised function, class or const), exported or not. */
+function localComponents(ast: any): string[] {
+  const out = new Set<string>();
+  for (const s0 of ast.program.body) {
+    const s = s0.type === 'ExportNamedDeclaration' || s0.type === 'ExportDefaultDeclaration' ? s0.declaration : s0;
+    if (!s || s.declare) continue;
+    if ((s.type === 'FunctionDeclaration' || s.type === 'ClassDeclaration') && s.id && /^[A-Z]/.test(s.id.name)) out.add(s.id.name);
+    if (s.type === 'VariableDeclaration') for (const d of s.declarations) if (d.id?.type === 'Identifier' && /^[A-Z]/.test(d.id.name) && d.init && /Function|Call|Class/.test(d.init.type)) out.add(d.id.name);
+  }
+  return [...out];
 }
 
 const jsxName = (n: any): string | null => n.type === 'JSXIdentifier' ? n.name : n.type === 'JSXMemberExpression' ? (jsxName(n.object) ? `${jsxName(n.object)}.${n.property.name}` : null) : null;
@@ -132,10 +149,18 @@ function walk(node: any, fn: (n: any) => void) {
 }
 
 /**
- * /@dsa/mount, served by the tagger whenever it's on: mounts one component on the page with React, inside an
- * error boundary, replacing the page's body, so the crawler can draw an element it can't reach live from
- * the app's own code and styles. Fixed text; what it mounts comes in as arguments from the crawler, which
- * tries each file URL in turn (/@fs/<abs>, then the path from the app's folder).
+ * /@dsa/mount, served by the tagger whenever it's on: draws one component on the app's own page with React,
+ * so the crawler can show an element it can't reach live from the app's own code and styles. Fixed text;
+ * what it mounts comes in as arguments from the crawler.
+ *
+ * - The component: exported from its file, or one the file declares without exporting (kept by the tagger).
+ * - Its providers: every context the live app provides at the deepest point near the element (the same
+ *   file's elements if the page shows any, else the deepest tagged element), with the live values. That
+ *   covers the providers the app's entry file wraps it in (a query client, a theme, a router, a store) and
+ *   ones deeper in the tree. The live app is hidden, not removed, so the next mount can read it again.
+ * - Its props: plain values from the crawler; {"__dsa":"fn"} becomes a function that does nothing.
+ *
+ * Returns { ok, why, providers }: why says, in plain words, what stopped it.
  */
 export const MOUNT_MODULE = `import { createElement, Component } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -145,20 +170,51 @@ class Guard extends Component {
   componentDidCatch(err) { window.__dsaMountError = String((err && err.message) || err).slice(0, 200); }
   render() { return this.state.failed ? null : this.props.children; }
 }
-window.__dsaMount = async (files, name, props) => {
+const noop = () => {};
+const revive = (v) => Array.isArray(v) ? v.map(revive) : v && typeof v === 'object' ? (v.__dsa === 'fn' ? noop : Object.fromEntries(Object.entries(v).map(([k, x]) => [k, revive(x)]))) : v;
+const fiberOf = (el) => { const k = Object.keys(el).find((x) => x.startsWith('__reactFiber$')); return k ? el[k] : null; };
+// The contexts provided above a node of the live app, innermost first, one value per context.
+function contextsAt(el) {
+  const out = [], seen = new Set();
+  for (let f = el && fiberOf(el); f; f = f.return) {
+    if (f.tag !== 10 || !f.type) continue;
+    const ctx = f.type._context || f.type;
+    if (seen.has(ctx) || !f.memoizedProps || !('value' in f.memoizedProps)) continue;
+    seen.add(ctx); out.push({ ctx, value: f.memoizedProps.value });
+  }
+  return out;
+}
+function nearest(file) {
+  const all = Array.from(document.querySelectorAll('[data-dsa-src]')).filter((el) => !el.closest('#dsa-mount, #dsa-markup'));
+  const same = file ? all.filter((el) => el.getAttribute('data-dsa-src').startsWith(file + ':')) : [];
+  const depth = (el) => { let d = 0; for (let x = el; x; x = x.parentElement) d++; return d; };
+  return (same.length ? same : all).reduce((a, b) => (!a || depth(b) > depth(a) ? b : a), null);
+}
+let root = null;
+window.__dsaMount = async (files, name, props, file) => {
   window.__dsaMountError = null;
   let mod, err = '';
   for (const f of [].concat(files)) { try { mod = await import(/* @vite-ignore */ f); break; } catch (e) { err = String((e && e.message) || e).slice(0, 160); } }
-  if (!mod) return 'its file did not load: ' + err;
-  const C = mod[name] || (mod.default && (name === 'default' || mod.default.name === name) ? mod.default : undefined);
-  if (!C) return 'its component is not exported';
+  if (!mod) return { ok: false, why: 'its file did not load: ' + err };
+  const local = (globalThis.__dsaLocal || {})[file] || {};
+  const C = mod[name] || (mod.default && (name === 'default' || mod.default.name === name) ? mod.default : undefined) || local[name];
+  if (!C) return { ok: false, why: 'its component ' + name + ' is not in its file as built' };
+  const ctxs = contextsAt(nearest(file));
+  if (root) { try { root.unmount(); } catch {} root = null; }
+  document.getElementById('dsa-mount')?.remove();
+  document.getElementById('dsa-markup')?.remove();
+  for (const c of Array.from(document.body.children)) c.setAttribute('data-dsa-hide', '');
+  if (!document.getElementById('dsa-hide')) { const st = document.createElement('style'); st.id = 'dsa-hide'; st.textContent = '[data-dsa-hide]{display:none !important}'; document.head.append(st); }
   const host = document.createElement('div');
   host.id = 'dsa-mount';
   host.style.padding = '24px';
-  document.body.replaceChildren(host);
-  createRoot(host).render(createElement(Guard, null, createElement(C, props)));
+  document.body.append(host);
+  let el = createElement(C, revive(props));
+  for (const { ctx, value } of ctxs) el = createElement(ctx.Provider || ctx, { value }, el);
+  root = createRoot(host);
+  root.render(createElement(Guard, null, el));
   await new Promise((r) => setTimeout(r, 400));
-  return window.__dsaMountError ? 'its component failed to render: ' + window.__dsaMountError : 'ok';
+  return window.__dsaMountError ? { ok: false, why: 'its component failed to render: ' + window.__dsaMountError, providers: ctxs.length } : { ok: true, providers: ctxs.length };
 };
 `;
 

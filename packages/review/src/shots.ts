@@ -2,13 +2,13 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { BLANK_INSET, buildGraph, decodePng, groupKey, isBlank, latestEvals, materializeRemotes, resolveTargets, targetRelative, type Config, type ElementEval } from '@snds/dsa/engine';
+import { BLANK_INSET, buildGraph, decodePng, groupKey, isBlank, latestEvals, materializeRemotes, resolveTargets, targetRelative, walk, type Config, type ElementEval } from '@snds/dsa/engine';
 import { appSurface, openSurface } from '@snds/dsa';
 
 import { detectApp, discoverRoutes, ensureBrowser, linkCoreForChild, routeConfig, startApp, tagPlan } from './apps.js';
 
 import { READ_STYLE } from './rendered.js';
-import { SHOW_MARKUP, gateProps, markupOf, readSource } from './drawn.js';
+import { SHOW_MARKUP, markupOf, mountProps, readSource } from './drawn.js';
 import { needsValue, patternTest, routeFiles, routesReaching } from './routes.js';
 import { flowProblems, guardNetwork, routeUrl, runFlow, type Flow } from './flows.js';
 
@@ -266,7 +266,23 @@ interface Act { n: number; key: string; kind: 'click' | 'hover' | 'context' | 'c
  * How to draw what can't be photographed (drawn.ts): the scan root (to read each element's source), its
  * app's folder, and whether the app runs on dsa's own Vite runner (which serves /@dsa/mount).
  */
-interface DrawWith { root: string; dir?: string | undefined; mount?: boolean | undefined; max?: number | undefined }
+interface DrawWith { root: string; dir?: string | undefined; mount?: boolean | undefined; max?: number | undefined; maxMinutes?: number | undefined }
+
+/** The files that render `<Name …>`, its own first, read once per app: where a component's literal props come from. */
+const callerIndex = new WeakMap<DrawWith, Map<string, string[]>>();
+function callersOf(d: DrawWith, name: string, own: string): string[] {
+  let idx = callerIndex.get(d);
+  if (!idx) {
+    idx = new Map();
+    for (const f of walk(d.dir ?? d.root, new Set(['.tsx', '.jsx', '.ts', '.js']), [], true).slice(0, 6000)) {
+      let src = '';
+      try { src = fs.readFileSync(f, 'utf8'); } catch { continue; }
+      for (const m of new Set([...src.matchAll(/<([A-Z][\w$]*)[\s/>]/g)].map(x => x[1]!))) { const l = idx.get(m) ?? []; if (l.length < 4) idx.set(m, [...l, f]); }
+    }
+    callerIndex.set(d, idx);
+  }
+  return (idx.get(name) ?? []).filter(f => f !== own).map(f => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } });
+}
 
 /** What the scan knows about reaching each element (routes.ts): the routes that render its file, and the patterns that need a value. */
 interface ReachPlan { byId: Record<string, string[]>; patterns: string[] }
@@ -588,12 +604,14 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
 
   /**
    * What's still missing after both passes, drawn direct from code on one of the app's pages, so its style
-   * sheets apply: its component mounted through the app's Vite build when dsa runs it (found by its source
-   * tag), else its own JSX as static markup. Each is labelled a drawing, never a photo, and stays "not
-   * found" in the app.
+   * sheets apply: its component mounted through the app's Vite build (with the live app's providers and
+   * props filled in, found by its source tag), else its own JSX as static markup. Each is labelled a
+   * drawing, never a photo, and stays "not found" in the app. Every one gets a line saying what it became,
+   * and why it wasn't mounted when it wasn't: none is dropped without a reason.
    */
   async function drawRest(d: DrawWith, at: string) {
-    const stop = Date.now() + 3 * 60_000;
+    const stop = Date.now() + (d.maxMinutes ?? 10) * 60_000;
+    const max = d.max ?? Infinity;
     let n = 0;
     // Drawing from the app's code needs /@dsa/mount: dsa's own Vite runner, or any Vite dev build with dsaTag on.
     let canMount = Boolean(d.mount);
@@ -602,60 +620,80 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       canMount = await inPage<boolean>(page, MOUNT_PROBE).catch(() => false);
     }
     o.log(`  drawing ${remaining.length} not reached live: ${canMount ? "from the app's code where its component can be mounted, else as markup" : "as markup only (this build doesn't serve /@dsa/mount; add dsaTag to its Vite dev build to draw from the app's code)"}`);
-    const skipped = new Map<string, number>();
-    const skip = (r: Target, why: string) => { note(r, `not drawn: ${why}`); const k = why.replace(/\(.*\)/, '').trim(); skipped.set(k, (skipped.get(k) ?? 0) + 1); };
+    const tally = new Map<string, number>();
+    const count = (k: string) => tally.set(k, (tally.get(k) ?? 0) + 1);
+    // A reason without its specifics, for the summary: "its component failed to render", "no element at its line…".
+    const short = (u: string) => u.replace(/\b\d+:\d+\b/g, 'its line').replace(/^[\w$.]+(?=: | mounted)(: )?/, '').replace(/ with \d+ of the app's providers/, '').replace(/\s*\(.*$/, '').replace(/:.*$/, '').trim();
+    const where = (r: Target) => `${r.id} (${r.e.file}:${r.e.line})`;
     const SECRET = /token|auth|session|user|jwt|cred|account|login|csrf|key|secret/i;
-    for (const r of [...remaining]) {
-      if (n >= (d.max ?? 40) || Date.now() > stop) { skip(r, n >= (d.max ?? 40) ? `over the ${d.max ?? 40} drawings per app` : 'out of time for drawings'); continue; }
+    // The page each is drawn on: one that renders its file, so the live providers there are its own.
+    const queue = [...remaining].map(r => ({ r, u: pageFor(r) ?? at })).sort((a, b) => a.u.localeCompare(b.u));
+    let loaded = '';
+    const open = async (u: string) => {
+      if (loaded === u && page.url() === loaded) return;
+      await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await page.waitForTimeout(o.waitMs);
+      loaded = page.url();
+    };
+    for (const { r, u } of queue) {
+      const out = (msg: string) => { note(r, msg); count(`not drawn (${short(msg.replace(/^not drawn: /, '').replace(/; not mounted.*$/, ''))})`); o.log(`  ${where(r)} ${msg}`); };
+      if (n >= max || Date.now() > stop) { out(`not drawn: ${n >= max ? `over the ${max} drawings per app` : 'out of time for drawings'}`); continue; }
       const code = readSource(d.root, r.e.file, d.dir);
-      if (!code) { skip(r, `its source file wasn't found (${r.e.file})`); continue; }
+      if (!code) { out(`not drawn: its source file wasn't found (${r.e.file})`); continue; }
       let how: 'mount' | 'markup' | null = null;
       let exact = false;
+      let unmounted = '';
+      let providers = 0;
       try {
-        if (canMount && r.e.within) {
-          await page.goto(at, { waitUntil: 'domcontentloaded', timeout: 30000 });
-          await page.waitForTimeout(o.waitMs);
+        if (!canMount) unmounted = "this build doesn't serve /@dsa/mount";
+        else if (!r.e.within) unmounted = 'the scan found no component around it';
+        else {
+          await open(u);
           // A first visit's saved state, so state read from storage starts as the component's default.
           const keys = (r.e.reach?.storage ?? []).filter(k => !SECRET.test(k));
           if (keys.length) await inPage(page, CLEAR_KEYS, keys);
           const abs = path.resolve(d.root, r.e.file);
           const files = ['/@fs' + abs.split(path.sep).join('/'), ...(d.dir && !path.relative(d.dir, abs).startsWith('..') ? ['/' + path.relative(d.dir, abs).split(path.sep).join('/')] : [])];
-          const said: string = await inPage(page, MOUNT_IN_PAGE, [files, r.e.within, gateProps(r.e)]).catch((e: any) => String(e?.message ?? e).split('\n')[0]);
-          if (said === 'ok') {
+          const props = mountProps(r.e, code, callersOf(d, r.e.within, abs));
+          const said = await inPage<{ ok: boolean; why?: string; providers?: number }>(page, MOUNT_IN_PAGE, [files, r.e.within, props, r.e.file])
+            .catch((e: any): { ok: boolean; why?: string; providers?: number } => ({ ok: false, why: `the page failed while mounting (${String(e?.message ?? e).split('\n')[0]!.slice(0, 80)})` }));
+          providers = said.providers ?? 0;
+          if (said.ok) {
             const hit: any[] = await inPage(page, FIND_IN_PAGE, [{ ...r, e: undefined }]);
             if (hit.length) { how = 'mount'; exact = Boolean(hit[0].exact); }
-            else note(r, `mounted ${r.e.within} with ${JSON.stringify(gateProps(r.e))}: the element wasn't in what it drew`);
-          } else note(r, `${r.e.within} not mounted: ${said}`);
-        } else if (canMount && !r.e.within) note(r, 'not mounted: the scan found no component around it');
+            else unmounted = `${r.e.within} mounted${providers ? ` with ${providers} of the app's providers` : ''}, but the element wasn't in what it drew (a condition inside it wasn't met)`;
+          } else unmounted = `${r.e.within}: ${said.why ?? 'no reason given'}`;
+          if (!how) note(r, `not mounted: ${unmounted}`);
+        }
         if (!how) {
           const html = markupOf(code, r.e, r.id);
-          if (!html) { skip(r, `no element at ${r.e.line}:${r.e.col} in its file as it is now`); continue; }
-          {
-            await page.goto(at, { waitUntil: 'domcontentloaded', timeout: 30000 });
-            await page.waitForTimeout(o.waitMs);
-            if (await inPage<boolean>(page, SHOW_MARKUP, html)) {
-              await inPage(page, `(id) => { const el = document.querySelector('[data-dsa-drawn="' + CSS.escape(id) + '"]'); if (el) el.setAttribute('data-dsa-shot', id); }`, r.id);
-              how = 'markup';
-            }
+          if (!html) { out(`not drawn: no element at ${r.e.line}:${r.e.col} in its file as it is now${unmounted ? `; not mounted: ${unmounted}` : ''}`); continue; }
+          if (!loaded) await open(u);
+          if (await inPage<boolean>(page, SHOW_MARKUP, html)) {
+            await inPage(page, `(id) => { const el = document.querySelector('[data-dsa-drawn="' + CSS.escape(id) + '"]'); if (el) el.setAttribute('data-dsa-shot', id); }`, r.id);
+            how = 'markup';
           }
         }
-        if (!how) { skip(r, "its markup didn't show on the page"); continue; }
+        if (!how) { out(`not drawn: its markup didn't show on the page; not mounted: ${unmounted}`); continue; }
         const file = `${r.id}.png`;
         const content = await inPage(page, OWN_CONTENT, r.id).catch(() => null);
         const cap = await capture(page, r.id, path.join(o.dir, file));
-        if (!cap) { skip(r, 'the drawing had no size to photograph'); continue; }
+        if (!cap) { out(`not drawn: the drawing had no size to photograph${unmounted ? `; not mounted: ${unmounted}` : ''}`); continue; }
         // A mount found by its exact source tag, and not blank, counts as seeing the element (seenInApp).
-        shots[r.id] = { file, page: at, matchScore: 1, drawn: how, ...(how === 'mount' && exact ? { exact: true } : {}), box: cap.box, content, ...(cap.blank ? { blank: true } : {}) };
+        shots[r.id] = { file, page: u, matchScore: 1, drawn: how, ...(how === 'mount' && exact ? { exact: true } : {}), box: cap.box, content, ...(cap.blank ? { blank: true } : {}) };
         drawnIds.push(r.id);
         remaining = remaining.filter(x => x.id !== r.id);
         n++;
-        o.log(`  ${r.id} ${how === 'mount' ? "drawn from the app's code (its component, in the app's build)" : "drawn as markup only (with the app's styles)"}${cap.blank ? ' · blank' : ''}`);
+        const msg = how === 'mount' ? `drawn from the app's code (its component, in the app's build${providers ? `, with ${providers} of its providers` : ''})` : `drawn as markup only; not mounted: ${unmounted}`;
+        count(how === 'mount' ? "drawn from the app's code" : `markup only (not mounted: ${short(unmounted)})`);
+        o.log(`  ${where(r)} ${msg}${cap.blank ? ' · blank' : ''}`);
       } catch (e: any) {
-        skip(r, `the page failed while drawing (${String(e?.message ?? e).split('\n')[0]!.slice(0, 80)})`);
+        loaded = '';
+        out(`not drawn: the page failed while drawing (${String(e?.message ?? e).split('\n')[0]!.slice(0, 80)})${unmounted ? `; not mounted: ${unmounted}` : ''}`);
         if (/closed|crash|Target/i.test(String(e?.message))) await relaunch();
       }
     }
-    if (skipped.size) o.log(`  not drawn: ${[...skipped].sort((a, b) => b[1] - a[1]).map(([w, k]) => `${k} ${w}`).join('; ')}`);
+    if (tally.size) o.log(`  drawings: ${[...tally].sort((a, b) => b[1] - a[1]).map(([w, k]) => `${k} ${w}`).join('; ')}`);
   }
 
   /**
@@ -1199,7 +1237,7 @@ const HIDE_COVER = `(sel) => {
 const RESTORE_COVER = `document.querySelectorAll('[data-dsa-hid]').forEach((x) => { const s = x.getAttribute('data-dsa-hid'); if (s) x.setAttribute('style', s); else x.removeAttribute('style'); x.removeAttribute('data-dsa-hid'); })`;
 
 /** Runs in the page: load /@dsa/mount from the app's own Vite server and mount one component (drawn.ts), trying each file URL. */
-const MOUNT_IN_PAGE = `async ([files, name, props]) => { await import('/@dsa/mount'); return window.__dsaMount(files, name, props); }`;
+const MOUNT_IN_PAGE = `async ([files, name, props, file]) => { await import('/@dsa/mount'); return window.__dsaMount(files, name, props, file); }`;
 /** Runs in the page: does this build serve /@dsa/mount (dsa's runner, or dsaTag on)? */
 const MOUNT_PROBE = `async () => { try { await import('/@dsa/mount'); return typeof window.__dsaMount === 'function'; } catch { return false; } }`;
 /** Runs in the page: forget these saved-state keys, as on a first visit. */

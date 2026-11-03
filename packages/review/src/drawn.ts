@@ -34,6 +34,179 @@ export function gateProps(e: ElementEval): Record<string, string | boolean> {
   return out;
 }
 
+/** A prop value the page turns into a function that does nothing. */
+export const FN = { __dsa: 'fn' } as const;
+type Val = string | number | boolean | null | typeof FN | Val[] | { [k: string]: Val };
+
+/**
+ * Props to mount a component with, so it renders without its parent: best last, so each wins over the one
+ * before it.
+ *  1. Type-shaped defaults for what it needs: from its props type (string '', number 0, boolean false, a
+ *     list [], a function, an object with its own required fields), else from how its body uses each
+ *     prop (`.map(` → [], `onX` → a function).
+ *  2. The values a call site passes as literals (`<Panel title="Orders" rows={[]} onClose={() => …}>`).
+ *  3. The gates the scan traced on the element (gateProps).
+ */
+export function mountProps(e: ElementEval, code: string, callers: string[] = []): Record<string, Val> {
+  const out: Record<string, Val> = {};
+  const ast = parse(code);
+  if (ast && e.within) Object.assign(out, shapedProps(ast, e.within));
+  for (const c of [code, ...callers]) {
+    const site = c === code ? ast : parse(c);
+    const lit = site && e.within ? callSite(site, e.within) : null;
+    if (lit) { Object.assign(out, lit); break; }
+  }
+  return Object.assign(out, gateProps(e));
+}
+
+const parse = (code: string): any => { try { return babelParse(code, { sourceType: 'unambiguous', errorRecovery: true, plugins: ['jsx', 'typescript', 'decorators-legacy'] }); } catch { return null; } };
+
+/** The component's function: a declaration, an arrow, or one wrapped in memo()/forwardRef(). */
+function componentFn(ast: any, name: string): any {
+  for (const s0 of ast.program.body) {
+    const s = s0.type === 'ExportNamedDeclaration' || s0.type === 'ExportDefaultDeclaration' ? s0.declaration : s0;
+    if (!s) continue;
+    if (s.type === 'FunctionDeclaration' && s.id?.name === name) return s;
+    if (s.type === 'VariableDeclaration') for (const d of s.declarations) {
+      if (d.id?.name !== name || !d.init) continue;
+      let f = d.init;
+      while (f.type === 'CallExpression') f = f.arguments.find((a: any) => /Function|Call/.test(a.type)) ?? f.arguments[0];
+      if (f && /Function/.test(f.type)) return f;
+    }
+  }
+  return null;
+}
+
+/** Types declared in the file, by name: interfaces and type aliases. */
+function localTypes(ast: any): Map<string, any> {
+  const m = new Map<string, any>();
+  walk(ast.program, (n) => {
+    if (n.type === 'TSInterfaceDeclaration') m.set(n.id.name, { type: 'TSTypeLiteral', members: n.body.body });
+    if (n.type === 'TSTypeAliasDeclaration') m.set(n.id.name, n.typeAnnotation);
+  });
+  return m;
+}
+
+function shapedProps(ast: any, name: string): Record<string, Val> {
+  const fn = componentFn(ast, name);
+  const param = fn?.params?.[0];
+  if (!param) return {};
+  const types = localTypes(ast);
+  const out: Record<string, Val> = {};
+  let ann = param.typeAnnotation?.typeAnnotation;
+  // React.FC<Props> on the const: the type is on the declarator, not the param.
+  if (!ann) walk(ast.program, (n) => { if (!ann && n.type === 'VariableDeclarator' && n.id?.name === name) ann = n.id.typeAnnotation?.typeAnnotation?.typeParameters?.params?.[0]; });
+  const lit = literalOf(ann, types);
+  const defaults = new Set<string>();
+  if (param.type === 'ObjectPattern') for (const p of param.properties) if (p.type === 'ObjectProperty' && p.value?.type === 'AssignmentPattern') defaults.add(p.key.name);
+  if (lit) for (const m of lit.members ?? []) {
+    if (m.type !== 'TSPropertySignature' || m.optional || !m.key?.name || defaults.has(m.key.name) || m.key.name === 'children') continue;
+    const v = shapeOf(m.typeAnnotation?.typeAnnotation, types, 0);
+    if (v !== undefined) out[m.key.name] = v;
+  }
+  // Untyped: from the names it takes (destructured, or read as props.x) and how its body uses them.
+  const names = new Set<string>();
+  if (param.type === 'ObjectPattern') for (const p of param.properties) { if (p.type === 'ObjectProperty' && p.value?.type !== 'AssignmentPattern' && p.key?.name) names.add(p.key.name); }
+  else if (param.type === 'Identifier') walk(fn.body, (n) => { if (n.type === 'MemberExpression' && !n.computed && n.object?.type === 'Identifier' && n.object.name === param.name && n.property?.name) names.add(n.property.name); });
+  for (const k of names) {
+    if (k in out || k === 'children') continue;
+    if (/^(on|handle|set)[A-Z]/.test(k)) out[k] = FN;
+    else if (usedAsList(fn.body, param.type === 'Identifier' ? param.name : null, k)) out[k] = [];
+  }
+  return out;
+}
+
+/** Is this prop used as a list (`.map(`, `.length`, `.filter(`…) in the body? */
+function usedAsList(body: any, obj: string | null, k: string): boolean {
+  let hit = false;
+  walk(body, (n) => {
+    if (hit || !/MemberExpression$/.test(n.type) || n.computed || !/^(map|filter|forEach|length|some|every|find|findIndex|reduce|slice|includes|join|flatMap|at)$/.test(n.property?.name ?? '')) return;
+    const o = n.object;
+    if (obj ? /MemberExpression$/.test(o?.type) && o.object?.name === obj && o.property?.name === k : o?.type === 'Identifier' && o.name === k) hit = true;
+  });
+  return hit;
+}
+
+function literalOf(t: any, types: Map<string, any>): any {
+  if (!t) return null;
+  if (t.type === 'TSTypeLiteral') return t;
+  if (t.type === 'TSTypeReference' && t.typeName?.type === 'Identifier') return literalOf(types.get(t.typeName.name), types);
+  if (t.type === 'TSIntersectionType') return { type: 'TSTypeLiteral', members: t.types.flatMap((x: any) => literalOf(x, types)?.members ?? []) };
+  return null;
+}
+
+function shapeOf(t: any, types: Map<string, any>, depth: number): Val | undefined {
+  if (!t) return undefined;
+  switch (t.type) {
+    case 'TSStringKeyword': return '';
+    case 'TSNumberKeyword': return 0;
+    case 'TSBooleanKeyword': return false;
+    case 'TSArrayType': case 'TSTupleType': return [];
+    case 'TSFunctionType': return FN;
+    case 'TSLiteralType': return t.literal.type === 'TemplateLiteral' ? '' : t.literal.value;
+    case 'TSNullKeyword': return null;
+    case 'TSUnionType': {
+      const parts = t.types.filter((x: any) => x.type !== 'TSUndefinedKeyword' && x.type !== 'TSNullKeyword');
+      return parts.length ? shapeOf(parts[0], types, depth) : null;
+    }
+    case 'TSTypeReference': {
+      const n = t.typeName?.type === 'Identifier' ? t.typeName.name : t.typeName?.right?.name;
+      if (/^(Array|ReadonlyArray|Set)$/.test(n)) return [];
+      if (/^(Record|Map|Partial)$/.test(n)) return {};
+      if (n === 'Date') return undefined;
+      if (/Handler$|Callback$|^Dispatch$|^SetStateAction$/.test(n)) return FN;
+      if (/^(ReactNode|ReactElement|JSX)$/.test(n)) return undefined;
+      const l = depth < 2 ? literalOf(types.get(n), types) : null;
+      if (l) return objectOf(l, types, depth);
+      const alias = types.get(n);
+      return alias && alias.type !== 'TSTypeLiteral' && depth < 2 ? shapeOf(alias, types, depth + 1) : undefined;
+    }
+    case 'TSTypeLiteral': return depth < 2 ? objectOf(t, types, depth) : {};
+    default: return undefined;
+  }
+}
+
+function objectOf(l: any, types: Map<string, any>, depth: number): Val {
+  const o: Record<string, Val> = {};
+  for (const m of l.members ?? []) {
+    if (m.type !== 'TSPropertySignature' || m.optional || !m.key?.name) continue;
+    const v = shapeOf(m.typeAnnotation?.typeAnnotation, types, depth + 1);
+    if (v !== undefined) o[m.key.name] = v;
+  }
+  return o;
+}
+
+/** The literal props of the first `<Name …>` in this file: plain values, lists and objects of them, and functions. */
+function callSite(ast: any, name: string): Record<string, Val> | null {
+  let found: any = null;
+  walk(ast.program, (n) => { if (!found && n.type === 'JSXOpeningElement' && n.name.type === 'JSXIdentifier' && n.name.name === name) found = n; });
+  if (!found) return null;
+  const out: Record<string, Val> = {};
+  for (const a of found.attributes) {
+    if (a.type !== 'JSXAttribute' || a.name.type !== 'JSXIdentifier' || a.name.name === 'key' || a.name.name === 'ref') continue;
+    const v = a.value === null ? true : a.value.type === 'StringLiteral' ? a.value.value : a.value.type === 'JSXExpressionContainer' ? valueOf(a.value.expression) : undefined;
+    if (v !== undefined) out[a.name.name] = v;
+  }
+  return out;
+}
+
+function valueOf(x: any): Val | undefined {
+  switch (x?.type) {
+    case 'StringLiteral': case 'NumericLiteral': case 'BooleanLiteral': return x.value;
+    case 'NullLiteral': return null;
+    case 'TemplateLiteral': return x.expressions.length ? undefined : x.quasis.map((q: any) => q.value.cooked ?? '').join('');
+    case 'ArrowFunctionExpression': case 'FunctionExpression': return FN;
+    case 'ArrayExpression': { const v = x.elements.map(valueOf); return v.every((y: any) => y !== undefined) ? v : []; }
+    case 'ObjectExpression': {
+      const o: Record<string, Val> = {};
+      for (const p of x.properties) { if (p.type !== 'ObjectProperty' || p.computed) return undefined; const v = valueOf(p.value); if (v === undefined) return undefined; o[p.key.name ?? p.key.value] = v; }
+      return o;
+    }
+    case 'TSAsExpression': case 'TSSatisfiesExpression': return valueOf(x.expression);
+    default: return undefined;
+  }
+}
+
 const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr']);
 const RENAME: Record<string, string> = { className: 'class', htmlFor: 'for', tabIndex: 'tabindex', readOnly: 'readonly', autoFocus: 'autofocus', viewBox: 'viewBox', strokeWidth: 'stroke-width', strokeLinecap: 'stroke-linecap', strokeLinejoin: 'stroke-linejoin', fillRule: 'fill-rule', clipRule: 'clip-rule' };
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -116,13 +289,17 @@ export function readSource(root: string, file: string, dir?: string): string | n
 }
 
 
-/** Runs in the page: show static markup alone, on the app's page (its style sheets stay in the head). */
+/** Runs in the page: show static markup alone, on the app's page (its style sheets stay in the head; the live app is hidden, not removed). */
 export const SHOW_MARKUP = `(html) => {
+  document.getElementById('dsa-mount')?.remove();
+  document.getElementById('dsa-markup')?.remove();
+  for (const c of Array.from(document.body.children)) c.setAttribute('data-dsa-hide', '');
+  if (!document.getElementById('dsa-hide')) { const st = document.createElement('style'); st.id = 'dsa-hide'; st.textContent = '[data-dsa-hide]{display:none !important}'; document.head.append(st); }
   const host = document.createElement('div');
   host.id = 'dsa-markup';
   host.style.padding = '24px';
   host.innerHTML = html;
   host.querySelectorAll('script, iframe, object, embed').forEach((x) => x.remove());
-  document.body.replaceChildren(host);
+  document.body.append(host);
   return Boolean(host.querySelector('[data-dsa-drawn]'));
 }`;

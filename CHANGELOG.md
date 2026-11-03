@@ -8,6 +8,15 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- Drawing from the app's code works for components that can't render alone. The mount wraps the
+  component in every provider the live app has at that point (the store, theme, query client or router its
+  entry file sets up, and ones deeper in the tree), read off the running page with their live values. It
+  fills required props from the component's types, from how its body uses them, and from the literal values
+  a call site passes, before the gates the scan traced. Components a file declares without exporting can be
+  mounted too (the tagger keeps them).
+- Every element that isn't reached live gets its own line in the log: drawn from the app's code, drawn as
+  markup with the reason it wasn't mounted, or not drawn with the reason. A summary groups the reasons.
+
 - Proposals are drawn without depending on stories. The system's component is mounted straight from its
   source through its own Vite, on a page that loads its Storybook preview file (CSS, providers,
   decorators), with the proposal's props and the element's own words and icon. Parts that live inside
@@ -23,6 +32,9 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- Only 40 elements per app were drawn, and the rest were dropped with one total line. There's no count cap
+  now, only a time budget (10 minutes per app), and each element is drawn on the page of a route that
+  renders it without reloading the page for every one.
 - Cards showed a proposal with the story's sample content although the element had its own. The
   confidence cap changes which question an element is in, and so what its card proposes, and the last cap
   ran after the last drawing. Now dsa caps and draws until nothing new is wanted

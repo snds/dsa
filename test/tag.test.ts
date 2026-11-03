@@ -95,3 +95,10 @@ test('components are left alone unless asked for; then never a Fragment', () => 
   // Already tagged (the app's own dsaTag ran first): left as it is.
   assert.equal(tagSource('<button data-dsa-src="x">Go</button>', file, { when: true, root }), null);
 });
+
+test('the file\'s own components, exported or not, are kept for the mount, on its last line', () => {
+  const src = `import { memo } from 'react';\nfunction Row() { return <li>a</li>; }\nexport const List = memo(() => <ul><Row /></ul>);\nconst helper = () => 1;\ntype Props = {};\nexport default function Page() { return <List />; }\n`;
+  const r = tagSource(src, '/repo/apps/x/src/Page.tsx', { when: true, root: '/repo' })!;
+  assert.equal(r.code.split('\n').length, src.split('\n').length);
+  assert.ok(r.code.endsWith(';(globalThis.__dsaLocal ??= {})["apps/x/src/Page.tsx"] = { Row, List, Page };'), r.code);
+});
