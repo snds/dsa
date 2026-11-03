@@ -973,6 +973,10 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
+        },
+        "draw": {
+          "description": "Draw elements that can't be photographed direct from their code (default true). Drawings are labelled and never count as a photo.",
+          "type": "boolean"
         }
       },
       "additionalProperties": false

@@ -51,7 +51,7 @@ export function readPagePlacement(dataDir: string): Map<string, PagePlacement> {
     // Live ARIA also needs a unique match; regions survive a tie between look-alikes.
     const out = new Map<string, PagePlacement>();
     for (const [id, v] of Object.entries<any>(idx.shots ?? {})) {
-      if (!v?.placement || (!v.tagged && (v.matchScore ?? 0) < PLACEMENT_MIN_MATCH)) continue;
+      if (!v?.placement || v.drawn || (!v.tagged && (v.matchScore ?? 0) < PLACEMENT_MIN_MATCH)) continue;
       const sure = (v.ties ?? 1) <= 1;
       out.set(id, sure ? v.placement : { ...v.placement, attrs: {}, parentRole: undefined, siblings: 0 });
     }

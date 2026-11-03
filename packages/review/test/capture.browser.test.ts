@@ -5,7 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 // A photo is evidence only if it shows the element: the capture checks the box has painted pixels and
-// that the element is the top layer at its centre, trying hover and focus before it gives up; it keeps
+// that the element is the top layer at its centre, trying hover and focus, then hiding a covering layer,
+// before it gives up; it keeps
 // the element's own content for its proposal; and identical controls claimed by two source lines are a
 // guess, not a certainty. Skipped where no browser is installed (`dsa setup`) or DSA_NO_BROWSER is set.
 
@@ -29,7 +30,7 @@ const PAGE = `<style>
 <button class="covered" aria-label="Under">Save</button>
 <div class="bar"></div>`;
 
-test('capture: painted, shown on hover, blank, covered; and the element\'s own content', async ({ skip }) => {
+test('capture: painted, shown on hover, blank, uncovered; and the element\'s own content', async ({ skip }) => {
   if (!browser) skip('no headless browser (run dsa setup)');
   const { __test: t } = await import('../src/shots.js');
   const page = await browser!.newPage({ viewport: { width: 800, height: 600 }, deviceScaleFactor: 2 });
@@ -59,8 +60,11 @@ test('capture: painted, shown on hover, blank, covered; and the element\'s own c
     const never = await shoot('never');
     assert.equal(never.r!.blank, true, 'a box with nothing drawn inside is blank, after hover and focus');
 
+    // A fixed bar over its centre: hidden for the photo (it's still the app's page), then put back.
     const covered = await shoot('covered');
-    assert.equal(covered.r!.covered, true, 'a fixed bar over its centre covers it');
+    assert.deepEqual([covered.r!.covered, covered.r!.uncovered], [undefined, 1]);
+    assert.equal((await page.locator('.bar').getAttribute('style')) ?? '', '', 'the bar is back as it was');
+    assert.equal(await page.locator('.bar').evaluate((el) => getComputedStyle(el).visibility), 'visible');
   } finally { await page.close(); }
 });
 

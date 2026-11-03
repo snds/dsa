@@ -87,3 +87,12 @@ test('a photo matched by its source tag is proof of place: shown, and "ready" on
   const blank = trustRubric({ elements: { ...payload.elements, evals: [ev('tag', { shot: { ...shot(), tagged: true, blank: true }, confidence: 0.95 })] } });
   assert.ok(blank.rows[0]!.failed.includes('C2'));
 });
+
+test('a drawing from the code is shown, but it is not a photo: C1 fails, so it is never "ready" on it', () => {
+  const drawn = trustRubric({ elements: { ...payload.elements, evals: [ev('drawn', { shot: { ...shot(), drawn: 'mount' }, confidence: 0.8 })] } });
+  assert.ok(drawn.rows[0]!.failed.includes('C1'));
+  assert.ok(!drawn.rows[0]!.failed.includes('C9'), 'held under the bar, its confidence matches what can be seen');
+  // A live photo with a covering layer hidden is still a photo of the app.
+  const uncovered = trustRubric({ elements: { ...payload.elements, evals: [ev('ok', { shot: { ...shot(), uncovered: 1 }, confidence: 0.95 })] } });
+  assert.deepEqual(uncovered.rows[0]!.failed, []);
+});

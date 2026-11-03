@@ -148,6 +148,22 @@ A tagged photo counts as proof of place in the review: the card says "matched by
 read them. Tag internal dev and preview builds only, never a public production build. The tagger is
 off unless `DSA_TAG=1` or `when: true`, so a production build isn't tagged by accident.
 
+### What the review shows when there's no photo
+
+Each element on a card is shown the best way available, with one of two labels:
+
+| Label | How it's made |
+|---|---|
+| Live app screenshot | A photo of the running app. |
+| Live app screenshot | The same, after hiding a layer that sat over the element (a toast, a sticky bar). Up to three layers are hidden, then put back. |
+| Drawn direct from code | The element's component, loaded through the app's own Vite dev server and drawn on one of its pages. Props come from the conditions the scan traced (`open && …` gets `open: true`). Only for apps dsa starts itself with Vite. |
+| Drawn direct from code | The element's own JSX as plain markup, shown on one of the app's pages so its style sheets apply. No app code runs. |
+
+A drawing is shown so the reviewer can see roughly what the element is. It is not a photo of the app, so it
+never counts as evidence that a person can see the element: the trust checks and the confidence cap treat
+it as "no photo". The element still reads as not found in the app, and it's looked for again when its file
+or the app's setup changes. Set `shots.draw: false` to turn drawings off.
+
 ## `host`: how the dashboard is hosted
 
 There are two hosting modes, sharing one dashboard.

@@ -81,7 +81,7 @@ const button = (scope: ParentNode, text: RegExp) => [...scope.querySelectorAll("
 test("each photo is labelled: in the app, which app, file:line, match", async () => {
   await mount()
   const panes = [...card("Ghost buttons").querySelectorAll('[data-pane="app"]')].map(p => p.textContent)
-  expect(panes).toEqual(["In the appledgersrc/Toolbar.tsx:4match 100%", "In the appatlassrc/Bar.tsx:4match 100%"])
+  expect(panes).toEqual(["Live app screenshotledgersrc/Toolbar.tsx:4match 100%", "Live app screenshotatlassrc/Bar.tsx:4match 100%"])
   expect(m.CARD.photoLabels).toBe(true)
 })
 
@@ -143,7 +143,7 @@ test("the zoom view says how the element was revealed once, and proposes what th
   await mount()
   await click(card("Ghost buttons").querySelector('[data-pane="app"] button')!)
   const d = document.querySelector('[role="dialog"]')!
-  expect(d.textContent).toContain("In the app · ledger · match 100% · after opening “Filters”")
+  expect(d.textContent).toContain("Live app screenshot · ledger · match 100% · after opening “Filters”")
   expect(d.textContent).not.toContain("opening “opening")
   expect(d.textContent).toContain("Proposed · Acme Button · variant ghost")
   expect([...d.querySelectorAll("img")].map(i => i.getAttribute("src"))).toEqual(["shots/b1.png", "rendered/ghost.png"])
@@ -153,7 +153,7 @@ test("one app chosen: its evidence only, and the answer says what else it covers
   m.app.setApp("ledger")
   await mount()
   const c = card("Ghost buttons")
-  expect([...c.querySelectorAll('[data-pane="app"]')].map(p => p.textContent)).toEqual(["In the appledgersrc/Toolbar.tsx:4match 100%"])
+  expect([...c.querySelectorAll('[data-pane="app"]')].map(p => p.textContent)).toEqual(["Live app screenshotledgersrc/Toolbar.tsx:4match 100%"])
   expect(c.textContent).toContain("That includes 1 in atlas, not shown here.")
   // A question is the app's when any of its elements is, not only its first.
   m.app.setApp("atlas")

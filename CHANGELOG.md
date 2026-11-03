@@ -8,6 +8,14 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- Element Review shows every element the best way it can, labelled "Live app screenshot" or "Drawn direct
+  from code". A photo whose element sits under another layer (a toast, a sticky bar) is taken again with
+  that layer hidden, up to three, then put back. An element the crawler can't reach is drawn from the code:
+  its component mounted through the app's own Vite dev server (apps dsa starts), with props that meet its
+  traced conditions, else its own JSX as static markup on one of the app's pages, with the app's styles. A
+  drawing never counts as a photo for the trust rubric or the confidence cap, and the element stays "not
+  found" until it's looked for again. `shots.draw: false` turns drawings off.
+
 - Source tags make Element Review's matches exact. `@snds/dsa/tag` stamps every host JSX element with
   `data-dsa-src="<file>:<line>:<col>"`, the place the scanner records (paths relative to the scan root,
   never absolute). It ships as a Vite plugin (`dsaTag`; Vite, React Router v7, Remix on Vite) and a

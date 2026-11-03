@@ -31,7 +31,8 @@ function evidenceOf(dataDir: string, evals: ElementEval[], threshold: number): E
 /** The element with its scanner score back (a copy). */
 const uncapped = (e: ElementEval): ElementEval => ((e as any).evidenceCap ? { ...e, confidence: (e as any).evidenceCap.from } : e);
 
-const visible = (s: any) => Boolean(s && (s.tagged || (s.matchScore ?? 0) >= PHOTO_MIN_MATCH) && !s.blank && !s.covered);
+// A drawing from the code (shots drawn: mount, markup) is shown on the card but isn't a photo of the app.
+const visible = (s: any) => Boolean(s && !s.drawn && (s.tagged || (s.matchScore ?? 0) >= PHOTO_MIN_MATCH) && !s.blank && !s.covered);
 
 /** What's missing for a person to see this recommendation, in plain words; empty when nothing is. */
 export function evidenceGaps(e: ElementEval, ev: Evidence, evals: ElementEval[]): string[] {
@@ -40,7 +41,7 @@ export function evidenceGaps(e: ElementEval, ev: Evidence, evals: ElementEval[])
   // A photo of the element, or of one that looks the same (the card shows one photo per look).
   const sameLook = e.styleSig ? evals.filter((x) => x.styleSig === e.styleSig && x.id !== e.id).some((x) => visible(ev.shots[x.id])) : false;
   if (!visible(own) && !sameLook) {
-    why.push(!own ? 'there is no photo of it in the app'
+    why.push(!own || own.drawn ? 'there is no photo of it in the app'
       : own.blank ? "its photo shows nothing (it may need a state the crawler couldn't set)"
       : own.covered ? 'something else covers it in its photo'
       : 'its photo may be a different element');

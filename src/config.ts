@@ -322,6 +322,7 @@ export const ConfigSchema = z
         maxMinutes: z.number().min(0).optional(),
         maxAgeDays: z.number().min(0).optional(),
         waitMs: z.number().int().min(0).optional(),
+        draw: z.boolean().optional().describe("Draw elements that can't be photographed direct from their code (default true). Drawings are labelled and never count as a photo."),
       })
       .optional()
       .describe("App screenshots for element review (the review add-on)."),
