@@ -170,6 +170,44 @@ in), the element still reads as not found live, and it's looked for live again w
 setup changes. Markup only is a sketch: shown so a reviewer knows roughly what the element is, never
 counted. Set `shots.draw: false` to turn drawings off.
 
+### Apps that keep their sign-in in memory (OIDC, PKCE)
+
+`dsa login` saves cookies, local storage, and the app's session storage. Many single-page apps
+signed in with OpenID Connect (for example through Keycloak, with PKCE) keep their tokens only in
+memory. Then the saved file holds just the identity provider's session, and every fresh page opens
+signed out on the app's sign-in page. If that page has one button that signs you in, tell dsa:
+
+```json
+{
+  "live": {
+    "apps": {
+      "ledger": {
+        "url": "https://ledger.example.com/",
+        "auth": ".dsa/auth/ledger.json",
+        "signIn": { "path": "/login", "click": "Sign in with Acme ID" },
+        "readPaths": ["/record-service/**", "/schema-registry/**"]
+      }
+    }
+  }
+}
+```
+
+- **`signIn`**: when a page lands on `path`, the crawler clicks the button or link named `click` (its
+  accessible name). With the identity provider's saved session, that signs in without a password. It
+  happens once per browser. The crawler then moves inside the app without reloading, so the tokens
+  in memory survive. If the identity provider asks for a password instead, the saved sign-in expired:
+  `dsa shots` says so. Run `dsa login` again.
+- **`idp`** (optional, in `signIn`): the identity provider's origin. Without it, dsa takes it from
+  the sign-in redirect.
+- **`readPaths`**: data paths the crawler may read (GET), as globs on the app's origin, or as full
+  URLs for another host. Without them it reads only the app's pages, plus `/api/` when `readApi` is on.
+
+The crawler stays read-only. It never writes to the app: every POST, PUT, PATCH and DELETE is
+stopped. At the identity provider, it reads, and posts only to its token endpoint, which is how the
+app exchanges its sign-in code. What was let through and what was stopped is logged by method and
+path. Query strings, bodies, codes and tokens are never logged or stored outside the saved sign-in
+file, and that file is written at mode 600.
+
 ## `host`: how the dashboard is hosted
 
 There are two hosting modes, sharing one dashboard.
