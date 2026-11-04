@@ -36,8 +36,11 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   the root's state (a nav value, a setup flag) again on each one, though that shows the same thing on
   every page; on a large app pass 1 ran out of time with most pages unvisited. It now runs after pass 1,
   in its own share of the time left (30%), and tries each combination once per run, on the first page
-  where all its levels could be set (pages that show its outermost component first, up to 6). The log
-  says how many were tried and how many weren't on any page tried.
+  where all its levels could be set. A combination set in full that finds nothing gets up to 3 more
+  pages, ranked by whether they show the missing elements' own files (or files near them): the outermost
+  component is often the root, on every page. One whose component isn't on any page tried is set after
+  the state that first showed that component's file (a nav value that renders the view it's in), in one
+  go, and the log says which. Each miss's line now says which page showed its own file, or that none did.
 - Live photos no longer depend on page order. Traced openers ("Edit Image", "Add") were replayed at most
   40 times per app run, so in a large app the order of pages decided which got replayed. Any change to
   what was still missing could push one past the limit. Now each page gets up to 12 replays,

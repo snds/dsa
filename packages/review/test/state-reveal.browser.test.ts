@@ -99,9 +99,9 @@ test("an app that navigates by its root's state: each level set, outermost first
   assert.match(all, /after setting setupTakeover = false, activeNav = "Partners", open = true/);
 });
 
-// The same root on two routes: its state shows the same thing on both, so each combination is tried once
-// per run, not once per page.
-test("root state is set once per run, not on every page", { timeout: 300_000 }, async ({ skip }) => {
+// The same root on two routes: its state shows the same thing on both, so a combination that found what it
+// hides isn't set again. One that found none (a prop only /settings passes) gets another page.
+test("root state is set once when it finds what it hides, and on another page when it finds none", { timeout: 300_000 }, async ({ skip }) => {
   if (!browser) skip('no headless browser (run dsa setup)');
   const kit = path.resolve(import.meta.dirname, '../../dashboard/ui/node_modules');
   if (!fs.existsSync(path.join(kit, 'vite')) || !fs.existsSync(path.join(kit, 'react'))) skip('no Vite installed');
@@ -112,7 +112,8 @@ test("root state is set once per run, not on every page", { timeout: 300_000 }, 
     'src/main.jsx': `import { createRoot } from 'react-dom/client';\nimport { routes } from './routes.jsx';\nconst R = routes.find(r => r.path === location.pathname) ?? routes[0];\ncreateRoot(document.getElementById('root')).render(<R.Component />);\n`,
     // One the state can't show (a count that's never above 3): still missing after the set, not tried again.
     'src/PartnersView.jsx': `import { useState } from 'react';\nexport function PartnersView() {\n  const [open, setOpen] = useState(false);\n  const count = 0;\n  return <section><h1>Partners</h1>\n    {open && <div>\n      <button className="btn">Add facility</button>\n    </div>}\n    {open && count > 3 && <div>\n      <button className="btn">Merge facilities</button>\n    </div>}</section>;\n}\n`,
-    'src/routes.jsx': `import { App } from './App.jsx';\nexport const routes = [\n  { path: '/home', Component: App },\n  { path: '/settings', Component: App },\n];\n`,
+    'src/App.jsx': NAV['src/App.jsx']!.replace('export function App() {', 'export function App({ extra }) {').replace("{activeNav === 'Partners' && <PartnersView />}", "{activeNav === 'Partners' && <PartnersView />}\n    {activeNav === 'Materials' && extra && <div>\n      <button className=\"btn\">Filter bar</button>\n    </div>}"),
+    'src/routes.jsx': `import { App } from './App.jsx';\nfunction Extra() { return <App extra />; }\nexport const routes = [\n  { path: '/home', Component: App },\n  { path: '/settings', Component: Extra },\n];\n`,
   };
   for (const [f, c] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }); fs.writeFileSync(path.join(dir, f), c); }
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'twice', private: true, type: 'module', scripts: { dev: 'vite' }, dependencies: { '@acme/ds-react': '^4.9.0', react: '^18.3.0' } }));
@@ -121,7 +122,8 @@ test("root state is set once per run, not on every page", { timeout: 300_000 }, 
   await runPipeline({ root, dataDir: data, git: false, now: NOW });
   const { evals } = await latestEvals(data);
   const target = evals.find(e => e.file.endsWith('PartnersView.jsx') && e.match.text === 'Add facility');
-  assert.ok(target);
+  const bar = evals.find(e => e.file.endsWith('App.jsx') && e.match.text === 'Filter bar');
+  assert.ok(target && bar, evals.map(e => `${e.file}:${e.line} ${e.match.text}`).join('\n'));
   const logs: string[] = [];
   const config = loadConfig(root).config as any;
   config.shots = { ...(config.shots ?? {}), maxMinutes: 2, waitMs: 200 };
@@ -129,10 +131,14 @@ test("root state is set once per run, not on every page", { timeout: 300_000 }, 
   const idx = JSON.parse(fs.readFileSync(path.join(data, 'shots', 'index.json'), 'utf8'));
   const all = logs.join('\n');
   assert.ok(idx.shots[target!.id] && !idx.shots[target!.id].drawn, all);
-  // Both pages visited; the combination set on one of them only, though one it hides is still missing.
-  assert.match(all, /\/settings/);
-  assert.ok(logs.filter(l => /state on \//.test(l)).length === 1, all);
-  assert.match(all, /state: \d+ combinations? tried, once each/);
+  assert.ok(idx.shots[bar!.id] && !idx.shots[bar!.id].drawn, all);
+  // The Partners combination found its element on the first page and wasn't set again, though one it hides is still missing.
+  assert.equal(logs.filter(l => /state on \/.*activeNav = "Partners"/.test(l)).length, 1, all);
+  assert.equal((all.match(/activeNav = "Partners", open = true: found/g) ?? []).length, 1, all);
+  // The Materials one found none on /home and was set again on /settings.
+  assert.match(all, /state on \/(home)?: .*activeNav = "Materials": found 0/);
+  assert.match(all, /state on \/settings: .*activeNav = "Materials": found 1/);
+  assert.match(all, /state: \d+ combinations? tried/);
 });
 
 // A modal a custom hook renders (useDetailImages returns JSX), shown once the hook's own state is set; the
@@ -169,4 +175,41 @@ test("a modal a custom hook renders: the hook's state is set in the component th
   const all = logs.join('\n');
   assert.ok(idx.shots[target!.id] && !idx.shots[target!.id].drawn, `${JSON.stringify(target!.reach?.gates)}\n${all}`);
   assert.match(all, /after setting openColour = true, editor = true/);
+});
+
+// A view the root picks by a nav value through a lookup the scan can't follow: its own state (openColour)
+// can't be set on any page, as ColoursView isn't on one. Another element's state (activeNav = "Colours")
+// shows ColoursView's file, so openColour is set after it, in one go.
+const PICKED: Record<string, string> = {
+  'index.html': APP['index.html']!,
+  'public/app.css': APP['public/app.css']!,
+  'vite.config.js': APP['vite.config.js']!,
+  'src/main.jsx': `import { createRoot } from 'react-dom/client';\nimport { App } from './App.jsx';\ncreateRoot(document.getElementById('root')).render(<App />);\n`,
+  'src/views.js': `import { ColoursView } from './ColoursView.jsx';\nexport const VIEWS = { Colours: ColoursView };\n`,
+  'src/App.jsx': `import { useState } from 'react';\nimport { VIEWS } from './views.js';\nexport function App() {\n  const [activeNav, setActiveNav] = useState('Home');\n  const View = VIEWS[activeNav];\n  return <main><nav>{activeNav}</nav>\n    {activeNav === 'Colours' && <div>\n      <button className="btn">Colours help</button>\n    </div>}\n    {View ? <View /> : <p>Home</p>}</main>;\n}\n`,
+  'src/ColoursView.jsx': `import { useState } from 'react';\nexport function ColoursView() {\n  const [openColour, setOpenColour] = useState(null);\n  return <section><h1>Colours</h1>\n    {openColour && <div role="dialog">\n      <button className="btn">Edit image</button>\n    </div>}</section>;\n}\n`,
+};
+
+test("a view only the root's state shows: its own state is set after the root's, in one go", { timeout: 300_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  const kit = path.resolve(import.meta.dirname, '../../dashboard/ui/node_modules');
+  if (!fs.existsSync(path.join(kit, 'vite')) || !fs.existsSync(path.join(kit, 'react'))) skip('no Vite installed');
+  const root = fixtureCopy();
+  const dir = path.join(root, 'apps', 'picked');
+  for (const [f, c] of Object.entries(PICKED)) { fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }); fs.writeFileSync(path.join(dir, f), c); }
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'picked', private: true, type: 'module', scripts: { dev: 'vite' }, dependencies: { '@acme/ds-react': '^4.9.0', react: '^18.3.0' } }));
+  fs.symlinkSync(kit, path.join(dir, 'node_modules'), 'dir');
+  const data = path.join(root, '.dsa');
+  await runPipeline({ root, dataDir: data, git: false, now: NOW });
+  const { evals } = await latestEvals(data);
+  const target = evals.find(e => e.file.endsWith('ColoursView.jsx') && e.match.text === 'Edit image');
+  assert.ok(target, evals.map(e => `${e.file}:${e.line} ${e.match.text}`).join('\n'));
+  const logs: string[] = [];
+  const config = loadConfig(root).config as any;
+  config.shots = { ...(config.shots ?? {}), maxMinutes: 2, waitMs: 200 };
+  await takeShots({ root, dataDir: data, config, target: 'picked', perGroup: 20, log: m => logs.push(m) });
+  const idx = JSON.parse(fs.readFileSync(path.join(data, 'shots', 'index.json'), 'utf8'));
+  const all = logs.join('\n');
+  assert.ok(idx.shots[target!.id] && !idx.shots[target!.id].drawn, `${JSON.stringify(target!.reach?.gates)}\n${all}`);
+  assert.match(all, /ColoursView shows after activeNav = "Colours"\): found 1/);
 });

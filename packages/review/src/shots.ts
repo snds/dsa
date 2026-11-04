@@ -300,7 +300,8 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
         if (!e) continue;
         const gates = (e.reach?.gates ?? []).map((g: any) => `${g.component ? g.component + ': ' : ''}${g.negated ? 'not ' : ''}“${String(g.test).slice(0, 60)}”`).join(', ');
         const rs = s.reach?.byId[id];
-        log(`    ${id} (${e.file}:${e.line}) · ${r.why[id] ?? (r.shots[id]?.drawn ? `drawn (${r.shots[id].drawn})` : 'no reason recorded')}${gates ? ` · when ${gates}` : ''} · ${rs === undefined ? 'routes unknown' : rs.length ? `routes ${rs.slice(0, 4).join(', ')}${rs.length > 4 ? ` +${rs.length - 4}` : ''}` : 'no route renders its file'}`);
+        const on = r.fileOn?.[id];
+        log(`    ${id} (${e.file}:${e.line}) · ${r.why[id] ?? (r.shots[id]?.drawn ? `drawn (${r.shots[id].drawn})` : 'no reason recorded')}${gates ? ` · when ${gates}` : ''}${on === undefined ? '' : on ? ` · its file showed on ${on}` : ' · its file showed on no page visited'} · ${rs === undefined ? 'routes unknown' : rs.length ? `routes ${rs.slice(0, 4).join(', ')}${rs.length > 4 ? ` +${rs.length - 4}` : ''}` : 'no route renders its file'}`);
       }
       index.missing.push(...r.missing);
       index.pages.push(...r.pages);
@@ -463,6 +464,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   const note = (r: Target, t: string) => { r.tried ??= []; if (!r.tried.includes(t) && r.tried.length < 12) r.tried.push(t); };
   const stepName = (x: { label: string; event: string; value?: string | undefined }) => (x.event === 'choose' && x.value ? `“${x.value}” in ${x.label ? `“${x.label}”` : 'a list'}` : x.label ? `“${x.label}”` : 'an unlabelled control');
   const why: Record<string, string> = {};
+  const fileOn: Record<string, string> = {};
   const reasonOf = (r: Target): string => {
     const rs = r.routes;
     if (rs && !rs.length) return 'no route reaches its file';
@@ -867,13 +869,15 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     if (remaining.length && !signedOut() && !isBroken()) await stateAndSearch();
     // Why each one still missing wasn't photographed, in plain words, before any is drawn.
     for (const r of remaining) why[r.id] = reasonOf(r);
+    // Whether its own file showed on a page visited: a miss on a page reached, or one on a page never reached.
+    for (const r of remaining) fileOn[r.id] = pages.find(u => shown.get(u)?.has(r.e.file)) ?? '';
     if (remaining.length && o.draw && pages.length && !signedOut() && !isBroken()) await drawRest(o.draw, pages[0]!);
     if ((net.blocked || Object.keys(net.allowed).length) && !signedOut() && !isBroken()) o.log(`  network: ${describeNetwork(net, base.origin)}`);
     if (remaining.length && Date.now() >= deadline) o.log(`  time budget (shots.maxMinutes) used up with ${remaining.length} still to find: results can differ between runs; raise shots.maxMinutes for the same result each time.`);
   } finally {
     await browser.close().catch(() => {});
   }
-  return { shots, pages, missing: [...remaining.map(r => r.id), ...drawnIds], drawn: drawnIds.length, why, tried: Object.fromEntries(everyone.filter(r => r.tried?.length).map(r => [r.id, r.tried!])), tagged: { pages: taggedPages, of: pages.length }, ...(signedOut() || auth.expired ? { signIn: wall.at || o.url } : {}), ...(auth.expired ? { expired: true } : {}), ...(isBroken() ? { broken: broken.first } : {}) };
+  return { shots, pages, missing: [...remaining.map(r => r.id), ...drawnIds], drawn: drawnIds.length, why, fileOn: Object.fromEntries(Object.entries(fileOn).map(([k, u]) => [k, u && routeOf(u)])), tried: Object.fromEntries(everyone.filter(r => r.tried?.length).map(r => [r.id, r.tried!])), tagged: { pages: taggedPages, of: pages.length }, ...(signedOut() || auth.expired ? { signIn: wall.at || o.url } : {}), ...(auth.expired ? { expired: true } : {}), ...(isBroken() ? { broken: broken.first } : {}) };
 
   /** A page that renders this element: a route the scan says renders its file (one with a value found, if it needs one), else the first page. */
   function pageFor(r: Target): string | undefined {
@@ -952,11 +956,12 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
 
   /**
    * Live, after pass 1: elements behind a component's own state ("when openColour", "mode === 'current'") are
-   * shown by setting that state through React, level by level, outermost first, and looked for. Each
-   * combination once per run, on the first page where all its levels could be set: the root's state shows
-   * the same thing on every page (a nav value overrides the route), so trying it again repeats the first.
-   * Pages that show the outermost component's file go first; a combination whose component isn't on a page
-   * tries the next, up to 6 pages. Its own time share (30% of what's left), so the route crawl comes first.
+   * shown by setting that state through React, level by level, outermost first, and looked for. Pages that
+   * show the missing elements' own files (or files near them) go first, then the outermost component's. A
+   * combination set in full on a page that finds nothing gets up to 3 more pages; one whose component isn't
+   * on any page waits until the others ran, then is tried after the state that first showed its component's
+   * file (a root nav value that renders the view it's in), in one go. Its own time share (30% of what's
+   * left), so the route crawl comes first.
    */
   async function stateReveal() {
     if (!o.draw?.root || !pages.length) return;
@@ -973,47 +978,93 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     if (!groups.size) return;
     const said = new Map<string, string[]>();
     const say = (u: string, m: string) => said.set(u, [...(said.get(u) ?? []), m]);
+    // Files a set showed that its page didn't: the state that renders a component, for one whose component wasn't on any page.
+    const opens = new Map<string, { u: string; sets: StateSet[] }>();
+    const visit = async (u: string) => {
+      const same = page.url().split('#')[0] === u.split('#')[0];
+      await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+      if (same) await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+      await page.waitForTimeout(o.waitMs); await settle();
+    };
+    const setAll = async (sets: StateSet[], sweep: (by?: string) => Promise<void>, before: StateSet[] = []) => {
+      const done: StateSet[] = [];
+      for (const one of sets) {
+        const n = await inPage<number>(page, SET_STATE, { sets: [one] }).catch(() => 0);
+        if (!n) break;
+        done.push(one);
+        await page.waitForTimeout(o.waitMs); await settle();
+        if (before.length + sets.length > 1) await sweep(`setting ${describeSets([...before, ...done])}`);
+      }
+      return done;
+    };
+    const learn = async (u: string, done: StateSet[]) => {
+      const now: string[] = await page.evaluate(SHOWN_FILES).catch(() => []);
+      const had = shown.get(u);
+      for (const f of now) if (!had?.has(f) && !opens.has(f)) opens.set(f, { u, sets: done });
+    };
+    const near = (r: Target) => [r.e.file, ...(o.reach?.near?.[r.id] ?? [])];
     let combos = 0, absent = 0;
+    const later: { sets: StateSet[]; mine: Target[]; at: string[] }[] = [];
     for (const g of [...groups.values()].sort((a, b) => b.mine.length - a.mine.length)) {
       if (!remaining.length || Date.now() >= stop) break;
       if (!g.mine.some(r => remaining.includes(r))) continue;
       const what = describeSets(g.sets);
       const first = g.sets[0]!.file;
-      const at = [...pages.filter(u => shown.get(u)?.has(first)), ...pages.filter(u => !shown.get(u)?.has(first))].slice(0, 6);
-      let reached = false;
+      const score = (u: string) => {
+        const f = shown.get(u);
+        if (!f) return 0;
+        return 2 * g.mine.filter(r => remaining.includes(r) && near(r).some(x => f.has(x))).length + (f.has(first) ? 1 : 0);
+      };
+      // Two pages when none showed its outermost component: likely not there; it waits for the state that shows it.
+      const anyShows = pages.some(u => shown.get(u)?.has(first));
+      const at = pages.map((u, i) => ({ u, i, s: score(u) })).sort((a, b) => b.s - a.s || a.i - b.i).map(x => x.u).slice(0, anyShows ? 8 : 2);
+      let reached = false, full = 0;
+      combos++;
       for (const u of at) {
-        if (Date.now() >= stop) break;
-        const same = page.url().split('#')[0] === u.split('#')[0];
-        await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-        if (same) await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-        await page.waitForTimeout(o.waitMs); await settle();
+        if (Date.now() >= stop || full >= 4 || !g.mine.some(r => remaining.includes(r))) break;
+        await visit(u);
         const sweep = sweeper(u);
-        const done: StateSet[] = [];
-        for (const one of g.sets) {
-          const n = await inPage<number>(page, SET_STATE, { sets: [one] }).catch(() => 0);
-          if (!n) break;
-          done.push(one);
-          await page.waitForTimeout(o.waitMs); await settle();
-          if (g.sets.length > 1) await sweep(`setting ${describeSets(done)}`);
-        }
+        const before = g.mine.filter(r => remaining.includes(r)).length;
+        const done = await setAll(g.sets, sweep);
         if (!done.length) continue;
         reached = true;
         if (g.sets.length === 1) await sweep(`setting ${what}`);
+        await learn(u, done);
         const missed = g.sets.slice(done.length).map(x => x.component);
-        const found = g.mine.length - g.mine.filter(r => remaining.includes(r)).length;
+        const found = before - g.mine.filter(r => remaining.includes(r)).length;
         say(u, `${what}: found ${found}${missed.length ? ` (${missed.join(' › ')} didn't show after the levels above were set)` : ''}`);
         for (const r of g.mine) if (remaining.includes(r)) note(r, `set ${what} on ${routeOf(u)}: still not shown`);
-        // Every level set: another page shows the same. Stopped partway: the next page may render the rest.
-        if (!missed.length) break;
+        // Every level set and something found: another page shows the same. Found none: up to 3 more pages.
+        if (!missed.length && (found || ++full >= 4)) break;
       }
-      combos++;
-      if (!reached) {
+      if (!reached) later.push({ ...g, at });
+    }
+    // Its component on no page tried: after the state that first showed that component's file, in one go.
+    for (const g of later) {
+      if (!remaining.length || Date.now() >= stop) break;
+      if (!g.mine.some(r => remaining.includes(r))) continue;
+      const what = describeSets(g.sets);
+      const { component, file } = g.sets[0]!;
+      const via = opens.get(file);
+      if (!via) {
         absent++;
-        for (const r of g.mine) if (remaining.includes(r)) note(r, `set ${what}: its component wasn't on any page tried (${at.map(routeOf).join(', ')})`);
+        o.log(`  state: ${component} (${file}) showed on no page visited and after no state set, so ${what} wasn't set`);
+        for (const r of g.mine) if (remaining.includes(r)) note(r, `set ${what}: ${component} wasn't on any page tried (${g.at.map(routeOf).join(', ')}) nor shown by any state set`);
+        continue;
       }
+      await visit(via.u);
+      const sweep = sweeper(via.u);
+      const pre = await setAll(via.sets, sweep);
+      if (pre.length < via.sets.length) { absent++; continue; }
+      const done = await setAll(g.sets, sweep, pre);
+      const all = describeSets([...pre, ...g.sets]);
+      if (!done.length) { absent++; say(via.u, `${all}: ${component} didn't show`); continue; }
+      const found = g.mine.length - g.mine.filter(r => remaining.includes(r)).length;
+      say(via.u, `${all} (${component} shows after ${describeSets(pre)}): found ${found}${done.length < g.sets.length ? ` (${g.sets.slice(done.length).map(x => x.component).join(' › ')} didn't show)` : ''}`);
+      for (const r of g.mine) if (remaining.includes(r)) note(r, `set ${all} on ${routeOf(via.u)}: still not shown`);
     }
     for (const [u, m] of said) o.log(`  state on ${u.replace(base.origin, '')}: ${m.join('; ')}`);
-    o.log(`  state: ${combos} combination${combos === 1 ? '' : 's'} tried, once each${absent ? `, ${absent} whose component wasn't on any page tried` : ''}${groups.size > combos ? `, ${groups.size - combos} not tried (its time share ran out)` : ''}`);
+    o.log(`  state: ${combos} combination${combos === 1 ? '' : 's'} tried${later.length ? `, ${later.length} whose component wasn't on the pages tried (${later.length - absent} set after the state that shows it)` : ''}${groups.size > combos ? `, ${groups.size - combos} not tried (its time share ran out)` : ''}`);
   }
 
   /**
