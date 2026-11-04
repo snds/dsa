@@ -8,7 +8,7 @@ import { ACME_PROFILE, NOW, fixtureCopy, runPipeline, tmp } from '../../../test/
 import { loadConfig as loadDsaConfig } from '../../../src/config.js';
 import { engineConfig } from '../../../src/engine/from-dsa.js';
 import { bench, benchText, correctness, predictionsOf, repeatability, type Prediction } from '../src/bench.js';
-import { historyLabels, migratedLabels, reviewQueue } from '../src/labels.js';
+import { historyLabels, migratedLabels, reviewQueue, sourceFiles } from '../src/labels.js';
 import { lowerBound, wilson } from '../src/stats.js';
 import { payloadOf } from '../src/bench-cli.js';
 import { renderReport } from '../src/report.js';
@@ -47,6 +47,12 @@ test('an acceptable alternative is right; matching falls back to app, file and l
   const l = label('x', 'Toggle', {}, { id: 'L-x', acceptableAlts: [{ use: 'Button', props: { variant: 'ghost' } }] });
   assert.equal(correctness([l], [pred('E-1', 'Button', 0.95, { variant: 'ghost' }, { file: 'ledger/src/x.tsx' })]).right, 1);
   assert.equal(correctness([l], [pred('E-1', 'Button', 0.95, { variant: 'outline' }, { file: 'ledger/src/x.tsx' })]).wrong, 1);
+});
+
+test('a label naming any line of a multi-line opening tag matches it; a line past the tag does not', () => {
+  const p = pred('E-1', 'Button', 0.95, {}, { file: 'ledger/src/x.tsx', line: 10, openEndLine: 13 });
+  assert.equal(correctness([label('x', 'Button', {}, { id: 'L-x', line: 12 })], [p]).right, 1);
+  assert.equal(correctness([label('x', 'Button', {}, { id: 'L-x', line: 14 })], [p]).matched, 0);
 });
 
 test('coverage at 99% precision, the reliability curve in 0.05 bins and its calibration error', () => {
@@ -119,6 +125,15 @@ test('the review queue: disagreements, plus a seeded audit of the rest; people a
   assert.ok(!q.items.some((x) => x.id === 'e7'));
   assert.ok(q.audited > 0 && q.audited < 12, `about a tenth of 37 (${q.audited})`);
   assert.deepEqual(reviewQueue({ labels, payload: p, judge, audit: 0.1, seed: 's1' }).items, q.items, 'the same seed, the same audit');
+});
+
+test('migrated labels never come from vendored copies or non-product files (the scanner skips them)', () => {
+  const dir = tmp();
+  for (const f of ['src/App.tsx', 'src/Panel.jsx', 'vendor/kit/src/Button.tsx', 'stories/review/specs.tsx', 'docs/page.tsx', 'src/demo/Try.tsx', 'src/api.stub.tsx', 'src/App.test.tsx', 'src/x.stories.tsx']) {
+    fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
+    fs.writeFileSync(path.join(dir, f), 'export {}\n');
+  }
+  assert.deepEqual(sourceFiles(dir), ['src/App.tsx', 'src/Panel.jsx']);
 });
 
 test('migrated labels: components stripped back to markup in a copy, then scanned and benched', async () => {

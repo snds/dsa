@@ -29,6 +29,8 @@ export interface Prediction {
   verdict: string;
   use: string | null;
   props: Record<string, string>;
+  /** The line its opening tag ends on, when the tag spans lines (a label may name any line of it). */
+  openEndLine?: number | undefined;
   /** The scanner's confidence, before the evidence cap. */
   confidence: number;
   /** The confidence the card shows (after the cap): what decides "ready" on the page. */
@@ -56,7 +58,7 @@ export function predictionsOf(payload: any): Prediction[] {
     const r = proposes.get(e.id) ?? e;
     // The scanner's own score, before the evidence cap: the cap holds a card under the bar until a person
     // can see it, which is presentation. Scoring correctness on the capped number would merge the two.
-    return { id: e.id, target: e.target, file: e.file, line: e.line, verdict: r?.verdict ?? e.verdict, use: r?.use ?? null, props: norm(r?.props), confidence: e.evidenceCap?.from ?? e.confidence, shown: e.confidence, source: sourceOf(e.shot) };
+    return { id: e.id, target: e.target, file: e.file, line: e.line, ...(e.openEndLine > e.line ? { openEndLine: e.openEndLine } : {}), verdict: r?.verdict ?? e.verdict, use: r?.use ?? null, props: norm(r?.props), confidence: e.evidenceCap?.from ?? e.confidence, shown: e.confidence, source: sourceOf(e.shot) };
   });
 }
 
@@ -68,13 +70,16 @@ export function isCorrect(l: Label, p: Prediction): boolean {
   return l.acceptableAlts.some((a) => a.use === p.use && (a.props === undefined || sameProps(p.props, a.props)));
 }
 
-/** The prediction a label is about: by id, else by app, file and line (either path may carry a leading folder the other doesn't). */
+/** The prediction a label is about: by id, else by app, file and line (either path may carry a leading folder the other doesn't), or any line of a multi-line opening tag. */
 export function matchLabels(labels: Label[], preds: Prediction[]): { label: Label; pred: Prediction | null }[] {
   const byId = new Map(preds.map((p) => [p.id, p]));
   const byLine = new Map<string, Prediction[]>();
   for (const p of preds) byLine.set(`${p.target}\u0001${p.line}`, [...(byLine.get(`${p.target}\u0001${p.line}`) ?? []), p]);
   const sameFile = (a: string, b: string) => a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`);
-  return labels.map((label) => ({ label, pred: byId.get(label.id) ?? (byLine.get(`${label.app}\u0001${label.line}`) ?? []).find((p) => sameFile(p.file, label.file)) ?? null }));
+  // A multi-line opening tag: the label may name any line of it, not only the first.
+  const spanning = preds.filter((p) => p.openEndLine !== undefined && p.openEndLine > p.line);
+  const inSpan = (label: Label) => spanning.find((p) => p.target === label.app && label.line > p.line && label.line <= p.openEndLine! && sameFile(p.file, label.file));
+  return labels.map((label) => ({ label, pred: byId.get(label.id) ?? (byLine.get(`${label.app}\u0001${label.line}`) ?? []).find((p) => sameFile(p.file, label.file)) ?? inSpan(label) ?? null }));
 }
 
 export interface RateCI { n: number; k: number; rate: number | null; ci: [number, number] }

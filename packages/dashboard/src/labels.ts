@@ -11,9 +11,14 @@ import { isCorrect, matchLabels, predictionsOf } from './bench.js';
  * reading). Every file it writes goes where it is told, never into the apps it reads.
  */
 
-/** Folders and files a label is never about: build output, tests, stories, fixtures. */
-const SKIP_DIRS = /^(node_modules|\.git|dist|build|\.next|coverage|__tests__|__mocks__|fixtures|test|tests)$/;
-const SKIP_FILES = /\.(test|spec|stories)\.[jt]sx$/;
+/**
+ * Folders and files a label is never about: build output, vendored copies of other code, and what isn't
+ * product code. The non-product part is a local copy of the engine scanner's list (NON_PRODUCT in
+ * src/model/extract.ts on the engine branch): tests, stories, examples, demos, fixtures, mocks, stubs and
+ * docs. Keep the two in step: a label in a file the scanner skips can never be matched.
+ */
+const SKIP_DIRS = /^(node_modules|\.git|dist|build|\.next|coverage|vendor|__tests__|__mocks__|__fixtures__|fixtures|test|tests|stories|examples?|demos?|playgrounds?|stubs|__stubs__|docs)$/;
+const SKIP_FILES = /\.(test|spec|stories|stub)\.[cm]?[jt]sx?$/;
 
 /** The app's .tsx and .jsx files, relative to it. */
 export function sourceFiles(dir: string, rel = ''): string[] {

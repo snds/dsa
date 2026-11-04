@@ -61,6 +61,11 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- `dsa labels migrated` labelled vendored copies of other code (`vendor/`) and non-product files (stories
+  folders, examples, demos, stubs, docs) that the scanner never reads, so those labels could never match.
+  It now skips them, keeping a local copy of the engine scanner's list.
+- `dsa bench` matched a label only on the first line of an element. A label may now name any line of a
+  multi-line opening tag (`openEndLine`, when the scan records it).
 - The trust rubric counted one problem several times and assumed what the card shows. It now has
   eleven checks, each a pass, a fail or not applicable, and a check that needs another doesn't apply
   when that one fails: "current element shown" replaces C1/C2/C3/C6, so a missing photo counts once.
