@@ -6,6 +6,7 @@ import { appSettings, lookalikeMap, readExceptions, type Config } from './config
 import { refineWithTypes } from './typecheck.js';
 import { buildPrecedent, type PrecedentIndex } from './precedent.js';
 import { readAliases } from './modules.js';
+import { applyLabels, readLabels } from './labels.js';
 import type { CodeScanResult } from './scanners/code.js';
 import { defaultExcludes, globMatch, targetRelative } from './paths.js';
 import type { Store, StoreFactory } from './store.js';
@@ -92,7 +93,8 @@ export interface RunOptions {
   log?: (msg: string) => void | undefined;
   /** false = skip the profile's agent-readiness provider. */
   readiness?: boolean | undefined;
-
+  /** A labels.jsonl to calibrate confidence on (labels.ts). Overrides the config's recommend.labels. */
+  labels?: string | undefined;
   /**
    * The dsa config: when given, instances come from the system model (every framework and markup
    * the model reads) instead of the engine's code scanner. Look-alikes and element review still come
@@ -264,6 +266,8 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
     await store.insertMany('instances', ['run_id', 'target', 'library', 'pkg', 'component', 'file', 'line', 'framework', 'overrides'], data.instances.map(i => [runId, i.target, i.library, i.pkg, i.component, i.file, i.line, i.framework, i.overrides.join(',')]));
     await store.insertMany('lookalikes', ['run_id', 'target', 'element', 'component', 'file', 'line'], data.lookalikes.map(l => [runId, l.target, l.element, l.component, l.file, l.line]));
     await store.insertMany('tokens', ['run_id', 'target', 'file', 'raw_values', 'token_refs', 'is_new'], data.tokens.map(t => [runId, t.target, t.file, t.rawValues, t.tokenRefs, t.isNew]));
+    // Confidence is measured precision where labels exist (labels.ts); otherwise it says it's uncalibrated.
+    calibrateOnLabels(evals, config, opts.labels, opts.configDir ?? opts.root, threshold, notes);
     // Nothing is "ready" that a person can't see: no photo or no exact render keeps it under the bar (evidence-cap.ts).
     applyEvidenceCap(opts.dataDir, evals, threshold);
     await store.insertMany('element_evals', ['run_id', 'id', 'target', 'file', 'line', 'element', 'role', 'verdict', 'use_component', 'confidence', 'needs_human', 'exception', 'decided', 'data'],
@@ -325,6 +329,7 @@ export async function reevaluateElements(opts: { root: string; dataDir: string; 
     const before = new Map((await store.all<any>('select id, data from element_evals where run_id=$1', [runId])).map(r => { const d = typeof r.data === 'string' ? JSON.parse(r.data) : r.data; return [r.id, `${d.role}|${d.use}|${JSON.stringify(d.props ?? {})}`]; }));
     const changed = evals.filter(e => before.has(e.id) && before.get(e.id) !== `${e.role}|${e.use}|${JSON.stringify(e.props ?? {})}`).length;
     await store.exec('delete from element_evals where run_id=$1', [runId]);
+    calibrateOnLabels(evals, config, undefined, opts.configDir ?? opts.root, threshold, []);
     // Nothing is "ready" that a person can't see: no photo or no exact render keeps it under the bar (evidence-cap.ts).
     applyEvidenceCap(opts.dataDir, evals, threshold);
     await store.insertMany('element_evals', ['run_id', 'id', 'target', 'file', 'line', 'element', 'role', 'verdict', 'use_component', 'confidence', 'needs_human', 'exception', 'decided', 'data'],
@@ -332,6 +337,15 @@ export async function reevaluateElements(opts: { root: string; dataDir: string; 
     log(`Re-evaluated ${evals.length} elements with page placement from ${page.size} screenshots: ${changed} recommendation${changed === 1 ? '' : 's'} changed.`);
     return { changed, total: evals.length };
   } finally { store.close(); }
+}
+
+/** Calibrate on the label set, from the option or the config's recommend.labels (relative to the config's folder). */
+function calibrateOnLabels(evals: ElementEval[], config: Config, option: string | undefined, configDir: string, threshold: number, notes: string[]) {
+  const file = option ?? config.recommend?.labels;
+  const read = file ? readLabels(path.resolve(configDir, file)) : { labels: [], skipped: 0 };
+  if (file && !read.labels.length) notes.push(`No labels read from ${file}${read.skipped ? ` (${read.skipped} unreadable lines)` : ''}: confidence stays uncalibrated.`);
+  const r = applyLabels(evals, read.labels, threshold);
+  if (read.labels.length) notes.push(`Labels: ${read.labels.length} read${read.skipped ? `, ${read.skipped} skipped` : ''}, ${r.matched} matched an element; ${r.paths} decision path${r.paths === 1 ? '' : 's'} with a fit of their own.`);
 }
 
 /** The app's own system-component uses and git migrations, to learn from (precedent.ts). */

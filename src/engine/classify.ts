@@ -87,6 +87,8 @@ export interface Evaluation extends Recommendation {
 const LAYOUT = /^(-?translate-|align-|aspect-|min-h-|inline-grid$|outline-hidden$|-?m[trblxy]?-|w-|min-w|max-w|h-full|flex-1|flex-none|shrink|grow|self-|justify-|items-|place-|gap-|inline-flex$|flex$|inline-block$|block$|grid$|relative$|absolute$|fixed$|sticky$|inset|top-|right-|bottom-|left-|z-|overflow-|truncate$|whitespace-|order-|col-|row-|transition|duration-|ease-|focus-visible:|focus:|disabled:|aria-|data-|cursor-|select-none|pointer-events|opacity-50$|sr-only$|group(\/|$)|peer$|text-left$|text-center$|text-right$|leading-|tracking-|font-medium$|outline-none$)/;
 const base = (t: string) => t.replace(/^([a-z-]+:)+/, '');
 
+/** Under this signature fit, confidence is held under the review threshold (review item 20). */
+export const FIT_GATE = 0.4;
 /** Two different components closer than this are a coin toss: abstain rather than pick. */
 export const THIN_MARGIN = 0.02;
 
@@ -164,6 +166,13 @@ export function classify(f: ElementFeatures, map: RoleMap = systemRoleMap(), thr
     confidence = cap;
   }
   const sig = sigInfo.get(top.c);
+  // Fit is a gate, not a footnote: a component that matches under FIT_GATE of the element's measured
+  // properties would change its look too much to ship without a person.
+  if (sig && top.c.verdict === 'replace' && sig.score < FIT_GATE && sig.matched.length + sig.mismatched.length > 0) {
+    const cap = Math.min(confidence, Math.max(0.5, threshold - 0.05));
+    reasons.push({ text: `Fit gate: ${describe(top.c)} matches ${Math.round(sig.score * 100)}% of its look (under ${Math.round(FIT_GATE * 100)}%). A person should confirm the change of look.`, delta: round(cap - confidence) });
+    confidence = cap;
+  }
   // With a signature, differences are named per property against the component; otherwise the unexplained classes.
   const visualDiffs = top.c.verdict !== 'replace' ? [] : sig ? [...sig.mismatched] : visualDifferences(f, top.c);
   if (toneLost(elLook, top.c) && !visualDiffs.some(d => /red/.test(d))) visualDiffs.push(`red ${dangerWords(elLook.danger!)} (danger tone)`);

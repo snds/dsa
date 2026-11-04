@@ -343,6 +343,14 @@ export const ConfigSchema = z
       .object({ figma: z.boolean().optional() })
       .optional()
       .describe("Optional modules. Off modules keep their settings; they just don't run."),
+    recommend: z
+      .object({
+        labels: z.string().optional().describe("A labels.jsonl to calibrate confidence on (one labelled element per line), relative to this file. Without it, confidence is marked uncalibrated."),
+        rules: z.string().optional().describe("Each app's machine-readable design-system rules file (control scale, preferred primitives), relative to the app. Read as hard constraints."),
+        typescript: z.boolean().optional().describe("Resolve spreads, class constants and prop unions with the TypeScript checker and the app's tsconfig (default true; skipped with a note when unavailable)."),
+      })
+      .optional()
+      .describe("How element recommendations are made: labels, the consumer's rules, the type checker."),
     figma: z
       .object({
         teamIds: z.array(z.string()).optional(),

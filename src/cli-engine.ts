@@ -168,7 +168,8 @@ export function addEngineCommands(program: Command, io: CliIo): void {
     .option("--now <iso>", "the run's timestamp (for reproducible runs)")
     .option("--allow-unreleased", "run even when the checkout isn't the live revision; the report says so on every page")
     .option("--no-history", "don't pull or push the data folder (history.adapter)")
-    .action(async (o: { registry?: boolean; remote?: boolean; git?: boolean; readiness?: boolean; drafts?: boolean; now?: string; allowUnreleased?: boolean; history?: boolean }, cmd: Command) => {
+    .option("--labels <file>", "a labels.jsonl to calibrate confidence on (overrides recommend.labels)")
+    .action(async (o: { registry?: boolean; remote?: boolean; git?: boolean; readiness?: boolean; drafts?: boolean; now?: string; allowUnreleased?: boolean; history?: boolean; labels?: string }, cmd: Command) => {
       const ctx = await context(io, g(cmd));
       requirePackages(ctx);
       await storeFor(io, "run");
@@ -195,6 +196,7 @@ export function addEngineCommands(program: Command, io: CliIo): void {
         dsaConfig: ctx.loaded.config,
         sources: { live },
         ...(o.now ? { now: new Date(o.now) } : {}),
+        ...(o.labels ? { labels: path.resolve(io.cwd, o.labels) } : {}),
         log: (m) => io.out(m),
       });
       const s = res.summary;

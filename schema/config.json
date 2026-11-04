@@ -995,6 +995,25 @@
       },
       "additionalProperties": false
     },
+    "recommend": {
+      "description": "How element recommendations are made: labels, the consumer's rules, the type checker.",
+      "type": "object",
+      "properties": {
+        "labels": {
+          "description": "A labels.jsonl to calibrate confidence on (one labelled element per line), relative to this file. Without it, confidence is marked uncalibrated.",
+          "type": "string"
+        },
+        "rules": {
+          "description": "Each app's machine-readable design-system rules file (control scale, preferred primitives), relative to the app. Read as hard constraints.",
+          "type": "string"
+        },
+        "typescript": {
+          "description": "Resolve spreads, class constants and prop unions with the TypeScript checker and the app's tsconfig (default true; skipped with a note when unavailable).",
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
     "figma": {
       "description": "Figma library usage (the figma add-on).",
       "type": "object",

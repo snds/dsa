@@ -34,6 +34,18 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   element a commit turned into one (`git log -p`, bounded), follows that migration as near-truth. A
   system component of the picked kind right beside it lends its size. Otherwise the most similar uses are
   named as evidence, and offered as an alternative when they differ.
+- Confidence is measured precision on a label set (`src/engine/labels.ts`). A `labels.jsonl` (one
+  labelled element per line: `id`, `app`, `file`, `line`, `sourceRef`, `elementHash`, `truth` with
+  `verdict`, `use`, `props`, `acceptableAlts`, `labeler`, `method`, `at`, `notes`) is read from
+  `recommend.labels` or `dsa run --labels`. Labels feed `calibrate()`, which never ran before for want of
+  decisions, then an isotonic fit maps each decision path's score (rule and verdict) to its measured
+  precision, pooled when a path has under 20 labels. "Ready" needs the one-sided 95% lower bound of that
+  precision at 0.99 or more, so about 300 clean labels on a path. Without labels nothing changes, and
+  each evaluation says its confidence is uncalibrated (`calibration.status`).
+- Fit is a gate: a replacement whose signature matches under 40% of the element's look stays under the
+  review threshold, and says so.
+- `recommend` in dsa.config.json: `labels` (path, relative to the config), `rules` (path, relative to
+  each app) and `typescript` (boolean, default on).
 - The element scanner skips files that aren't product code: tests, stories, examples, demos, fixtures,
   mocks, stubs and docs, reusing the model extractor's list (`NON_PRODUCT`). The run notes how many it
   left out.
