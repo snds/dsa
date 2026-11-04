@@ -1,6 +1,6 @@
 import fs from "node:fs";
+import { gitRead, isDirty } from "../engine/git-read.js";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
 import type { LiveCheck, LiveConfig, LiveRevision, RevisionContext, RevisionSource } from "./types.js";
 
 /**
@@ -120,9 +120,10 @@ export async function resolveLiveRevision(c: RevisionContext, extra: RevisionSou
   return null;
 }
 
+/** Read-only git (GIT_OPTIONAL_LOCKS=0): the checkout may not be ours, so nothing here writes its index. */
 function git(root: string, args: string[]): { ok: boolean; out: string } {
-  const r = spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
-  return { ok: r.status === 0, out: (r.stdout ?? "").trim() };
+  const r = gitRead(root, args);
+  return { ok: r.ok, out: r.out };
 }
 
 /**
@@ -137,8 +138,8 @@ export function compareTree(root: string, revision: LiveRevision | null): Omit<L
   const same = head.toLowerCase().startsWith(revision.sha.toLowerCase()) || revision.sha.toLowerCase().startsWith(head.toLowerCase());
   const sameTree = !same && git(root, ["cat-file", "-e", `${revision.sha}^{commit}`]).ok && git(root, ["diff", "--quiet", revision.sha, "HEAD"]).ok;
   if (!same && !sameTree) return { state: "other-commit", revision, head };
-  const dirty = git(root, ["status", "--porcelain", "--untracked-files=no"]).out;
-  return { state: dirty ? "modified" : "live", revision, head };
+  // Tracked changes only (untracked files don't count), read without git status, which rewrites the index.
+  return { state: isDirty(root) ? "modified" : "live", revision, head };
 }
 
 const short = (s: string | null | undefined) => (s ? s.slice(0, 7) : "?");

@@ -78,6 +78,10 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- dsa ran `git status` on checkouts it only reads (the token scan's new-code check, the live check), and
+  `git status` rewrites the index. Those reads now use plumbing only (`src/engine/git-read.ts`):
+  `git diff-index --name-only HEAD --`, with each listed file confirmed by comparing `git hash-object` with
+  the blob at HEAD, untracked files from `git ls-files --others`, and `GIT_OPTIONAL_LOCKS=0` throughout.
 - A calibrated block that isn't ready was flattened to one score under the bar, which erased ranking and
   coverage. It now keeps its measured precision, squeezed into [0, threshold) in order (`squeeze`).
 - Isotonic calibration left equal neighbouring scores in separate one-label blocks, so a clean top band

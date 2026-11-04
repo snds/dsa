@@ -90,7 +90,7 @@ export function gitMigrations(dir: string, components: Set<string>, opts: { maxC
   let log = '';
   try {
     log = execFileSync('git', ['-C', dir, 'log', `-n${opts.maxCommits ?? 300}`, '-p', '--unified=2', '--no-color', '--format=commit %h', '--', '*.tsx', '*.jsx'],
-      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024, timeout: opts.timeoutMs ?? 8000 });
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024, timeout: opts.timeoutMs ?? 8000, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } });
   } catch { return []; }
   const out: Migration[] = [];
   let commit = '', file = '';
