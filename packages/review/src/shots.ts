@@ -179,7 +179,7 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
 
   // Routes the app declares that need a value to open: listed in the result, so a person can name one.
   const needs = (target: string) => { const t = all.find(x => x.name === target); const v = t ? routeConfig(t.dir).needsValue : []; return v.length ? { needsValue: v } : {}; };
-  const sessions: { target: string; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; stop?: () => void; how?: string; need: ElementEval[]; storageState?: string | undefined; readApi?: boolean; readPaths?: string[] | undefined; signIn?: SignIn | undefined; draw?: DrawWith; reach?: ReachPlan | undefined }[] = [];
+  const sessions: { target: string; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; stop?: () => void; how?: string; need: ElementEval[]; storageState?: string | undefined; readApi?: boolean; readPaths?: string[] | undefined; signIn?: SignIn | undefined; draw?: DrawWith; reach?: ReachPlan | undefined; routeSource?: RouteSource | undefined; profiles?: Profile[] | undefined; appDir?: string | undefined }[] = [];
   // Which routes render each element's file, from the scan's import graph and the routes in the source
   // (routes.ts): no config. Undefined when the app declares no routes we can read.
   const reachFor = (t: (typeof all)[number] | undefined, need: ElementEval[]): ReachPlan | undefined => {
@@ -206,6 +206,8 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
   };
   // Elements that can't be photographed are drawn from the code (shots.draw: false turns it off).
   const drawOn = opts.config.shots?.draw !== false;
+  // The app's own route list and starting profiles (apps[name].routeSource, .profiles).
+  const reachOwn = (name: string, dir: string) => { const a: any = opts.config.apps?.[name] ?? {}; return { appDir: dir, routeSource: a.routeSource as RouteSource | undefined, profiles: a.profiles as Profile[] | undefined }; };
   const drawFor = (dir?: string, mount?: boolean): DrawWith | undefined => (drawOn ? { root: opts.root, dir, mount } : undefined);
   const evalTargets = [...new Set(evals.filter(e => !e.exception).map(e => e.target))].filter(t => !opts.target || t === opts.target);
   if (opts.url) {
@@ -236,7 +238,7 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
           const open = await openSurface(surface, opts.root);
           const routes = routesFor();
           log(`  ${open.how} · ${routes.length} route${routes.length === 1 ? '' : 's'} ${configured ? 'from config' : 'found in the source'}`);
-          sessions.push({ target: name, url: open.url, routes, first: extra, flows: opts.config.apps?.[name]?.flows as Flow[] | undefined, crawl: true, stop: open.stop, how: open.how, need: p.need, storageState: open.storageState, readApi: open.readApi, readPaths: open.readPaths, signIn: open.signIn, draw: drawFor(t.dir), reach: reachFor(t, p.need) });
+          sessions.push({ target: name, url: open.url, routes, first: extra, flows: opts.config.apps?.[name]?.flows as Flow[] | undefined, crawl: true, stop: open.stop, how: open.how, need: p.need, storageState: open.storageState, readApi: open.readApi, readPaths: open.readPaths, signIn: open.signIn, draw: drawFor(t.dir), reach: reachFor(t, p.need), ...reachOwn(name, t.dir) });
           if (open.signIn && !open.storageState) log(`  live.apps["${name}"].signIn needs a saved sign-in: run \`dsa login ${open.url}\` and set live.apps["${name}"].auth.`);
         } catch (e: any) { result.apps.push({ target: name, skipped: e.message.split('\n')[0] }); log(`  ${e.message}`); }
         continue;
@@ -251,7 +253,7 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
         const app = await startApp(ap);
         const routes = routesFor();
         log(`  ${app.url} · ${routes.length} route${routes.length === 1 ? '' : 's'} ${configured ? 'from config' : 'found in the source'}${extra.length ? ` (${extra.length} extra, visited first)` : ''}`);
-        sessions.push({ target: name, url: app.url, routes, first: extra, flows: opts.config.apps?.[name]?.flows as Flow[] | undefined, crawl: true, stop: app.stop, how: ap.how, need: p.need, draw: drawFor(t.dir, ap.tag === 'injected'), reach: reachFor(t, p.need), ...extra2 });
+        sessions.push({ target: name, url: app.url, routes, first: extra, flows: opts.config.apps?.[name]?.flows as Flow[] | undefined, crawl: true, stop: app.stop, how: ap.how, need: p.need, draw: drawFor(t.dir, ap.tag === 'injected'), reach: reachFor(t, p.need), ...reachOwn(name, t.dir), ...extra2 });
         if (extra2.readPaths?.length || extra2.readApi) log(`  reads allowed besides its pages: ${[...(extra2.readApi ? ['/api/**'] : []), ...(extra2.readPaths ?? [])].join(', ')}`);
       } catch (e: any) { result.apps.push({ target: name, skipped: e.message.split('\n')[0] }); log(`  ${e.message}`); }
     }
@@ -262,7 +264,7 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
       if (!s.need.length) { log('Nothing new to capture.'); continue; }
       log(`${s.target === '*' ? '' : s.target + ': '}${s.need.length} examples to find across ${new Set(s.need.map(e => groupKey(e))).size} groups.`);
       const sh = opts.config.shots ?? {};
-      const r: Awaited<ReturnType<typeof session>> & { signIn?: string; expired?: boolean; broken?: string } = await session(pw, { reach: s.reach, draw: s.draw, url: s.url, routes: s.routes, first: s.first, flows: s.flows, crawl: s.crawl, examples: s.need, dir, storageState: s.storageState, readApi: s.readApi, readPaths: s.readPaths, signIn: s.signIn, maxPages: sh.maxPages ?? 90, waitMs: sh.waitMs ?? 600, log, reveal: sh.reveal, maxActions: sh.maxActions ?? sh.maxTriggers, maxDepth: sh.maxDepth, maxMinutes: sh.maxMinutes });
+      const r: Awaited<ReturnType<typeof session>> & { signIn?: string; expired?: boolean; broken?: string } = await session(pw, { reach: s.reach, draw: s.draw, url: s.url, routes: s.routes, first: s.first, flows: s.flows, crawl: s.crawl, examples: s.need, dir, storageState: s.storageState, readApi: s.readApi, readPaths: s.readPaths, signIn: s.signIn, maxPages: sh.maxPages ?? 90, pagesSet: sh.maxPages !== undefined, waitMs: sh.waitMs ?? 600, log, reveal: sh.reveal, maxActions: sh.maxActions ?? sh.maxTriggers, maxDepth: sh.maxDepth, maxMinutes: sh.maxMinutes, routeSource: s.routeSource, profiles: s.profiles, appDir: s.appDir });
       const at = new Date().toISOString();
       const byId = new Map(s.need.map(e => [e.id, e]));
       if (r.signIn && !Object.keys(r.shots).length) {
@@ -470,7 +472,7 @@ function callersOf(d: DrawWith, name: string, own: string): string[] {
 /** What the scan knows about reaching each element (routes.ts): the routes that render its file, and the patterns that need a value. */
 interface ReachPlan { byId: Record<string, string[]>; patterns: string[]; /** Per element: its file and its importers three steps up, as tag paths. */ near?: Record<string, string[]> }
 
-async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawWith | undefined; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; examples: ElementEval[]; dir: string; storageState?: string | undefined; readApi?: boolean | undefined; readPaths?: string[] | undefined; signIn?: SignIn | undefined; maxPages: number; waitMs: number; log: (m: string) => void; reveal?: boolean; maxActions?: number; maxDepth?: number; maxMinutes?: number; maxReplays?: number }) {
+async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawWith | undefined; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; examples: ElementEval[]; dir: string; storageState?: string | undefined; readApi?: boolean | undefined; readPaths?: string[] | undefined; signIn?: SignIn | undefined; maxPages: number; waitMs: number; log: (m: string) => void; reveal?: boolean; maxActions?: number; maxDepth?: number; maxMinutes?: number; maxReplays?: number; routeSource?: RouteSource | undefined; appDir?: string | undefined; profiles?: Profile[] | undefined; pagesSet?: boolean | undefined }) {
   const shots: Record<string, any> = {};
   const pages: string[] = [];
   let taggedPages = 0;
@@ -479,6 +481,8 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   const note = (r: Target, t: string) => { r.tried ??= []; if (!r.tried.includes(t) && r.tried.length < 12) r.tried.push(t); };
   const stepName = (x: { label: string; event: string; value?: string | undefined }) => (x.event === 'choose' && x.value ? `“${x.value}” in ${x.label ? `“${x.label}”` : 'a list'}` : x.label ? `“${x.label}”` : 'an unlabelled control');
   const why: Record<string, string> = {};
+  const tiny = new Map<string, number>();
+  const setAside: string[] = [];
   const gateCode = new Map<string, string>();
   const readGateFile = (f: string) => { if (!gateCode.has(f)) gateCode.set(f, (o.draw ? readSource(o.draw.root, f, o.draw.dir) : (() => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } })()) ?? ''); return gateCode.get(f)!; };
   const fileOn: Record<string, string> = {};
@@ -512,6 +516,8 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     if (items && Object.keys(items).length) await page.addInitScript({ content: `(${RESTORE_SESSION})(${JSON.stringify({ origin: base.origin, items })});` });
     // alert/confirm/prompt: dismiss, so nothing the explorer opens can confirm an action.
     page.on('dialog', (d: any) => d.dismiss().catch(() => {}));
+    // URLs the app writes itself (pushState, replaceState, a new hash): real routes, kept for the queue.
+    await page.addInitScript({ content: WRITTEN_URLS });
     // Reads only: no writes, nothing under /api/ (or readPaths), nothing to another host but images, fonts,
     // and styles, and the identity provider while signing in (flows.ts).
     net = await guardNetwork(page, base.origin, { readApi: Boolean(o.readApi), readPaths: o.readPaths, idp: o.signIn?.idp, signingIn: () => auth.signing });
@@ -545,6 +551,23 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     }
   };
   const unfilled = () => (o.reach?.patterns ?? []).some(p => wantRoute().get(p) && (filled.get(p)?.size ?? 0) < 3);
+  // The URLs the app wrote since the last look, into the queue: same origin, not seen, each once.
+  const written = async () => {
+    const urls: string[] = await page.evaluate(`(window.__dsaUrls || []).splice(0)`).catch(() => []);
+    let n = 0;
+    for (const l of urls) { try { const lu = new URL(l); if (lu.origin === base.origin && !seen.has(lu.toString()) && !queue.includes(lu.toString())) { queue.push(lu.toString()); n++; } } catch { /* ignore */ } }
+    if (urls.length) harvest(urls);
+    return n;
+  };
+  /** The app's route list from its own module, or why not. */
+  const routesFromApp = async (rs: RouteSource): Promise<string[] | string> => {
+    const abs = path.resolve(o.appDir ?? o.draw?.root ?? '.', rs.module);
+    const rel = o.appDir ? path.relative(o.appDir, abs).split(path.sep).join('/') : rs.module.replace(/^\.?\//, '');
+    const files = [...(rel.startsWith('..') ? [] : [new URL('/' + rel, base).toString()]), new URL('/@fs' + abs.split(path.sep).join('/'), base).toString()];
+    try { await page.goto(base.toString(), { waitUntil: 'domcontentloaded', timeout: 30000 }); } catch { /* the import may still work */ }
+    const r = await inPage<string[] | { error: string }>(page, ROUTES_FROM_MODULE, { files, name: rs.export }).catch((e: any) => ({ error: String(e?.message ?? e).split('\n')[0]! }));
+    return Array.isArray(r) ? r : `couldn't list routes from ${rs.module} (${rs.export}): ${r.error}`;
+  };
   const firstUrls = new Set((o.first ?? []).map(r => routeUrl(r, base)));
   const seen = new Set<string>();
   // Pages that asked for sign-in instead of showing the app, out of the pages tried.
@@ -645,7 +668,10 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     const inApp = (() => { try { return new URL(page.url()).origin === base.origin; } catch { return false; } })();
     if (o.signIn && auth.done && inApp) await within(u);
     else {
+      // Already there (the app wrote this URL itself): going there again wouldn't load it, so reload.
+      const here = page.url() === u;
       await page.goto(u, { waitUntil: 'domcontentloaded', timeout });
+      if (here) await page.reload({ waitUntil: 'domcontentloaded', timeout });
       // Only a route's first visit waits for the network to go quiet (up to 8s): reloads while exploring
       // don't, so an app that keeps polling doesn't spend the explore budget waiting.
       if (firstVisit) await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
@@ -713,7 +739,13 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       const placement = await inPage(page, `(id) => { const el = document.querySelector('[data-dsa-shot="' + CSS.escape(id) + '"]'); return el ? (${PLACE_IN_PAGE})(el) : null; }`, f.id).catch(() => null);
       const content = await inPage(page, OWN_CONTENT, f.id).catch(() => null);
       const cap = await capture(page, f.id, path.join(o.dir, file));
-      if (!cap) continue;
+      if (!cap) {
+        // Under 2px each way on every node its line drew, twice: set aside with why, not measured on every look.
+        const n = (tiny.get(f.id) ?? 0) + 1;
+        tiny.set(f.id, n);
+        if (n >= 2) { remaining = remaining.filter(x => x.id !== f.id); setAside.push(f.id); why[f.id] = `it renders under 2px wide or tall (on ${routeOf(u)}, each node its line drew)`; }
+        continue;
+      }
       shots[f.id] = { file, page: u, matchScore: Math.round(f.score * 100) / 100, ties: f.ties, alike: f.alike, ...(f.tagged ? { tagged: true } : {}), ...((f as any).claimants > 1 ? { shared: (f as any).claimants } : {}), styles, placement, box: cap.box, revealedBy, content, ...(cap.blank ? { blank: true } : {}), ...(cap.covered ? { covered: true } : {}), ...(cap.uncovered ? { uncovered: cap.uncovered } : {}), ...(cap.via ? { via: cap.via } : {}) };
       o.log(`  ${f.id} on ${u.replace(base.origin, '')}${revealedBy ? ` after ${revealedBy}` : ''} (${f.tagged ? `matched by source tag${f.ties > 1 ? `, one of ${f.ties} rendered by this line` : ''}` : `match ${Math.round(f.score * 100)}%`}${f.tagged ? '' : (f as any).claimants > 1 ? `, ${(f as any).claimants} source lines want the same control` : f.ties > 1 ? (f.alike >= f.ties ? `, one of ${f.ties} alike on the page` : `, a guess among ${f.ties} similar elements on the page`) : ''})${cap.blank ? ' · captured but blank' : cap.covered ? ' · covered by another layer' : cap.uncovered ? ` · ${cap.uncovered} covering layer${cap.uncovered > 1 ? 's' : ''} hidden` : cap.via ? ` · shows on ${cap.via}` : ''}`);
     }
@@ -721,6 +753,40 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   };
   // Pass 1 (quick): every route, look, replay traced controls, and note how much of what's missing each page mentions.
   // Pass 2 (deep): explore the most promising pages with the time left.
+  // The app's own route list (apps[name].routeSource): a module of the app, loaded through its build, that
+  // lists every route (its route formatter over its registries). Those go first, and the page cap grows to fit.
+  if (o.routeSource) {
+    const got = await routesFromApp(o.routeSource);
+    if (Array.isArray(got)) {
+      const add = got.map(r => { try { return /^https?:/.test(r) ? (new URL(r).origin === base.origin ? r : '') : routeUrl(r, base); } catch { return ''; } }).filter(Boolean);
+      const fresh = add.filter(u => !queue.includes(u));
+      queue.unshift(...fresh);
+      for (const u of fresh) firstUrls.add(u);
+      o.log(`  ${got.length} route${got.length === 1 ? '' : 's'} from ${o.routeSource.module} (${o.routeSource.export}), ${fresh.length} new`);
+    } else o.log(`  apps.routeSource: ${got}`);
+  }
+  if (!o.pagesSet && queue.length > o.maxPages) { o.log(`  ${queue.length} routes known: visiting up to all of them (shots.maxPages sets a cap)`); o.maxPages = queue.length + 20; }
+  // Profiles (apps[name].profiles): a route opened with storage seeded first, no clicking (a wizard step, a flag).
+  for (const pf of o.profiles ?? []) {
+    if (!remaining.length || Date.now() >= deadline) break;
+    const u = routeUrl(pf.route, base);
+    try {
+      await page.goto(base.toString(), { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await inPage(page, SEED_STORAGE, { local: pf.storage ?? {}, session: pf.session ?? {} });
+      const same = page.url().split('#')[0] === u.split('#')[0];
+      await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      if (same) await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
+      await page.waitForTimeout(o.waitMs); await settle();
+      const before = remaining.length;
+      await sweeper(u)(`profile “${pf.name}”`);
+      await written();
+      o.log(`  profile “${pf.name}” on ${routeOf(u)}: ${before - remaining.length} found`);
+      await inPage(page, SEED_STORAGE, { local: Object.fromEntries(Object.keys(pf.storage ?? {}).map(k => [k, null])), session: Object.fromEntries(Object.keys(pf.session ?? {}).map(k => [k, null])) });
+    } catch (e: any) {
+      o.log(`  profile “${pf.name}” failed: ${String(e?.message ?? e).split('\n')[0]}`);
+      if (/closed|crash|Target/i.test(String(e?.message))) await relaunch();
+    }
+  }
   // Flows first: each is written for elements nothing else reaches, so it's the best use of the time.
   for (const f of o.flows ?? []) {
     if (!remaining.length || Date.now() >= deadline) break;
@@ -776,6 +842,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       shown.set(u, new Set<string>(await page.evaluate(SHOWN_FILES).catch(() => [])));
       if (await page.evaluate(`Boolean(document.querySelector('[data-dsa-src]'))`).catch(() => false)) taggedPages++;
       const links: string[] = await page.evaluate(`Array.from(document.querySelectorAll('a[href]')).map(a => a.href)`).catch(() => []);
+      await written();
       if (o.crawl) {
         for (const l of links) {
           try { const lu = new URL(l); if (lu.origin === base.origin && !seen.has(lu.toString())) queue.push(lu.toString()); } catch { /* ignore */ }
@@ -856,6 +923,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         // Each traced opener tried here, and what it found: so a miss behind one says whether it ran.
         if (said.length) o.log(`  openers on ${u.replace(base.origin, '')}: ${said.join('; ')}${absent ? `; ${absent} other opener${absent === 1 ? '' : 's'} not on this page` : ''}`);
       }
+      await written();
       } catch (e: any) {
         if (!/closed|crash|Target/i.test(String(e?.message))) throw e;
         o.log(`  the page closed on ${u.replace(base.origin, '')}; restarting the browser and moving on`);
@@ -897,7 +965,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   } finally {
     await browser.close().catch(() => {});
   }
-  return { shots, pages, missing: [...remaining.map(r => r.id), ...drawnIds], drawn: drawnIds.length, why, fileOn: Object.fromEntries(Object.entries(fileOn).map(([k, u]) => [k, u && routeOf(u)])), tried: Object.fromEntries(everyone.filter(r => r.tried?.length).map(r => [r.id, r.tried!])), tagged: { pages: taggedPages, of: pages.length }, ...(signedOut() || auth.expired ? { signIn: wall.at || o.url } : {}), ...(auth.expired ? { expired: true } : {}), ...(isBroken() ? { broken: broken.first } : {}) };
+  return { shots, pages, missing: [...remaining.map(r => r.id), ...setAside, ...drawnIds], drawn: drawnIds.length, why, fileOn: Object.fromEntries(Object.entries(fileOn).map(([k, u]) => [k, u && routeOf(u)])), tried: Object.fromEntries(everyone.filter(r => r.tried?.length).map(r => [r.id, r.tried!])), tagged: { pages: taggedPages, of: pages.length }, ...(signedOut() || auth.expired ? { signIn: wall.at || o.url } : {}), ...(auth.expired ? { expired: true } : {}), ...(isBroken() ? { broken: broken.first } : {}) };
 
   /** A page that renders this element: a route the scan says renders its file (one with a value found, if it needs one), else the first page. */
   function pageFor(r: Target): string | undefined {
@@ -980,12 +1048,12 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
    * show the missing elements' own files (or files near them) go first, then the outermost component's. A
    * combination set in full on a page that finds nothing gets up to 3 more pages; one whose component isn't
    * on any page waits until the others ran, then is tried after the state that first showed its component's
-   * file (a root nav value that renders the view it's in), in one go. Its own time share (30% of what's
+   * file (a root nav value that renders the view it's in), in one go. Its own time share (half of what's
    * left), so the route crawl comes first.
    */
   async function stateReveal() {
     if (!o.draw?.root || !pages.length) return;
-    const stop = Date.now() + (deadline - Date.now()) * 0.3;
+    const stop = Date.now() + (deadline - Date.now()) * 0.5;
     const groups = new Map<string, { sets: StateSet[]; mine: Target[] }>();
     for (const r of remaining) {
       const sets = stateFor(r);
@@ -1459,6 +1527,41 @@ const SET_STATE = `({ sets, within, check }) => {
 }`;
 
 /** Runs in the page: resolve once nothing in the DOM has changed for 250 ms, or after `max` ms. */
+/** apps[name].routeSource: a module of the app (path from its folder) and the export that lists its routes. */
+export interface RouteSource { module: string; export: string }
+/** apps[name].profiles: a route opened with local (and session) storage seeded first. null removes a key. */
+export interface Profile { name: string; route: string; storage?: Record<string, string | null> | undefined; session?: Record<string, string | null> | undefined }
+
+/** Runs before the app's scripts: keep each URL the app writes (pushState, replaceState, a hash change), up to 200. */
+const WRITTEN_URLS = `(() => {
+  const out = (window.__dsaUrls = window.__dsaUrls || []);
+  const keep = (u) => { try { const x = new URL(u, location.href).href; if (out.length < 200 && !out.includes(x)) out.push(x); } catch {} };
+  for (const k of ['pushState', 'replaceState']) { const f = history[k]; history[k] = function (s, t, u) { if (u != null) keep(u); return f.apply(this, arguments); }; }
+  window.addEventListener('hashchange', () => keep(location.href));
+})();`;
+
+/** Runs in the page: import a module of the app through its own server (the first URL that loads), and list its routes. */
+const ROUTES_FROM_MODULE = `async ({ files, name }) => {
+  const imp = new Function('u', 'return import(u)');
+  let last = 'not loaded';
+  for (const f of files) {
+    try {
+      const m = await imp(f);
+      let v = m[name];
+      if (typeof v === 'function') v = await v();
+      if (Array.isArray(v)) return v.filter((x) => typeof x === 'string').slice(0, 2000);
+      return { error: name + (v === undefined ? ' is not exported' : ' is not a list of routes or a function that returns one') };
+    } catch (e) { last = String(e && e.message || e).split('\\n')[0]; }
+  }
+  return { error: last };
+}`;
+
+/** Runs in the page: set (or, for null, remove) local and session storage keys. */
+const SEED_STORAGE = `({ local, session }) => {
+  for (const [k, v] of Object.entries(local)) { try { v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} }
+  for (const [k, v] of Object.entries(session)) { try { v === null ? sessionStorage.removeItem(k) : sessionStorage.setItem(k, v); } catch {} }
+}`;
+
 interface SetResult { found: number; set: number; off: string[] }
 const NONE_SET: SetResult = { found: 0, set: 0, off: [] };
 
@@ -1854,6 +1957,38 @@ export interface Captured {
  */
 async function capture(page: any, id: string, file: string): Promise<Captured | null> {
   const sel = `[data-dsa-shot="${id}"]`;
+  // One line can render many nodes (a .map() list): one that's zero-sized, blank or covered gives way to the
+  // next from the same line, up to four more; the first clean photo wins, else the first one taken.
+  let first: Captured | null = null;
+  try {
+    for (let i = 0; i < 5; i++) {
+      const got = await captureNode(page, sel, file + (i ? `.${i}` : ''));
+      if (got && !got.blank && !got.covered) { if (i) fs.renameSync(file + `.${i}`, file); return got; }
+      if (got && !first) { first = got; if (i) fs.renameSync(file + `.${i}`, file); }
+      else if (got && i) fs.rmSync(file + `.${i}`, { force: true });
+      if (!await inPage<boolean>(page, NEXT_NODE, sel).catch(() => false)) break;
+    }
+    return first;
+  } finally {
+    await inPage(page, `(sel) => { const el = document.querySelector(sel); if (el) el.removeAttribute('data-dsa-shot'); }`, sel).catch(() => {});
+    await page.evaluate(`document.querySelectorAll('[data-dsa-tried]').forEach(e => e.removeAttribute('data-dsa-tried'))`).catch(() => {});
+  }
+}
+
+/** Runs in the page: move the photo mark to another node the same source line rendered, at least 2px each way. */
+const NEXT_NODE = `(sel) => {
+  const el = document.querySelector(sel);
+  const src = el && el.getAttribute('data-dsa-src');
+  if (!src) return false;
+  el.setAttribute('data-dsa-tried', '');
+  const next = Array.from(document.querySelectorAll('[data-dsa-src]')).find((x) => x.getAttribute('data-dsa-src') === src && !x.hasAttribute('data-dsa-tried') && (() => { const r = x.getBoundingClientRect(); return r.width >= 2 && r.height >= 2; })());
+  if (!next) return false;
+  next.setAttribute('data-dsa-shot', el.getAttribute('data-dsa-shot'));
+  el.removeAttribute('data-dsa-shot');
+  return true;
+}`;
+
+async function captureNode(page: any, sel: string, file: string): Promise<Captured | null> {
   try {
     // Center it, reveal hover-only controls (row actions fade in on hover), and let layout settle.
     await inPage(page, `(sel) => { const el = document.querySelector(sel); if (el) el.scrollIntoView({ block: 'center', inline: 'center' }); }`, sel);
@@ -1911,7 +2046,6 @@ async function capture(page: any, id: string, file: string): Promise<Captured | 
     return { box: rel, ...(shot.blank ? { blank: true as const } : {}), ...(!shot.top ? { covered: true as const } : uncovered ? { uncovered } : {}), ...(via ? { via } : {}) };
   } catch { return null; }
   finally {
-    await inPage(page, `(sel) => { const el = document.querySelector(sel); if (el) el.removeAttribute('data-dsa-shot'); }`, sel).catch(() => {});
     await page.evaluate(RESTORE_COVER).catch(() => {});
     await page.mouse.move(0, 0).catch(() => {});
     await page.evaluate(`document.activeElement && document.activeElement.blur && document.activeElement.blur()`).catch(() => {});

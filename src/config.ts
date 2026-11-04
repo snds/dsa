@@ -78,6 +78,21 @@ const AppSchema = z.object({
     )
     .optional()
     .describe("Written-down UI sequences that reveal elements only a filled field or an upload shows."),
+  routeSource: z
+    .object({ module: z.string(), export: z.string() })
+    .optional()
+    .describe("A module of the app (path from its folder) whose export lists every route: an array, or a function (it may be async) that returns one, e.g. the app's route formatter over its registries. Loaded through the running app's build; its routes are visited first."),
+  profiles: z
+    .array(
+      z.object({
+        name: z.string(),
+        route: z.string(),
+        storage: z.record(z.string(), z.string().nullable()).optional(),
+        session: z.record(z.string(), z.string().nullable()).optional(),
+      }),
+    )
+    .optional()
+    .describe("Named starting states: a route opened with local (and session) storage seeded first, no clicking (a wizard step, a feature flag). null removes a key."),
   screenshots: z.boolean().optional().describe("false: never start this app for screenshots."),
   tag: z.boolean().optional().describe("false: start this app without source tags (data-dsa-src). By default dsa adds them when it starts the app, so screenshots match each element by its source line."),
 });

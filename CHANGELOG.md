@@ -32,6 +32,16 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- Routes the source doesn't spell out are reached. `apps[name].routeSource` names a module of the app and
+  the export that lists every route (an array, or a function that returns one, such as the app's route
+  formatter over its registries); it's loaded through the running app's build and its routes go first.
+  URLs the app writes itself (pushState, replaceState, a new hash) join the queue, and a URL the page is
+  already on is reloaded rather than skipped. `apps[name].profiles` opens a route with local or session
+  storage seeded first, no clicking. With more routes known than `shots.maxPages` allows (and no cap
+  set), every one is visited.
+- One line that renders many nodes: a node that photographs blank, covered or under 2px gives way to the
+  next node from the same line (up to four more). An element under 2px on every node, twice, is set aside
+  with why instead of being measured on every look.
 - An app's own `dsa.config.json` is merged into the run: its `apps` entry (routes, extra routes, flows;
   the host's values win, lists are joined) and the folders its `scan.exclude` names. An `apps` key may be
   the app's folder name or its package name. Screenshots stop with an error naming any `apps` key that
@@ -48,7 +58,7 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 - Setting component state no longer crowds out the route crawl. It ran on every page in pass 1 and set
   the root's state (a nav value, a setup flag) again on each one, though that shows the same thing on
   every page; on a large app pass 1 ran out of time with most pages unvisited. It now runs after pass 1,
-  in its own share of the time left (30%), and tries each combination once per run, on the first page
+  in its own share of the time left (half, taken from exploring), and tries each combination once per run, on the first page
   where all its levels could be set. A combination set in full that finds nothing gets up to 3 more
   pages, ranked by whether they show the missing elements' own files (or files near them): the outermost
   component is often the root, on every page. One whose component isn't on any page tried is set after
