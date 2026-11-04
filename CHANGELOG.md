@@ -40,6 +40,11 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 - A page whose route the scan says renders a missing element is explored first, and every control on it
   is tried, whatever was tried on other pages. Each explored page gets a log line: how many interactions,
   how many found, and whether its budget ran out. Opener lines show the page's own route, hash included.
+- A provider the page doesn't have is found by following the component's own imports (two levels) and
+  then the whole app, with tests and stories last. Before, only the first 6,000 files were read. When the
+  hook's file makes a context but no provider component, the mount provides that context itself, with a
+  value shaped by what the component reads off the hook. The tagger keeps a file's contexts even when the
+  file has no JSX.
 - Mounted props: a `Set` or `Map` prop (by its type, or because the body calls `.has(` or `.get(`) gets
   an empty one. A value rendered anywhere (`{open ? lead : null}`, `icon={lead}`) is never an object. An item
   handed to another component in the same file (`<Node node={n} />`) is shaped by how that component reads

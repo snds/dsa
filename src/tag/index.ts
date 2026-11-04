@@ -118,7 +118,8 @@ export interface Tag { element: string; value: string; line: number; col: number
 export function tagSource(code: string, file: string, o: TagOptions = {}): { code: string; tags: Tag[] } | null {
   if (!tagEnabled(o)) return null;
   const clean = file.replace(/[?#].*$/, '');
-  if (!SOURCE.test(clean) || !code.includes('<')) return null;
+  // No JSX: nothing to tag, unless it makes a context the mount may need to provide (kept below).
+  if (!SOURCE.test(clean) || (!code.includes('<') && !/\bcreateContext\b/.test(code))) return null;
   const rel = tagFileOf(clean, o);
   if (!rel) return null;
   let ast: any;
@@ -274,7 +275,8 @@ window.__dsaMount = async (files, name, props, file, wraps) => {
   for (const w of [].concat(wraps || [])) {
     const p = await load(w.files, w.name, w.file);
     if (!p.C) return { ok: false, why: 'its provider ' + w.name + ' did not load: ' + p.why };
-    extra.push({ P: p.C, props: w.props || {} });
+    // A bare context (no provider component in its file): its Provider, with the value the crawler shaped.
+    extra.push(w.context ? { P: p.C.Provider || p.C, props: w.props || {} } : { P: p.C, props: w.props || {} });
   }
   const ctxs = contextsAll(file);
   if (root) { try { root.unmount(); } catch {} root = null; }

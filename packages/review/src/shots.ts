@@ -8,7 +8,7 @@ import { appSurface, openSurface } from '@snds/dsa';
 import { detectApp, discoverRoutes, ensureBrowser, linkCoreForChild, routeConfig, startApp, tagPlan } from './apps.js';
 
 import { READ_STYLE } from './rendered.js';
-import { NO_SIZE, SHOW_MARKUP, markupOf, mountProps, parentComponent, readSource, whatItNeeded } from './drawn.js';
+import { NO_SIZE, SHOW_MARKUP, hookValue, markupOf, mountProps, parentComponent, readSource, whatItNeeded } from './drawn.js';
 import { needsValue, patternTest, routeFiles, routesReaching } from './routes.js';
 import { describeNetwork, flowProblems, guardNetwork, routeUrl, runFlow, type Flow, type GuardStats } from './flows.js';
 
@@ -328,7 +328,11 @@ function declaredIn(d: DrawWith, name: string): string | undefined {
   let idx = declIndex.get(d);
   if (!idx) {
     idx = new Map();
-    for (const f of walk(d.dir ?? d.root, new Set(['.tsx', '.jsx', '.ts', '.js']), [], true).slice(0, 6000)) {
+    // Every file, not a first few thousand: a large app's provider can sit anywhere. Tests and stories last,
+    // so a mock of a provider never stands in for the real one.
+    const files = walk(d.dir ?? d.root, new Set(['.tsx', '.jsx', '.ts', '.js']), [], true);
+    const mock = (f: string) => /\.(test|spec|stories)\.|__(tests|mocks)__/.test(f);
+    for (const f of [...files.filter(f => !mock(f)), ...files.filter(mock)]) {
       let src = '';
       try { src = fs.readFileSync(f, 'utf8'); } catch { continue; }
       for (const m of src.matchAll(/\b(?:function|const|let|class)\s+([A-Z][\w$]*Provider|use[A-Z][\w$]*)\b/g)) if (!idx.has(m[1]!)) idx.set(m[1]!, f);
@@ -343,20 +347,56 @@ function declaredIn(d: DrawWith, name: string): string | undefined {
  * used inside CanvasChromeProvider"), else the one declared beside the hook it needed (useCanvasChrome's
  * file declares CanvasChromeProvider). Only inside the scan root.
  */
-function providerFor(d: DrawWith, message: string, need: string): { name: string; file: string } | null {
+function providerFor(d: DrawWith, message: string, need: string, from: string): { name: string; file: string; context?: boolean } | null {
+  const declares = (src: string, n: string) => new RegExp(`\\b(?:function|const|let|class)\\s+${n.replace(/\$/g, '\\$')}\\b`).test(src);
+  const read = (f?: string) => { try { return f ? fs.readFileSync(f, 'utf8') : ''; } catch { return ''; } };
+  // The component's own imports first (two levels): the hook and its provider usually sit in a file beside it.
+  const near = importsNear(d, from, 2);
+  const find = (n: string) => near.find(f => declares(read(f), n)) ?? declaredIn(d, n);
+  const inRoot = (f: string) => { const rel = path.relative(d.root, f); return !rel.startsWith('..') && !path.isAbsolute(rel); };
   let name = message.match(/\b([A-Z][\w$]*Provider)\b/)?.[1];
-  let file = name ? declaredIn(d, name) : undefined;
+  let file = name ? find(name) : undefined;
   const hook = need.match(/what (use[A-Z][\w$]*) reads/)?.[1] ?? message.match(/\b(use[A-Z][\w$]*)\b/)?.[1];
   if (!file && hook) {
-    const hf = declaredIn(d, hook);
-    let src = '';
-    try { src = hf ? fs.readFileSync(hf, 'utf8') : ''; } catch { /* gone */ }
-    name = src.match(/\b(?:function|const|class)\s+([A-Z][\w$]*Provider)\b/)?.[1];
-    file = name ? declaredIn(d, name) : undefined;
+    const hf = find(hook);
+    const src = read(hf);
+    const pn = src.match(/\b(?:function|const|class)\s+([A-Z][\w$]*Provider)\b/)?.[1];
+    if (pn) { name = pn; file = declares(src, pn) ? hf : find(pn); }
+    // No provider component: the context the hook reads, given a value (the mount reaches it even unexported).
+    else {
+      const ctx = src.match(/\b(?:const|let)\s+([A-Z][\w$]*)\s*(?::[^=]+)?=\s*(?:React\.)?createContext\b/)?.[1];
+      if (ctx && hf && inRoot(hf)) return { name: ctx, file: hf, context: true };
+    }
   }
   if (!name || !file) return null;
-  const rel = path.relative(d.root, file);
-  return rel.startsWith('..') || path.isAbsolute(rel) ? null : { name, file };
+  return inRoot(file) ? { name, file } : null;
+}
+
+/** Files a file imports, followed this many levels: relative paths and the "@/" or "~/" shortcut for src. */
+function importsNear(d: DrawWith, from: string, levels: number): string[] {
+  const exts = ['', '.tsx', '.ts', '.jsx', '.js', '/index.tsx', '/index.ts', '/index.jsx', '/index.js'];
+  const base = d.dir ?? d.root;
+  const resolve = (dir: string, spec: string): string | null => {
+    const roots = spec.startsWith('.') ? [path.resolve(dir, spec)] : /^[@~]\//.test(spec) ? [path.join(base, 'src', spec.slice(2)), path.join(base, spec.slice(2))] : [];
+    for (const r of roots) for (const e of exts) { const f = r + e; try { if (fs.statSync(f).isFile()) return f; } catch { /* next */ } }
+    return null;
+  };
+  const seen = new Set<string>([from]);
+  let wave = [from];
+  for (let l = 0; l < levels && seen.size < 80; l++) {
+    const next: string[] = [];
+    for (const f of wave) {
+      let src = '';
+      try { src = fs.readFileSync(f, 'utf8'); } catch { continue; }
+      for (const m of src.matchAll(/\bfrom\s*['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]/g)) {
+        const r = resolve(path.dirname(f), (m[1] ?? m[2])!);
+        if (r && !seen.has(r)) { seen.add(r); next.push(r); }
+      }
+    }
+    wave = next;
+  }
+  seen.delete(from);
+  return [...seen];
 }
 
 /** The files that render `<Name …>`, its own first, read once per app: where a component's literal props come from. */
@@ -912,7 +952,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
           const files = [...(d.dir && !path.relative(d.dir, abs).startsWith('..') ? ['/' + path.relative(d.dir, abs).split(path.sep).join('/')] : []), '/@fs' + abs.split(path.sep).join('/')];
           // Mount one of the file's components and look for the element in what it drew.
           const filesOf = (f: string) => [...(d.dir && !path.relative(d.dir, f).startsWith('..') ? ['/' + path.relative(d.dir, f).split(path.sep).join('/')] : []), '/@fs' + f.split(path.sep).join('/')];
-          const wraps: { files: string[]; file: string; name: string; props: unknown }[] = [];
+          const wraps: { files: string[]; file: string; name: string; props: unknown; context?: boolean }[] = [];
           const mountAs = (name: string) => inPage<Mounted>(page, MOUNT_IN_PAGE, [files, name, mountProps({ ...r.e, within: name }, code, callersOf(d, name, abs)), r.e.file, wraps])
             .catch((e: any): Mounted => ({ ok: false, why: `the page failed while mounting (${String(e?.message ?? e).split('\n')[0]!.slice(0, 80)})` }));
           const find = async () => ((await inPage<any[]>(page, FIND_IN_PAGE, [{ ...r, e: undefined }]).catch(() => [])) ?? [])[0] ?? null;
@@ -927,11 +967,14 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
           let need = '';
           for (let i = 0; i < 2 && !said.ok && said.threw; i++) {
             need = whatItNeeded(sourceOfThrow(d, said.threw, code, parent || r.e.within), said.threw.component || parent || r.e.within, said.threw.message);
-            const pv = providerFor(d, said.threw.message, need);
+            const pv = providerFor(d, said.threw.message, need, sourceFileOfThrow(d, said.threw, abs, parent || r.e.within));
             if (!pv || wraps.some(w => w.name === pv.name)) break;
             let pcode = '';
             try { pcode = fs.readFileSync(pv.file, 'utf8'); } catch { break; }
-            wraps.push({ files: filesOf(pv.file), file: path.relative(d.root, pv.file).split(path.sep).join('/'), name: pv.name, props: mountProps({ ...r.e, within: pv.name, reach: undefined } as any, pcode) });
+            const hook = need.match(/what (use[A-Z][\w$]*) reads/)?.[1] ?? said.threw.message.match(/\b(use[A-Z][\w$]*)\b/)?.[1] ?? '';
+            // A bare context: its value shaped by how the component reads what the hook returns.
+            const props = pv.context ? { value: hookValue(sourceOfThrow(d, said.threw, code, parent || r.e.within), said.threw.component || parent || r.e.within, hook) ?? {} } : mountProps({ ...r.e, within: pv.name, reach: undefined } as any, pcode);
+            wraps.push({ files: filesOf(pv.file), file: path.relative(d.root, pv.file).split(path.sep).join('/'), name: pv.name, props, ...(pv.context ? { context: true } : {}) });
             said = await mountAs(parent || r.e.within);
           }
           providers = said.providers ?? 0;
@@ -1539,6 +1582,19 @@ const RESTORE_COVER = `document.querySelectorAll('[data-dsa-hid]').forEach((x) =
 
 /** What /@dsa/mount answers (tag/index.ts). */
 type Mounted = { ok: boolean; why?: string; providers?: number; threw?: { message: string; component: string; src?: string } };
+
+/** The file of the component that threw: its own when the stack names one inside the scan root, else the element's. */
+function sourceFileOfThrow(d: DrawWith, threw: NonNullable<Mounted['threw']>, abs: string, name: string): string {
+  if (!threw.src || !threw.component || threw.component === name) return abs;
+  let p = '';
+  try { p = decodeURIComponent(new URL(threw.src).pathname); } catch { return abs; }
+  const at = p.indexOf('/@fs/');
+  for (const f of at >= 0 ? [p.slice(at + 4)] : [path.join(d.dir ?? d.root, p), path.join(d.root, p)]) {
+    const rel = path.relative(d.root, f);
+    if (!rel.startsWith('..') && !path.isAbsolute(rel) && fs.existsSync(f)) return f;
+  }
+  return abs;
+}
 
 /**
  * The source of the component that threw, for whatItNeeded: its own file when the stack names one the app's

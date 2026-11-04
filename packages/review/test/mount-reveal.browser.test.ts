@@ -7,8 +7,9 @@ import { detectApp, startApp, tagPlan } from '../src/apps.js';
 
 // Drawing from the app's code when the component alone doesn't show the element: it's behind the
 // component's own state (a tab), it's made by a render helper the build doesn't keep (cellFor), or the
-// component throws because nothing provides what its hook reads. The first two are drawn; the third says
-// which component threw and what it needed. Skipped without a headless browser (`dsa setup`) or Vite.
+// component throws because nothing on the page provides what its hook reads. Each is drawn: the provider
+// or context comes from the source, its value shaped by what the component reads. Skipped without a
+// headless browser (`dsa setup`) or Vite.
 
 const browser = process.env.DSA_NO_BROWSER ? null : await (async () => {
   try { const { chromium } = await import('playwright'); return await chromium.launch(); } catch { return null; }
@@ -31,6 +32,10 @@ const FILES: Record<string, string> = {
   // A provider only the source knows: nothing on the page renders it.
   'src/chrome.jsx': `import { createContext, useContext } from 'react';\nconst Ctx = createContext(null);\nexport function CanvasChromeProvider({ children }) { return <Ctx.Provider value={{ zoom: 2 }}>{children}</Ctx.Provider>; }\nexport function useCanvasChrome() { const v = useContext(Ctx); if (!v) throw new Error('useCanvasChrome must be used inside CanvasChromeProvider'); return v; }\n`,
   'src/Zoom.jsx': `import { useCanvasChrome } from './chrome.jsx';\nexport function Zoom() {\n  const c = useCanvasChrome();\n  return <button className="btn">Zoom {c.zoom}x</button>;\n}\n`,
+  // A context with no provider component: the hook's error names one that doesn't exist. Imported from a
+  // folder beside the component.
+  'src/canvas/PaneContext.jsx': `import { createContext, useContext } from 'react';\nconst PaneContext = createContext(null);\nexport const usePane = () => { const v = useContext(PaneContext); if (!v) throw new Error('usePane must be used inside PaneProvider'); return v; };\n`,
+  'src/canvas/PaneTitle.jsx': `import { usePane } from './PaneContext.jsx';\nexport function PaneTitle() {\n  const { title, collapsed } = usePane();\n  return <button className="btn">{collapsed ? 'Closed' : 'Pane'} {title.trim()}</button>;\n}\n`,
   // A column's render function over rows: drawn by the table, with one row.
   'src/Table.jsx': `const columns = [{ render: (row) => <button className="btn">Open {row.name}</button> }];\nexport function Table({ rows }) {\n  return <table><tbody>{rows.map(r => <tr key={r.id}><td>{columns[0].render(r)}</td></tr>)}</tbody></table>;\n}\n`,
   // A node or an object: a node (nothing) is what renders.
@@ -38,7 +43,7 @@ const FILES: Record<string, string> = {
   'src/Account.jsx': `import { useSession } from './session.js';\nexport function Account() {\n  const s = useSession();\n  return <button className="btn">{s.user.name}</button>;\n}\n`,
 };
 
-test("an element behind its component's state, one made by a render helper, and a component that throws", { timeout: 180_000 }, async ({ skip }) => {
+test("an element behind its component's state, one made by a render helper, and components needing what nothing on the page provides", { timeout: 180_000 }, async ({ skip }) => {
   if (!browser) skip('no headless browser (run dsa setup)');
   const kit = path.resolve(import.meta.dirname, '../../dashboard/ui/node_modules');
   if (!fs.existsSync(path.join(kit, 'vite')) || !fs.existsSync(path.join(kit, 'react'))) skip('no Vite installed');
@@ -61,6 +66,7 @@ test("an element behind its component's state, one made by a render helper, and 
     ev('E-zoom', 'src/Zoom.jsx', 'Zoom', 'Zoom 2x'),
     ev('E-col', 'src/Table.jsx', 'columns', 'Open'),
     ev('E-chip', 'src/Chip.tsx', 'Chip', 'Chip'),
+    ev('E-pane', 'src/canvas/PaneTitle.jsx', 'PaneTitle', 'Pane'),
   ];
   const app = await startApp(tagPlan(detectApp({ name: 'desk', dir } as any, { apps: {} } as any) as any, { root, dir }));
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-mount-reveal-shots-'));
@@ -76,12 +82,14 @@ test("an element behind its component's state, one made by a render helper, and 
     // A render helper: the component around it draws it.
     assert.deepEqual([r.shots['E-cell']?.drawn, r.shots['E-cell']?.exact], ['mount', true], all);
     assert.match(all, /E-cell \(apps\/desk\/src\/Grid\.jsx:2\) drawn from the app's code \(Grid, the component around it, in the app's build\)/);
-    // Thrown: its first line, and what it needed, from its source.
-    assert.match(all, /E-account \(apps\/desk\/src\/Account\.jsx:4\) .*not mounted: Account: its component failed to render: Cannot read properties of undefined \(reading 'user'\); it needed what useSession reads \(a provider above it\)/);
+    // Reads a session nothing on the page provides: its context, found beside the hook, given a value shaped by what it reads.
+    assert.equal(r.shots['E-account']?.drawn, 'mount', all);
+    assert.match(all, /E-account \(apps\/desk\/src\/Account\.jsx:4\) drawn from the app's code \(its component, in the app's build, with 1 of its providers, SessionCtx found in the source\)/);
     // Shaped from use, wrapped in a provider found in the source, drawn by the table, a node left empty.
-    for (const id of ['E-swatch', 'E-zoom', 'E-col', 'E-chip']) assert.deepEqual([id, r.shots[id]?.drawn, r.shots[id]?.exact], [id, 'mount', true], all);
+    for (const id of ['E-swatch', 'E-zoom', 'E-col', 'E-chip', 'E-pane']) assert.deepEqual([id, r.shots[id]?.drawn, r.shots[id]?.exact], [id, 'mount', true], all);
     assert.match(String(r.shots['E-zoom'].content?.text ?? ''), /Zoom 2x/);
     assert.match(all, /E-zoom \(apps\/desk\/src\/Zoom\.jsx:4\) drawn from the app's code \(its component, in the app's build, with 1 of its providers, CanvasChromeProvider found in the source\)/);
+    assert.match(all, /E-pane \(apps\/desk\/src\/canvas\/PaneTitle\.jsx:4\) drawn from the app's code \(its component, in the app's build, with 1 of its providers, PaneContext found in the source\)/);
     assert.match(all, /E-col \(apps\/desk\/src\/Table\.jsx:1\) drawn from the app's code \(Table, the component around it/);
   } finally { app.stop(); }
 });

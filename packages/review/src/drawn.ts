@@ -555,3 +555,28 @@ export function whatItNeeded(code: string, component: string, message: string): 
   if (!found && params.has(prop)) found = `the prop ${prop}`;
   return found;
 }
+
+/**
+ * What a component reads off a hook's result, as a value: `const c = useCanvasChrome(); c.zoom` →
+ * { zoom: '' }; `const { zoom, setZoom } = useCanvasChrome()` → { zoom: '', setZoom: a function }.
+ */
+export function hookValue(code: string, component: string, hook: string): Val | undefined {
+  const ast = parse(code);
+  const fn = ast ? componentFn(ast, component) : null;
+  if (!fn || !hook) return undefined;
+  let out: Val | undefined;
+  walk(fn.body, (n) => {
+    if (out !== undefined || n.type !== 'VariableDeclarator' || n.init?.type !== 'CallExpression' || n.init.callee?.name !== hook) return;
+    if (n.id.type === 'Identifier') out = usageOf(fn.body, (m) => m?.type === 'Identifier' && m.name === n.id.name, 0, ast) ?? {};
+    else if (n.id.type === 'ObjectPattern') {
+      const o: Record<string, Val> = {};
+      for (const p of n.id.properties) {
+        const k = p.key?.name, local = p.value?.type === 'Identifier' ? p.value.name : p.value?.left?.name ?? k;
+        if (!k) continue;
+        o[k] = /^(on|set|handle|toggle)[A-Z]/.test(k) ? FN : usageOf(fn.body, (m) => m?.type === 'Identifier' && m.name === local, 0, ast) ?? '';
+      }
+      out = o;
+    }
+  });
+  return out;
+}
