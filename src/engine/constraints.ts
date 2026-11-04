@@ -68,6 +68,12 @@ export function applyConstraints(cands: Candidate[], f: ElementFeatures, sigs: S
     if (role && comp.role && comp.role !== role) why.push(`it has role="${role}", and ${c.use} renders role="${comp.role}"`);
     if (f.element === 'button' && FIELD_TAGS.has(comp.tag)) why.push(`it is a <button>, and ${c.use} renders <${comp.tag}>`);
     if (f.element === 'button' && comp.tag === 'button' && f.children.interactive > 0) why.push(`it holds another control, and ${c.use} renders a <button>, which can't`);
+    // The system's prop unions are the only allowed values (the checker's, else the cva axes).
+    const allowed = { ...comp.axes, ...(comp.allowed ?? {}) };
+    for (const [k, v] of Object.entries(c.props ?? {})) {
+      const ok = allowed[k];
+      if (ok && ok.length && !ok.includes(v)) (c.abstain ??= []).push(`${k}="${v}" isn't a value ${c.use} allows (${ok.slice(0, 6).join(', ')}${ok.length > 6 ? '…' : ''})`);
+    }
     if (why.length) rejected.push({ candidate: c, why: why.join('; ') });
     else kept.push(c);
   }

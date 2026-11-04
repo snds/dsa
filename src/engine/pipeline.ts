@@ -2,7 +2,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadCatalog, withMetrics } from './catalog.js';
-import { appSettings, readExceptions, type Config } from './config.js';
+import { appSettings, lookalikeMap, readExceptions, type Config } from './config.js';
+import { refineWithTypes } from './typecheck.js';
+import type { CodeScanResult } from './scanners/code.js';
 import { defaultExcludes, globMatch, targetRelative } from './paths.js';
 import type { Store, StoreFactory } from './store.js';
 import { effectiveSettings } from './settings.js';
@@ -190,6 +192,7 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
     const tEx = [...excludes, ...(t.exclude ?? [])];
     const app = appSettings(config, t.name);
     const res = scanCode(opts.root, config, t, tEx);
+    if (app.lookalikes) applyTypes(opts.root, config, t, res, notes, sigs);
     if (reading) res.instances = instancesFromReading(reading, opts.root, t, config.designSystem.core.name);
     if (app.components) data.instances.push(...res.instances);
     if (app.lookalikes) {
@@ -300,6 +303,7 @@ export async function reevaluateElements(opts: { root: string; dataDir: string; 
   for (const t of targets.filter(t => t.role !== 'core' && appSettings(config, t.name).lookalikes)) {
     const tEx = [...excludes, ...(t.exclude ?? [])];
     const res = scanCode(opts.root, config, t, tEx);
+    applyTypes(opts.root, config, t, res, [], sigs);
     const { exceptionOf } = exceptLookalikes(opts.root, config, t, res.lookalikes, [], new Date());
     const reachOf = new Map<Lookalike, Reach>();
     try {
@@ -323,6 +327,23 @@ export async function reevaluateElements(opts: { root: string; dataDir: string; 
     log(`Re-evaluated ${evals.length} elements with page placement from ${page.size} screenshots: ${changed} recommendation${changed === 1 ? '' : 's'} changed.`);
     return { changed, total: evals.length };
   } finally { store.close(); }
+}
+
+/**
+ * The TypeScript checker over what Babel couldn't read (typecheck.ts): spreads and class constants.
+ * Optional: skipped with a note when the app has no tsconfig or no `typescript` can be loaded.
+ */
+function applyTypes(root: string, config: Config, t: Target, res: CodeScanResult, notes: string[], sigs?: SignatureSet) {
+  if (config.recommend?.typescript === false) return;
+  const { allowTypes, inputTypes } = lookalikeMap(root, config);
+  const ref = refineWithTypes(res.lookalikes, r => path.join(t.dir, targetRelative(root, r.file, t.dir)), t.dir, root, allowTypes, inputTypes, res.instances, new Set(sigs?.components.keys() ?? []));
+  // The system's prop unions are the only values a recommendation may set (constraints.ts).
+  for (const [name, u] of ref.unions) { const c = sigs?.components.get(name); if (c) c.allowed = { ...(c.allowed ?? {}), ...u }; }
+  if (ref.note) notes.push(`${t.name}: type checker skipped (${ref.note}). Spreads and class constants are read by Babel alone.`);
+  if (ref.dropped.length) {
+    res.lookalikes = res.lookalikes.filter(r => !ref.dropped.includes(r));
+    notes.push(`${t.name}: ${ref.dropped.length} input${ref.dropped.length === 1 ? '' : 's'} left out: the type checker found an allowed type in a spread (a file input).`);
+  }
 }
 
 /**

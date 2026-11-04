@@ -44,6 +44,12 @@ export interface ElementFeatures {
   optionCount?: number | undefined;
   /** The file calls .showModal() somewhere (dialogs). */
   fileUsesShowModal?: boolean | undefined;
+  /**
+   * What the TypeScript checker (typecheck.ts) made of what Babel couldn't read. Absent when no checker ran.
+   * spread: its {...x} fixes every attribute that decides the component (resolved), or leaves some open.
+   * classes: class constants that don't resolve to literal classes.
+   */
+  typed?: { spread?: 'resolved' | 'unresolved' | undefined; spreadText?: string | undefined; open?: string[] | undefined; classes?: string[] | undefined } | undefined;
 }
 
 export interface ClassInfo {

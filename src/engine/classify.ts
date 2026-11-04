@@ -107,7 +107,15 @@ export function classify(f: ElementFeatures, map: RoleMap = systemRoleMap(), thr
   // look: only matters when a component replaces the element (a gap or keep doesn't depend on the look).
   const shared: { text: string; delta: number; look?: boolean | undefined }[] = [];
   if (f.classes.unresolved.length) shared.push({ text: `Part of the styling comes from outside (${[...new Set(f.classes.unresolved)].slice(0, 3).join(', ')}), so the look may differ from what was read.`, delta: -0.06, look: true });
-  if (f.hasSpread) shared.push({ text: 'Other code passes extra settings in ({...props}); check the callers.', delta: -0.05 });
+  // Spreads and class constants: the type checker resolves them when it ran; what it couldn't is a reason to abstain.
+  const unresolvedInputs: string[] = [];
+  if (f.hasSpread) {
+    const t = f.typed;
+    if (t?.spread === 'resolved') shared.push({ text: `The type checker resolved its spread ({...${t.spreadText ?? 'props'}}): nothing in it changes what the element is.`, delta: 0 });
+    else if (t?.spread === 'unresolved') unresolvedInputs.push(`its spread ({...${t.spreadText ?? 'props'}}) can set ${(t.open ?? []).map(k => (k === 'index' ? 'any attribute' : k === 'any' ? 'anything' : k)).join(', ')}, and the type checker can't say to what`);
+    else shared.push({ text: 'Other code passes extra settings in ({...props}); check the callers. (No type checker ran to resolve it.)', delta: -0.05 });
+  }
+  if (f.typed?.classes?.length) unresolvedInputs.push(`the class constant${f.typed.classes.length === 1 ? '' : 's'} ${f.typed.classes.slice(0, 3).join(', ')} ${f.typed.classes.length === 1 ? "doesn't" : "don't"} resolve to classes`);
   if (f.framework !== 'react') shared.push({ text: 'Template element: no parent or child context available.', delta: -0.1 });
   if (f.classes.viaConst.length) shared.push({ text: `Styled by the shared style ${sharedStyleWords(f.classes.viaConst)}.`, delta: 0 });
   // Migrating a control that does nothing is pointless until someone decides it should exist.
@@ -141,7 +149,7 @@ export function classify(f: ElementFeatures, map: RoleMap = systemRoleMap(), thr
   const reasons = [...top.reasons, ...ruledOut.map(text => ({ text: `${text}.`, delta: 0 }))];
   const second = scored[1];
   // Abstain third: an input the pick depends on didn't resolve, or a different component is just as close.
-  const unclear = [...(top.c.abstain ?? [])];
+  const unclear = [...unresolvedInputs, ...(top.c.abstain ?? [])];
   if (second && round(top.conf - second.conf) < THIN_MARGIN && describe(second.c) !== describe(top.c) && (second.c.use !== top.c.use || second.c.verdict !== top.c.verdict)) {
     unclear.push(`${describe(second.c)} scores ${pct(second.conf)} against ${pct(top.conf)}, too close to call`);
   }

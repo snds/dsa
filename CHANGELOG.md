@@ -21,6 +21,13 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   alternatives. It does so when a height doesn't resolve to pixels, when an element sits exactly between
   two sizes, when a state-bearing element's pick can't be checked, when every candidate is ruled out, and
   when two different components score within 0.02.
+- An optional TypeScript checker, run with each app's own `tsconfig.json` (`src/engine/typecheck.ts`).
+  It resolves what Babel can't read: spreads (`<input {...getInputProps()}>` carrying `type: "file"` is a
+  file input, not an `Input`), class constants whose type is a string literal, wrappers' props, and the
+  system's prop unions, read at one use of each component, as the only values a recommendation may set.
+  A spread or class constant it can't resolve makes the classifier abstain (`unclear`) instead of the old
+  5% penalty. It runs only over files with something to resolve, loads the app's own `typescript` first,
+  and is skipped with a note when there is no tsconfig or no `typescript`; the old penalty then stays.
 - The element scanner skips files that aren't product code: tests, stories, examples, demos, fixtures,
   mocks, stubs and docs, reusing the model extractor's list (`NON_PRODUCT`). The run notes how many it
   left out.

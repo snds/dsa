@@ -55,6 +55,8 @@ export interface ComponentSig {
    * component that can carry it.
    */
   props?: string[] | undefined;
+  /** The values each prop's type allows (Button size "xs" | "sm" | …), from the TypeScript checker. */
+  allowed?: Record<string, string[]> | undefined;
   sigs: Signature[];
 }
 

@@ -103,3 +103,11 @@ test('item 21: tests, stories, fixtures, stubs and docs are not product code', (
   for (const p of ['src/App.tsx', 'src/features/docsPanel/Panel.tsx', 'src/components/Stubborn.tsx'])
     assert.ok(!isNonProduct(p), p);
 });
+
+test('constraints: a prop value the component does not allow is unresolved, not shipped', () => {
+  const sigs = system({ 'src/toggle.tsx': `import { cva } from 'class-variance-authority';\nconst v = cva('inline-flex', { variants: { size: { default: 'h-8', lg: 'h-9' } }, defaultVariants: { size: 'default' } });\nexport function Toggle({ size, pressed, ...props }: { size?: 'default' | 'lg'; pressed?: boolean }) { return <button data-slot="toggle" className={v({ size })} {...props} />; }\n` });
+  const f = features(`export const B = () => <button aria-pressed={on} aria-label="Bold" onClick={() => setOn(!on)} className="size-6 hover:bg-accent"><Icon name="bold" /></button>;`);
+  const e = classify(f, systemRoleMap(), 0.9, sigs);
+  assert.equal(e.verdict, 'unclear', JSON.stringify(e.reasons.map(r => r.text)));
+  assert.ok(e.unclear?.some(w => /size="sm" isn't a value Toggle allows \(default, lg\)/.test(w)), JSON.stringify(e.unclear));
+});
