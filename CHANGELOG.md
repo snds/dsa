@@ -32,6 +32,9 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- Photos carry the run that took them: `shots/index.json` has `run: { id, ref, at }` (the source commit, or
+  "worktree" when the checkout has changes), and each new photo its `run` id beside its `at` time. Cached
+  photos keep their own, so a report can treat older ones as stale.
 - Routes the source doesn't spell out are reached. `apps[name].routeSource` names a module of the app and
   the export that lists every route (an array, or a function that returns one, such as the app's route
   formatter over its registries); it's loaded through the running app's build and its routes go first.

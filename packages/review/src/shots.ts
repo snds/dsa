@@ -1,4 +1,5 @@
 /// <reference lib="dom" />
+import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -121,8 +122,11 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
   const dir = path.join(opts.dataDir, 'shots');
   fs.mkdirSync(dir, { recursive: true });
   const idxFile = path.join(dir, 'index.json');
-  const index: { shots: Record<string, any>; missing: string[]; pages: string[]; takenAt: string; misses?: Record<string, any> } = fs.existsSync(idxFile) ? JSON.parse(fs.readFileSync(idxFile, 'utf8')) : { shots: {}, missing: [], pages: [], takenAt: '' };
+  const index: { shots: Record<string, any>; missing: string[]; pages: string[]; takenAt: string; misses?: Record<string, any>; run?: RunStamp } = fs.existsSync(idxFile) ? JSON.parse(fs.readFileSync(idxFile, 'utf8')) : { shots: {}, missing: [], pages: [], takenAt: '' };
   index.missing = []; index.pages = [];
+  // This run: an id each new photo carries, the source it was taken from (its commit, or "worktree" when the
+  // checkout has changes), and when. Cached photos keep their own stamp, so a report can tell an old one apart.
+  index.run = { id: `${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`, ref: sourceRef(opts.root), at: new Date().toISOString() };
   const result: ShotResult = { captured: 0, missing: 0, pages: 0, apps: [] };
   const perGroup = opts.perGroup ?? 3;
 
@@ -283,7 +287,7 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
         continue;
       }
       // Drawn from the code: kept beside the element's "not found", which still stands.
-      for (const [id, v] of Object.entries<any>(r.shots)) { index.shots[id] = { ...v, at, fileHash: hashOf(byId.get(id)!) }; if (!v.drawn) delete misses[id]; }
+      for (const [id, v] of Object.entries<any>(r.shots)) { index.shots[id] = { ...v, at, run: index.run!.id, fileHash: hashOf(byId.get(id)!) }; if (!v.drawn) delete misses[id]; }
       // How much of the app carried source tags: matches there are exact, the rest are the crawler's best guess.
       const tagged = r.tagged.of ? Math.round((100 * r.tagged.pages) / r.tagged.of) / 100 : undefined;
       if (tagged !== undefined) log(`  ${s.target === '*' ? 'this app' : s.target}: ${Math.round(tagged * 100)}% of pages tagged${tagged === 0 ? '; add dsaTag to its dev build for exact matches' : tagged < 1 ? ' (exact matches there, a best guess elsewhere)' : ' (every match exact)'}`);
@@ -354,6 +358,18 @@ interface Act { n: number; key: string; kind: 'click' | 'hover' | 'context' | 'c
  * How to draw what can't be photographed (drawn.ts): the scan root (to read each element's source), its
  * app's folder, and whether the app runs on dsa's own Vite runner (which serves /@dsa/mount).
  */
+/** shots/index.json's `run`: this run's id, the source it photographed (commit, or "worktree" when changed), and when. */
+export interface RunStamp { id: string; ref: string; at: string }
+
+/** The scan root's commit, "worktree" when it has uncommitted changes, "" outside git. */
+function sourceRef(root: string): string {
+  try {
+    const head = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    const dirty = execFileSync('git', ['-C', root, 'status', '--porcelain', '--untracked-files=no'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return dirty ? 'worktree' : head;
+  } catch { return ''; }
+}
+
 interface DrawWith { root: string; dir?: string | undefined; mount?: boolean | undefined; max?: number | undefined; maxMinutes?: number | undefined }
 
 /**

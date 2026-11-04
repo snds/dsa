@@ -44,4 +44,7 @@ test("a node that photographs blank gives way to the next one its line drew", { 
   const pick = idx.shots[id('Pick swatch')!];
   assert.ok(pick && !pick.drawn && !pick.blank, all);
   assert.doesNotMatch(all, /captured but blank/);
+  // Each photo carries this run's stamp: its id, the source it was taken from, and when.
+  assert.ok(idx.run?.id && typeof idx.run.ref === 'string' && idx.run.at, JSON.stringify(idx.run));
+  assert.equal(pick.run, idx.run.id);
 });
