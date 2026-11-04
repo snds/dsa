@@ -108,13 +108,18 @@ export function stripSystemComponents(src: string, imports: Map<string, string>,
       if (axis !== "variant" && axis !== "size" && props[axis] !== (t.defaults[axis] ?? values[0])) sure = false;
     }
     const classes = sure ? t.classes(props.variant ?? "default", props.size ?? "default") : null;
-    if (!classes) return;
+    // Nothing to recognize it by (a component that adds no classes of its own): no label.
+    if (!classes?.length) return;
     const cls = classes.join(" ");
     const name = n.openingElement.name;
     mine.push({ start: name.start, end: name.end, text: t.tag });
+    // Type arguments (<Table<Row> …>) don't belong on a host tag.
+    const typeArgs = n.openingElement.typeArguments ?? n.openingElement.typeParameters;
+    if (typeArgs) mine.push({ start: typeArgs.start, end: typeArgs.end, text: blank(src.slice(typeArgs.start, typeArgs.end)) });
+    const afterName = typeArgs ? typeArgs.end : name.end;
     if (n.closingElement) mine.push({ start: n.closingElement.name.start, end: n.closingElement.name.end, text: t.tag });
     const own = className && literal(className.value);
-    if (!className) mine.push({ start: name.end, end: name.end, text: ` className="${attr(cls)}"` });
+    if (!className) mine.push({ start: afterName, end: afterName, text: ` className="${attr(cls)}"` });
     else if (own !== undefined) mine.push({ start: className.value.start, end: className.value.end, text: `"${attr(`${cls} ${own}`.trim())}"` });
     else if (className.value?.type === "JSXExpressionContainer") {
       const e = className.value.expression;

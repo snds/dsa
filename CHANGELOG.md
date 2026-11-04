@@ -16,7 +16,9 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   expected calibration error (ECE); the one-sided 95% lower bound on precision at the ready bar
   (Clopper-Pearson); and Wilson intervals per app and per picture source. With several `--site`
   folders of the same build it reports repeatability: rubric passes that flip, recommendations that
-  flip, the confidence spread, and cards that cross the ready line.
+  flip, the confidence spread, and cards that cross the ready line as the page shows it (and, apart,
+  on the scanner's own score). Correctness is scored at the scanner's confidence before the evidence
+  cap: the cap is a presentation gate, and scoring correctness on it would merge the two numbers.
 - `labels.jsonl`: one label per line, `{id, app, file, line, sourceRef, elementHash, truth: {verdict,
   use, props}, acceptableAlts, labeler, method, at, notes}`, with `method` one of human, migrated,
   history, lint or consensus. `schema/label.json` and a zod validator (`LabelSchema`, `parseLabels`);
@@ -24,7 +26,8 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 - `dsa labels` bootstraps ground truth from code that already answers. `migrated`: each app is copied to
   a work folder with every system component stripped back to the markup it renders (its host tag and the
   classes its variant and size add, its own classes kept, lines unchanged), and each is labelled with
-  what was there; scan the copy and bench it. Signatures now keep each variant and size's classes
+  what was there (components that add no classes of their own, and apps whose look-alikes aren't
+  measured, are skipped); scan the copy and bench it. Signatures now keep each variant and size's classes
   (`classes`) for this. `history`: commits that turned a raw element into a system component label the
   raw element at the commit before (a shallow clone says it has no history to read). `queue`: where dsa
   and the labels, two labels, or a second judge's labels disagree, plus a seeded 10% random audit of the

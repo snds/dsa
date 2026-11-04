@@ -68,7 +68,8 @@ export function migratedLabels(o: { root: string; config: Config; configFile: st
   const now = (o.now ?? new Date()).toISOString();
   const work = path.resolve(o.workDir);
   const root = path.resolve(o.root);
-  const targets = resolveTargets(root, o.config).filter((t) => t.role === 'consumer' && (!o.apps || o.apps.includes(t.name)));
+  // Apps whose look-alikes the config doesn't measure would never be scanned: no labels for them.
+  const targets = resolveTargets(root, o.config).filter((t) => t.role === 'consumer' && o.config.apps?.[t.name]?.lookalikes !== false && (!o.apps || o.apps.includes(t.name)));
   for (const d of [root, ...targets.map((t) => t.dir)]) if (isInside(work, d) || isInside(d, work)) throw new Error(`The work folder (${work}) and ${d} overlap: put the work folder somewhere else.`);
   const strip = stripTargets(root, o.config);
   const packages = allDsPackages(o.config);

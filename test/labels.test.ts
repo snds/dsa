@@ -29,6 +29,7 @@ describe("labels.jsonl", () => {
   });
 });
 
+const plain: StripTarget = { tag: "div", axes: {}, defaults: {}, classes: () => [] };
 const button: StripTarget = {
   tag: "button",
   axes: { variant: ["default", "ghost"], size: ["default", "sm"] },
@@ -51,11 +52,13 @@ describe("migrated: a system component stripped back to the markup it renders", 
     "    <Button variant={tone}>Maybe</Button>",
     "    <Button asChild><a href=\"/x\">Go</a></Button>",
     "    <Card />",
+    '    <Button<Row> variant="ghost" />',
     "  </div>;",
     "}",
   ].join("\n");
   const imports = systemImports(src, ["@acme/ui"]);
-  const r = stripSystemComponents(src, imports, new Map([["Button", button]]));
+  // Card adds no classes of its own: nothing to recognize it by, so it is left alone.
+  const r = stripSystemComponents(src, imports, new Map([["Button", button], ["Card", plain]]));
 
   it("finds the system's imports by package", () => {
     expect([...imports]).toEqual([["Button", "Button"], ["Card", "Card"]]);
@@ -66,6 +69,7 @@ describe("migrated: a system component stripped back to the markup it renders", 
       [5, "Button", { variant: "ghost", size: "sm" }],
       [6, "Button", { variant: "ghost", size: "default" }],
       [10, "Button", { variant: "default", size: "default" }],
+      [14, "Button", { variant: "ghost", size: "default" }],
     ]);
   });
 
@@ -81,6 +85,7 @@ describe("migrated: a system component stripped back to the markup it renders", 
     expect(lines[10]).toBe("    <Button variant={tone}>Maybe</Button>");
     expect(lines[11]).toContain("<Button asChild>");
     expect(lines[12]).toBe("    <Card />");
+    expect(lines[13]).toMatch(/^ {4}<button +className="inline-flex rounded-md bg-transparent h-9" +\/>$/);
   });
 });
 

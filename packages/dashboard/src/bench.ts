@@ -29,7 +29,10 @@ export interface Prediction {
   verdict: string;
   use: string | null;
   props: Record<string, string>;
+  /** The scanner's confidence, before the evidence cap. */
   confidence: number;
+  /** The confidence the card shows (after the cap): what decides "ready" on the page. */
+  shown: number;
   source: Source;
 }
 
@@ -38,7 +41,10 @@ const norm = (props: Record<string, unknown> | null | undefined) =>
   Object.fromEntries(Object.entries(props ?? {}).filter(([k, v]) => !['render', 'asChild', 'children'].includes(k) && v != null && v !== '' && v !== 'default').map(([k, v]) => [k, String(v)]).sort((a, b) => (a[0] < b[0] ? -1 : 1)));
 const sameProps = (a: Record<string, unknown> | undefined | null, b: Record<string, unknown> | undefined | null) => JSON.stringify(norm(a)) === JSON.stringify(norm(b));
 
-/** What each card recommends, as a prediction: the question's (or part's) pick, else the element's own. Decided and excepted elements are not predictions. */
+/**
+ * What each card recommends, as a prediction: the question's (or part's) pick, else the element's own, at
+ * the scanner's confidence before the evidence cap. Decided and excepted elements are not predictions.
+ */
 export function predictionsOf(payload: any): Prediction[] {
   const E = payload.elements;
   const proposes = new Map<string, any>();
@@ -48,7 +54,9 @@ export function predictionsOf(payload: any): Prediction[] {
   }
   return (E?.evals ?? []).filter((e: any) => !e.exception && !e.decided && e.reach?.status !== 'unused').map((e: any) => {
     const r = proposes.get(e.id) ?? e;
-    return { id: e.id, target: e.target, file: e.file, line: e.line, verdict: r?.verdict ?? e.verdict, use: r?.use ?? null, props: norm(r?.props), confidence: e.confidence, source: sourceOf(e.shot) };
+    // The scanner's own score, before the evidence cap: the cap holds a card under the bar until a person
+    // can see it, which is presentation. Scoring correctness on the capped number would merge the two.
+    return { id: e.id, target: e.target, file: e.file, line: e.line, verdict: r?.verdict ?? e.verdict, use: r?.use ?? null, props: norm(r?.props), confidence: e.evidenceCap?.from ?? e.confidence, shown: e.confidence, source: sourceOf(e.shot) };
   });
 }
 
@@ -175,17 +183,20 @@ export function repeatability(payloads: any[], opts: { cards?: (CardFacts[] | nu
     preds: new Map(predictionsOf(p).map((x) => [x.id, x])),
   }));
   const ids = [...(runs[0]?.preds.keys() ?? [])].filter((id) => runs.every((r) => r.preds.has(id)));
-  let passFlips = 0, verdictFlips = 0, crossings = 0, passCompared = 0;
+  let passFlips = 0, verdictFlips = 0, crossings = 0, scannerCrossings = 0, passCompared = 0;
   const spreads: number[] = [];
   for (const id of ids) {
     const ps = runs.map((r) => r.preds.get(id)!);
     const passes = runs.map((r) => r.trust.get(id)).filter((x): x is boolean => x !== undefined);
     if (passes.length === runs.length) { passCompared++; if (new Set(passes).size > 1) passFlips++; }
     if (new Set(ps.map((p) => `${p.verdict}|${p.use}|${JSON.stringify(p.props)}`)).size > 1) verdictFlips++;
-    const cs = ps.map((p) => p.confidence);
+    // The ready line as the page shows it (after the cap), and the scanner's own score apart.
+    const cs = ps.map((p) => p.shown);
     const lo = Math.min(...cs), hi = Math.max(...cs);
     spreads.push(hi - lo);
     if (lo < th && hi >= th) crossings++;
+    const raw = ps.map((p) => p.confidence);
+    if (Math.min(...raw) < th && Math.max(...raw) >= th) scannerCrossings++;
   }
   spreads.sort((a, b) => a - b);
   const q = (p: number) => (spreads.length ? r4(spreads[Math.min(spreads.length - 1, Math.floor(p * spreads.length))]!) : null);
@@ -195,6 +206,7 @@ export function repeatability(payloads: any[], opts: { cards?: (CardFacts[] | nu
     passFlips, passFlipRate: passCompared ? r4(passFlips / passCompared) : null,
     verdictFlips, verdictFlipRate: n ? r4(verdictFlips / n) : null,
     crossings, crossingRate: n ? r4(crossings / n) : null,
+    scannerCrossings,
     confidenceSpread: { mean: n ? r4(spreads.reduce((a, x) => a + x, 0) / n) : null, p90: q(0.9), max: q(1) },
     threshold: th,
   };
@@ -220,6 +232,6 @@ export function benchText(b: BenchResult, rep?: ReturnType<typeof repeatability>
       ...Object.entries(C.bySource).map(([k, v]) => `  ${k} pictures: precision ${pct(v.precision.rate)} [${pct(v.precision.ci[0])}, ${pct(v.precision.ci[1])}] of ${v.precision.n}; accuracy ${pct(v.accuracy.rate)} of ${v.accuracy.n}.`),
     );
   }
-  if (rep) lines.push(`Repeatability over ${rep.runs} runs, ${rep.elements} elements: passes flip ${rep.passFlips} (${pct(rep.passFlipRate)}), recommendations flip ${rep.verdictFlips} (${pct(rep.verdictFlipRate)}), ${rep.crossings} cross the ${rep.threshold} line (${pct(rep.crossingRate)}); confidence spread mean ${rep.confidenceSpread.mean}, p90 ${rep.confidenceSpread.p90}, max ${rep.confidenceSpread.max}.`);
+  if (rep) lines.push(`Repeatability over ${rep.runs} runs, ${rep.elements} elements: passes flip ${rep.passFlips} (${pct(rep.passFlipRate)}), recommendations flip ${rep.verdictFlips} (${pct(rep.verdictFlipRate)}), ${rep.crossings} cross the ${rep.threshold} line as shown (${pct(rep.crossingRate)}; ${rep.scannerCrossings} on the scanner's own score); shown confidence spread mean ${rep.confidenceSpread.mean}, p90 ${rep.confidenceSpread.p90}, max ${rep.confidenceSpread.max}.`);
   return lines.join('\n');
 }

@@ -21,7 +21,7 @@ const label = (id: string, use: string, props: Record<string, string> = {}, o: P
   acceptableAlts: [], labeler: 'pat', method: 'human', at: '2026-10-06T12:00:00Z', ...o,
 });
 const pred = (id: string, use: string, confidence: number, props: Record<string, string> = {}, o: Partial<Prediction> = {}): Prediction => ({
-  id, target: 'ledger', file: `ledger/src/${id}.tsx`, line: 3, verdict: 'replace', use, props, confidence, source: 'live', ...o,
+  id, target: 'ledger', file: `ledger/src/${id}.tsx`, line: 3, verdict: 'replace', use, props, confidence, shown: confidence, source: 'live', ...o,
 });
 
 test('precision, recall, abstention and errors are kept apart', () => {
@@ -91,6 +91,8 @@ test('two numbers, never merged: presentation from the rubric, correctness from 
   assert.deepEqual(b.presentation.excluded, { unused: 0, lab: 1, exception: 0, ignored: 0 });
   assert.deepEqual([b.correctness!.claimed, b.correctness!.right, b.correctness!.abstained], [1, 1, 1]);
   assert.deepEqual(predictionsOf(p).map((x) => x.id), ['a', 'b'], 'excepted elements are not predictions');
+  // Held under the bar for want of a photo: still the scanner's claim, at its own score.
+  assert.equal(predictionsOf(page([el('h', { confidence: 0.89, evidenceCap: { from: 0.97, why: [] } })]))[0]!.confidence, 0.97);
   const text = benchText(b);
   assert.match(text, /^Presentation .*\n[\s\S]*\nCorrectness /);
   assert.ok(!/overall|combined/i.test(text));
@@ -104,6 +106,7 @@ test('repeatability: passes and recommendations that flip, confidence spread, cr
   assert.equal(r.passFlips, 2, 'a lost its photo; b fell under the bar with its photo');
   assert.equal(r.verdictFlips, 1);
   assert.equal(r.crossings, 1);
+  assert.equal(r.scannerCrossings, 1, 'no cap here: the same line either way');
   assert.equal(r.confidenceSpread.max, 0.03);
 });
 

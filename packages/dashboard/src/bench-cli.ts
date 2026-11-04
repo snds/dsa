@@ -38,8 +38,9 @@ export function benchCommands(program: Command, api: AddonApi) {
     .option('--site <dir...>', 'published dashboards (dsa publish) to score; the first is benched, all of them are compared for repeatability (default: a report of the latest run)')
     .option('--no-cards', "don't open the pages in a browser: card checks stay untested")
     .option('--ready <n>', 'the ready bar (default: the report threshold)')
-    .option('--json', 'print JSON')
-    .action(async (o: { labels?: string; site?: string[]; cards: boolean; ready?: string; json?: boolean }, cmd: Command) => {
+    .action(async (o: { labels?: string; site?: string[]; cards: boolean; ready?: string }, cmd: Command) => {
+      // --json is the CLI's own option (dsa --json bench, or dsa bench --json).
+      const json = Boolean((cmd.optsWithGlobals() as { json?: boolean }).json);
       const labels = o.labels ? loadLabels(path.resolve(api.cwd, o.labels), api.out) : null;
       const threshold = o.ready ? Number(o.ready) : undefined;
       let payloads: any[], dirs: (string | undefined)[], cards: (CardFacts[] | null)[];
@@ -56,7 +57,7 @@ export function benchCommands(program: Command, api: AddonApi) {
       }
       const b = bench(payloads[0], labels, { cards: cards[0] ?? null, ...(dirs[0] ? { dir: dirs[0] } : {}), ...(threshold != null ? { threshold } : {}) });
       const rep = payloads.length > 1 ? repeatability(payloads, { cards, dirs, ...(threshold != null ? { threshold } : {}) }) : null;
-      api.out(o.json ? JSON.stringify({ ...b, repeatability: rep }, null, 1) : benchText(b, rep));
+      api.out(json ? JSON.stringify({ ...b, repeatability: rep }, null, 1) : benchText(b, rep));
     });
 
   const labels = program.command('labels').description('ground truth for dsa bench: check a labels file, or bootstrap labels from code that already answers');
@@ -94,7 +95,7 @@ export function benchCommands(program: Command, api: AddonApi) {
       const ctx = await api.context(cmd);
       const components = new Set(stripTargets(ctx.root, ctx.config).keys());
       const all: Label[] = [];
-      for (const t of resolveTargets(ctx.root, ctx.config).filter((x) => x.role === 'consumer' && (!o.app || o.app.includes(x.name)))) {
+      for (const t of resolveTargets(ctx.root, ctx.config).filter((x) => x.role === 'consumer' && ctx.config.apps?.[x.name]?.lookalikes !== false && (!o.app || o.app.includes(x.name)))) {
         const r = historyLabels({ app: t, components, maxCommits: Number(o.max) });
         api.out(`${t.name}: ${r.labels.length} labels from ${r.commits} commits${r.shallow ? ' (a shallow clone: its history is cut off)' : ''}.`);
         all.push(...r.labels);
