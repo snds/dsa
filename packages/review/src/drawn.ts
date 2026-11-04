@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { parse as babelParse } from '@babel/parser';
+import { parse as babelParse, parseExpression as babelParseExpression } from '@babel/parser';
 import type { ElementEval } from '@snds/dsa/engine';
 export { MOUNT_MODULE } from '@snds/dsa/tag';
 
@@ -579,4 +579,88 @@ export function hookValue(code: string, component: string, hook: string): Val | 
     }
   });
   return out;
+}
+
+/** One component's state to set so an element shows: which of its state hooks (in order), and to what. */
+export interface StateSet { file: string; component: string; slots: { index: number; name: string; value: Val }[] }
+
+const NO_QUEUE = /^use(Memo|Callback|Ref|Effect|LayoutEffect|InsertionEffect|ImperativeHandle|Context|Id|DebugValue|SyncExternalStore|DeferredValue)$/;
+const QUEUE_OTHER = /^use(Transition|ActionState|Optimistic|FormState)$/;
+
+/**
+ * The component's state hooks, in the order React keeps them: each useState/useReducer's name
+ * (`const [open, setOpen] = useState(…)` → open), null for another hook that keeps state. Stops at the
+ * first custom hook, whose own hooks can't be counted from here.
+ */
+export function stateOrder(code: string, component: string): (string | null)[] {
+  const ast = parse(code);
+  const fn = ast ? componentFn(ast, component) : null;
+  const out: (string | null)[] = [];
+  if (!fn?.body?.body) return out;
+  const nameOf = (c: any) => c?.type === 'Identifier' ? c.name : c?.property?.name ?? '';
+  for (const st of fn.body.body) {
+    const calls: { name: string; id: any }[] = [];
+    if (st.type === 'VariableDeclaration') for (const d of st.declarations) { if (d.init?.type === 'CallExpression') calls.push({ name: nameOf(d.init.callee), id: d.id }); }
+    else if (st.type === 'ExpressionStatement' && st.expression?.type === 'CallExpression') calls.push({ name: nameOf(st.expression.callee), id: null });
+    for (const c of calls) {
+      if (!/^use[A-Z]/.test(c.name)) continue;
+      if (c.name === 'useState' || c.name === 'useReducer') out.push(c.id?.type === 'ArrayPattern' && c.id.elements[0]?.type === 'Identifier' ? c.id.elements[0].name : null);
+      else if (QUEUE_OTHER.test(c.name)) out.push(null);
+      else if (!NO_QUEUE.test(c.name)) return out;
+    }
+  }
+  return out;
+}
+
+/**
+ * The state to set so an element's conditions hold: for each gate on a component's own state (`openColour`,
+ * `!singleView`, `mode === 'current'`, `a || b` false), that hook and a value: a literal from the test, a
+ * value shaped by how the component reads it, or true / false. Gates on props or members are left alone.
+ */
+export function stateSets(gates: { test: string; negated: boolean; component?: string; file?: string }[], read: (file: string) => string | null): StateSet[] {
+  const out = new Map<string, StateSet>();
+  for (const g of gates) {
+    if (!g.component || !g.file) continue;
+    const code = read(g.file);
+    if (!code) continue;
+    const order = stateOrder(code, g.component);
+    if (!order.some(Boolean)) continue;
+    const ast = parse(code);
+    const fn = ast ? componentFn(ast, g.component) : null;
+    let expr: any = null;
+    try { expr = babelParseExpression(g.test, { plugins: ['jsx', 'typescript'] }); } catch { continue; }
+    const want = new Map<string, Val>();
+    const shapeFor = (x: string, truth: boolean): Val => {
+      if (!truth) return false;
+      const v = fn ? usageOf(fn.body, (m) => m?.type === 'Identifier' && m.name === x, 0, ast) : undefined;
+      return v === undefined || v === '' ? true : v === 0 ? 1 : Array.isArray(v) && !v.length ? [''] : v;
+    };
+    const visit = (e: any, truth: boolean) => {
+      if (!e) return;
+      if (e.type === 'Identifier') { if (order.includes(e.name)) want.set(e.name, shapeFor(e.name, truth)); return; }
+      if (e.type === 'UnaryExpression' && e.operator === '!') return visit(e.argument, !truth);
+      if (e.type === 'LogicalExpression') {
+        if ((e.operator === '&&' && truth) || (e.operator === '||' && !truth)) { visit(e.left, truth); visit(e.right, truth); }
+        else visit(e.left, truth);
+        return;
+      }
+      if (e.type === 'BinaryExpression' && /^[!=]==?$/.test(e.operator)) {
+        const [id, lit] = e.left.type === 'Identifier' ? [e.left, e.right] : [e.right, e.left];
+        if (id?.type !== 'Identifier' || !order.includes(id.name) || !/^(String|Numeric|Boolean)Literal$/.test(lit?.type)) return;
+        const eq = e.operator.startsWith('=') === truth;
+        if (eq) want.set(id.name, lit.value);
+        else if (typeof lit.value === 'boolean') want.set(id.name, !lit.value);
+      }
+    };
+    visit(expr, !g.negated);
+    if (!want.size) continue;
+    const key = `${g.file}|${g.component}`;
+    const s = out.get(key) ?? { file: g.file, component: g.component, slots: [] };
+    for (const [name, value] of want) {
+      const index = order.filter(Boolean).length ? order.indexOf(name) : -1;
+      if (index >= 0 && !s.slots.some(x => x.name === name)) s.slots.push({ index, name, value });
+    }
+    if (s.slots.length) out.set(key, s);
+  }
+  return [...out.values()];
 }

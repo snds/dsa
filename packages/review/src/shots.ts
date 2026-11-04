@@ -8,7 +8,7 @@ import { appSurface, openSurface } from '@snds/dsa';
 import { detectApp, discoverRoutes, ensureBrowser, linkCoreForChild, routeConfig, startApp, tagPlan } from './apps.js';
 
 import { READ_STYLE } from './rendered.js';
-import { NO_SIZE, SHOW_MARKUP, hookValue, markupOf, mountProps, parentComponent, readSource, whatItNeeded } from './drawn.js';
+import { NO_SIZE, SHOW_MARKUP, hookValue, markupOf, mountProps, parentComponent, readSource, stateSets, whatItNeeded, type StateSet } from './drawn.js';
 import { needsValue, patternTest, routeFiles, routesReaching } from './routes.js';
 import { describeNetwork, flowProblems, guardNetwork, routeUrl, runFlow, type Flow, type GuardStats } from './flows.js';
 
@@ -288,6 +288,15 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
       reach.unreachable = r.missing.length - reach.mounted - reach.markup;
       log(`  ${s.target === '*' ? 'this app' : s.target}: ${reach.live} reached live, ${reach.mounted} drawn from the app's code, ${reach.markup} markup only, ${reach.unreachable} not shown at all; why the ${r.missing.length} not reached live weren't${Object.keys(reasons).length ? ':' : ''}`);
       for (const [w, n] of Object.entries(reasons).sort((a, b) => b[1] - a[1])) log(`    ${n} · ${w}`);
+      // Each one not reached live, on its own line: why, its conditions (and the component each is in), the routes that render it.
+      if (r.missing.length) log(`  not reached live, one by one:`);
+      for (const id of r.missing) {
+        const e = byId.get(id);
+        if (!e) continue;
+        const gates = (e.reach?.gates ?? []).map((g: any) => `${g.component ? g.component + ': ' : ''}${g.negated ? 'not ' : ''}“${String(g.test).slice(0, 60)}”`).join(', ');
+        const rs = s.reach?.byId[id];
+        log(`    ${id} (${e.file}:${e.line}) · ${r.why[id] ?? (r.shots[id]?.drawn ? `drawn (${r.shots[id].drawn})` : 'no reason recorded')}${gates ? ` · when ${gates}` : ''} · ${rs === undefined ? 'routes unknown' : rs.length ? `routes ${rs.slice(0, 4).join(', ')}${rs.length > 4 ? ` +${rs.length - 4}` : ''}` : 'no route renders its file'}`);
+      }
       index.missing.push(...r.missing);
       index.pages.push(...r.pages);
       result.apps.push({ target: s.target, url: s.url, how: s.how, routes: s.routes.length, captured: Object.values<any>(r.shots).filter(v => !v.drawn).length, ...(r.drawn ? { drawn: r.drawn } : {}), reach, ...(tagged !== undefined ? { tagged } : {}), ...needs(s.target) });
@@ -788,6 +797,8 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         // Each traced opener tried here, and what it found: so a miss behind one says whether it ran.
         if (said.length) o.log(`  openers on ${u.replace(base.origin, '')}: ${said.join('; ')}${absent ? `; ${absent} other opener${absent === 1 ? '' : 's'} not on this page` : ''}`);
       }
+      // State the source says hides what's missing, set through React (not when signed in by memory: a reload would sign out).
+      if (remaining.length && o.reveal !== false && !(o.signIn && auth.done)) await stateReveal(u, sweep);
       } catch (e: any) {
         if (!/closed|crash|Target/i.test(String(e?.message))) throw e;
         o.log(`  the page closed on ${u.replace(base.origin, '')}; restarting the browser and moving on`);
@@ -881,12 +892,69 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
    * drawing, never a photo, and stays "not found" in the app. Every one gets a line saying what it became,
    * and why it wasn't mounted when it wasn't: none is dropped without a reason.
    */
+  /** The component state that would show this element, from its traced conditions (empty without a source). */
+  function stateFor(r: Target): StateSet[] {
+    if (!o.draw?.root) return [];
+    const d = o.draw;
+    const gates = (r.e.reach?.gates ?? []).map((g: any) => ({ ...g, file: g.file && path.isAbsolute(g.file) ? path.relative(d.root, g.file).split(path.sep).join('/') : g.file }));
+    try { return stateSets(gates, (f) => readSource(d.root, f, d.dir)); } catch { return []; }
+  }
+  function describeSets(sets: StateSet[]) { return sets.flatMap(x => x.slots.map(sl => `${sl.name} = ${JSON.stringify(sl.value)}`.slice(0, 40))).join(', '); }
+
+  /**
+   * Live, on the page that renders them: elements behind a component's own state ("when openColour",
+   * "mode === 'current'") are shown by setting that state through React, looked for, then the page is
+   * reloaded. Grouped by the state each needs; up to 10 per page.
+   */
+  async function stateReveal(u: string, sweep: (by?: string) => Promise<void>) {
+    const files = shown.get(u);
+    if (!files || !o.draw?.root) return;
+    const groups = new Map<string, { sets: StateSet[]; mine: Target[] }>();
+    for (const r of remaining) {
+      const sets = stateFor(r).filter(x => files.has(x.file) || files.has(r.e.file));
+      if (!sets.length) continue;
+      const k = JSON.stringify(sets);
+      const g = groups.get(k) ?? { sets, mine: [] };
+      g.mine.push(r);
+      groups.set(k, g);
+    }
+    const said: string[] = [];
+    let tries = 0;
+    for (const g of [...groups.values()].sort((a, b) => b.mine.length - a.mine.length)) {
+      if (!remaining.length || tries >= 10 || Date.now() >= phase1End) break;
+      if (!g.mine.some(r => remaining.includes(r))) continue;
+      const set = await inPage<number>(page, SET_STATE, { sets: g.sets }).catch(() => 0);
+      tries++;
+      const what = describeSets(g.sets);
+      if (!set) { said.push(`${what}: its component isn't on this page`); continue; }
+      await page.waitForTimeout(o.waitMs);
+      await sweep(`setting ${what}`);
+      const found = g.mine.length - g.mine.filter(r => remaining.includes(r)).length;
+      said.push(`${what}: found ${found}`);
+      for (const r of g.mine) if (remaining.includes(r)) note(r, `set ${what} on ${routeOf(u)}: still not shown`);
+      const same = page.url().split('#')[0] === u.split('#')[0];
+      await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+      if (same) await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+      await page.waitForTimeout(o.waitMs);
+    }
+    if (said.length) o.log(`  state on ${u.replace(base.origin, '')}: ${said.join('; ')}`);
+  }
+
   /**
    * An element its mounted component didn't show: click what the scan traced as opening it, then each of the
    * drawing's own toggles, tabs and menus (never one that saves, deletes or leaves), looking after each.
    */
   async function revealInMount(r: Target, find: () => Promise<any>): Promise<{ hit: any; after: string; tried: string }> {
     const names: string[] = [];
+    // Its conditions on the drawing's own state, set through React.
+    const sets = stateFor(r);
+    if (sets.length && await inPage<number>(page, SET_STATE, { sets, within: '#dsa-mount' }).catch(() => 0)) {
+      await page.waitForTimeout(300);
+      const hit = await find();
+      const what = `setting ${describeSets(sets)}`;
+      if (hit) return { hit, after: what, tried: '' };
+      names.push(what);
+    }
     // A few seconds per element: drawing every element left must not cost more than the live pass did.
     const until = Date.now() + 8000;
     const use = async (event: string, value?: string) => {
@@ -1045,7 +1113,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         drawnIds.push(r.id);
         remaining = remaining.filter(x => x.id !== r.id);
         n++;
-        const msg = how === 'mount' ? `drawn from the app's code (${drawnBy ? `${drawnBy}, the component around it` : 'its component'}, in the app's build${providers ? `, with ${providers} of its providers` : ''}${wrapped ? `, ${wrapped} found in the source` : ''}${revealed ? `, after clicking ${revealed} in it` : ''})` : `drawn as markup only; not mounted: ${unmounted}`;
+        const msg = how === 'mount' ? `drawn from the app's code (${drawnBy ? `${drawnBy}, the component around it` : 'its component'}, in the app's build${providers ? `, with ${providers} of its providers` : ''}${wrapped ? `, ${wrapped} found in the source` : ''}${revealed ? `, after ${revealed.startsWith('setting ') ? revealed : `clicking ${revealed}`} in it` : ''})` : `drawn as markup only; not mounted: ${unmounted}`;
         count(placeholder ? `shown outlined (no size: ${short(placeholder)})` : how === 'mount' ? "drawn from the app's code" : `markup only (not mounted: ${short(unmounted)})`);
         o.log(`  ${where(r)} ${msg}${placeholder ? ` · shown outlined, it had no size: ${placeholder}` : ''}${cap.blank ? ' · blank' : ''}`);
       } catch (e: any) {
@@ -1138,6 +1206,38 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     o.log(`  explored ${u.replace(base.origin, '')}: ${used} interaction${used === 1 ? '' : 's'}, ${startCount - remaining.length} found${own ? ' (a page that renders what is missing: every control tried)' : ''}${budget <= 0 ? '; interaction budget (shots.maxActions) used' : Date.now() > pageStop ? '; out of time for this page' : ''}`);
   }
 }
+
+/**
+ * Runs in the page: set component state through React, so an element its conditions hide shows. For each
+ * set, the component's fibers are found from elements its file draws (or any tagged element, walking up),
+ * and each named state hook (by its place among the hooks that keep state) gets the value. Inside the
+ * mounted drawing only when `within` is given. Returns how many were set.
+ */
+const SET_STATE = `({ sets, within }) => {
+  const fiberOf = (el) => { const k = Object.keys(el).find((x) => x.startsWith('__reactFiber$')); return k ? el[k] : null; };
+  const nameOf = (t) => !t ? '' : typeof t === 'function' ? (t.displayName || t.name || '') : (t.displayName || nameOf(t.render) || nameOf(t.type));
+  const revive = (v) => Array.isArray(v) ? v.map(revive) : v && typeof v === 'object' ? (v.__dsa === 'fn' ? () => {} : v.__dsa === 'set' ? new Set() : v.__dsa === 'map' ? new Map() : Object.fromEntries(Object.entries(v).map(([k, x]) => [k, revive(x)]))) : v;
+  const scope = within ? document.querySelector(within) : document;
+  if (!scope) return 0;
+  const tagged = Array.from(scope.querySelectorAll('[data-dsa-src]')).filter((el) => within || !el.closest('#dsa-mount, #dsa-markup'));
+  let n = 0;
+  for (const s of sets) {
+    const own = tagged.filter((el) => el.getAttribute('data-dsa-src').startsWith(s.file + ':'));
+    const from = own.length ? own : tagged.slice(0, 600);
+    const seen = new Set();
+    for (const el of from) {
+      let f = fiberOf(el);
+      while (f && nameOf(f.type) !== s.component) f = f.return;
+      if (!f || seen.has(f) || seen.has(f.alternate)) continue;
+      seen.add(f);
+      const hooks = [];
+      for (let h = f.memoizedState; h && typeof h === 'object' && 'next' in h; h = h.next) if (h.queue && typeof h.queue.dispatch === 'function') hooks.push(h);
+      for (const sl of s.slots) { const h = hooks[sl.index]; if (h) { try { h.queue.dispatch(revive(sl.value)); n++; } catch {} } }
+      if (own.length === 0) break;
+    }
+  }
+  return n;
+}`;
 
 /** Runs in the page: the files its source tags name ("apps/x/src/A.tsx"), each once. */
 const SHOWN_FILES = `Array.from(new Set(Array.from(document.querySelectorAll('[data-dsa-src]')).map((e) => e.getAttribute('data-dsa-src').replace(/:\\d+:\\d*$/, ''))))`;

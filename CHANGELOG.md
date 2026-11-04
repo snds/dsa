@@ -37,6 +37,13 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   what was still missing could push one past the limit. Now each page gets up to 12 replays,
   openers that reveal the most go first, and an opener matched only by its words on one page is tried
   again on the next page that has it.
+- Elements behind a component's own state ("when openColour", "mode === 'current'", "not singleView")
+  are reached live. On a page that shows the component, the crawler sets that state through React, photographs
+  what shows ("after setting openColour = {…}"), then reloads. The value comes from the condition, or is
+  shaped by how the component reads it. A drawing does the same before clicking anything. Each page logs
+  what it set and what it found ("state on …").
+- The log ends with every element not reached live on its own line: why, its conditions and the component
+  each is in, and the routes that render its file.
 - A page also counts as rendering a missing element when it shows that element's file, or a file that
   imports it within three steps, read off the page's source tags. This holds where the scan can't tie a
   route to its files, and for a modal a child of the page opens. Such pages get twice the interactions and time.
