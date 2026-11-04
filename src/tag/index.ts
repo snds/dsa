@@ -246,19 +246,35 @@ async function whyNotLoaded(url, err) {
   return err;
 }
 let root = null;
-window.__dsaMount = async (files, name, props, file) => {
-  window.__dsaMountError = null;
-  // Where this server serves the file (the tagger knows its root and base), then the crawler's guesses.
+// Imported by the URL as given: Vite rewrites a dynamic import() here to add "?import", which loads a second
+// copy of the module, with its own contexts, apart from the copy the app and its other files import.
+const importAsApp = new Function('u', 'return import(u)');
+// One component of a file, imported where this server serves it (the tagger knows its root and base), then
+// from the crawler's guesses: { C } or { why }.
+async function load(files, name, file) {
   let served = null;
   try { const r = await fetch('/@dsa/where?file=' + encodeURIComponent(file || '')); if (r.ok) served = await r.json(); } catch {}
-  if (served && served.missing) return { ok: false, why: 'its file is not on this server (' + served.missing + ')' };
+  if (served && served.missing) return { why: 'its file is not on this server (' + served.missing + ')' };
   const tries = [...new Set([...(served && served.url ? [served.url] : []), ...[].concat(files)])];
   let mod, err = '', first = null;
-  for (const f of tries) { try { mod = await import(/* @vite-ignore */ f); break; } catch (e) { if (!first) { first = f; err = String((e && e.message) || e).slice(0, 160); } } }
-  if (!mod) return { ok: false, why: 'its file did not load: ' + (/fetch|loading|Importing a module/i.test(err) ? await whyNotLoaded(first, err) : err) };
+  for (const f of tries) { try { mod = await importAsApp(f); break; } catch (e) { if (!first) { first = f; err = String((e && e.message) || e).slice(0, 160); } } }
+  if (!mod) return { why: 'its file did not load: ' + (/fetch|loading|Importing a module/i.test(err) ? await whyNotLoaded(first, err) : err) };
   const local = (globalThis.__dsaLocal || {})[file] || {};
   const C = mod[name] || (mod.default && (name === 'default' || mod.default.name === name) ? mod.default : undefined) || local[name];
-  if (!C) return { ok: false, why: 'its component ' + name + ' is not in its file as built' };
+  return C ? { C } : { why: 'its component ' + name + ' is not in its file as built' };
+}
+window.__dsaMount = async (files, name, props, file, wraps) => {
+  window.__dsaMountError = null;
+  const got = await load(files, name, file);
+  if (!got.C) return { ok: false, why: got.why };
+  const C = got.C;
+  // Providers found in the source that the page doesn't have (useX needs XProvider): each wraps it, inside the borrowed ones.
+  const extra = [];
+  for (const w of [].concat(wraps || [])) {
+    const p = await load(w.files, w.name, w.file);
+    if (!p.C) return { ok: false, why: 'its provider ' + w.name + ' did not load: ' + p.why };
+    extra.push({ P: p.C, props: w.props || {} });
+  }
   const ctxs = contextsAll(file);
   if (root) { try { root.unmount(); } catch {} root = null; }
   document.getElementById('dsa-mount')?.remove();
@@ -270,12 +286,14 @@ window.__dsaMount = async (files, name, props, file) => {
   host.style.padding = '24px';
   document.body.append(host);
   let el = createElement(C, revive(props));
+  for (const { P, props: pp } of extra) el = createElement(P, revive(pp), el);
   for (const { ctx, value } of ctxs) el = createElement(ctx.Provider || ctx, { value }, el);
   root = createRoot(host);
   root.render(createElement(Guard, null, el));
   await new Promise((r) => setTimeout(r, 400));
   const t = window.__dsaMountError;
-  return t ? { ok: false, why: 'its component failed to render: ' + t.message + (t.component && t.component !== name ? ' (in ' + t.component + ')' : ''), threw: t, providers: ctxs.length } : { ok: true, providers: ctxs.length };
+  const n = ctxs.length + extra.length;
+  return t ? { ok: false, why: 'its component failed to render: ' + t.message + (t.component && t.component !== name ? ' (in ' + t.component + ')' : ''), threw: t, providers: n } : { ok: true, providers: n };
 };
 `;
 

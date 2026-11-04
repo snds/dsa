@@ -108,12 +108,92 @@ function shapedProps(ast: any, name: string): Record<string, Val> {
   const names = new Set<string>();
   if (param.type === 'ObjectPattern') for (const p of param.properties) { if (p.type === 'ObjectProperty' && p.value?.type !== 'AssignmentPattern' && p.key?.name) names.add(p.key.name); }
   else if (param.type === 'Identifier') walk(fn.body, (n) => { if (n.type === 'MemberExpression' && !n.computed && n.object?.type === 'Identifier' && n.object.name === param.name && n.property?.name) names.add(n.property.name); });
-  for (const k of names) {
-    if (k in out || k === 'children') continue;
-    if (/^(on|handle|set)[A-Z]/.test(k)) out[k] = FN;
-    else if (usedAsList(fn.body, param.type === 'Identifier' ? param.name : null, k)) out[k] = [];
+  // Destructured with another local name (`{ print: p }`): its uses go by that name.
+  const local = new Map<string, string>();
+  if (param.type === 'ObjectPattern') for (const p of param.properties) if (p.type === 'ObjectProperty' && p.key?.name) local.set(p.key.name, p.value?.type === 'Identifier' ? p.value.name : p.value?.left?.name ?? p.key.name);
+  const propsName = param.type === 'Identifier' ? param.name : null;
+  const isRoot = (n: any, k: string) => propsName ? /MemberExpression$/.test(n?.type) && !n.computed && n.object?.name === propsName && n.property?.name === k : n?.type === 'Identifier' && n.name === (local.get(k) ?? k);
+  // Required ones only: the type's required props, or, untyped, every prop without a default. An optional
+  // prop given a value could switch on a branch the element isn't in (`error && <Error …/>`).
+  const required = lit ? new Set<string>((lit.members ?? []).filter((m: any) => m.type === 'TSPropertySignature' && !m.optional && m.key?.name && !defaults.has(m.key.name)).map((m: any) => m.key.name)) : names;
+  for (const k of required) {
+    if (k === 'children') continue;
+    if (!(k in out)) {
+      if (/^(on|handle|set)[A-Z]/.test(k)) { out[k] = FN; continue; }
+      if (usedAsList(fn.body, propsName, k)) out[k] = [];
+    }
+    // What its body reads off it (`print.key`, `rows.map(r => r.name)`), nested: the type's own fields stay.
+    const used = usageOf(fn.body, (n) => isRoot(n, k), 0);
+    if (used !== undefined) out[k] = mergeShape(out[k], used);
   }
+  // Rendered as a child (`{label}`): an object there throws, so it's text instead.
+  walk(fn.body, (n) => {
+    if (n.type !== 'JSXExpressionContainer' || !n.expression) return;
+    for (const k of Object.keys(out)) { const v = out[k]; if (isRoot(n.expression, k) && v && typeof v === 'object' && !Array.isArray(v) && (v as any).__dsa !== 'fn') out[k] = ''; }
+  });
   return out;
+}
+
+const LIST = /^(map|filter|forEach|some|every|find|findIndex|reduce|slice|includes|join|flatMap|at|sort|length)$/;
+const NUM = /^(toFixed|toPrecision|toLocaleString)$/;
+const STR = /^(toUpperCase|toLowerCase|trim|split|replace|startsWith|endsWith|padStart|padEnd|charAt|localeCompare|match)$/;
+
+/**
+ * A value shaped by how code reads it, from the nodes `isRoot` picks out: `x.key` → { key: '' },
+ * `x.total.toFixed(` → { total: 0 }, `x.rows.map(r => r.name)` → { rows: [{ name: '' }] } (one item, so a
+ * list draws a row), `x.onOpen(` → a function. Undefined when nothing reads it.
+ */
+function usageOf(body: any, isRoot: (n: any) => boolean, depth: number): Val | undefined {
+  if (depth > 3) return undefined;
+  let shape: Val | undefined;
+  const fields = new Map<string, any[]>();
+  walk(body, (n) => {
+    if (!/MemberExpression$/.test(n.type) || !isRoot(n.object)) return;
+    const name = n.computed ? null : n.property?.name;
+    if (!name) { if (shape === undefined) shape = {}; return; }
+    if (LIST.test(name)) {
+      // A list: one item, shaped by what the callback reads off its first parameter.
+      if (Array.isArray(shape)) return;
+      const call = parentCall(body, n);
+      const cb = call?.arguments?.[0];
+      const item = cb && /Function/.test(cb.type) && cb.params?.[0]?.type === 'Identifier' ? usageOf(cb.body, (m) => m?.type === 'Identifier' && m.name === cb.params[0].name, depth + 1) : undefined;
+      shape = name === 'length' ? [] : [item ?? ''];
+      return;
+    }
+    if (NUM.test(name)) { shape = 0; return; }
+    if (STR.test(name)) { shape = ''; return; }
+    if (shape === undefined || typeof shape !== 'object' || Array.isArray(shape)) shape = {};
+    fields.set(name, [...(fields.get(name) ?? []), n]);
+  });
+  if (shape && typeof shape === 'object' && !Array.isArray(shape) && fields.size) {
+    const o: Record<string, Val> = {};
+    for (const [f, nodes] of fields) {
+      const set = new Set(nodes);
+      const called = nodes.some(x => parentCall(body, x)?.callee === x);
+      o[f] = called ? FN : usageOf(body, (m) => set.has(m), depth + 1) ?? '';
+    }
+    return o;
+  }
+  return shape;
+}
+
+/** The call whose callee is this node, if any. */
+function parentCall(body: any, node: any): any {
+  let found: any = null;
+  walk(body, (n) => { if (!found && (n.type === 'CallExpression' || n.type === 'OptionalCallExpression') && n.callee === node) found = n; });
+  return found;
+}
+
+/** The type's shape, with what the body reads filled in where the type left it out. */
+function mergeShape(a: Val | undefined, b: Val): Val {
+  if (a === undefined || a === null) return b;
+  if (Array.isArray(a)) return a.length || !Array.isArray(b) ? a : b;
+  if (typeof a === 'object' && typeof b === 'object' && b && !Array.isArray(b) && (a as any).__dsa !== 'fn') {
+    const o: Record<string, Val> = { ...(a as Record<string, Val>) };
+    for (const [k, v] of Object.entries(b)) o[k] = mergeShape(o[k], v);
+    return o;
+  }
+  return a;
 }
 
 /** Is this prop used as a list (`.map(`, `.length`, `.filter(`…) in the body? */
@@ -147,7 +227,9 @@ function shapeOf(t: any, types: Map<string, any>, depth: number): Val | undefine
     case 'TSNullKeyword': return null;
     case 'TSUnionType': {
       const parts = t.types.filter((x: any) => x.type !== 'TSUndefinedKeyword' && x.type !== 'TSNullKeyword');
-      return parts.length ? shapeOf(parts[0], types, depth) : null;
+      // A plain value or a node renders anywhere; an object only where it's read. So those go first.
+      const plain = parts.find((x: any) => /^TS(String|Number|Boolean)Keyword$|^TSLiteralType$/.test(x.type) || /^(ReactNode|ReactElement|Element)$/.test(x.typeName?.name ?? x.typeName?.right?.name ?? ''));
+      return plain ? shapeOf(plain, types, depth) : parts.length ? shapeOf(parts[0], types, depth) : null;
     }
     case 'TSTypeReference': {
       const n = t.typeName?.type === 'Identifier' ? t.typeName.name : t.typeName?.right?.name;
@@ -155,7 +237,8 @@ function shapeOf(t: any, types: Map<string, any>, depth: number): Val | undefine
       if (/^(Record|Map|Partial)$/.test(n)) return {};
       if (n === 'Date') return undefined;
       if (/Handler$|Callback$|^Dispatch$|^SetStateAction$/.test(n)) return FN;
-      if (/^(ReactNode|ReactElement|JSX)$/.test(n)) return undefined;
+      // A node: nothing, which renders as nothing (JSX.Element, ReactNode, ReactElement).
+      if (/^(ReactNode|ReactElement|Element|ReactChild|ReactFragment)$/.test(n)) return null;
       const l = depth < 2 ? literalOf(types.get(n), types) : null;
       if (l) return objectOf(l, types, depth);
       const alias = types.get(n);

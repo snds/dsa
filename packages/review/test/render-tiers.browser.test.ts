@@ -48,8 +48,8 @@ test('3 and 4: what the crawler can\'t reach is drawn from the code, in the app\
   fs.writeFileSync(path.join(dir, 'public/app.css'), '.btn { background: rgb(29, 78, 216); color: #fff; padding: 8px 16px; border: 0; border-radius: 6px; }');
   fs.writeFileSync(path.join(dir, 'src/main.jsx'), `import { createRoot } from 'react-dom/client';\nimport { Filters } from './Filters.jsx';\ncreateRoot(document.getElementById('root')).render(<main><h1>Ledger</h1><Filters open={false} /></main>);\n`);
   // Shown only when open: the crawler never sees it. Exported, so it can be mounted. Hidden isn't exported
-  // (the tagger keeps it for the mount). Broken throws without data nothing can fill in: its markup is drawn.
-  const filters = `export function Filters({ open }) {\n  if (!open) return null;\n  return <div><button className="btn">Apply filters</button></div>;\n}\nfunction Hidden() {\n  return <button className="btn">Never used</button>;\n}\nexport function Broken({ user }) {\n  const name = user.profile.name;\n  return <button className="btn">Rename {name}</button>;\n}\n`;
+  // (the tagger keeps it for the mount). Broken throws reading a global nothing can fill in: its markup is drawn.
+  const filters = `export function Filters({ open }) {\n  if (!open) return null;\n  return <div><button className="btn">Apply filters</button></div>;\n}\nfunction Hidden() {\n  return <button className="btn">Never used</button>;\n}\nexport function Broken() {\n  const name = window.__session.profile.name;\n  return <button className="btn">Rename {name}</button>;\n}\n`;
   fs.writeFileSync(path.join(dir, 'src/Filters.jsx'), filters);
   const col = (l: number, s: string) => filters.split('\n')[l - 1]!.indexOf(s) + 1;
   const ev = (id: string, line: number, within: string, text: string, gates: any[] = []) => ({

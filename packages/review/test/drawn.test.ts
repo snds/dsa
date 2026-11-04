@@ -48,7 +48,8 @@ export function Shell({ open, rows }) { if (!open) return null; return <div>{row
   // Types: required fields only, nested object types filled in, the first of a union.
   assert.deepEqual(mountProps(e('Card'), code), { item: { id: '', qty: 0 }, tags: [], mode: 'grid', onPick: FN, done: false });
   // Untyped: handlers become functions, what's mapped becomes a list, the rest is left out.
-  assert.deepEqual(mountProps(e('Row'), code), { onOpen: FN, cells: [] });
+  // A list gets one item, so it draws a row.
+  assert.deepEqual(mountProps(e('Row'), code), { onOpen: FN, cells: [''] });
   // A call site's literals win over shapes; the gate wins over both.
   const caller = `import { Shell } from './Shell';\nexport const A = () => <Shell open={false} rows={[1, 2]} title="Orders" onClose={() => go()} key="k" />;\n`;
   assert.deepEqual(mountProps(e('Shell', [{ test: '!open', negated: true, component: 'Shell' }]), code, [caller]), { rows: [1, 2], open: true, title: 'Orders', onClose: FN });

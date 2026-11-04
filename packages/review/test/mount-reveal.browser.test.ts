@@ -26,6 +26,15 @@ const FILES: Record<string, string> = {
   'src/Grid.jsx': `function cellFor(row) {\n  return <button className="btn" key={row}>Open {row}</button>;\n}\nexport function Grid() {\n  return <div>{['A1', 'B2'].map(cellFor)}</div>;\n}\n`,
   // Reads a session nothing on the page provides.
   'src/session.js': `import { createContext, useContext } from 'react';\nexport const SessionCtx = createContext(undefined);\nexport const useSession = () => useContext(SessionCtx);\n`,
+  // An object prop of a type from elsewhere, read as a list: one item, shaped by what the row reads.
+  'src/PrintCard.tsx': `import type { Print } from './types';\nexport function PrintCard({ print }: { print: Print }) {\n  return <ul>{print.colours.map(c => <li key={c.key}><button className="btn">{c.name.toUpperCase()} swatch</button></li>)}</ul>;\n}\n`,
+  // A provider only the source knows: nothing on the page renders it.
+  'src/chrome.jsx': `import { createContext, useContext } from 'react';\nconst Ctx = createContext(null);\nexport function CanvasChromeProvider({ children }) { return <Ctx.Provider value={{ zoom: 2 }}>{children}</Ctx.Provider>; }\nexport function useCanvasChrome() { const v = useContext(Ctx); if (!v) throw new Error('useCanvasChrome must be used inside CanvasChromeProvider'); return v; }\n`,
+  'src/Zoom.jsx': `import { useCanvasChrome } from './chrome.jsx';\nexport function Zoom() {\n  const c = useCanvasChrome();\n  return <button className="btn">Zoom {c.zoom}x</button>;\n}\n`,
+  // A column's render function over rows: drawn by the table, with one row.
+  'src/Table.jsx': `const columns = [{ render: (row) => <button className="btn">Open {row.name}</button> }];\nexport function Table({ rows }) {\n  return <table><tbody>{rows.map(r => <tr key={r.id}><td>{columns[0].render(r)}</td></tr>)}</tbody></table>;\n}\n`,
+  // A node or an object: a node (nothing) is what renders.
+  'src/Chip.tsx': `type Deco = { mode: string; dot: boolean };\ninterface Props { lead: React.ReactNode | Deco; text: string }\nexport function Chip({ lead, text }: Props) {\n  return <button className="btn">{lead}{text}Chip</button>;\n}\n`,
   'src/Account.jsx': `import { useSession } from './session.js';\nexport function Account() {\n  const s = useSession();\n  return <button className="btn">{s.user.name}</button>;\n}\n`,
 };
 
@@ -48,6 +57,10 @@ test("an element behind its component's state, one made by a render helper, and 
     ev('E-reopen', 'src/Orders.jsx', 'Orders', 'Reopen order'),
     ev('E-cell', 'src/Grid.jsx', 'cellFor', 'Open A1'),
     ev('E-account', 'src/Account.jsx', 'Account', ''),
+    ev('E-swatch', 'src/PrintCard.tsx', 'PrintCard', 'swatch'),
+    ev('E-zoom', 'src/Zoom.jsx', 'Zoom', 'Zoom 2x'),
+    ev('E-col', 'src/Table.jsx', 'columns', 'Open'),
+    ev('E-chip', 'src/Chip.tsx', 'Chip', 'Chip'),
   ];
   const app = await startApp(tagPlan(detectApp({ name: 'desk', dir } as any, { apps: {} } as any) as any, { root, dir }));
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-mount-reveal-shots-'));
@@ -65,5 +78,10 @@ test("an element behind its component's state, one made by a render helper, and 
     assert.match(all, /E-cell \(apps\/desk\/src\/Grid\.jsx:2\) drawn from the app's code \(Grid, the component around it, in the app's build\)/);
     // Thrown: its first line, and what it needed, from its source.
     assert.match(all, /E-account \(apps\/desk\/src\/Account\.jsx:4\) .*not mounted: Account: its component failed to render: Cannot read properties of undefined \(reading 'user'\); it needed what useSession reads \(a provider above it\)/);
+    // Shaped from use, wrapped in a provider found in the source, drawn by the table, a node left empty.
+    for (const id of ['E-swatch', 'E-zoom', 'E-col', 'E-chip']) assert.deepEqual([id, r.shots[id]?.drawn, r.shots[id]?.exact], [id, 'mount', true], all);
+    assert.match(String(r.shots['E-zoom'].content?.text ?? ''), /Zoom 2x/);
+    assert.match(all, /E-zoom \(apps\/desk\/src\/Zoom\.jsx:4\) drawn from the app's code \(its component, in the app's build, with 1 of its providers, CanvasChromeProvider found in the source\)/);
+    assert.match(all, /E-col \(apps\/desk\/src\/Table\.jsx:1\) drawn from the app's code \(Table, the component around it/);
   } finally { app.stop(); }
 });

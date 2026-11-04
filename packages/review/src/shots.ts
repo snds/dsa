@@ -314,13 +314,50 @@ export function readAuth(file: string): { state: { cookies: any[]; origins: any[
 const RESTORE_SESSION = `(d) => { if (location.origin !== d.origin) return; for (const [k, v] of Object.entries(d.items)) if (sessionStorage.getItem(k) == null) sessionStorage.setItem(k, v); }`;
 
 /** One interaction the explorer can take: click, hover, or right-click a control on the page. */
-interface Act { n: number; key: string; kind: 'click' | 'hover' | 'context' | 'choose'; label: string; why: string; prio: number; /** For choose: the option to pick in a select. */ value?: string }
+interface Act { n: number; key: string; kind: 'click' | 'hover' | 'context' | 'choose'; label: string; why: string; prio: number; /** The source line that made it (its source tag), when tagged. */ src?: string; /** For choose: the option to pick in a select. */ value?: string }
 
 /**
  * How to draw what can't be photographed (drawn.ts): the scan root (to read each element's source), its
  * app's folder, and whether the app runs on dsa's own Vite runner (which serves /@dsa/mount).
  */
 interface DrawWith { root: string; dir?: string | undefined; mount?: boolean | undefined; max?: number | undefined; maxMinutes?: number | undefined }
+
+/** Where each provider and hook is declared (`XProvider`, `useX`), read once per app: the first file for each name. */
+const declIndex = new WeakMap<DrawWith, Map<string, string>>();
+function declaredIn(d: DrawWith, name: string): string | undefined {
+  let idx = declIndex.get(d);
+  if (!idx) {
+    idx = new Map();
+    for (const f of walk(d.dir ?? d.root, new Set(['.tsx', '.jsx', '.ts', '.js']), [], true).slice(0, 6000)) {
+      let src = '';
+      try { src = fs.readFileSync(f, 'utf8'); } catch { continue; }
+      for (const m of src.matchAll(/\b(?:function|const|let|class)\s+([A-Z][\w$]*Provider|use[A-Z][\w$]*)\b/g)) if (!idx.has(m[1]!)) idx.set(m[1]!, f);
+    }
+    declIndex.set(d, idx);
+  }
+  return idx.get(name);
+}
+
+/**
+ * The provider a component that threw needs and the page doesn't have: the one its error names ("must be
+ * used inside CanvasChromeProvider"), else the one declared beside the hook it needed (useCanvasChrome's
+ * file declares CanvasChromeProvider). Only inside the scan root.
+ */
+function providerFor(d: DrawWith, message: string, need: string): { name: string; file: string } | null {
+  let name = message.match(/\b([A-Z][\w$]*Provider)\b/)?.[1];
+  let file = name ? declaredIn(d, name) : undefined;
+  const hook = need.match(/what (use[A-Z][\w$]*) reads/)?.[1] ?? message.match(/\b(use[A-Z][\w$]*)\b/)?.[1];
+  if (!file && hook) {
+    const hf = declaredIn(d, hook);
+    let src = '';
+    try { src = hf ? fs.readFileSync(hf, 'utf8') : ''; } catch { /* gone */ }
+    name = src.match(/\b(?:function|const|class)\s+([A-Z][\w$]*Provider)\b/)?.[1];
+    file = name ? declaredIn(d, name) : undefined;
+  }
+  if (!name || !file) return null;
+  const rel = path.relative(d.root, file);
+  return rel.startsWith('..') || path.isAbsolute(rel) ? null : { name, file };
+}
 
 /** The files that render `<Name …>`, its own first, read once per app: where a component's literal props come from. */
 const callerIndex = new WeakMap<DrawWith, Map<string, string[]>>();
@@ -639,6 +676,8 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         // budget could run out before the page whose opener reveals the most. Openers that reveal more go first.
         const order = [...seqs].map(([key, steps]) => ({ key, steps, n: remaining.filter(r => r.steps && seqKey(r.steps) === key).length })).sort((a, b) => b.n - a.n);
         let pageReplays = 0;
+        const said: string[] = [];
+        let absent = 0;
         for (const { key, steps } of order) {
           if (!remaining.length || pageReplays >= (o.maxReplays ?? 12) || Date.now() >= phase1End) break;
           const mine = remaining.filter(r => r.steps && seqKey(r.steps) === key);
@@ -646,7 +685,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
           let done = 0, stuck = '', byTag = true;
           for (const st of steps!) {
             const hit = await inPage<string | false>(page, FIND_CONTROL, { label: st.label, src: st.src }).catch(() => false);
-            if (!hit) { stuck = `${stepName(st)} isn't on ${routeOf(u)}`; break; }
+            if (!hit) { stuck = `${stepName(st)} isn't on ${routeOf(u)}`; if (!done) absent++; break; }
             if (typeof hit !== 'string' || !hit.startsWith('tag ')) byTag = false;
             try {
               const loc = page.locator('[data-dsa-step]').first();
@@ -666,15 +705,21 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
           // Done for good only when its own controls (by their source tags) were used: one matched by its
           // words alone ("Add") may be another page's, so it's tried again where the next page has it.
           if (done === steps!.length && byTag) replayed.add(key);
+          const found = mine.length - mine.filter(r => remaining.includes(r)).length;
+          said.push(`${steps!.slice(0, done).map(x => stepName(x)).join(' › ')}${byTag ? '' : ' (by its words)'} ${found ? `found ${found}` : 'found none'}${done < steps!.length ? `, stopped: ${stuck}` : ''}`);
           for (const r of mine) if (remaining.includes(r)) note(r, `${steps!.slice(0, done).map(x => `${x.event === 'type' ? 'typed in' : x.event === 'choose' ? 'chose' : 'clicked'} ${stepName(x)}${x.src ? ' (found by its line)' : ''}`).join(', then ')} on ${routeOf(u)}: still not shown${stuck ? `; then ${stuck}` : ''}`);
-          // Reset whatever the clicks opened or switched on.
+          // Reset whatever the clicks opened or switched on: one load (a reload when still on the route).
           if (o.signIn && auth.done) await open(u).catch(() => {});
           else {
+            // Same document (only the hash differs): going there doesn't load it, so reload. Else going there does.
+            const same = page.url().split('#')[0] === u.split('#')[0];
             await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-            await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+            if (same) await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
             await page.waitForTimeout(o.waitMs);
           }
         }
+        // Each traced opener tried here, and what it found: so a miss behind one says whether it ran.
+        if (said.length) o.log(`  openers on ${routeOf(u)}: ${said.join('; ')}${absent ? `; ${absent} other opener${absent === 1 ? '' : 's'} not on this page` : ''}`);
       }
       } catch (e: any) {
         if (!/closed|crash|Target/i.test(String(e?.message))) throw e;
@@ -774,15 +819,17 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
    */
   async function revealInMount(r: Target, find: () => Promise<any>): Promise<{ hit: any; after: string; tried: string }> {
     const names: string[] = [];
+    // A few seconds per element: drawing every element left must not cost more than the live pass did.
+    const until = Date.now() + 8000;
     const use = async (event: string, value?: string) => {
       const loc = page.locator('[data-dsa-step], [data-dsa-mc]').first();
       try {
-        if (event === 'dblclick') await loc.dblclick({ timeout: 1500 });
-        else if (event === 'type') await loc.fill('a', { timeout: 1500 });
-        else if (event === 'choose' && value) await loc.selectOption(value, { timeout: 1500 });
-        else await loc.click({ timeout: 1500 });
+        if (event === 'dblclick') await loc.dblclick({ timeout: 800 });
+        else if (event === 'type') await loc.fill('a', { timeout: 800 });
+        else if (event === 'choose' && value) await loc.selectOption(value, { timeout: 800 });
+        else await loc.click({ timeout: 800 });
       } catch { /* gone, or not usable */ }
-      await page.waitForTimeout(300);
+      await page.waitForTimeout(200);
     };
     const clear = () => page.evaluate(`document.querySelectorAll('[data-dsa-step],[data-dsa-mc]').forEach(e => { e.removeAttribute('data-dsa-step'); e.removeAttribute('data-dsa-mc'); })`).catch(() => {});
     for (const st of r.steps ?? []) {
@@ -796,7 +843,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     }
     const labels = await inPage<string[]>(page, MOUNT_CONTROLS).catch((): string[] => []);
     await clear();
-    for (let i = 0; i < labels.length; i++) {
+    for (let i = 0; i < labels.length && Date.now() < until; i++) {
       // Marked again each time: a click can redraw the controls.
       const again = await inPage<string[]>(page, MOUNT_CONTROLS).catch((): string[] => []);
       const at = again.indexOf(labels[i]!);
@@ -848,7 +895,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       let exact = false;
       let unmounted = '';
       let providers = 0;
-      let revealed = '', drawnBy = '';
+      let revealed = '', drawnBy = '', wrapped = '';
       try {
         if (!canMount) unmounted = "this build doesn't serve /@dsa/mount";
         else if (!r.e.within) unmounted = 'the scan found no component around it';
@@ -861,7 +908,9 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
           // The mount asks the app's server where it serves the file (/@dsa/where); these are the fallbacks.
           const files = [...(d.dir && !path.relative(d.dir, abs).startsWith('..') ? ['/' + path.relative(d.dir, abs).split(path.sep).join('/')] : []), '/@fs' + abs.split(path.sep).join('/')];
           // Mount one of the file's components and look for the element in what it drew.
-          const mountAs = (name: string) => inPage<Mounted>(page, MOUNT_IN_PAGE, [files, name, mountProps({ ...r.e, within: name }, code, callersOf(d, name, abs)), r.e.file])
+          const filesOf = (f: string) => [...(d.dir && !path.relative(d.dir, f).startsWith('..') ? ['/' + path.relative(d.dir, f).split(path.sep).join('/')] : []), '/@fs' + f.split(path.sep).join('/')];
+          const wraps: { files: string[]; file: string; name: string; props: unknown }[] = [];
+          const mountAs = (name: string) => inPage<Mounted>(page, MOUNT_IN_PAGE, [files, name, mountProps({ ...r.e, within: name }, code, callersOf(d, name, abs)), r.e.file, wraps])
             .catch((e: any): Mounted => ({ ok: false, why: `the page failed while mounting (${String(e?.message ?? e).split('\n')[0]!.slice(0, 80)})` }));
           const find = async () => ((await inPage<any[]>(page, FIND_IN_PAGE, [{ ...r, e: undefined }]).catch(() => [])) ?? [])[0] ?? null;
           let said = await mountAs(r.e.within);
@@ -871,6 +920,17 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
             const p = parentComponent(code, r.e.within, r.e.line);
             if (p) { const again = await mountAs(p); if (!/is not in its file as built/.test(again.why ?? '')) { said = again; parent = p; } }
           }
+          // Needs a provider the page doesn't have: found in the source, wrapped around it, tried again (two at most).
+          let need = '';
+          for (let i = 0; i < 2 && !said.ok && said.threw; i++) {
+            need = whatItNeeded(sourceOfThrow(d, said.threw, code, parent || r.e.within), said.threw.component || parent || r.e.within, said.threw.message);
+            const pv = providerFor(d, said.threw.message, need);
+            if (!pv || wraps.some(w => w.name === pv.name)) break;
+            let pcode = '';
+            try { pcode = fs.readFileSync(pv.file, 'utf8'); } catch { break; }
+            wraps.push({ files: filesOf(pv.file), file: path.relative(d.root, pv.file).split(path.sep).join('/'), name: pv.name, props: mountProps({ ...r.e, within: pv.name, reach: undefined } as any, pcode) });
+            said = await mountAs(parent || r.e.within);
+          }
           providers = said.providers ?? 0;
           const label = parent ? `${r.e.within} (drawn by ${parent}, the component around it)` : r.e.within;
           if (said.ok) {
@@ -878,11 +938,11 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
             // Behind a state inside it: the clicks the scan traced, then the drawing's own toggles, tabs and menus.
             let tried = '';
             if (!hit) { const rv = await revealInMount(r, find); hit = rv.hit; revealed = rv.after; tried = rv.tried; }
-            if (hit) { how = 'mount'; exact = Boolean(hit.exact); drawnBy = parent; }
+            if (hit) { how = 'mount'; exact = Boolean(hit.exact); drawnBy = parent; wrapped = wraps.map(w => w.name).join(', '); }
             else unmounted = `${label} mounted${providers ? ` with ${providers} of the app's providers` : ''}, but the element wasn't in what it drew (a condition inside it wasn't met${tried ? `; clicked ${tried} in it` : ''})`;
           } else {
-            const need = said.threw ? whatItNeeded(sourceOfThrow(d, said.threw, code, parent || r.e.within), said.threw.component || parent || r.e.within, said.threw.message) : '';
-            unmounted = `${label}: ${said.why ?? 'no reason given'}${need ? `; it needed ${need}` : ''}`;
+            if (said.threw) need = whatItNeeded(sourceOfThrow(d, said.threw, code, parent || r.e.within), said.threw.component || parent || r.e.within, said.threw.message);
+            unmounted = `${label}: ${said.why ?? 'no reason given'}${need ? `; it needed ${need}` : ''}${wraps.length ? ` (wrapped in ${wraps.map(w => w.name).join(', ')} from the source)` : ''}`;
           }
           if (!how) note(r, `not mounted: ${unmounted}`);
         }
@@ -914,7 +974,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         drawnIds.push(r.id);
         remaining = remaining.filter(x => x.id !== r.id);
         n++;
-        const msg = how === 'mount' ? `drawn from the app's code (${drawnBy ? `${drawnBy}, the component around it` : 'its component'}, in the app's build${providers ? `, with ${providers} of its providers` : ''}${revealed ? `, after clicking ${revealed} in it` : ''})` : `drawn as markup only; not mounted: ${unmounted}`;
+        const msg = how === 'mount' ? `drawn from the app's code (${drawnBy ? `${drawnBy}, the component around it` : 'its component'}, in the app's build${providers ? `, with ${providers} of its providers` : ''}${wrapped ? `, ${wrapped} found in the source` : ''}${revealed ? `, after clicking ${revealed} in it` : ''})` : `drawn as markup only; not mounted: ${unmounted}`;
         count(placeholder ? `shown outlined (no size: ${short(placeholder)})` : how === 'mount' ? "drawn from the app's code" : `markup only (not mounted: ${short(unmounted)})`);
         o.log(`  ${where(r)} ${msg}${placeholder ? ` · shown outlined, it had no size: ${placeholder}` : ''}${cap.blank ? ' · blank' : ''}`);
       } catch (e: any) {
@@ -972,8 +1032,9 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         if (!remaining.length || budget <= 0 || Date.now() > pageStop) return true;
         const a = (await list(level)).find(x => x.key === key);
         if (!a) continue;
-        const appKey = `${a.kind}|${a.label.toLowerCase()}`;
-        // The same top-level control on another page usually opens the same thing; unless it's what the source points at.
+        // The same top-level control on another page usually opens the same thing; unless it's what the source
+        // points at. "The same" is the same source line when tagged: an "Edit Image" on another page is another control.
+        const appKey = a.src ? `${a.kind}|src|${a.src}` : `${a.kind}|${a.label.toLowerCase()}`;
         if (level === 0 && a.prio < 100 && triedApp.has(appKey)) continue;
         if (level === 0) triedApp.add(appKey);
         await mark(level);
@@ -1055,7 +1116,8 @@ const CANDIDATES = `(o) => {
     const role = el.getAttribute('role') || el.tagName.toLowerCase();
     const base = kind + '|' + role + '|' + l;
     counts[base] = (counts[base] || 0) + 1;
-    out.push({ el, key: base + '|' + (counts[base] - 1), kind, label: label || role, why, prio: p });
+    const t = el.closest('[data-dsa-src]');
+    out.push({ el, key: base + '|' + (counts[base] - 1), kind, label: label || role, why, prio: p, src: t ? t.getAttribute('data-dsa-src') : '' });
   };
   const q = (sel, f) => document.querySelectorAll(sel).forEach(f);
   // Content swaps: the tab, segment, or option not showing yet.
@@ -1489,7 +1551,7 @@ function sourceOfThrow(d: DrawWith, threw: NonNullable<Mounted['threw']>, code: 
 
 /**
  * Runs in the page: mark the mounted drawing's own toggles, tabs, menus and disclosures (data-dsa-mc), up to
- * 12, and return their names. Never one that saves, deletes, submits or leaves.
+ * 8, and return their names. Never one that saves, deletes, submits or leaves.
  */
 const MOUNT_CONTROLS = `() => {
   const host = document.getElementById('dsa-mount');
@@ -1498,7 +1560,7 @@ const MOUNT_CONTROLS = `() => {
   const sel = 'button, [role=button], [role=tab], [role=switch], [role=checkbox], [role=radio], summary, [aria-haspopup], [aria-expanded], input[type=checkbox], input[type=radio]';
   const out = [];
   for (const el of host.querySelectorAll(sel)) {
-    if (out.length >= 12) break;
+    if (out.length >= 8) break;
     const r = el.getBoundingClientRect();
     if (!r.width || !r.height || el.closest(':disabled,[aria-disabled="true"]') || el.closest('a[href]') || (el.type === 'submit' && el.form)) continue;
     const name = (el.getAttribute('aria-label') || el.textContent || el.getAttribute('title') || '').replace(/\\s+/g, ' ').trim().slice(0, 40);
@@ -1514,7 +1576,7 @@ const MARK_DRAWN = `(id) => { const el = document.querySelector('[data-dsa-drawn
 /** The dev server's base ("/", or the config's base): where it serves /@vite/client from. */
 const VITE_BASE = `(() => { const s = Array.from(document.scripts).map((x) => x.src).find((u) => /\\/@vite\\/client$/.test(u)); return s ? new URL(s).pathname.replace(/@vite\\/client$/, '') : '/'; })()`;
 /** Runs in the page: load /@dsa/mount from the app's own Vite server and mount one component (drawn.ts), trying each file URL. */
-const MOUNT_IN_PAGE = `async ([files, name, props, file]) => { await import(${VITE_BASE} + '@dsa/mount'); return window.__dsaMount(files, name, props, file); }`;
+const MOUNT_IN_PAGE = `async ([files, name, props, file, wraps]) => { await import(${VITE_BASE} + '@dsa/mount'); return window.__dsaMount(files, name, props, file, wraps); }`;
 /** Runs in the page: does this build serve /@dsa/mount (dsa's runner, or dsaTag on)? */
 const MOUNT_PROBE = `async () => { try { await import(${VITE_BASE} + '@dsa/mount'); return typeof window.__dsaMount === 'function'; } catch { return false; } }`;
 /** Runs in the page: forget these saved-state keys, as on a first visit. */

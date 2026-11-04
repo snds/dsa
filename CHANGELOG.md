@@ -37,6 +37,16 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   what was still missing could push one past the limit. Now each page gets up to 12 replays,
   openers that reveal the most go first, and an opener matched only by its words on one page is tried
   again on the next page that has it.
+- Exploring skipped a control on a page if one with the same words had been tried on another page, so
+  the first page to show "Edit Image" decided for every page. Now only the same control (the same source
+  line, when tagged) is skipped. The log now has a line per page for the traced openers tried there and what each found.
+- Mounted components get better props. A prop typed as a node gets nothing, and a prop rendered as text
+  never gets an object. Required props, including ones typed elsewhere, get their shape from how the body reads them,
+  nested, and a list gets one item shaped by its row, so helpers called per row draw. A provider the page
+  doesn't have ("useX must be used inside XProvider") is found in the source and wrapped around the
+  component. Drawings import files the way the app does, so a provider and its hook share one context.
+- Drawing is quicker: at most 8 controls clicked per drawing, within 8 seconds, and a traced opener's reset
+  loads the page once.
 - Drawing from the app's code reaches more elements. An element behind its component's own state (a tab,
   a toggle, a menu) is drawn after the mount clicks what the scan traced, then the drawing's own controls,
   never one that saves, deletes or leaves. One made by a render helper (`cellFor`, `renderBody`) is drawn
