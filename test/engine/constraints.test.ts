@@ -158,3 +158,23 @@ test('config: recommend { labels, rules, typescript } parses and reaches the eng
   assert.deepEqual(engineConfig(c, ACME_PROFILE).recommend, { labels: 'labels.jsonl', rules: 'design-system.rules.json', typescript: false });
   assert.throws(() => parseConfig({ recommend: { typescript: 'yes' } }));
 });
+
+// A base that hides the border, then a variant that colours it (as copied, rendered or stripped markup has
+// it): the later class wins, as cn() resolves it. Read as "no border", outline was ruled out and an
+// outlined button came back as secondary.
+import { borderOf } from '../../src/engine/classify-look.js';
+
+test('look: later border classes win (border-transparent then border-border is an outline)', () => {
+  assert.equal(borderOf(['border', 'border-transparent', 'border-border']), 'box');
+  assert.equal(borderOf(['border', 'border-border', 'border-transparent']), 'none');
+  assert.equal(borderOf(['border', 'border-0']), 'none');
+  assert.equal(borderOf(['border-0', 'border']), 'box');
+  assert.equal(borderOf(['border-b', 'border-border']), 'side');
+  assert.equal(borderOf(['border', 'border-none']), 'none');
+});
+
+test('signatures: an outlined button whose base hides the border is outline, not secondary', () => {
+  const e = classify(features(`export const A = () => <button type="button" onClick={reset} className="inline-flex items-center rounded-md border border-transparent text-sm font-medium border-border bg-background hover:bg-accent hover:text-accent-foreground h-8 px-3">Reset</button>;`), systemRoleMap(), 0.9, acmeSigs());
+  assert.equal(e.use, 'Button');
+  assert.equal(e.props?.variant, 'outline', JSON.stringify(e.signature));
+});

@@ -78,6 +78,10 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- Outlined buttons were read as secondary when their classes hide the border first and colour it later
+  (`border border-transparent … border-border`, as copied or rendered markup has it). The border was read
+  as "none", which ruled the outline variant out. Border classes now resolve last-wins, as `cn()` does.
+
 - Cards showed a proposal with the story's sample content although the element had its own. The
   confidence cap changes which question an element is in, and so what its card proposes, and the last cap
   ran after the last drawing. Now dsa caps and draws until nothing new is wanted
