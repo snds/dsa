@@ -32,6 +32,20 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- Live photos no longer depend on page order. Traced openers ("Edit Image", "Add") were replayed at most
+  40 times per app run, so in a large app the order of pages decided which got replayed. Any change to
+  what was still missing could push one past the limit. Now each page gets up to 12 replays,
+  openers that reveal the most go first, and an opener matched only by its words on one page is tried
+  again on the next page that has it.
+- Drawing from the app's code reaches more elements. An element behind its component's own state (a tab,
+  a toggle, a menu) is drawn after the mount clicks what the scan traced, then the drawing's own controls,
+  never one that saves, deletes or leaves. One made by a render helper (`cellFor`, `renderBody`) is drawn
+  by the component around it. The mount also borrows every provider the live page has, not only the ones
+  near the element.
+- A component that fails to render says which component threw, the error's first line, and what it needed
+  when its source shows it ("the prop invoice", "what useSession reads (a provider above it)").
+- A page that shows text but nothing to click, and logs an error, is swept like any other page; only a
+  page with no text and nothing to click, or one whose modules mostly failed, counts as not rendered.
 - Components didn't mount in an app whose Vite server sets a base path (or whose root is a folder below
   the scan root): the mount asked for the file at a URL that server doesn't serve. The tagger now answers
   `/@dsa/where`, the URL its own server serves a file at (its root and base applied), and the mount imports

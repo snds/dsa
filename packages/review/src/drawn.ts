@@ -333,3 +333,77 @@ export const SHOW_MARKUP = `(html) => {
   document.body.append(host);
   return Boolean(host.querySelector('[data-dsa-drawn]'));
 }`;
+
+/** Top-level components in a file (a capitalised function, or a const holding one), with their source range. */
+function components(ast: any): { name: string; node: any; start: number; end: number }[] {
+  const out: { name: string; node: any; start: number; end: number }[] = [];
+  for (const s0 of ast.program.body) {
+    const s = s0.type === 'ExportNamedDeclaration' || s0.type === 'ExportDefaultDeclaration' ? s0.declaration : s0;
+    if (!s) continue;
+    if ((s.type === 'FunctionDeclaration' || s.type === 'ClassDeclaration') && /^[A-Z]/.test(s.id?.name ?? '')) out.push({ name: s.id.name, node: s, start: s.loc.start.line, end: s.loc.end.line });
+    if (s.type === 'VariableDeclaration') for (const d of s.declarations) if (/^[A-Z]/.test(d.id?.name ?? '') && d.init && /Function|Call|Class/.test(d.init.type)) out.push({ name: d.id.name, node: d, start: d.loc.start.line, end: d.loc.end.line });
+  }
+  return out;
+}
+
+/**
+ * The component to mount for an element whose own function isn't one the build keeps (a render helper like
+ * `cellFor`, `renderBody` or `toolbar`, or a function inside a component): the component whose body holds
+ * the element's line, else the first one that calls the helper. Null when the file has neither.
+ */
+export function parentComponent(code: string, name: string, line: number): string | null {
+  const ast = parse(code);
+  if (!ast) return null;
+  const all = components(ast).filter(c => c.name !== name);
+  const around = all.find(c => c.start <= line && line <= c.end);
+  if (around) return around.name;
+  for (const c of all) {
+    let calls = false;
+    walk(c.node, (n) => { if (!calls && n.type === 'Identifier' && n.name === name) calls = true; });
+    if (calls) return c.name;
+  }
+  return null;
+}
+
+/**
+ * What a component that threw while drawing was missing, read off its error and its source: "the prop
+ * invoice", "a provider for StoreCtx", "what useStore reads (a provider above it)". Empty when it can't tell.
+ */
+export function whatItNeeded(code: string, component: string, message: string): string {
+  const ast = parse(code);
+  const fn = ast ? componentFn(ast, component) : null;
+  if (!fn) return '';
+  // The property it read off nothing ("reading 'map'", "x.map is not a function", "destructure property 'id'").
+  const m = message.match(/reading '([\w$]+)'/) ?? message.match(/\.([\w$]+) is not a function/) ?? message.match(/destructure property '([\w$]+)'/);
+  if (!m) return '';
+  const prop = m[1]!;
+  const params = new Set<string>();
+  let propsName = '';
+  const param = fn.params?.[0];
+  if (param?.type === 'ObjectPattern') for (const p of param.properties) { if (p.type === 'ObjectProperty' && p.key?.name) params.add(p.value?.type === 'Identifier' ? p.value.name : p.key.name); }
+  else if (param?.type === 'Identifier') propsName = param.name;
+  // Each local name, and what set it: a hook (`const s = useStore()`), a context (`useContext(StoreCtx)`).
+  const from = new Map<string, string>();
+  walk(fn.body, (n) => {
+    if (n.type !== 'VariableDeclarator' || n.init?.type !== 'CallExpression') return;
+    const callee = n.init.callee?.type === 'Identifier' ? n.init.callee.name : n.init.callee?.property?.name ?? '';
+    if (!/^use[A-Z]/.test(callee)) return;
+    const arg = n.init.arguments?.[0];
+    const what = callee === 'useContext' && arg ? `a provider for ${arg.type === 'Identifier' ? arg.name : arg.property?.name ?? 'its context'}` : `what ${callee} reads (a provider above it)`;
+    const names: string[] = n.id.type === 'Identifier' ? [n.id.name] : n.id.type === 'ObjectPattern' ? n.id.properties.map((p: any) => p.value?.name ?? p.key?.name).filter(Boolean) : n.id.type === 'ArrayPattern' ? n.id.elements.map((e: any) => e?.name).filter(Boolean) : [];
+    for (const x of names) from.set(x, what);
+  });
+  // The object it was read from: `invoice.id`, `props.invoice.id`, `s.shop`.
+  let found = '';
+  const rootOf = (o: any): string[] => { const path: string[] = []; while (o?.type === 'MemberExpression' || o?.type === 'OptionalMemberExpression') { if (!o.computed && o.property?.name) path.unshift(o.property.name); o = o.object; } return o?.type === 'Identifier' ? [o.name, ...path] : []; };
+  walk(fn.body, (n) => {
+    if (found || !(n.type === 'MemberExpression' || n.type === 'OptionalMemberExpression') || n.computed || n.property?.name !== prop) return;
+    const [head, ...rest] = rootOf(n.object);
+    if (!head) return;
+    if (head === propsName && rest[0]) found = `the prop ${rest[0]}`;
+    else if (params.has(head)) found = `the prop ${head}`;
+    else if (from.has(head)) found = from.get(head)!;
+  });
+  if (!found && params.has(prop)) found = `the prop ${prop}`;
+  return found;
+}

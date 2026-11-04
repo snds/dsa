@@ -185,17 +185,23 @@ function walk(node: any, fn: (n: any) => void) {
  * - Its providers: every context the live app provides at the deepest point near the element (the same
  *   file's elements if the page shows any, else the deepest tagged element), with the live values. That
  *   covers the providers the app's entry file wraps it in (a query client, a theme, a router, a store) and
- *   ones deeper in the tree. The live app is hidden, not removed, so the next mount can read it again.
+ *   ones deeper in the tree; then any other the page provides elsewhere, so a component drawn on another
+ *   page still gets its store. The live app is hidden, not removed, so the next mount can read it again.
  * - Its props: plain values from the crawler; {"__dsa":"fn"} becomes a function that does nothing.
  *
- * Returns { ok, why, providers }: why says, in plain words, what stopped it.
+ * Returns { ok, why, providers, threw }: why says, in plain words, what stopped it; threw is the error's
+ * first line and the component that threw, when it failed to render.
  */
 export const MOUNT_MODULE = `import { createElement, Component } from 'react';
 import { createRoot } from 'react-dom/client';
 class Guard extends Component {
   constructor(p) { super(p); this.state = { failed: false }; }
   static getDerivedStateFromError() { return { failed: true }; }
-  componentDidCatch(err) { window.__dsaMountError = String((err && err.message) || err).slice(0, 200); }
+  // The error's first line, and the component that threw: the first one its component stack names.
+  componentDidCatch(err, info) {
+    const at = String((info && info.componentStack) || '').match(/(?:\\bat|\\bin) ([A-Z][\\w$]*)(?: \\((\\S+?)(?::\\d+){1,2}\\))?/);
+    window.__dsaMountError = { message: String((err && err.message) || err).split('\\n')[0].slice(0, 200), component: at ? at[1] : '', src: at && at[2] ? at[2] : '' };
+  }
   render() { return this.state.failed ? null : this.props.children; }
 }
 const noop = () => {};
@@ -210,6 +216,15 @@ function contextsAt(el) {
     if (seen.has(ctx) || !f.memoizedProps || !('value' in f.memoizedProps)) continue;
     seen.add(ctx); out.push({ ctx, value: f.memoizedProps.value });
   }
+  return out;
+}
+// Every context the live app provides anywhere: the nearest element's first (innermost first), then any
+// other the page's tagged elements sit under, so a component drawn away from its own page still gets them.
+function contextsAll(file) {
+  const out = contextsAt(nearest(file)), seen = new Set(out.map((c) => c.ctx));
+  const all = Array.from(document.querySelectorAll('[data-dsa-src]')).filter((el) => !el.closest('#dsa-mount, #dsa-markup'));
+  const step = Math.max(1, Math.ceil(all.length / 300));
+  for (let i = 0; i < all.length; i += step) for (const c of contextsAt(all[i])) if (!seen.has(c.ctx)) { seen.add(c.ctx); out.push(c); }
   return out;
 }
 function nearest(file) {
@@ -244,7 +259,7 @@ window.__dsaMount = async (files, name, props, file) => {
   const local = (globalThis.__dsaLocal || {})[file] || {};
   const C = mod[name] || (mod.default && (name === 'default' || mod.default.name === name) ? mod.default : undefined) || local[name];
   if (!C) return { ok: false, why: 'its component ' + name + ' is not in its file as built' };
-  const ctxs = contextsAt(nearest(file));
+  const ctxs = contextsAll(file);
   if (root) { try { root.unmount(); } catch {} root = null; }
   document.getElementById('dsa-mount')?.remove();
   document.getElementById('dsa-markup')?.remove();
@@ -259,7 +274,8 @@ window.__dsaMount = async (files, name, props, file) => {
   root = createRoot(host);
   root.render(createElement(Guard, null, el));
   await new Promise((r) => setTimeout(r, 400));
-  return window.__dsaMountError ? { ok: false, why: 'its component failed to render: ' + window.__dsaMountError, providers: ctxs.length } : { ok: true, providers: ctxs.length };
+  const t = window.__dsaMountError;
+  return t ? { ok: false, why: 'its component failed to render: ' + t.message + (t.component && t.component !== name ? ' (in ' + t.component + ')' : ''), threw: t, providers: ctxs.length } : { ok: true, providers: ctxs.length };
 };
 `;
 

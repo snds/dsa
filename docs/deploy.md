@@ -214,9 +214,9 @@ counted. Set `shots.draw: false` to turn drawings off.
 provider, props their parent passes. The mount gives it what the running app gives it:
 
 - **Providers.** It reads every context the live page provides near where the element belongs (the same
-  file's elements if the page shows any, else the deepest point of the page) and wraps the component in
-  them, with their live values. That covers what the app's entry file sets up and providers deeper in the
-  tree, without dsa knowing any library.
+  file's elements if the page shows any, else the deepest point of the page), then any other context the
+  page provides elsewhere, and wraps the component in them, with their live values. That covers what the
+  app's entry file sets up and providers deeper in the tree, without dsa knowing any library.
 - **Props.** Required props get a value shaped by their type (`''`, `0`, `false`, `[]`, a function that
   does nothing, an object with its own required fields). Untyped props get one from how the body uses them
   (`items.map(` gets a list, `onSave` a function). A call site's literal values (`<Badge count={3} />`)
@@ -227,11 +227,17 @@ provider, props their parent passes. The mount gives it what the running app giv
 - **Its file.** The mount imports the file the way the app does. The tagger asks its own Vite server
   where it serves the file (`/@dsa/where`), with that server's root and base applied, so an app in a folder
   below the scan root, or one served under a base path like `/portal/`, mounts the same way.
+- **Render helpers.** An element made by a helper that isn't a component (`cellFor`, `renderBody`, a
+  function inside a component) is drawn by the component around it, or the one that calls it.
+- **State inside it.** When the component draws without the element, the mount clicks what the scan
+  traced as opening it, then the drawing's own tabs, toggles, menus and disclosures, one at a time, and
+  looks after each. It never clicks one that saves, deletes, submits or leaves.
 
 Every element that isn't reached live ends with a line in the log: drawn from the app's code, markup only
 with the reason it wasn't mounted (its file didn't load and what the server answered for it or for the
-import that failed, it failed to render and the error, or it rendered without the element because a
-condition inside it wasn't met), or not drawn and why. A drawing that comes out with no size says why
+import that failed; it failed to render, with the error's first line, the component that threw, and what
+it needed when its source says, such as "the prop invoice" or "what useSession reads (a provider above
+it)"; or it rendered without the element because a condition inside it wasn't met, and what it clicked), or not drawn and why. A drawing that comes out with no size says why
 (its styles hide it, it's empty in its markup, its styles give it no size) and is shown outlined at a
 small size instead; its card says "Outline only" and it doesn't count as seen. The log ends with a count
 per reason. Drawing has a 10-minute budget per app; any left when it runs out say so.
