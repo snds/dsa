@@ -187,7 +187,8 @@ function walk(node: any, fn: (n: any) => void) {
  *   covers the providers the app's entry file wraps it in (a query client, a theme, a router, a store) and
  *   ones deeper in the tree; then any other the page provides elsewhere, so a component drawn on another
  *   page still gets its store. The live app is hidden, not removed, so the next mount can read it again.
- * - Its props: plain values from the crawler; {"__dsa":"fn"} becomes a function that does nothing.
+ * - Its props: plain values from the crawler; {"__dsa":"fn"} becomes a function that does nothing, and
+ *   {"__dsa":"set"} / {"__dsa":"map"} an empty Set / Map.
  *
  * Returns { ok, why, providers, threw }: why says, in plain words, what stopped it; threw is the error's
  * first line and the component that threw, when it failed to render.
@@ -205,7 +206,7 @@ class Guard extends Component {
   render() { return this.state.failed ? null : this.props.children; }
 }
 const noop = () => {};
-const revive = (v) => Array.isArray(v) ? v.map(revive) : v && typeof v === 'object' ? (v.__dsa === 'fn' ? noop : Object.fromEntries(Object.entries(v).map(([k, x]) => [k, revive(x)]))) : v;
+const revive = (v) => Array.isArray(v) ? v.map(revive) : v && typeof v === 'object' ? (v.__dsa === 'fn' ? noop : v.__dsa === 'set' ? new Set() : v.__dsa === 'map' ? new Map() : Object.fromEntries(Object.entries(v).map(([k, x]) => [k, revive(x)]))) : v;
 const fiberOf = (el) => { const k = Object.keys(el).find((x) => x.startsWith('__reactFiber$')); return k ? el[k] : null; };
 // The contexts provided above a node of the live app, innermost first, one value per context.
 function contextsAt(el) {

@@ -719,7 +719,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
           }
         }
         // Each traced opener tried here, and what it found: so a miss behind one says whether it ran.
-        if (said.length) o.log(`  openers on ${routeOf(u)}: ${said.join('; ')}${absent ? `; ${absent} other opener${absent === 1 ? '' : 's'} not on this page` : ''}`);
+        if (said.length) o.log(`  openers on ${u.replace(base.origin, '')}: ${said.join('; ')}${absent ? `; ${absent} other opener${absent === 1 ? '' : 's'} not on this page` : ''}`);
       }
       } catch (e: any) {
         if (!/closed|crash|Target/i.test(String(e?.message))) throw e;
@@ -731,7 +731,10 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     const done2 = new Set<string>();
     while (remaining.length && Date.now() < deadline && o.reveal !== false && !signedOut() && !auth.expired && !isBroken()) {
       const words = [...hints(), ...traced().map(t => t.toLowerCase())];
-      const next = promising.filter(p => !done2.has(p.u)).sort((a, b) => b.score - a.score)[0];
+      // Pages whose route renders what's still missing first (by how much), then by the words they mention.
+      const want = wantRoute();
+      const owns = (u: string) => { const h = routeOf(u); let n = 0; for (const [p, k] of want) if (needsValue(p) ? patternTest(p).test(h) : p === h) n += k; return n; };
+      const next = promising.filter(p => !done2.has(p.u)).map(p => ({ ...p, own: owns(p.u) })).sort((a, b) => b.own - a.own || b.score - a.score)[0];
       if (!next || !words.length && done2.size >= 20) break;
       done2.add(next.u);
       try {
@@ -996,6 +999,10 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
    */
   async function explore(u: string, sweep: (revealedBy?: string) => Promise<void>) {
     let budget = o.maxActions ?? 20;
+    const startCount = remaining.length;
+    // A route the scan says renders a missing element's file (a pattern like /style/:id/samples too).
+    const here = routeOf(u);
+    const own = [...wantRoute().keys()].some(p => needsValue(p) ? patternTest(p).test(here) : p === here);
     const maxDepth = o.maxDepth ?? 3;
     const pageStop = Math.min(deadline, Date.now() + 45_000);
     const load = async () => { await open(u, 30000).catch(() => {}); };
@@ -1034,8 +1041,9 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         if (!a) continue;
         // The same top-level control on another page usually opens the same thing; unless it's what the source
         // points at. "The same" is the same source line when tagged: an "Edit Image" on another page is another control.
-        const appKey = a.src ? `${a.kind}|src|${a.src}` : `${a.kind}|${a.label.toLowerCase()}`;
-        if (level === 0 && a.prio < 100 && triedApp.has(appKey)) continue;
+        const appKey = `${a.kind}|${a.label.toLowerCase()}|${a.src ?? ''}`;
+        // Never on a page the source says renders something still missing: there, every control is worth a try.
+        if (level === 0 && a.prio < 100 && !own && triedApp.has(appKey)) continue;
         if (level === 0) triedApp.add(appKey);
         await mark(level);
         try { await perform(a); } catch { continue; }
@@ -1059,7 +1067,8 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       return true;
     };
     await walk([], 0, await sig());
-    if (budget <= 0) o.log(`  interaction budget (shots.maxActions) used on ${u.replace(base.origin, '')}`);
+    const used = (o.maxActions ?? 20) - budget;
+    o.log(`  explored ${u.replace(base.origin, '')}: ${used} interaction${used === 1 ? '' : 's'}, ${startCount - remaining.length} found${own ? ' (a page that renders what is missing: every control tried)' : ''}${budget <= 0 ? '; interaction budget (shots.maxActions) used' : Date.now() > pageStop ? '; out of time for this page' : ''}`);
   }
 }
 

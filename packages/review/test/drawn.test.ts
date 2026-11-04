@@ -1,6 +1,6 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { gateProps, markupOf, FN, mountProps } from '../src/drawn.js';
+import { gateProps, markupOf, FN, MAP, SET, mountProps } from '../src/drawn.js';
 
 // What can't be photographed is drawn from the code: its own JSX as static markup (no app code runs), and
 // props that meet the gates the scan traced, for mounting its component in the app's build.
@@ -53,4 +53,30 @@ export function Shell({ open, rows }) { if (!open) return null; return <div>{row
   // A call site's literals win over shapes; the gate wins over both.
   const caller = `import { Shell } from './Shell';\nexport const A = () => <Shell open={false} rows={[1, 2]} title="Orders" onClose={() => go()} key="k" />;\n`;
   assert.deepEqual(mountProps(e('Shell', [{ test: '!open', negated: true, component: 'Shell' }]), code, [caller]), { rows: [1, 2], open: true, title: 'Orders', onClose: FN });
+});
+
+test('props shaped from how the body reads them: sets and maps, a node never an object, a row handed to a child', () => {
+  const code = `import type { Print } from './types';
+type Deco = { mode: string; dot: boolean };
+interface Props { lead: Deco; print: Print; linked: Set<string>; byId: Lookup; tree: TreeData }
+export function Panel({ lead, print, linked, byId, tree }: Props) {
+  return <div>{open ? lead : null}{print.colours.map(c => <i key={c.key}>{c.name.toUpperCase()}</i>)}{linked.has(print.key) && 'linked'}{byId.get('a')}<Node node={tree.root} /></div>;
+}
+function Node({ node }) { return <ul>{node.children.length}{node.children.map(n => <Node key={n.id} node={n} />)}</ul>; }
+`;
+  const e = (within: string) => ({ within, reach: { gates: [] } }) as any;
+  const p = mountProps(e('Panel'), code) as any;
+  // Rendered: text, not the type's object (an object there throws).
+  assert.equal(p.lead, '');
+  // Typed elsewhere: from what's read, nested, a list with one row shaped by what the row reads.
+  assert.deepEqual(p.print, { colours: [{ key: '', name: '' }], key: '' });
+  // .has( → a Set, .get( → a Map.
+  assert.deepEqual([p.linked, p.byId], [SET, MAP]);
+  // Handed to Node in the same file: shaped by how Node reads its node, a row each level, the deepest empty.
+  const row = p.tree.root.children[0];
+  assert.equal(row.id, '');
+  assert.ok(Array.isArray(row.children), JSON.stringify(p.tree));
+  let d = p.tree.root, levels = 0;
+  while (d.children?.length) { d = d.children[0]; levels++; }
+  assert.ok(levels >= 1 && levels <= 4 && Array.isArray(d.children), JSON.stringify(p.tree));
 });

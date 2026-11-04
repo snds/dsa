@@ -36,7 +36,11 @@ export function gateProps(e: ElementEval): Record<string, string | boolean> {
 
 /** A prop value the page turns into a function that does nothing. */
 export const FN = { __dsa: 'fn' } as const;
-type Val = string | number | boolean | null | typeof FN | Val[] | { [k: string]: Val };
+/** A prop value the page turns into an empty Set, or an empty Map: what `.has(`, `.get(` are called on. */
+export const SET = { __dsa: 'set' } as const;
+export const MAP = { __dsa: 'map' } as const;
+type Val = string | number | boolean | null | typeof FN | typeof SET | typeof MAP | Val[] | { [k: string]: Val };
+const special = (v: unknown) => Boolean(v && typeof v === 'object' && '__dsa' in (v as object));
 
 /**
  * Props to mount a component with, so it renders without its parent: best last, so each wins over the one
@@ -123,19 +127,45 @@ function shapedProps(ast: any, name: string): Record<string, Val> {
       if (usedAsList(fn.body, propsName, k)) out[k] = [];
     }
     // What its body reads off it (`print.key`, `rows.map(r => r.name)`), nested: the type's own fields stay.
-    const used = usageOf(fn.body, (n) => isRoot(n, k), 0);
+    const used = usageOf(fn.body, (n) => isRoot(n, k), 0, ast);
     if (used !== undefined) out[k] = mergeShape(out[k], used);
   }
-  // Rendered as a child (`{label}`): an object there throws, so it's text instead.
-  walk(fn.body, (n) => {
-    if (n.type !== 'JSXExpressionContainer' || !n.expression) return;
-    for (const k of Object.keys(out)) { const v = out[k]; if (isRoot(n.expression, k) && v && typeof v === 'object' && !Array.isArray(v) && (v as any).__dsa !== 'fn') out[k] = ''; }
-  });
+  // Rendered (`{label}`, `{open ? lead : null}`) or handed on as a node (`<Chip icon={lead}>`): an object
+  // there throws ("Objects are not valid as a React child"), so it's text instead.
+  for (const k of Object.keys(out)) {
+    const v = out[k];
+    if (!v || typeof v !== 'object' || Array.isArray(v) || special(v)) continue;
+    if (renderedIn(fn.body, (n) => isRoot(n, k))) out[k] = '';
+  }
   return out;
+}
+
+const NODE_ATTR = /^(children|label|icon|title|lead|leading|trail|trailing|prefix|suffix|start|end|adornment|description|content|header|footer|text|placeholder|tooltip|badge|avatar|empty|caption|subtitle|heading)$/i;
+
+/** Is a value the root picks out rendered somewhere in this body: as a JSX child, or in a node-like attribute? */
+function renderedIn(body: any, isRoot: (n: any) => boolean): boolean {
+  let hit = false;
+  const visit = (n: any, inNode: boolean, parent: any) => {
+    if (hit || !n || typeof n.type !== 'string') return;
+    if (inNode && isRoot(n) && !(/MemberExpression$/.test(parent?.type) && parent.object === n) && !(/CallExpression$/.test(parent?.type) && parent.callee === n)) { hit = true; return; }
+    for (const key in n) {
+      if (key === 'loc' || key === 'start' || key === 'end' || key.endsWith('Comments') || key === 'extra') continue;
+      const v = n[key];
+      // Inside a JSX child container, or a node-like attribute's value: what's there gets rendered.
+      const next = inNode || (n.type === 'JSXExpressionContainer' && parent?.type === 'JSXElement') || (n.type === 'JSXAttribute' && key === 'value' && NODE_ATTR.test(n.name?.name ?? ''));
+      // Not into a callback's arguments or a member's property: those aren't the value rendered.
+      if (Array.isArray(v)) for (const c of v) visit(c, next && !(/CallExpression$/.test(n.type) && key === 'arguments'), n);
+      else if (v && typeof v === 'object') visit(v, next && !(/MemberExpression$/.test(n.type) && key === 'property'), n);
+    }
+  };
+  visit(body, false, null);
+  return hit;
 }
 
 const LIST = /^(map|filter|forEach|some|every|find|findIndex|reduce|slice|includes|join|flatMap|at|sort|length)$/;
 const NUM = /^(toFixed|toPrecision|toLocaleString)$/;
+const SETS = /^(has|add|delete|size|clear)$/;
+const MAPS = /^(get|set|entries|keys|values)$/;
 const STR = /^(toUpperCase|toLowerCase|trim|split|replace|startsWith|endsWith|padStart|padEnd|charAt|localeCompare|match)$/;
 
 /**
@@ -143,24 +173,38 @@ const STR = /^(toUpperCase|toLowerCase|trim|split|replace|startsWith|endsWith|pa
  * `x.total.toFixed(` → { total: 0 }, `x.rows.map(r => r.name)` → { rows: [{ name: '' }] } (one item, so a
  * list draws a row), `x.onOpen(` → a function. Undefined when nothing reads it.
  */
-function usageOf(body: any, isRoot: (n: any) => boolean, depth: number): Val | undefined {
-  if (depth > 3) return undefined;
+function usageOf(body: any, isRoot: (n: any) => boolean, depth: number, ast?: any): Val | undefined {
+  if (depth > 6) return undefined;
   let shape: Val | undefined;
+  let handed: Val | undefined;
   const fields = new Map<string, any[]>();
   walk(body, (n) => {
+    // Handed to a component in the same file (`<Node node={n} />`): shaped by how that component reads it.
+    if (ast && handed === undefined && n.type === 'JSXOpeningElement' && n.name?.type === 'JSXIdentifier' && /^[A-Z]/.test(n.name.name)) {
+      for (const a of n.attributes ?? []) {
+        if (a.type !== 'JSXAttribute' || a.value?.type !== 'JSXExpressionContainer' || !isRoot(a.value.expression)) continue;
+        const v = propUsage(ast, n.name.name, a.name?.name, depth + 1);
+        if (v !== undefined) handed = v;
+      }
+    }
     if (!/MemberExpression$/.test(n.type) || !isRoot(n.object)) return;
     const name = n.computed ? null : n.property?.name;
     if (!name) { if (shape === undefined) shape = {}; return; }
     if (LIST.test(name)) {
-      // A list: one item, shaped by what the callback reads off its first parameter.
-      if (Array.isArray(shape)) return;
+      // A list: one item, shaped by what the callback reads off its first parameter. Deep down (a tree
+      // drawing itself), an empty one, so the drawing ends.
+      if (Array.isArray(shape) && shape.length && shape[0] !== '') return;
+      if (depth >= 4) { shape = []; return; }
       const call = parentCall(body, n);
       const cb = call?.arguments?.[0];
-      const item = cb && /Function/.test(cb.type) && cb.params?.[0]?.type === 'Identifier' ? usageOf(cb.body, (m) => m?.type === 'Identifier' && m.name === cb.params[0].name, depth + 1) : undefined;
-      shape = name === 'length' ? [] : [item ?? ''];
+      const item = cb && /Function/.test(cb.type) && cb.params?.[0]?.type === 'Identifier' ? usageOf(cb.body, (m) => m?.type === 'Identifier' && m.name === cb.params[0].name, depth + 1, ast) : undefined;
+      if (name === 'length') { if (!Array.isArray(shape)) shape = ['']; return; }
+      shape = [item ?? ''];
       return;
     }
     if (NUM.test(name)) { shape = 0; return; }
+    if (SETS.test(name) && (!shape || special(shape))) { shape = SET; return; }
+    if (MAPS.test(name) && parentCall(body, n) && (!shape || special(shape))) { shape = MAP; return; }
     if (STR.test(name)) { shape = ''; return; }
     if (shape === undefined || typeof shape !== 'object' || Array.isArray(shape)) shape = {};
     fields.set(name, [...(fields.get(name) ?? []), n]);
@@ -170,11 +214,28 @@ function usageOf(body: any, isRoot: (n: any) => boolean, depth: number): Val | u
     for (const [f, nodes] of fields) {
       const set = new Set(nodes);
       const called = nodes.some(x => parentCall(body, x)?.callee === x);
-      o[f] = called ? FN : usageOf(body, (m) => set.has(m), depth + 1) ?? '';
+      o[f] = called ? FN : usageOf(body, (m) => set.has(m), depth + 1, ast) ?? '';
     }
-    return o;
+    return handed !== undefined ? mergeShape(handed, o) : o;
   }
-  return shape;
+  return shape === undefined ? handed : handed !== undefined ? mergeShape(handed, shape) : shape;
+}
+
+/** How a component in this file reads one of its props, as a value (usageOf). */
+function propUsage(ast: any, comp: string, prop: string | undefined, depth: number): Val | undefined {
+  if (!prop || depth > 6) return undefined;
+  const fn = componentFn(ast, comp);
+  const param = fn?.params?.[0];
+  if (!param) return undefined;
+  let isRoot: (n: any) => boolean;
+  if (param.type === 'ObjectPattern') {
+    const p = param.properties.find((x: any) => x.type === 'ObjectProperty' && x.key?.name === prop);
+    if (!p) return undefined;
+    const local = p.value?.type === 'Identifier' ? p.value.name : p.value?.left?.name ?? prop;
+    isRoot = (n) => n?.type === 'Identifier' && n.name === local;
+  } else if (param.type === 'Identifier') isRoot = (n) => /MemberExpression$/.test(n?.type) && !n.computed && n.object?.name === param.name && n.property?.name === prop;
+  else return undefined;
+  return usageOf(fn.body, isRoot, depth, ast);
 }
 
 /** The call whose callee is this node, if any. */
@@ -187,8 +248,10 @@ function parentCall(body: any, node: any): any {
 /** The type's shape, with what the body reads filled in where the type left it out. */
 function mergeShape(a: Val | undefined, b: Val): Val {
   if (a === undefined || a === null) return b;
+  // Called .has( or .get( on: a Set or Map, whatever else the type guessed.
+  if (special(b) && !special(a)) return b;
   if (Array.isArray(a)) return a.length || !Array.isArray(b) ? a : b;
-  if (typeof a === 'object' && typeof b === 'object' && b && !Array.isArray(b) && (a as any).__dsa !== 'fn') {
+  if (typeof a === 'object' && typeof b === 'object' && b && !Array.isArray(b) && !special(a) && !special(b)) {
     const o: Record<string, Val> = { ...(a as Record<string, Val>) };
     for (const [k, v] of Object.entries(b)) o[k] = mergeShape(o[k], v);
     return o;
@@ -233,8 +296,10 @@ function shapeOf(t: any, types: Map<string, any>, depth: number): Val | undefine
     }
     case 'TSTypeReference': {
       const n = t.typeName?.type === 'Identifier' ? t.typeName.name : t.typeName?.right?.name;
-      if (/^(Array|ReadonlyArray|Set)$/.test(n)) return [];
-      if (/^(Record|Map|Partial)$/.test(n)) return {};
+      if (/^(Array|ReadonlyArray)$/.test(n)) return [];
+      if (/^(Set|ReadonlySet|WeakSet)$/.test(n)) return SET;
+      if (/^(Map|ReadonlyMap|WeakMap)$/.test(n)) return MAP;
+      if (/^(Record|Partial)$/.test(n)) return {};
       if (n === 'Date') return undefined;
       if (/Handler$|Callback$|^Dispatch$|^SetStateAction$/.test(n)) return FN;
       // A node: nothing, which renders as nothing (JSX.Element, ReactNode, ReactElement).

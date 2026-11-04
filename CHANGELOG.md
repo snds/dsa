@@ -37,6 +37,13 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   what was still missing could push one past the limit. Now each page gets up to 12 replays,
   openers that reveal the most go first, and an opener matched only by its words on one page is tried
   again on the next page that has it.
+- A page whose route the scan says renders a missing element is explored first, and every control on it
+  is tried, whatever was tried on other pages. Each explored page gets a log line: how many interactions,
+  how many found, and whether its budget ran out. Opener lines show the page's own route, hash included.
+- Mounted props: a `Set` or `Map` prop (by its type, or because the body calls `.has(` or `.get(`) gets
+  an empty one. A value rendered anywhere (`{open ? lead : null}`, `icon={lead}`) is never an object. An item
+  handed to another component in the same file (`<Node node={n} />`) is shaped by how that component reads
+  it, and a tree that draws itself ends with an empty list.
 - Exploring skipped a control on a page if one with the same words had been tried on another page, so
   the first page to show "Edit Image" decided for every page. Now only the same control (the same source
   line, when tagged) is skipped. The log now has a line per page for the traced openers tried there and what each found.
