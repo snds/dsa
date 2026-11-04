@@ -80,6 +80,8 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 - A calibrated block that isn't ready was flattened to one score under the bar, which erased ranking and
   coverage. It now keeps its measured precision, squeezed into [0, threshold) in order (`squeeze`).
+- Isotonic calibration left equal neighbouring scores in separate one-label blocks, so a clean top band
+  never had enough labels for its lower bound. Equal neighbours now pool into one block.
 - A filled icon button (`bg-secondary` at rest) was always proposed as ghost. Its fill now picks the
   variant; only an unfilled icon button is ghost.
 - Elements a render function returns (`render={({ field }) => <input …/>}`, as form libraries use) were

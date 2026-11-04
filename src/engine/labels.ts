@@ -108,7 +108,7 @@ export function lowerBound(k: number, n: number): number {
   return (p + z2 / (2 * n) - Z95 * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n)) / (1 + z2 / n);
 }
 
-/** Isotonic regression by pool-adjacent-violators: blocks of scores with their pooled precision and size. */
+/** Isotonic regression by pool-adjacent-violators: maximal blocks of scores with their pooled precision and size. */
 export function isotonic(points: { score: number; ok: boolean }[]): { lo: number; hi: number; k: number; n: number }[] {
   const sorted = [...points].sort((a, b) => a.score - b.score);
   const blocks: { lo: number; hi: number; k: number; n: number }[] = [];
@@ -116,7 +116,8 @@ export function isotonic(points: { score: number; ok: boolean }[]): { lo: number
     blocks.push({ lo: p.score, hi: p.score, k: p.ok ? 1 : 0, n: 1 });
     while (blocks.length > 1) {
       const b = blocks[blocks.length - 1]!, a = blocks[blocks.length - 2]!;
-      if (a.k / a.n <= b.k / b.n) break;
+      // Pool violators and ties: equal neighbours are one block, so the lower bound counts all of them.
+      if (a.k / a.n < b.k / b.n) break;
       blocks.splice(blocks.length - 2, 2, { lo: a.lo, hi: b.hi, k: a.k + b.k, n: a.n + b.n });
     }
   }

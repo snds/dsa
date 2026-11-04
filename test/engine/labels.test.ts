@@ -122,3 +122,11 @@ test('labels: a label naming any line of a multi-line opening tag matches the el
   const outside = applyLabels([ev(2, { file: 'app/src/Panel.tsx', line: 10, openEndLine: 14 } as Partial<ElementEval>)], [{ app: 'app', file: 'src/Panel.tsx', line: 15, truth: truth('Button') }], 0.9);
   assert.equal(outside.matched, 0);
 });
+
+test('labels: equal neighbours pool into one block, so a clean top band is counted whole', () => {
+  const pts = [...Array.from({ length: 300 }, (_, i) => ({ score: 0.93 + (i % 3) * 0.01, ok: true })), { score: 0.5, ok: false }];
+  const blocks = isotonic(pts);
+  assert.equal(blocks.length, 2);
+  assert.equal(blocks[1]!.n, 300);
+  assert.ok(lowerBound(blocks[1]!.k, blocks[1]!.n) >= 0.99);
+});
