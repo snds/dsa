@@ -6,8 +6,9 @@ import { latestEvals } from '@snds/dsa/engine';
 import { fixtureCopy, loadConfig, NOW, runPipeline } from '../../../test/engine/fixture.js';
 import { takeShots } from '../src/shots.js';
 
-// A live pass on an app that never goes quiet: it polls every 200 ms, its blocked API calls throw, and one
-// page is read-only (text, no controls). Every page that shows something is swept and explored: a menu
+// A live pass on an app that never goes quiet: it polls every 200 ms, its blocked API calls throw, one page
+// is read-only (text, no controls), and one waits on a list that comes back after a different wait each time.
+// Run twice from scratch, it reaches the same elements. Every page that shows something is swept and explored: a menu
 // opened, a tab switched, a traced control replayed and the page reloaded between tries. A real Vite +
 // React app with a pushState router, started by dsa with source tags. Skipped without a headless browser
 // (`dsa setup`) or without Vite installed.
@@ -21,14 +22,15 @@ const APP: Record<string, string> = {
   'index.html': '<!doctype html><link rel="stylesheet" href="/app.css"><div id="root"></div><script type="module" src="/src/main.jsx"></script>',
   'public/app.css': '.btn { background: rgb(29, 78, 216); color: #fff; padding: 8px 16px; border: 0; margin: 4px; }',
   'public/poll.json': '{"jobs": 3}',
-  'vite.config.js': `export default { cacheDir: '../../.vite' };\n`,
+  // Its member list comes back after 0.3 to 1.5 s, a different wait each time.
+  'vite.config.js': `export default { cacheDir: '../../.vite', plugins: [{ name: 'slow', configureServer(s) { s.middlewares.use('/members.json', (q, r) => setTimeout(() => { r.setHeader('content-type', 'application/json'); r.end('["Ada","Lin"]'); }, 300 + Math.random() * 1200)); } }] };\n`,
   // Polls forever (the network is never idle), and its API reads are blocked, so each one throws.
   'src/main.jsx': `import { createRoot } from 'react-dom/client';\nimport { App } from './App.jsx';\nsetInterval(() => { fetch('/poll.json?t=' + Date.now()); fetch('/api/jobs').then(r => r.json()); }, 200);\ncreateRoot(document.getElementById('root')).render(<App />);\n`,
   'src/App.jsx': `import { useEffect, useState } from 'react';\nimport { Reports } from './Reports.jsx';\nimport { Team } from './Team.jsx';\nimport { Settings } from './Settings.jsx';\nconst pages = { '/reports': Reports, '/team': Team, '/settings': Settings };\nexport function App() {\n  const [at, setAt] = useState(location.pathname);\n  useEffect(() => { const on = () => setAt(location.pathname); addEventListener('popstate', on); return () => removeEventListener('popstate', on); }, []);\n  const P = pages[at];\n  if (P) return <P />;\n  const go = (to) => (e) => { e.preventDefault(); history.pushState(null, '', to); setAt(to); };\n  return <main><h1>Jobs</h1><nav><a href="/reports" onClick={go('/reports')}>Reports</a> <a href="/team" onClick={go('/team')}>Team</a> <a href="/settings" onClick={go('/settings')}>Settings</a></nav></main>;\n}\n`,
   // Read-only: text and a figure, nothing to click.
   'src/Reports.jsx': `export function Reports() {\n  return <article><h1>Quarterly report</h1><p>Three jobs ran this quarter.</p><img className="chart" alt="Jobs by week" width="120" height="40" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" /></article>;\n}\n`,
   // A menu: "Remove member" shows once "Actions" is clicked.
-  'src/Team.jsx': `import { useState } from 'react';\nexport function Team() {\n  const [open, setOpen] = useState(false);\n  return <section><h1>Team</h1><button className="btn" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>Actions</button>{open && <div role="menu"><button className="btn" role="menuitem">Remove member</button></div>}</section>;\n}\n`,
+  'src/Team.jsx': `import { useEffect, useState } from 'react';\nexport function Team() {\n  const [open, setOpen] = useState(false);\n  const [members, setMembers] = useState(null);\n  useEffect(() => { fetch('/members.json').then(r => r.json()).then(setMembers); }, []);\n  if (!members) return <p>Loading</p>;\n  return <section><h1>Team</h1><button className="btn" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>Actions</button>{open && <div role="menu"><button className="btn" role="menuitem">Remove member</button></div>}</section>;\n}\n`,
   // Tabs: "Delete workspace" is on the second one.
   'src/Settings.jsx': `import { useState } from 'react';\nexport function Settings() {\n  const [tab, setTab] = useState('general');\n  return <section><h1>Settings</h1><div role="tablist"><button role="tab" aria-selected={tab === 'general'} onClick={() => setTab('general')}>General</button><button role="tab" aria-selected={tab === 'danger'} onClick={() => setTab('danger')}>Danger zone</button></div>{tab === 'general' ? <p>Name and logo</p> : <button className="btn">Delete workspace</button>}</section>;\n}\n`,
 };
@@ -63,4 +65,11 @@ test('an app that polls and throws: every page that shows something is swept and
   assert.ok(isLive('Team.jsx', 'Remove member'), `a menu item\n${all}`);
   assert.ok(isLive('Settings.jsx', 'Delete workspace'), `a tab's content\n${all}`);
   assert.ok(!logs.some(l => /didn't render/.test(l)), all);
+  // Again from scratch: the same elements, though the list comes back after a different wait.
+  const liveNow = () => mine.filter(e => idx2().shots[e.id] && !idx2().shots[e.id].drawn).map(e => e.id).sort();
+  const idx2 = () => JSON.parse(fs.readFileSync(path.join(data, 'shots', 'index.json'), 'utf8'));
+  const first = liveNow();
+  const again: string[] = [];
+  await takeShots({ root, dataDir: data, config, target: 'jobs', perGroup: 20, fresh: true, log: m => again.push(m) });
+  assert.deepEqual(liveNow(), first, again.join('\n'));
 });

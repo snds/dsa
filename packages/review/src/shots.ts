@@ -219,7 +219,11 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
       const extra = opts.routes ? [] : (opts.config.apps?.[name]?.extraRoutes ?? []);
       const routesFor = () => [...new Set([...extra, ...(configured ?? ['', ...discoverRoutes(t.dir, (t.exclude ?? []))])])];
       // What is live: the deployed site (signed in) or the built folder that ships, instead of a dev server.
-      const surface = appSurface(opts.config.live, name);
+      // A live surface is one with somewhere to open (url or dir). An entry with only settings (readPaths,
+      // readApi, auth, signIn) adds them to the app dsa starts itself.
+      const entry: any = appSurface(opts.config.live, name);
+      const surface = entry && (entry.url || entry.dir) ? entry : undefined;
+      const extra2 = entry && !surface ? { readApi: entry.readApi, readPaths: entry.readPaths, signIn: entry.signIn, storageState: entry.auth ? path.resolve(opts.root, entry.auth) : undefined } : {};
       if (surface) {
         try {
           const open = await openSurface(surface, opts.root);
@@ -240,7 +244,8 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
         const app = await startApp(ap);
         const routes = routesFor();
         log(`  ${app.url} · ${routes.length} route${routes.length === 1 ? '' : 's'} ${configured ? 'from config' : 'found in the source'}${extra.length ? ` (${extra.length} extra, visited first)` : ''}`);
-        sessions.push({ target: name, url: app.url, routes, first: extra, flows: opts.config.apps?.[name]?.flows as Flow[] | undefined, crawl: true, stop: app.stop, how: ap.how, need: p.need, draw: drawFor(t.dir, ap.tag === 'injected'), reach: reachFor(t, p.need) });
+        sessions.push({ target: name, url: app.url, routes, first: extra, flows: opts.config.apps?.[name]?.flows as Flow[] | undefined, crawl: true, stop: app.stop, how: ap.how, need: p.need, draw: drawFor(t.dir, ap.tag === 'injected'), reach: reachFor(t, p.need), ...extra2 });
+        if (extra2.readPaths?.length || extra2.readApi) log(`  reads allowed besides its pages: ${[...(extra2.readApi ? ['/api/**'] : []), ...(extra2.readPaths ?? [])].join(', ')}`);
       } catch (e: any) { result.apps.push({ target: name, skipped: e.message.split('\n')[0] }); log(`  ${e.message}`); }
     }
   }
@@ -351,6 +356,7 @@ function declaredIn(d: DrawWith, name: string): string | undefined {
     // so a mock of a provider never stands in for the real one.
     const files = walk(d.dir ?? d.root, new Set(['.tsx', '.jsx', '.ts', '.js']), [], true);
     const mock = (f: string) => /\.(test|spec|stories)\.|__(tests|mocks)__/.test(f);
+    declCount.set(d, files.length);
     for (const f of [...files.filter(f => !mock(f)), ...files.filter(mock)]) {
       let src = '';
       try { src = fs.readFileSync(f, 'utf8'); } catch { continue; }
@@ -366,18 +372,23 @@ function declaredIn(d: DrawWith, name: string): string | undefined {
  * used inside CanvasChromeProvider"), else the one declared beside the hook it needed (useCanvasChrome's
  * file declares CanvasChromeProvider). Only inside the scan root.
  */
-function providerFor(d: DrawWith, message: string, need: string, from: string): { name: string; file: string; context?: boolean } | null {
+export function providerFor(d: DrawWith, message: string, need: string, from: string, why: string[] = []): { name: string; file: string; context?: boolean } | null {
   const declares = (src: string, n: string) => new RegExp(`\\b(?:function|const|let|class)\\s+${n.replace(/\$/g, '\\$')}\\b`).test(src);
   const read = (f?: string) => { try { return f ? fs.readFileSync(f, 'utf8') : ''; } catch { return ''; } };
   // The component's own imports first (two levels): the hook and its provider usually sit in a file beside it.
   const near = importsNear(d, from, 2);
   const find = (n: string) => near.find(f => declares(read(f), n)) ?? declaredIn(d, n);
   const inRoot = (f: string) => { const rel = path.relative(d.root, f); return !rel.startsWith('..') && !path.isAbsolute(rel); };
+  const short = (f?: string) => f ? path.relative(d.root, f).split(path.sep).join('/') : '';
+  // What it looked at, for the log when nothing is found: the imports followed, and where each name was.
+  why.push(`followed ${near.length} import${near.length === 1 ? '' : 's'} from ${short(from)}${near.length ? ` (${near.slice(0, 3).map(short).join(', ')}${near.length > 3 ? ', …' : ''})` : ''}`);
   let name = message.match(/\b([A-Z][\w$]*Provider)\b/)?.[1];
   let file = name ? find(name) : undefined;
+  if (name) why.push(file ? `${name} in ${short(file)}` : `no declaration of ${name} in the app's ${declaredCount(d)} files`);
   const hook = need.match(/what (use[A-Z][\w$]*) reads/)?.[1] ?? message.match(/\b(use[A-Z][\w$]*)\b/)?.[1];
   if (!file && hook) {
     const hf = find(hook);
+    why.push(hf ? `${hook} in ${short(hf)}` : `no declaration of ${hook}`);
     const src = read(hf);
     const pn = src.match(/\b(?:function|const|class)\s+([A-Z][\w$]*Provider)\b/)?.[1];
     if (pn) { name = pn; file = declares(src, pn) ? hf : find(pn); }
@@ -385,11 +396,17 @@ function providerFor(d: DrawWith, message: string, need: string, from: string): 
     else {
       const ctx = src.match(/\b(?:const|let)\s+([A-Z][\w$]*)\s*(?::[^=]+)?=\s*(?:React\.)?createContext\b/)?.[1];
       if (ctx && hf && inRoot(hf)) return { name: ctx, file: hf, context: true };
+      if (hf) why.push(`no provider or createContext in ${short(hf)}`);
     }
   }
   if (!name || !file) return null;
-  return inRoot(file) ? { name, file } : null;
+  if (!inRoot(file)) { why.push(`${short(file)} is outside the scan root`); return null; }
+  return { name, file };
 }
+
+/** How many files the provider index read (for the log). */
+function declaredCount(d: DrawWith): number { declaredIn(d, ''); return declCount.get(d) ?? 0; }
+const declCount = new WeakMap<DrawWith, number>();
 
 /** Files a file imports, followed this many levels: relative paths and the "@/" or "~/" shortcut for src. */
 function importsNear(d: DrawWith, from: string, levels: number): string[] {
@@ -516,7 +533,15 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   const pageErrors: string[] = [];
   const modules = { total: 0, failed: 0, first: '' };
   const isBroken = () => wall.tried >= 1 && broken.pages === wall.tried;
+  // The app's own data requests still on their way (fetch, XHR): a page isn't looked at until they're back.
+  const inflight = new Set<any>();
+  const asked = new Map<string, number>();
   const watch = (pg: any) => {
+    const data = (q: any) => { try { return new URL(q.url()).origin === base.origin && /^(fetch|xhr)$/.test(q.resourceType()); } catch { return false; } };
+    // A request seen three times is a poll: it's always somewhere in flight, so it's not waited for.
+    pg.on('request', (q: any) => { if (!data(q)) return; const k = new URL(q.url()).pathname; const n = (asked.get(k) ?? 0) + 1; asked.set(k, n); if (n < 3) inflight.add(q); });
+    pg.on('requestfinished', (q: any) => inflight.delete(q));
+    pg.on('requestfailed', (q: any) => inflight.delete(q));
     pg.on('pageerror', (e: any) => { pageErrors.push(String(e?.message ?? e).split('\n')[0]!); });
     const own = (r: any) => { try { return new URL(r.url()).origin === base.origin && r.resourceType() === 'script'; } catch { return false; } };
     pg.on('response', (r: any) => { if (!own(r.request())) return; modules.total++; if (r.status() >= 400) { modules.failed++; modules.first ||= `${new URL(r.url()).pathname} answered ${r.status()}`; } });
@@ -534,6 +559,18 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     const bad = seen.controls === 0 && ((total > 0 && failed * 2 > total) || seen.text === 0);
     if (bad && !broken.first) broken.first = (threw ? pageErrors[errorsBefore] : '') || modules.first || 'the page stayed blank';
     return bad;
+  };
+  // Wait until the page stops changing (no DOM change for 250 ms), up to `max`: a slow page and a fast
+  // one are looked at in the same state, so the same run reaches the same elements.
+  // Its own data requests too: a spinner waiting on a fetch changes nothing in the DOM until the answer comes.
+  // A poll that's always in flight only costs `max`.
+  const settle = async (max = 4000) => {
+    const until = Date.now() + max;
+    for (;;) {
+      await inPage(page, SETTLE, Math.max(250, until - Date.now())).catch(() => {});
+      if (!inflight.size || Date.now() >= until) return;
+      await page.waitForTimeout(100);
+    }
   };
   // A redirect may still be on its way (a meta refresh, a script): let it land before looking.
   const signInWall = async () => {
@@ -576,21 +613,21 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   /** Inside the app, without reloading it: history.pushState and popstate, as the app's own links do. */
   const within = async (u: string) => {
     await inPage(page, `(to) => { history.pushState(history.state, '', to); dispatchEvent(new PopStateEvent('popstate', { state: history.state })); }`, u);
-    await page.waitForTimeout(o.waitMs);
+    await page.waitForTimeout(o.waitMs); await settle();
   };
   /**
    * Open a route. Signed in with signIn, move inside the app (a reload would drop tokens kept in
    * memory); landed on the sign-in page, sign in once and go on to the route wanted.
    */
-  const open = async (u: string, timeout = 60000, settle = false) => {
+  const open = async (u: string, timeout = 60000, firstVisit = false) => {
     const inApp = (() => { try { return new URL(page.url()).origin === base.origin; } catch { return false; } })();
     if (o.signIn && auth.done && inApp) await within(u);
     else {
       await page.goto(u, { waitUntil: 'domcontentloaded', timeout });
       // Only a route's first visit waits for the network to go quiet (up to 8s): reloads while exploring
       // don't, so an app that keeps polling doesn't spend the explore budget waiting.
-      if (settle) await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
-      await page.waitForTimeout(o.waitMs);
+      if (firstVisit) await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+      await page.waitForTimeout(o.waitMs); await settle();
     }
     if (o.signIn && onSignInPage() && !auth.expired) {
       const r = await signInOnce();
@@ -730,7 +767,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
           try {
             await page.locator(`[data-dsa-row="${i}"]`).first().click({ timeout: 2000 });
             await page.waitForTimeout(500);
-            if (page.url() !== u) { harvest([page.url()]); await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 }); await page.waitForTimeout(o.waitMs); await page.evaluate(ROW_MARK).catch(() => 0); }
+            if (page.url() !== u) { harvest([page.url()]); await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 }); await page.waitForTimeout(o.waitMs); await settle(); await page.evaluate(ROW_MARK).catch(() => 0); }
           } catch { /* not clickable */ }
         }
       }
@@ -770,7 +807,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
               else if (st.event === 'choose' && st.value) await loc.selectOption(st.value, { timeout: 2000 });
               else await loc.click({ timeout: 2000 });
               done++;
-              await page.waitForTimeout(400);
+              await page.waitForTimeout(400); await settle(1500);
             } catch (e: any) { stuck = `${stepName(st)} couldn't be used (${String(e?.message ?? e).split('\n')[0]!.slice(0, 60)})`; break; }
             finally { await page.evaluate(`document.querySelectorAll('[data-dsa-step]').forEach(e => e.removeAttribute('data-dsa-step'))`).catch(() => {}); }
           }
@@ -791,7 +828,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
             const same = page.url().split('#')[0] === u.split('#')[0];
             await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
             if (same) await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-            await page.waitForTimeout(o.waitMs);
+            await page.waitForTimeout(o.waitMs); await settle();
           }
         }
         // Each traced opener tried here, and what it found: so a miss behind one says whether it ran.
@@ -805,6 +842,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         await relaunch();
       }
     }
+    if (queue.some(q => !seen.has(q)) && Date.now() >= phase1End && seen.size < o.maxPages && remaining.length) o.log(`  pass 1 stopped by its time share with ${queue.filter(q => !seen.has(q)).length} pages not yet visited: results can differ between runs; raise shots.maxMinutes to visit them all`);
     // Pass 2: explore pages, most promising first (re-scored as elements are found), until time runs out.
     const done2 = new Set<string>();
     while (remaining.length && Date.now() < deadline && o.reveal !== false && !signedOut() && !auth.expired && !isBroken()) {
@@ -830,7 +868,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     for (const r of remaining) why[r.id] = reasonOf(r);
     if (remaining.length && o.draw && pages.length && !signedOut() && !isBroken()) await drawRest(o.draw, pages[0]!);
     if ((net.blocked || Object.keys(net.allowed).length) && !signedOut() && !isBroken()) o.log(`  network: ${describeNetwork(net, base.origin)}`);
-    if (remaining.length && Date.now() >= deadline) o.log(`  time budget (shots.maxMinutes) used up with ${remaining.length} still to find.`);
+    if (remaining.length && Date.now() >= deadline) o.log(`  time budget (shots.maxMinutes) used up with ${remaining.length} still to find: results can differ between runs; raise shots.maxMinutes for the same result each time.`);
   } finally {
     await browser.close().catch(() => {});
   }
@@ -867,7 +905,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
           await page.goto(at, { waitUntil: 'domcontentloaded', timeout: 30000 });
           await inPage(page, CLEAR_KEYS, keys);
           await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
-          await page.waitForTimeout(o.waitMs);
+          await page.waitForTimeout(o.waitMs); await settle();
           await sweeper(at)(`clearing saved state (${keys.join(', ')})`);
           for (const r of rs) if (remaining.includes(r)) note(r, `cleared saved state (${keys.join(', ')}) on ${routeOf(at)}: still not shown`);
         }
@@ -875,7 +913,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
           if (!rs.some(r => remaining.includes(r))) break;
           const u2 = new URL(at); u2.searchParams.set(k, 'a');
           await page.goto(u2.toString(), { waitUntil: 'domcontentloaded', timeout: 30000 });
-          await page.waitForTimeout(o.waitMs);
+          await page.waitForTimeout(o.waitMs); await settle();
           await sweeper(u2.toString())(`with ?${k}=a`);
           for (const r of rs) if (remaining.includes(r)) note(r, `opened ${routeOf(at)} with ?${k}=a: still not shown`);
         }
@@ -927,7 +965,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       tries++;
       const what = describeSets(g.sets);
       if (!set) { said.push(`${what}: its component isn't on this page`); continue; }
-      await page.waitForTimeout(o.waitMs);
+      await page.waitForTimeout(o.waitMs); await settle();
       await sweep(`setting ${what}`);
       const found = g.mine.length - g.mine.filter(r => remaining.includes(r)).length;
       said.push(`${what}: found ${found}`);
@@ -935,7 +973,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       const same = page.url().split('#')[0] === u.split('#')[0];
       await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
       if (same) await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-      await page.waitForTimeout(o.waitMs);
+      await page.waitForTimeout(o.waitMs); await settle();
     }
     if (said.length) o.log(`  state on ${u.replace(base.origin, '')}: ${said.join('; ')}`);
   }
@@ -1058,9 +1096,12 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
           }
           // Needs a provider the page doesn't have: found in the source, wrapped around it, tried again (two at most).
           let need = '';
+          const searched: string[] = [];
           for (let i = 0; i < 2 && !said.ok && said.threw; i++) {
             need = whatItNeeded(sourceOfThrow(d, said.threw, code, parent || r.e.within), said.threw.component || parent || r.e.within, said.threw.message);
-            const pv = providerFor(d, said.threw.message, need, sourceFileOfThrow(d, said.threw, abs, parent || r.e.within));
+            const looked: string[] = [];
+            const pv = providerFor(d, said.threw.message, need, sourceFileOfThrow(d, said.threw, abs, parent || r.e.within), looked);
+            if (!pv && /Provider|\buse[A-Z]/.test(said.threw.message + need)) searched.push(...looked);
             if (!pv || wraps.some(w => w.name === pv.name)) break;
             let pcode = '';
             try { pcode = fs.readFileSync(pv.file, 'utf8'); } catch { break; }
@@ -1081,7 +1122,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
             else unmounted = `${label} mounted${providers ? ` with ${providers} of the app's providers` : ''}, but the element wasn't in what it drew (a condition inside it wasn't met${tried ? `; clicked ${tried} in it` : ''})`;
           } else {
             if (said.threw) need = whatItNeeded(sourceOfThrow(d, said.threw, code, parent || r.e.within), said.threw.component || parent || r.e.within, said.threw.message);
-            unmounted = `${label}: ${said.why ?? 'no reason given'}${need ? `; it needed ${need}` : ''}${wraps.length ? ` (wrapped in ${wraps.map(w => w.name).join(', ')} from the source)` : ''}`;
+            unmounted = `${label}: ${said.why ?? 'no reason given'}${need ? `; it needed ${need}` : ''}${wraps.length ? ` (wrapped in ${wraps.map(w => w.name).join(', ')} from the source)` : ''}${searched.length ? `; provider search: ${searched.join('; ')}` : ''}`;
           }
           if (!how) note(r, `not mounted: ${unmounted}`);
         }
@@ -1139,7 +1180,9 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     let budget = (o.maxActions ?? 20) * (own ? 2 : 1);
     const startCount = remaining.length;
     const maxDepth = o.maxDepth ?? 3;
-    const pageStop = Math.min(deadline, Date.now() + (own ? 90_000 : 45_000));
+    // A safety limit, rarely reached: the interaction budget (a count) is what normally ends a page, so the
+    // same page gets the same exploring on a slow run and a fast one.
+    const pageStop = Math.min(deadline, Date.now() + (own ? 240_000 : 120_000));
     const load = async () => { await open(u, 30000).catch(() => {}); };
     const sig = (): Promise<string> => page.evaluate(SIGNATURE).catch(() => '');
     const mark = (level: number) => inPage(page, MARK_SEEN, level).catch(() => {});
@@ -1151,7 +1194,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       else if (a.kind === 'choose') await loc.selectOption(a.value!, { timeout: 2000 });
       else if (a.kind === 'context') await loc.click({ button: 'right', timeout: 2000 });
       else await loc.click({ timeout: 2000 });
-      await page.waitForTimeout(a.kind === 'hover' ? 250 : 400);
+      await page.waitForTimeout(a.kind === 'hover' ? 250 : 400); await settle(1500);
     };
     // Back to the state after `path`: reload, then redo each step (each found again by its key).
     const replay = async (path: Act[]) => {
@@ -1238,6 +1281,16 @@ const SET_STATE = `({ sets, within }) => {
   }
   return n;
 }`;
+
+/** Runs in the page: resolve once nothing in the DOM has changed for 250 ms, or after `max` ms. */
+const SETTLE = `(max) => new Promise((done) => {
+  let t = 0;
+  const end = () => { obs.disconnect(); clearTimeout(t); done(true); };
+  const obs = new MutationObserver(() => { clearTimeout(t); t = setTimeout(end, 250); });
+  obs.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+  t = setTimeout(end, 250);
+  setTimeout(end, max);
+})`;
 
 /** Runs in the page: the files its source tags name ("apps/x/src/A.tsx"), each once. */
 const SHOWN_FILES = `Array.from(new Set(Array.from(document.querySelectorAll('[data-dsa-src]')).map((e) => e.getAttribute('data-dsa-src').replace(/:\\d+:\\d*$/, ''))))`;

@@ -37,6 +37,18 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   what was still missing could push one past the limit. Now each page gets up to 12 replays,
   openers that reveal the most go first, and an opener matched only by its words on one page is tried
   again on the next page that has it.
+- A `live.apps[name]` entry with only settings (`readPaths`, `readApi`, `auth`, `signIn`) and no `url` or
+  `dir` no longer skips the app as "a live surface needs url or dir". Its settings apply to the app dsa
+  starts itself, and the log names the reads it allows.
+- The same app and setup reach the same elements run after run. After every load, click and state change,
+  the crawler waits until the page stops changing and the app's own data requests are back (a request seen
+  three times counts as a poll and isn't waited for), instead of a fixed wait. A page's time limit is now
+  a rarely reached safety cap (2 minutes, 4 on pages that render what's missing), so its interaction
+  budget ends it the same way each time. When a time limit does cut a pass short, the log says so,
+  because only then can two runs differ.
+- A provider search that finds nothing says what it looked at: the imports it followed from the
+  component, where each name was declared or that it wasn't among the app's files, and whether the file
+  was outside the scan root.
 - Elements behind a component's own state ("when openColour", "mode === 'current'", "not singleView")
   are reached live. On a page that shows the component, the crawler sets that state through React, photographs
   what shows ("after setting openColour = {…}"), then reloads. The value comes from the condition, or is
