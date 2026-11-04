@@ -8,7 +8,7 @@ import { ACME_PROFILE, NOW, fixtureCopy, runPipeline, tmp } from '../../../test/
 import { loadConfig as loadDsaConfig } from '../../../src/config.js';
 import { engineConfig } from '../../../src/engine/from-dsa.js';
 import { bench, benchText, correctness, predictionsOf, repeatability, type Prediction } from '../src/bench.js';
-import { historyLabels, migratedLabels, reviewQueue, sourceFiles } from '../src/labels.js';
+import { historyLabels, migratedLabels, reviewQueue, sourceFiles, sourceRef } from '../src/labels.js';
 import { lowerBound, wilson } from '../src/stats.js';
 import { payloadOf } from '../src/bench-cli.js';
 import { renderReport } from '../src/report.js';
@@ -125,6 +125,24 @@ test('the review queue: disagreements, plus a seeded audit of the rest; people a
   assert.ok(!q.items.some((x) => x.id === 'e7'));
   assert.ok(q.audited > 0 && q.audited < 12, `about a tenth of 37 (${q.audited})`);
   assert.deepEqual(reviewQueue({ labels, payload: p, judge, audit: 0.1, seed: 's1' }).items, q.items, 'the same seed, the same audit');
+});
+
+test('reading an app\'s revision never rewrites its git index', () => {
+  const dir = tmp();
+  const env = { ...process.env, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@example.com' };
+  const git = (...a: string[]) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8', env });
+  git('init', '-q');
+  fs.writeFileSync(path.join(dir, 'a.tsx'), 'export const A = 1;\n');
+  git('add', '.'); git('commit', '-qm', 'one');
+  // A stat-only change: git status would refresh and rewrite the index now.
+  const later = new Date(Date.now() + 60_000);
+  fs.utimesSync(path.join(dir, 'a.tsx'), later, later);
+  const index = () => fs.statSync(path.join(dir, '.git', 'index')).mtimeMs;
+  const before = index();
+  assert.equal(sourceRef(dir), git('rev-parse', 'HEAD').trim(), 'a stat-only change is not a change');
+  fs.writeFileSync(path.join(dir, 'a.tsx'), 'export const A = 2;\n');
+  assert.equal(sourceRef(dir), 'worktree');
+  assert.equal(index(), before);
 });
 
 test('migrated labels never come from vendored copies or non-product files (the scanner skips them)', () => {

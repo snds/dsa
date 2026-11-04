@@ -61,6 +61,14 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- A migrated label named only the size prop that was written, even when the element's className overrode
+  it (`size="icon" className="size-7"` renders 28px). The size whose own pixels match the render is now an
+  acceptable alternative, with the system's tokens followed to their values.
+- `dsa labels migrated` labelled components in another component's render slot (`render={<Button/>}`),
+  which the scanner never counts, so those labels could never match. They are skipped.
+- `dsa labels` ran `git status` on the apps it reads, which rewrites their `.git/index`. It now reads
+  them with plumbing only (`rev-parse`, `diff-index` with each listed file confirmed by `hash-object`
+  against HEAD, `log`, `show`), all with `GIT_OPTIONAL_LOCKS=0`.
 - `dsa labels migrated` labelled vendored copies of other code (`vendor/`) and non-product files (stories
   folders, examples, demos, stubs, docs) that the scanner never reads, so those labels could never match.
   It now skips them, keeping a local copy of the engine scanner's list.

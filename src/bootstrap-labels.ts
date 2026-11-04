@@ -19,6 +19,12 @@ export interface StripTarget {
   axes: Record<string, string[]>;
   defaults: Record<string, string>;
   classes: (variant: string, size: string) => string[] | null;
+  /**
+   * The pixel height and width a class list renders (later classes win, as cn() resolves them), when the
+   * system's tokens resolve. With it, a className that overrides the size makes the size whose pixels
+   * match the render an acceptable answer too.
+   */
+  px?: ((classes: string[]) => { height?: number | undefined; width?: number | undefined }) | undefined;
 }
 
 export interface Stripped {
@@ -29,6 +35,11 @@ export interface Stripped {
   props: Record<string, string>;
   /** A hash of the component element's original source text. */
   elementHash: string;
+  /**
+   * Other props that render the same pixels: when its className overrides height or width (size="icon"
+   * className="size-7"), the size whose own pixels match the render is as right as the size it names.
+   */
+  alts?: Record<string, string>[] | undefined;
 }
 
 export const hashText = (s: string) => crypto.createHash("sha256").update(s).digest("hex").slice(0, 12);
@@ -80,8 +91,14 @@ export function stripSystemComponents(src: string, imports: Map<string, string>,
   try { ast = parseTsx(src); } catch { return { text: src, stripped: [] }; }
   const edits: { start: number; end: number; text: string }[] = [];
   const stripped: Stripped[] = [];
+  // render={<Button/>}: the element another component draws as. The scanner never counts that slot (it is
+  // the component's own element), so a label there could never match: skip it.
+  const renderSlots = new Set<any>();
   walk(ast.program, (n) => {
-    if (n.type !== "JSXElement" || n.openingElement.name.type !== "JSXIdentifier") return;
+    if (n.type === "JSXAttribute" && n.name?.name === "render" && n.value?.type === "JSXExpressionContainer" && n.value.expression?.type === "JSXElement") renderSlots.add(n.value.expression);
+  });
+  walk(ast.program, (n) => {
+    if (n.type !== "JSXElement" || n.openingElement.name.type !== "JSXIdentifier" || renderSlots.has(n)) return;
     const local = n.openingElement.name.name as string;
     const component = imports.get(local);
     const t = component ? targets.get(component) : undefined;
@@ -126,12 +143,36 @@ export function stripSystemComponents(src: string, imports: Map<string, string>,
       mine.push({ start: className.value.start, end: className.value.end, text: `{\`${cls.replace(/[`$\\]/g, (c) => `\\${c}`)} \${${src.slice(e.start, e.end)}}\`}` });
     } else return;
     edits.push(...mine);
-    stripped.push({ line: n.loc.start.line, component, props, elementHash: hashText(src.slice(n.start, n.end)) });
+    const alts = typeof own === "string" ? sameSizeAlts(t, props, classes, own) : [];
+    stripped.push({ line: n.loc.start.line, component, props, elementHash: hashText(src.slice(n.start, n.end)), ...(alts.length ? { alts } : {}) });
   });
   edits.sort((a, b) => b.start - a.start || b.end - a.end);
   let text = src;
   for (const e of edits) text = text.slice(0, e.start) + e.text + text.slice(e.end);
   return { text, stripped };
+}
+
+const SIZE_TOKEN = /^(h|w|size)-/;
+/**
+ * The sizes whose own pixels equal what the element renders once its className override applies. Height
+ * decides; a size that sets a width (an icon size) must match the width too.
+ */
+function sameSizeAlts(t: StripTarget, props: Record<string, string>, base: string[], own: string): Record<string, string>[] {
+  const extra = own.split(/\s+/).filter(Boolean);
+  if (!t.px || !t.axes.size || !extra.some((x) => SIZE_TOKEN.test(x))) return [];
+  const rendered = t.px([...base, ...extra]);
+  const named = t.px(base);
+  if (rendered.height === undefined || (rendered.height === named.height && rendered.width === named.width)) return [];
+  const out: Record<string, string>[] = [];
+  for (const s of t.axes.size) {
+    if (s === props.size) continue;
+    const c = t.classes(props.variant ?? "default", s);
+    if (!c) continue;
+    const p = t.px(c);
+    const same = (a?: number, b?: number) => a !== undefined && b !== undefined && Math.abs(a - b) <= 0.5;
+    if (same(p.height, rendered.height) && (p.width === undefined || same(p.width, rendered.width))) out.push({ ...props, size: s });
+  }
+  return out;
 }
 
 /** One raw element that a commit turned into a system component. */

@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { hashText, historyPairs, stripSystemComponents, systemImports, type Label, type StripTarget } from '@snds/dsa';
-import { allDsPackages, buildSignatures, resolveTargets, type Config, type Target } from '@snds/dsa/engine';
+import { allDsPackages, buildSignatures, normalize, resolveTargets, type Config, type Target } from '@snds/dsa/engine';
 import { isCorrect, matchLabels, predictionsOf } from './bench.js';
 
 /**
@@ -31,13 +31,42 @@ export function sourceFiles(dir: string, rel = ''): string[] {
   return out.sort();
 }
 
-/** The source revision of a folder: its commit, or "worktree" when it has changes (or isn't in git). */
+/**
+ * Read-only git: the apps are other people's checkouts. `git status` and `git diff` refresh stat info and
+ * rewrite .git/index, so neither is used. Plumbing only, with GIT_OPTIONAL_LOCKS=0: `diff-index` lists
+ * candidates (it also lists files whose mtime changed with the same content), and each is confirmed by
+ * comparing `hash-object` with the blob at HEAD. (The engine's src/engine/git-read.ts does the same; a
+ * local copy keeps this package from depending on it.)
+ */
+const GIT_ENV = { ...process.env, GIT_OPTIONAL_LOCKS: '0' };
+const gitRead = (dir: string, args: string[], maxBuffer = 64 * 1024 * 1024) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: GIT_ENV, maxBuffer });
+
+/** The source revision of a folder: its commit, or "worktree" when tracked files under it changed (or it isn't in git). */
 export function sourceRef(dir: string): string {
   try {
-    const head = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    const dirty = execFileSync('git', ['-C', dir, 'status', '--porcelain', '--', '.'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    return dirty ? 'worktree' : head;
+    const head = gitRead(dir, ['rev-parse', 'HEAD']).trim();
+    const top = gitRead(dir, ['rev-parse', '--show-toplevel']).trim();
+    const listed = gitRead(dir, ['diff-index', '--name-only', 'HEAD', '--', '.']).split('\n').map((x) => x.trim()).filter(Boolean);
+    const changed = listed.some((f) => {
+      try { return gitRead(top, ['hash-object', '--', f]).trim() !== gitRead(top, ['rev-parse', `HEAD:${f}`]).trim(); } catch { return true; }
+    });
+    return changed ? 'worktree' : head;
   } catch { return 'worktree'; }
+}
+
+/** Pixels from a class list, later classes winning: rem, px, [Npx], and tokens followed to their values. */
+export function renderedPx(classes: string[], aliases: Map<string, string>, values: Map<string, string>): { height?: number | undefined; width?: number | undefined } {
+  const p = normalize(classes, aliases);
+  const px = (v: string | undefined, depth = 0): number | undefined => {
+    if (!v || depth > 8) return undefined;
+    const s = v.trim().replace(/^\[(.+)\]$/, '$1');
+    if (s.startsWith('var:')) return px(values.get(s.slice(4)), depth + 1);
+    const ref = /^var\(--([\w-]+)\)$/.exec(s);
+    if (ref) return px(values.get(ref[1]!), depth + 1);
+    const m = /^(-?\d*\.?\d+)(rem|px)?$/.exec(s);
+    return m ? (m[2] === 'rem' ? Number(m[1]) * 16 : Number(m[1])) : undefined;
+  };
+  return { height: px(p.get('height')), width: px(p.get('width')) };
 }
 
 const labelId = (...parts: (string | number)[]) => `L-${crypto.createHash('sha256').update(parts.join('\u0001')).digest('hex').slice(0, 12)}`;
@@ -50,7 +79,7 @@ export function stripTargets(root: string, config: Config): Map<string, StripTar
   const out = new Map<string, StripTarget>();
   for (const c of sigs.components.values()) {
     if (!c.tag || !/^[a-z]/.test(c.tag)) continue;
-    out.set(c.component, { tag: c.tag, axes: c.axes, defaults: c.defaults, classes: (v, s) => c.sigs.find((x) => x.variant === v && x.size === s)?.classes ?? null });
+    out.set(c.component, { tag: c.tag, axes: c.axes, defaults: c.defaults, classes: (v, s) => c.sigs.find((x) => x.variant === v && x.size === s)?.classes ?? null, px: (cls) => renderedPx(cls, sigs.aliases, sigs.values) });
   }
   return out;
 }
@@ -100,8 +129,8 @@ export function migratedLabels(o: { root: string; config: Config; configFile: st
       files++; stripped += r.stripped.length;
       for (const s of r.stripped) labels.push({
         id: labelId(t.name, rel, s.line, s.elementHash), app: t.name, file: rel, line: s.line, sourceRef: ref, elementHash: s.elementHash,
-        truth: { verdict: 'replace', use: s.component, props: s.props }, acceptableAlts: [], labeler: o.labeler ?? 'dsa labels migrated', method: 'migrated', at: now,
-        notes: 'Was this component; stripped back to the markup it renders.',
+        truth: { verdict: 'replace', use: s.component, props: s.props }, acceptableAlts: (s.alts ?? []).map((props) => ({ use: s.component, props })), labeler: o.labeler ?? 'dsa labels migrated', method: 'migrated', at: now,
+        notes: s.alts?.length ? `Was this component; stripped back to the markup it renders. Its className overrides the size, so ${s.alts.map((a) => `size "${a.size}"`).join(' or ')} renders the same pixels.` : 'Was this component; stripped back to the markup it renders.',
       });
     }
     apps.push({ name: t.name, from: t.dir, to, files, stripped });
@@ -144,7 +173,7 @@ const safe = (n: string) => n.replace(/[^\w.-]+/g, '_');
  */
 export function historyLabels(o: { app: Target; components: Set<string>; maxCommits?: number; labeler?: string; now?: Date }): { labels: Label[]; commits: number; shallow: boolean } {
   const now = (o.now ?? new Date()).toISOString();
-  const git = (...a: string[]) => execFileSync('git', ['-C', o.app.dir, ...a], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
+  const git = (...a: string[]) => gitRead(o.app.dir, a, 256 * 1024 * 1024);
   let shallow = false;
   try { shallow = git('rev-parse', '--is-shallow-repository').trim() === 'true'; } catch { return { labels: [], commits: 0, shallow: false }; }
   const shas = git('log', '--format=%H %P', `-n${o.maxCommits ?? 2000}`, '--', '.').trim().split('\n').filter(Boolean).map((l) => l.split(' '));

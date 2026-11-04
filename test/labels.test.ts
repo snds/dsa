@@ -89,6 +89,30 @@ describe("migrated: a system component stripped back to the markup it renders", 
   });
 });
 
+describe("migrated: size overrides and render slots", () => {
+  // A tiny size scale: icon 32px, icon-xs 28px, default 32px high with no width, xs 24px high.
+  const scale: Record<string, string[]> = { default: ["h-8", "px-3"], xs: ["h-6", "px-2"], icon: ["size-8"], "icon-xs": ["size-7"] };
+  const step = (t: string) => { const m = /^(h|w|size)-(\d+)$/.exec(t); return m ? { dim: m[1]!, px: Number(m[2]) * 4 } : null; };
+  const kit: StripTarget = {
+    tag: "button", axes: { variant: ["default", "ghost"], size: Object.keys(scale) }, defaults: { variant: "default", size: "default" },
+    classes: (v, s) => [...(v === "ghost" ? ["hover:bg-accent"] : ["bg-primary"]), ...(scale[s] ?? [])],
+    px: (cls) => { let height: number | undefined, width: number | undefined; for (const t of cls) { const x = step(t); if (!x) continue; if (x.dim !== "w") height = x.px; if (x.dim !== "h") width = x.px; } return { height, width }; },
+  };
+  const imports = new Map([["Button", "Button"]]);
+
+  it("a className that overrides the size makes the size with those pixels an acceptable answer", () => {
+    const src = `export const A = () => <>\n<Button variant="ghost" size="icon" className="size-7">+</Button>\n<Button variant="ghost" size="icon">-</Button>\n<Button variant="ghost" size="default" className="h-6 w-12">%</Button>\n</>;`;
+    const r = stripSystemComponents(src, imports, new Map([["Button", kit]]));
+    expect(r.stripped.map((x) => x.alts)).toEqual([[{ variant: "ghost", size: "icon-xs" }], undefined, [{ variant: "ghost", size: "xs" }]]);
+  });
+
+  it("an element in another component's render slot is not labelled (the scanner never counts it)", () => {
+    const src = `export const A = () => <Trigger render={<Button variant="ghost">Open</Button>} />;\nexport const B = () => <Button>Save</Button>;`;
+    const r = stripSystemComponents(src, imports, new Map([["Button", kit]]));
+    expect(r.stripped.map((x) => x.line)).toEqual([2]);
+  });
+});
+
 describe("history: a commit that swapped a raw element for a system component", () => {
   it("pairs the removed raw element with the component added in its place, at the old line", () => {
     const diff = [
