@@ -154,18 +154,28 @@ export function renderedFor(comp: Record<string, { styles: Styles; shot?: string
   return { key: `${variant}/${size}`, styles, shot: v?.shot ?? z?.shot, composed: true, sizeMissing: !z };
 }
 
+/** A rendered variant has to measure at least this like the element, and this far ahead of the pick, to count as disagreement. */
+export const RENDER_MIN_SCORE = 0.6;
+export const RENDER_MIN_MARGIN = 0.15;
+/** The pick measures this unlike the element while another variant measures this like it: abstain. */
+const RENDER_ABSTAIN_PICK = 0.4, RENDER_ABSTAIN_OTHER = 0.8;
+
 /**
  * After screenshots: what elements look like in the running app vs each system variant in Storybook.
- * Updates the latest run's evaluations — confirmation raises confidence a little; a clear disagreement
- * on variant switches the recommendation to what the rendering supports and sends it to a human.
- * Elements with identical classes share the measurement.
+ * Screenshots confirm a pick; they never invent one (review item 19). Agreement raises confidence a
+ * little. Disagreement never switches the variant: it lowers confidence under the review threshold and
+ * offers the rendered variant as an alternative, ranked below the pick. A pick the rendering clearly
+ * contradicts becomes unclear, for a person to choose. A screenshot can catch another state (disabled,
+ * unselected) or miss a dark-theme border, so weak evidence (under RENDER_MIN_SCORE, or a margin under
+ * RENDER_MIN_MARGIN) changes nothing. Elements with identical classes share the measurement.
  */
-export async function applyRenderedEvidence(dataDir: string, threshold = 0.9): Promise<{ confirmed: number; switched: number; measured: number }> {
+export async function applyRenderedEvidence(dataDir: string, threshold = 0.9): Promise<{ confirmed: number; switched: number; measured: number; disagreed: number; unclear: number }> {
 
   const rendered = readRendered(dataDir);
   let idx: any = null;
   try { idx = JSON.parse(fs.readFileSync(path.join(dataDir, 'shots', 'index.json'), 'utf8')); } catch { /* none */ }
-  const res = { confirmed: 0, switched: 0, measured: 0 };
+  // switched stays in the result for callers; it is always 0 now.
+  const res = { confirmed: 0, switched: 0, measured: 0, disagreed: 0, unclear: 0 };
   if (!rendered || !idx) return res;
   const store = await openStore(dataDir, 'rendered evidence');
   try {
@@ -180,7 +190,7 @@ export async function applyRenderedEvidence(dataDir: string, threshold = 0.9): P
       if (e.evidenceCap) { e.confidence = e.evidenceCap.from; delete e.evidenceCap; }
       const st: Styles | undefined = idx.shots?.[e.id]?.styles ?? (e.styleSig ? bySig.get(e.styleSig) : undefined);
       const comp = e.signature && rendered.components[e.signature.component];
-      if (!st || !comp || e.decided) continue;
+      if (!st || !comp || e.decided || e.verdict !== 'replace') continue;
       e.reasons = (e.reasons ?? []).filter((r: any) => !String(r.text).startsWith('Rendered:'));
       const pick = renderedFor(comp, e.signature.variant, e.signature.size);
       if (!pick) continue;
@@ -191,28 +201,31 @@ export async function applyRenderedEvidence(dataDir: string, threshold = 0.9): P
       let best = { v: e.signature.variant, score: mine.score };
       for (const v of variants) { const r = renderedFor(comp, v, e.signature.size); if (r) { const s = compareRendered(st, r.styles).score; if (s > best.score) best = { v, score: s }; } }
       const own = idx.shots?.[e.id]?.styles ? 'this element' : 'an identical element';
-      // The classes say what the button is at rest; a screenshot can catch another state (disabled, unselected)
-      // or miss a dark-theme border. A switch that contradicts the resting look is reported, not applied.
-      // Red is a tone: a screenshot at rest can't see hover red, and a switch off a red variant loses it.
+      // What the classes say at rest, which a screenshot may not overrule: named in the reason.
       const why = (v: string) => !e.look ? ''
         : e.look.danger && /^(destructive|danger)$/.test(e.signature.variant) && !/^(destructive|danger)$/.test(v) ? 'a red danger tone'
         : (e.look.fill || e.look.border === 'box') && /^(ghost|link)$/.test(v) ? 'a box at rest'
+        : !e.look.fill && e.look.border !== 'box' && !/^(ghost|link)$/.test(v) ? 'no box at rest'
         : e.look.fromBranch ? 'a box that a condition switches on'
         : e.look.toolbar && v !== 'toolbar' ? 'toolbar chrome' : '';
-      if (best.v !== e.signature.variant && best.score - mine.score >= 0.15 && why(best.v)) {
-        // Kept, but the disagreement is a real doubt: a person confirms.
+      const disagrees = best.v !== e.signature.variant && best.score >= RENDER_MIN_SCORE && best.score - mine.score >= RENDER_MIN_MARGIN;
+      if (disagrees) {
         const before = e.confidence;
-        e.confidence = Math.min(before, Math.round((threshold - 0.05) * 100) / 100);
-        e.alternatives = [{ verdict: e.verdict, role: e.role, use: e.use, from: e.from, props: { ...e.props, variant: best.v }, confidence: e.confidence }, ...(e.alternatives ?? [])].slice(0, 3);
-        e.reasons.push({ text: `Rendered: the running app looked more like ${e.use} ${best.v} (${Math.round(best.score * 100)}%), but the classes show ${why(best.v)}; kept ${e.signature.variant}. A person should confirm.`, delta: Math.round((e.confidence - before) * 100) / 100 });
-      } else if (best.v !== e.signature.variant && best.score - mine.score >= 0.15) {
-        const before = e.confidence;
-        e.alternatives = [{ verdict: e.verdict, role: e.role, use: e.use, from: e.from, props: { ...e.props }, confidence: before }, ...(e.alternatives ?? [])].slice(0, 3);
-        e.props = { ...(e.props ?? {}), variant: best.v };
-        e.signature = { ...e.signature, variant: best.v };
-        e.confidence = Math.min(before, Math.round((threshold - 0.05) * 100) / 100);
-        e.reasons.push({ text: `Rendered: in the running app ${own} looks like ${e.use} ${best.v} (${Math.round(best.score * 100)}% of measured properties), not ${pick.key.split('/')[0]} (${Math.round(mine.score * 100)}%). Switched the variant; a human should confirm.`, delta: Math.round((e.confidence - before) * 100) / 100 });
-        res.switched++;
+        const cap = Math.round((threshold - 0.05) * 100) / 100;
+        const contradicts = why(best.v);
+        const strong = mine.score < RENDER_ABSTAIN_PICK && best.score >= RENDER_ABSTAIN_OTHER && !contradicts;
+        e.confidence = Math.min(before, strong ? Math.max(0.5, cap - 0.1) : cap);
+        const alt = { verdict: e.verdict, role: e.role, use: e.use, from: e.from, props: { ...e.props, variant: best.v }, confidence: Math.min(e.confidence, Math.round(best.score * 100) / 100) };
+        e.alternatives = [alt, ...(e.alternatives ?? []).map((a: any) => ({ ...a, confidence: Math.min(a.confidence ?? 0, e.confidence) }))].slice(0, 3);
+        if (strong) {
+          // The rendering clearly contradicts the pick and the classes don't say otherwise: abstain.
+          e.alternatives = [{ verdict: e.verdict, role: e.role, use: e.use, from: e.from, props: { ...e.props }, confidence: e.confidence }, ...e.alternatives].slice(0, 3);
+          e.unclear = [...(e.unclear ?? []), `in the running app it measures ${Math.round(mine.score * 100)}% like ${e.use} ${e.signature.variant} and ${Math.round(best.score * 100)}% like ${best.v}`];
+          e.verdict = 'unclear';
+          res.unclear++;
+        }
+        e.reasons.push({ text: `Rendered: the running app looked more like ${e.use} ${best.v} (${Math.round(best.score * 100)}%) than ${pick.key.split('/')[0]} (${Math.round(mine.score * 100)}%). ${contradicts ? `The classes show ${contradicts}, so ` : ''}${strong ? 'too unclear to keep the pick: a person should choose.' : `kept ${e.signature.variant}; a person should confirm.`}`, delta: Math.round((e.confidence - before) * 100) / 100 });
+        res.disagreed++;
       } else if (mine.score >= 0.7) {
         const up = Math.min(0.04, 0.98 - e.confidence);
         e.confidence = Math.round((e.confidence + up) * 100) / 100;
@@ -222,7 +235,7 @@ export async function applyRenderedEvidence(dataDir: string, threshold = 0.9): P
         e.reasons.push({ text: `Rendered: ${own} measures ${Math.round(mine.score * 100)}% like ${e.use} ${pick.key}; differs on ${mine.diffs.map(d => d.label).join(', ')}.`, delta: 0 });
       }
       e.needsHuman = !e.decided && e.confidence < threshold;
-      await store.exec('update element_evals set data=$3, confidence=$4, needs_human=$5 where run_id=$1 and id=$2', [run, e.id, JSON.stringify(e), e.confidence, e.needsHuman]);
+      await store.exec('update element_evals set data=$3, confidence=$4, needs_human=$5, verdict=$6 where run_id=$1 and id=$2', [run, e.id, JSON.stringify(e), e.confidence, e.needsHuman, e.verdict]);
     }
   } finally { store.close(); }
   return res;

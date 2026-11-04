@@ -38,6 +38,14 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 - `scripts/proposal-gaps.mjs` counts, on a published dashboard, why proposals aren't drawn exactly with
   their element's own content.
 
+### Changed
+
+- Screenshots confirm a pick; they never switch it. When the running app looks more like another variant
+  (at least 60% alike and 0.15 ahead of the pick), the pick stays, its confidence drops under the review
+  threshold, and the other variant is offered as an alternative ranked below it. A pick the rendering
+  clearly contradicts (under 40% alike, another variant 80% or more), with nothing in the classes against
+  it, becomes `unclear`. `applyRenderedEvidence` reports `disagreed` and `unclear`; `switched` is always 0.
+
 ### Fixed
 
 - Cards showed a proposal with the story's sample content although the element had its own. The
