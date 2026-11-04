@@ -834,8 +834,6 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         // Each traced opener tried here, and what it found: so a miss behind one says whether it ran.
         if (said.length) o.log(`  openers on ${u.replace(base.origin, '')}: ${said.join('; ')}${absent ? `; ${absent} other opener${absent === 1 ? '' : 's'} not on this page` : ''}`);
       }
-      // State the source says hides what's missing, set through React (not when signed in by memory: a reload would sign out).
-      if (remaining.length && o.reveal !== false && !(o.signIn && auth.done)) await stateReveal(u, sweep);
       } catch (e: any) {
         if (!/closed|crash|Target/i.test(String(e?.message))) throw e;
         o.log(`  the page closed on ${u.replace(base.origin, '')}; restarting the browser and moving on`);
@@ -843,6 +841,9 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       }
     }
     if (queue.some(q => !seen.has(q)) && Date.now() >= phase1End && seen.size < o.maxPages && remaining.length) o.log(`  pass 1 stopped by its time share with ${queue.filter(q => !seen.has(q)).length} pages not yet visited: results can differ between runs; raise shots.maxMinutes to visit them all`);
+    // State the source says hides what's still missing, set through React: after the route crawl had its share,
+    // each combination once (not when signed in by memory: a reload would sign out).
+    if (remaining.length && o.reveal !== false && !(o.signIn && auth.done) && !signedOut() && !isBroken()) await stateReveal();
     // Pass 2: explore pages, most promising first (re-scored as elements are found), until time runs out.
     const done2 = new Set<string>();
     while (remaining.length && Date.now() < deadline && o.reveal !== false && !signedOut() && !auth.expired && !isBroken()) {
@@ -950,18 +951,18 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   function describeSets(sets: StateSet[]) { return sets.flatMap(x => x.slots.map(sl => `${sl.name} = ${JSON.stringify(sl.value)}`.slice(0, 40))).join(', '); }
 
   /**
-   * Live, on the page that renders them: elements behind a component's own state ("when openColour",
-   * "mode === 'current'") are shown by setting that state through React, looked for, then the page is
-   * reloaded. Grouped by the state each needs; up to 10 per page.
+   * Live, after pass 1: elements behind a component's own state ("when openColour", "mode === 'current'") are
+   * shown by setting that state through React, level by level, outermost first, and looked for. Each
+   * combination once per run, on the first page where all its levels could be set: the root's state shows
+   * the same thing on every page (a nav value overrides the route), so trying it again repeats the first.
+   * Pages that show the outermost component's file go first; a combination whose component isn't on a page
+   * tries the next, up to 6 pages. Its own time share (30% of what's left), so the route crawl comes first.
    */
-  async function stateReveal(u: string, sweep: (by?: string) => Promise<void>) {
-    const files = shown.get(u);
-    if (!files || !o.draw?.root) return;
+  async function stateReveal() {
+    if (!o.draw?.root || !pages.length) return;
+    const stop = Date.now() + (deadline - Date.now()) * 0.3;
     const groups = new Map<string, { sets: StateSet[]; mine: Target[] }>();
     for (const r of remaining) {
-      // Every level, outermost first: the root (on every page) and components it only renders once its
-      // state is set. Found on the page by walking up from what it shows.
-      void files;
       const sets = stateFor(r);
       if (!sets.length) continue;
       const k = JSON.stringify(sets);
@@ -969,34 +970,50 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       g.mine.push(r);
       groups.set(k, g);
     }
-    const said: string[] = [];
-    let tries = 0;
+    if (!groups.size) return;
+    const said = new Map<string, string[]>();
+    const say = (u: string, m: string) => said.set(u, [...(said.get(u) ?? []), m]);
+    let combos = 0, absent = 0;
     for (const g of [...groups.values()].sort((a, b) => b.mine.length - a.mine.length)) {
-      if (!remaining.length || tries >= 10 || Date.now() >= phase1End) break;
+      if (!remaining.length || Date.now() >= stop) break;
       if (!g.mine.some(r => remaining.includes(r))) continue;
-      tries++;
-      // Level by level: each set renders the next component down, which is set after it shows.
-      const done: StateSet[] = [];
-      for (const one of g.sets) {
-        const n = await inPage<number>(page, SET_STATE, { sets: [one] }).catch(() => 0);
-        if (!n) break;
-        done.push(one);
-        await page.waitForTimeout(o.waitMs); await settle();
-        if (g.sets.length > 1) await sweep(`setting ${describeSets(done)}`);
-      }
       const what = describeSets(g.sets);
-      if (!done.length) { said.push(`${what}: its component isn't on this page`); continue; }
-      if (g.sets.length === 1) await sweep(`setting ${what}`);
-      const missed = g.sets.slice(done.length).map(x => x.component);
-      const found = g.mine.length - g.mine.filter(r => remaining.includes(r)).length;
-      said.push(`${what}: found ${found}${missed.length ? ` (${missed.join(' › ')} didn't show after the levels above were set)` : ''}`);
-      for (const r of g.mine) if (remaining.includes(r)) note(r, `set ${what} on ${routeOf(u)}: still not shown`);
-      const same = page.url().split('#')[0] === u.split('#')[0];
-      await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-      if (same) await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-      await page.waitForTimeout(o.waitMs); await settle();
+      const first = g.sets[0]!.file;
+      const at = [...pages.filter(u => shown.get(u)?.has(first)), ...pages.filter(u => !shown.get(u)?.has(first))].slice(0, 6);
+      let reached = false;
+      for (const u of at) {
+        if (Date.now() >= stop) break;
+        const same = page.url().split('#')[0] === u.split('#')[0];
+        await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+        if (same) await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+        await page.waitForTimeout(o.waitMs); await settle();
+        const sweep = sweeper(u);
+        const done: StateSet[] = [];
+        for (const one of g.sets) {
+          const n = await inPage<number>(page, SET_STATE, { sets: [one] }).catch(() => 0);
+          if (!n) break;
+          done.push(one);
+          await page.waitForTimeout(o.waitMs); await settle();
+          if (g.sets.length > 1) await sweep(`setting ${describeSets(done)}`);
+        }
+        if (!done.length) continue;
+        reached = true;
+        if (g.sets.length === 1) await sweep(`setting ${what}`);
+        const missed = g.sets.slice(done.length).map(x => x.component);
+        const found = g.mine.length - g.mine.filter(r => remaining.includes(r)).length;
+        say(u, `${what}: found ${found}${missed.length ? ` (${missed.join(' › ')} didn't show after the levels above were set)` : ''}`);
+        for (const r of g.mine) if (remaining.includes(r)) note(r, `set ${what} on ${routeOf(u)}: still not shown`);
+        // Every level set: another page shows the same. Stopped partway: the next page may render the rest.
+        if (!missed.length) break;
+      }
+      combos++;
+      if (!reached) {
+        absent++;
+        for (const r of g.mine) if (remaining.includes(r)) note(r, `set ${what}: its component wasn't on any page tried (${at.map(routeOf).join(', ')})`);
+      }
     }
-    if (said.length) o.log(`  state on ${u.replace(base.origin, '')}: ${said.join('; ')}`);
+    for (const [u, m] of said) o.log(`  state on ${u.replace(base.origin, '')}: ${m.join('; ')}`);
+    o.log(`  state: ${combos} combination${combos === 1 ? '' : 's'} tried, once each${absent ? `, ${absent} whose component wasn't on any page tried` : ''}${groups.size > combos ? `, ${groups.size - combos} not tried (its time share ran out)` : ''}`);
   }
 
   /**

@@ -32,6 +32,12 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- Setting component state no longer crowds out the route crawl. It ran on every page in pass 1 and set
+  the root's state (a nav value, a setup flag) again on each one, though that shows the same thing on
+  every page; on a large app pass 1 ran out of time with most pages unvisited. It now runs after pass 1,
+  in its own share of the time left (30%), and tries each combination once per run, on the first page
+  where all its levels could be set (pages that show its outermost component first, up to 6). The log
+  says how many were tried and how many weren't on any page tried.
 - Live photos no longer depend on page order. Traced openers ("Edit Image", "Add") were replayed at most
   40 times per app run, so in a large app the order of pages decided which got replayed. Any change to
   what was still missing could push one past the limit. Now each page gets up to 12 replays,

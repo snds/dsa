@@ -99,6 +99,42 @@ test("an app that navigates by its root's state: each level set, outermost first
   assert.match(all, /after setting setupTakeover = false, activeNav = "Partners", open = true/);
 });
 
+// The same root on two routes: its state shows the same thing on both, so each combination is tried once
+// per run, not once per page.
+test("root state is set once per run, not on every page", { timeout: 300_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  const kit = path.resolve(import.meta.dirname, '../../dashboard/ui/node_modules');
+  if (!fs.existsSync(path.join(kit, 'vite')) || !fs.existsSync(path.join(kit, 'react'))) skip('no Vite installed');
+  const root = fixtureCopy();
+  const dir = path.join(root, 'apps', 'twice');
+  const files: Record<string, string> = {
+    ...NAV,
+    'src/main.jsx': `import { createRoot } from 'react-dom/client';\nimport { routes } from './routes.jsx';\nconst R = routes.find(r => r.path === location.pathname) ?? routes[0];\ncreateRoot(document.getElementById('root')).render(<R.Component />);\n`,
+    // One the state can't show (a count that's never above 3): still missing after the set, not tried again.
+    'src/PartnersView.jsx': `import { useState } from 'react';\nexport function PartnersView() {\n  const [open, setOpen] = useState(false);\n  const count = 0;\n  return <section><h1>Partners</h1>\n    {open && <div>\n      <button className="btn">Add facility</button>\n    </div>}\n    {open && count > 3 && <div>\n      <button className="btn">Merge facilities</button>\n    </div>}</section>;\n}\n`,
+    'src/routes.jsx': `import { App } from './App.jsx';\nexport const routes = [\n  { path: '/home', Component: App },\n  { path: '/settings', Component: App },\n];\n`,
+  };
+  for (const [f, c] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }); fs.writeFileSync(path.join(dir, f), c); }
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'twice', private: true, type: 'module', scripts: { dev: 'vite' }, dependencies: { '@acme/ds-react': '^4.9.0', react: '^18.3.0' } }));
+  fs.symlinkSync(kit, path.join(dir, 'node_modules'), 'dir');
+  const data = path.join(root, '.dsa');
+  await runPipeline({ root, dataDir: data, git: false, now: NOW });
+  const { evals } = await latestEvals(data);
+  const target = evals.find(e => e.file.endsWith('PartnersView.jsx') && e.match.text === 'Add facility');
+  assert.ok(target);
+  const logs: string[] = [];
+  const config = loadConfig(root).config as any;
+  config.shots = { ...(config.shots ?? {}), maxMinutes: 2, waitMs: 200 };
+  await takeShots({ root, dataDir: data, config, target: 'twice', perGroup: 20, log: m => logs.push(m) });
+  const idx = JSON.parse(fs.readFileSync(path.join(data, 'shots', 'index.json'), 'utf8'));
+  const all = logs.join('\n');
+  assert.ok(idx.shots[target!.id] && !idx.shots[target!.id].drawn, all);
+  // Both pages visited; the combination set on one of them only, though one it hides is still missing.
+  assert.match(all, /\/settings/);
+  assert.ok(logs.filter(l => /state on \//.test(l)).length === 1, all);
+  assert.match(all, /state: \d+ combinations? tried, once each/);
+});
+
 // A modal a custom hook renders (useDetailImages returns JSX), shown once the hook's own state is set; the
 // hook keeps that state in the component that calls it (ColoursView), after its own openColour.
 const HOOKED: Record<string, string> = {
