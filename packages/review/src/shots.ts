@@ -361,13 +361,29 @@ interface Act { n: number; key: string; kind: 'click' | 'hover' | 'context' | 'c
 /** shots/index.json's `run`: this run's id, the source it photographed (commit, or "worktree" when changed), and when. */
 export interface RunStamp { id: string; ref: string; at: string }
 
-/** The scan root's commit, "worktree" when it has uncommitted changes, "" outside git. */
-function sourceRef(root: string): string {
+/**
+ * The scan root's commit, "worktree" when a tracked file's content differs from it, "" outside git. Read
+ * only: `git status` and `git diff` rewrite the index of a checkout dsa may only read, so this uses the
+ * plumbing `diff-index` (which never writes) and checks each file it names by content hash, since a file
+ * only touched (a new mtime) is listed too.
+ */
+export function sourceRef(root: string): string {
+  const git = (args: string[]) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } }).trim();
+  let head: string;
+  try { head = git(['rev-parse', 'HEAD']); } catch { return ''; }
   try {
-    const head = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    const dirty = execFileSync('git', ['-C', root, 'status', '--porcelain', '--untracked-files=no'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    return dirty ? 'worktree' : head;
-  } catch { return ''; }
+    const top = git(['rev-parse', '--show-toplevel']);
+    const named = git(['diff-index', '--name-only', 'HEAD', '--']).split('\n').filter(Boolean);
+    if (named.length > 50) return 'worktree';
+    for (const f of named) {
+      let now = '';
+      try { now = git(['hash-object', '--', path.join(top, f)]); } catch { return 'worktree'; }
+      let then = '';
+      try { then = git(['rev-parse', `HEAD:${f}`]); } catch { return 'worktree'; }
+      if (now !== then) return 'worktree';
+    }
+    return head;
+  } catch { return 'worktree'; }
 }
 
 interface DrawWith { root: string; dir?: string | undefined; mount?: boolean | undefined; max?: number | undefined; maxMinutes?: number | undefined }
