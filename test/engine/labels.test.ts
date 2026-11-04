@@ -65,7 +65,7 @@ test('labels: acceptable alternatives count as right; unreadable lines are skipp
     JSON.stringify({ id: 'E-1', app: 'app', file: 'src/F1.tsx', line: 1, sourceRef: 'abc', elementHash: 'fp1', truth: truth('Button', { variant: 'ghost' }), acceptableAlts: [truth('Button')], labeler: 'tester', method: 'manual', at: '2026-11-04', notes: '' }),
     '',
     '{ not json',
-    JSON.stringify({ elementHash: 'fp2', truth: truth('Button') }),
+    JSON.stringify({ app: 'app', file: 'F2.tsx', line: 1, elementHash: 'h2', truth: truth('Button', { variant: 'default', size: 'default' }) }),
   ];
   fs.writeFileSync(file, lines.join('\n'));
   const { labels, skipped } = readLabels(file);
@@ -73,7 +73,7 @@ test('labels: acceptable alternatives count as right; unreadable lines are skipp
   assert.equal(skipped, 1);
   const evals = [ev(1), ev(2)];
   const r = applyLabels(evals, labels, 0.9);
-  assert.equal(r.matched, 2, 'matched by id and by element hash');
+  assert.equal(r.matched, 2, 'matched by id, and by app, line and a file path missing its leading folder');
 });
 
 test('fit gate: a component matching under 40% of the element\'s look stays under the bar', () => {

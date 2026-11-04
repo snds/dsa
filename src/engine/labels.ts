@@ -71,17 +71,24 @@ export function readLabels(file: string): { labels: Label[]; skipped: number } {
   return { labels, skipped };
 }
 
-const norm = (p?: Record<string, string>) => JSON.stringify(Object.entries(p ?? {}).filter(([k]) => k !== 'render').sort());
-const same = (a: Recommendation, b: Recommendation) => a.verdict === b.verdict && (a.use ?? '') === (b.use ?? '') && (a.verdict !== 'replace' || norm(a.props) === norm(b.props));
+// Props compare as the bench compares them: "default" and empty values are the same as unset.
+const norm = (p?: Record<string, string>) => JSON.stringify(Object.entries(p ?? {}).filter(([k, v]) => !['render', 'asChild', 'children'].includes(k) && v != null && v !== '' && v !== 'default').map(([k, v]) => [k, String(v)]).sort());
+const same = (a: Recommendation, b: Recommendation) => a.verdict === b.verdict && (a.verdict !== 'replace' || ((a.use ?? '') === (b.use ?? '') && norm(a.props) === norm(b.props)));
 
-/** The label for an evaluation: by id, by element hash (its fingerprint), or by app, file and line. */
+/** Either path may carry a leading folder the other doesn't (the app's name, a workspace folder). */
+const sameFile = (a: string, b: string) => a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`);
+
+/**
+ * The label for an evaluation: by id, else by app, line and file. (A label's elementHash hashes the
+ * element's source text; it says when the code changed under a label, so it isn't used to match.)
+ */
 export function labelFor(e: ElementEval, labels: Label[]): Label | undefined {
-  return labels.find(l => l.id === e.id) ?? labels.find(l => l.elementHash && l.elementHash === e.fingerprint)
-    ?? labels.find(l => l.file === e.file && l.line === e.line && (!l.app || l.app === e.target));
+  return labels.find(l => l.id === e.id)
+    ?? labels.find(l => l.line === e.line && l.file !== undefined && sameFile(e.file, l.file) && (!l.app || l.app === e.target));
 }
 
 /** Is the recommendation right by the label? The truth, or any acceptable alternative. */
-export const isCorrect = (e: Recommendation, l: Label) => same(e, l.truth) || (l.acceptableAlts ?? []).some(a => same(e, a));
+export const isCorrect = (e: Recommendation, l: Label) => same(e, l.truth) || (l.acceptableAlts ?? []).some(a => same(e, a) || (e.verdict === 'replace' && a.use === e.use && a.props === undefined));
 
 export const pathOf = (e: { ruleId: string; verdict: string }) => `${e.ruleId}|${e.verdict}`;
 

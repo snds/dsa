@@ -78,6 +78,10 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- Labels matched almost nothing on a real run: they were matched by element hash (which hashes the
+  element's source text, not dsa's fingerprint) and by an exact file path. They now match by id, else by
+  app, line and a file path that may carry a leading folder, and props compare as the bench compares
+  them ("default" is the same as unset).
 - Outlined buttons were read as secondary when their classes hide the border first and colour it later
   (`border border-transparent … border-border`, as copied or rendered markup has it). The border was read
   as "none", which ruled the outline variant out. Border classes now resolve last-wins, as `cn()` does.
