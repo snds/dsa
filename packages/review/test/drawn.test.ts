@@ -1,6 +1,6 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { gateProps, markupOf, FN, MAP, SET, mountProps, stateValues } from '../src/drawn.js';
+import { gateProps, markupOf, FN, MAP, SET, mountProps, stateValues, holdsInitially, stateSets } from '../src/drawn.js';
 
 // What can't be photographed is drawn from the code: its own JSX as static markup (no app code runs), and
 // props that meet the gates the scan traced, for mounting its component in the app's build.
@@ -92,4 +92,24 @@ export function App() {
 }`;
   assert.deepEqual(stateValues(app, 'activeNav').sort(), ['Colours', 'Home', 'Lab', 'Materials', 'Partners', 'Prints', 'Requests']);
   assert.deepEqual(stateValues(app, 'tab'), ['x']);
+});
+
+test("a condition that holds with its initial state isn't the one to blame, and state isn't set to what it starts as", () => {
+  const app = `export function App() {
+  const [setupTakeover, setSetupTakeover] = useState(false);
+  const [nav, setNav] = useState('Home');
+  const [colour, setColour] = useState<Colour | null>(null);
+  const [filters, setFilters] = useState({});
+  return null;
+}`;
+  assert.equal(holdsInitially({ test: 'setupTakeover', negated: true }, app), true);
+  assert.equal(holdsInitially({ test: 'setupTakeover', negated: false }, app), false);
+  assert.equal(holdsInitially({ test: "nav === 'Home'", negated: false }, app), true);
+  assert.equal(holdsInitially({ test: "nav === 'Prints'", negated: false }, app), false);
+  assert.equal(holdsInitially({ test: "nav !== 'Prints'", negated: false }, app), true);
+  assert.equal(holdsInitially({ test: 'unknown', negated: false }, app), false);
+  const gates = [{ test: 'colour && filters', negated: false, component: 'App', file: 'App.tsx' }];
+  const [set] = stateSets(gates, () => app);
+  // A typed value with nothing read off it: an object, not true. State that starts as an object: left alone.
+  assert.deepEqual(set!.slots.map(x => [x.name, x.value]), [['colour', {}]]);
 });

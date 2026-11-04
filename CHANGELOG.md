@@ -32,6 +32,15 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- An app outside the scan root: every path compared with a source tag is now named as the tagger names it
+  (`<app folder>/<path>`), not relative to the root (`../…`). Openers were matched only by their words,
+  state was set on the wrong component, and providers were refused as outside the scan root.
+- State is read before it's set: a value that already holds (a default) isn't set again, so it costs no
+  reload or look. A value the app undoes (an effect that syncs state from the URL) is logged as reverted.
+  A boolean never goes into state that starts as an object, and a typed value nothing reads off is set to
+  an object, not `true`.
+- A miss behind conditions names the first one that doesn't hold with its state's initial values, not the
+  first one listed ("not setupTakeover" when it starts false).
 - Setting component state no longer crowds out the route crawl. It ran on every page in pass 1 and set
   the root's state (a nav value, a setup flag) again on each one, though that shows the same thing on
   every page; on a large app pass 1 ran out of time with most pages unvisited. It now runs after pass 1,

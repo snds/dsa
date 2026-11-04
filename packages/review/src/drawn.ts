@@ -637,6 +637,37 @@ function orderOf(code: string, component: string, hookCode: ((name: string) => s
  * `!singleView`, `mode === 'current'`, `a || b` false), that hook and a value: a literal from the test, a
  * value shaped by how the component reads it, or true / false. Gates on props or members are left alone.
  */
+/**
+ * A state hook's initial value as written (`useState(null)`, `useState<Colour | null>(null)`, `useState({})`):
+ * a value that already holds isn't set again, and a boolean never goes into state that starts as an object.
+ */
+export function initialOf(code: string, name: string): { type?: string | undefined; init: string } | null {
+  const m = code.match(new RegExp(`\\[\\s*${name.replace(/[$]/g, '\\$')}\\s*,\\s*[\\w$]+\\s*\\]\\s*=\\s*(?:React\\.)?useState\\s*(?:<([^>]*)>)?\\s*\\(\\s*([^)]*?)\\s*\\)`));
+  return m ? { type: m[1]?.trim(), init: m[2]!.trim() } : null;
+}
+
+/**
+ * Whether a condition already holds with its state at the initial values its source gives (`!setupTakeover`
+ * when it starts false, `nav === 'Home'` when it starts 'Home'). False when that can't be told.
+ */
+export function holdsInitially(g: { test: string; negated: boolean }, code: string): boolean {
+  const id = g.test.match(/^!?\s*([\w$]+)$/);
+  const eq = g.test.match(/^([\w$]+)\s*(===?|!==?)\s*(['"])(.*)\3$/);
+  const name = id?.[1] ?? eq?.[1];
+  const at = name ? initialOf(code, name) : null;
+  if (!at) return false;
+  const v = at.init;
+  if (id) {
+    const truthy = /^(true|[1-9]\d*|(['"`]).+\2|\{|\[|new\s)/.test(v);
+    const falsy = /^(false|null|undefined|0|''|""|``|)$/.test(v);
+    if (!truthy && !falsy) return false;
+    return (truthy !== g.test.startsWith('!')) !== g.negated;
+  }
+  const lit = v.match(/^(['"`])(.*)\1$/)?.[2];
+  if (lit === undefined) return false;
+  return ((lit === eq![4]) === eq![2]!.startsWith('=')) !== g.negated;
+}
+
 export function stateSets(gates: { test: string; negated: boolean; component?: string; file?: string }[], read: (file: string) => string | null, hookCode?: (name: string, from: string) => string | null): StateSet[] {
   const out = new Map<string, StateSet>();
   for (const [gi, g] of gates.entries()) {
@@ -664,14 +695,20 @@ export function stateSets(gates: { test: string; negated: boolean; component?: s
       offset = at;
     }
     const want = new Map<string, Val>();
-    const shapeFor = (x: string, truth: boolean): Val => {
-      if (!truth) return false;
+    const initial = (x: string) => initialOf(code, x);
+    const shapeFor = (x: string, truth: boolean): Val | undefined => {
+      const at = initial(x);
+      const objecty = at ? /^(\{|\[|new\s)/.test(at.init) : false;
+      if (!truth) return objecty ? undefined : false;
+      if (objecty) return undefined;
       const v = fn ? usageOf(fn.body, (m) => m?.type === 'Identifier' && m.name === x, 0, ast) : undefined;
-      return v === undefined || v === '' ? true : v === 0 ? 1 : Array.isArray(v) && !v.length ? [''] : v;
+      // Nothing read off it: true, unless its type says it's a value, not a flag (`useState<Colour | null>`).
+      if (v === undefined || v === '') return at?.type && !/\bboolean\b/.test(at.type) ? {} : true;
+      return v === 0 ? 1 : Array.isArray(v) && !v.length ? [''] : v;
     };
     const visit = (e: any, truth: boolean) => {
       if (!e) return;
-      if (e.type === 'Identifier') { if (order.includes(e.name)) want.set(e.name, shapeFor(e.name, truth)); return; }
+      if (e.type === 'Identifier') { if (order.includes(e.name)) { const v = shapeFor(e.name, truth); if (v !== undefined) want.set(e.name, v); } return; }
       if (e.type === 'UnaryExpression' && e.operator === '!') return visit(e.argument, !truth);
       if (e.type === 'LogicalExpression') {
         if ((e.operator === '&&' && truth) || (e.operator === '||' && !truth)) { visit(e.left, truth); visit(e.right, truth); }

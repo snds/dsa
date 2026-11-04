@@ -244,3 +244,34 @@ test("a view no missing element's state shows: the nav state set to each value b
   assert.match(all, /nav values? by itself to see what each shows; new files after activeNav = "Colours"/);
   assert.match(all, /ColoursView shows after activeNav = "Colours"\): found 1/);
 });
+
+// The app in a folder outside the scan root: the scanner and the tagger name its files "<folder>/<path>", so
+// every path the crawler compares with a tag (state files, files a state showed) must be named the same way.
+// ColoursView shows only after the root's state: found by the file that state showed, as named by its tag.
+test("an app outside the scan root: state files named as its tags name them", { timeout: 300_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  const kit = path.resolve(import.meta.dirname, '../../dashboard/ui/node_modules');
+  if (!fs.existsSync(path.join(kit, 'vite')) || !fs.existsSync(path.join(kit, 'react'))) skip('no Vite installed');
+  const root = fixtureCopy();
+  const dir = path.join(path.dirname(root), 'outside', 'picked');
+  for (const [f, c] of Object.entries(PICKED)) { fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }); fs.writeFileSync(path.join(dir, f), c); }
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'picked', private: true, type: 'module', scripts: { dev: 'vite' }, dependencies: { '@acme/ds-react': '^4.9.0', react: '^18.3.0' } }));
+  fs.symlinkSync(kit, path.join(dir, 'node_modules'), 'dir');
+  const cfgFile = path.join(root, 'dsa.config.json');
+  fs.writeFileSync(cfgFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(cfgFile, 'utf8')), extraRepos: [{ name: 'picked', path: '../outside/picked' }] }, null, 2));
+  const data = path.join(root, '.dsa');
+  await runPipeline({ root, dataDir: data, git: false, now: NOW });
+  const { evals } = await latestEvals(data);
+  const target = evals.find(e => e.file.endsWith('ColoursView.jsx') && e.match.text === 'Edit image');
+  assert.ok(target, evals.map(e => `${e.file}:${e.line} ${e.match.text}`).join('\n'));
+  assert.match(target!.file, /^picked\//);
+  const logs: string[] = [];
+  const config = loadConfig(root).config as any;
+  config.shots = { ...(config.shots ?? {}), maxMinutes: 2, waitMs: 200 };
+  await takeShots({ root, dataDir: data, config, target: 'picked', perGroup: 20, log: m => logs.push(m) });
+  const idx = JSON.parse(fs.readFileSync(path.join(data, 'shots', 'index.json'), 'utf8'));
+  const all = logs.join('\n');
+  assert.ok(idx.shots[target!.id] && !idx.shots[target!.id].drawn, all);
+  assert.match(all, /ColoursView shows after activeNav = "Colours"\): found 1/);
+  assert.doesNotMatch(all, /\.\.\/outside/);
+});

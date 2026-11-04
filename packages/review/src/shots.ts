@@ -2,13 +2,14 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileOfTag, tagPath } from '@snds/dsa/tag';
 import { BLANK_INSET, buildGraph, decodePng, groupKey, isBlank, latestEvals, materializeRemotes, resolveTargets, targetRelative, walk, type Config, type ElementEval } from '@snds/dsa/engine';
 import { appSurface, openSurface } from '@snds/dsa';
 
 import { detectApp, discoverRoutes, ensureBrowser, linkCoreForChild, routeConfig, startApp, tagPlan } from './apps.js';
 
 import { READ_STYLE } from './rendered.js';
-import { NO_SIZE, SHOW_MARKUP, hookValue, markupOf, mountProps, parentComponent, readSource, stateSets, stateValues, whatItNeeded, type StateSet } from './drawn.js';
+import { NO_SIZE, SHOW_MARKUP, hookValue, markupOf, mountProps, parentComponent, holdsInitially, readSource, stateSets, stateValues, whatItNeeded, type StateSet } from './drawn.js';
 import { needsValue, patternTest, routeFiles, routesReaching } from './routes.js';
 import { describeNetwork, flowProblems, guardNetwork, routeUrl, runFlow, type Flow, type GuardStats } from './flows.js';
 
@@ -185,7 +186,8 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
       // The files a page must show for it to render each element: its own file and what imports it, three
       // steps up, as source tags name them. Read off the page itself, so it holds when the routes don't say.
       const near: Record<string, string[]> = {};
-      const tagOf = (f: string) => { const rel = path.relative(opts.root, f); return rel.startsWith('..') || path.isAbsolute(rel) ? null : rel.split(path.sep).join('/'); };
+      // As the tagger names them: under the root, else "<app folder>/<path>" for an app outside it.
+      const tagOf = (f: string) => tagPath(f, opts.root, t.dir);
       for (const e of need) {
         const file = path.resolve(t.dir, targetRelative(opts.root, e.file, t.dir));
         if (routes.length) byId[e.id] = routesReaching(routes, g, file);
@@ -347,6 +349,14 @@ interface Act { n: number; key: string; kind: 'click' | 'hover' | 'context' | 'c
  */
 interface DrawWith { root: string; dir?: string | undefined; mount?: boolean | undefined; max?: number | undefined; maxMinutes?: number | undefined }
 
+/**
+ * A file as source tags name it (tagPath): under the scan root, else "<app folder>/<path>" for an app outside
+ * it, as the scanner shows them. Null outside both. Every path compared with a tag goes through this.
+ */
+function tagOfFile(d: { root: string; dir?: string | undefined }, f: string): string | null { return tagPath(path.resolve(d.root, f), d.root, d.dir); }
+/** The file a tag path names (fileOfTag), else the path under the root. */
+function absOfTag(d: { root: string; dir?: string | undefined }, rel: string): string { return (path.isAbsolute(rel) ? rel : fileOfTag(rel, d.root, d.dir)) ?? path.resolve(d.root, rel); }
+
 /** Where each provider and hook is declared (`XProvider`, `useX`), read once per app: the first file for each name. */
 const declIndex = new WeakMap<DrawWith, Map<string, string>>();
 function declaredIn(d: DrawWith, name: string): string | undefined {
@@ -379,8 +389,8 @@ export function providerFor(d: DrawWith, message: string, need: string, from: st
   // The component's own imports first (two levels): the hook and its provider usually sit in a file beside it.
   const near = importsNear(d, from, 2);
   const find = (n: string) => near.find(f => declares(read(f), n)) ?? declaredIn(d, n);
-  const inRoot = (f: string) => { const rel = path.relative(d.root, f); return !rel.startsWith('..') && !path.isAbsolute(rel); };
-  const short = (f?: string) => f ? path.relative(d.root, f).split(path.sep).join('/') : '';
+  const inRoot = (f: string) => tagOfFile(d, f) !== null;
+  const short = (f?: string) => f ? tagOfFile(d, f) ?? path.relative(d.root, f).split(path.sep).join('/') : '';
   // What it looked at, for the log when nothing is found: the imports followed, and where each name was.
   why.push(`followed ${near.length} import${near.length === 1 ? '' : 's'} from ${short(from)}${near.length ? ` (${near.slice(0, 3).map(short).join(', ')}${near.length > 3 ? ', …' : ''})` : ''}`);
   let name = message.match(/\b([A-Z][\w$]*Provider)\b/)?.[1];
@@ -464,13 +474,18 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   const note = (r: Target, t: string) => { r.tried ??= []; if (!r.tried.includes(t) && r.tried.length < 12) r.tried.push(t); };
   const stepName = (x: { label: string; event: string; value?: string | undefined }) => (x.event === 'choose' && x.value ? `“${x.value}” in ${x.label ? `“${x.label}”` : 'a list'}` : x.label ? `“${x.label}”` : 'an unlabelled control');
   const why: Record<string, string> = {};
+  const gateCode = new Map<string, string>();
+  const readGateFile = (f: string) => { if (!gateCode.has(f)) gateCode.set(f, (o.draw ? readSource(o.draw.root, f, o.draw.dir) : (() => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } })()) ?? ''); return gateCode.get(f)!; };
   const fileOn: Record<string, string> = {};
   const reasonOf = (r: Target): string => {
     const rs = r.routes;
     if (rs && !rs.length) return 'no route reaches its file';
     if (rs?.length && rs.every(needsValue) && !rs.some(p => filled.get(p)?.size)) return `its page needs a value (${rs[0]}) and no page visited linked to one`;
     if (rs?.length && !rs.some(p => needsValue(p) ? filled.get(p)?.size : seen.has(routeUrl(p, base)) || seen.has(routeUrl('#' + p, base)))) return 'its route was not visited in the time budget';
-    const g = r.e.reach?.status === 'gated' ? r.e.reach.gates[0] : undefined;
+    // The first condition that doesn't already hold with its state's initial values: blaming one that
+    // holds by default ("not setupTakeover" when it starts false) points at the wrong step.
+    const gs = r.e.reach?.status === 'gated' ? r.e.reach.gates : [];
+    const g = gs.find((x: any) => x.overlay || !x.file || !holdsInitially(x, readGateFile(x.file))) ?? gs[0];
     if (g) return `it shows only after a step the crawler couldn't take (${g.overlay ? `opening ${g.overlay}` : `when ${g.negated ? 'not ' : ''}“${g.test.slice(0, 40)}”`})`;
     if (Date.now() >= deadline) return 'not reached in the time budget';
     return 'not on the pages that render it';
@@ -478,7 +493,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   let browser: any, page: any;
   const base = new URL(o.url);
   // A traced control's own line, as its source tag reads ("apps/ledger/src/Bar.tsx:12:"), when it's inside the scan root.
-  const stepSrc = (file: string, line: number, col?: number) => { if (!o.draw?.root || !file) return undefined; const rel = path.relative(o.draw.root, file); return rel.startsWith('..') || path.isAbsolute(rel) ? undefined : `${rel.split(path.sep).join('/')}:${line}:${col ?? ''}`; };
+  const stepSrc = (file: string, line: number, col?: number) => { if (!o.draw?.root || !file) return undefined; const rel = tagOfFile(o.draw, file); return rel ? `${rel}:${line}:${col ?? ''}` : undefined; };
   let net: GuardStats = { blocked: 0, last: [], allowed: {}, denied: {}, idp: new Set() };
   // The saved sign-in: cookies and local storage for Playwright, and the app's session storage, which
   // Playwright doesn't keep (dsa login saves it; it's put back before the app's own scripts run).
@@ -939,10 +954,10 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   function stateFor(r: Target): StateSet[] {
     if (!o.draw?.root) return [];
     const d = o.draw;
-    const gates = (r.e.reach?.gates ?? []).map((g: any) => ({ ...g, file: g.file && path.isAbsolute(g.file) ? path.relative(d.root, g.file).split(path.sep).join('/') : g.file }));
+    const gates = (r.e.reach?.gates ?? []).map((g: any) => ({ ...g, file: g.file && path.isAbsolute(g.file) ? tagOfFile(d, g.file) ?? g.file : g.file }));
     // A custom hook's own hooks are counted from its source (the file itself, its imports, then the app).
     const hookCode = (name: string, from: string) => {
-      const abs = path.resolve(d.root, from);
+      const abs = absOfTag(d, from);
       const read = (f?: string) => { try { return f ? fs.readFileSync(f, 'utf8') : ''; } catch { return ''; } };
       const own = read(abs);
       const decl = new RegExp(`\\b(?:function|const|let)\\s+${name}\\b`);
@@ -978,6 +993,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     if (!groups.size) return;
     const said = new Map<string, string[]>();
     const say = (u: string, m: string) => said.set(u, [...(said.get(u) ?? []), m]);
+    const reverted = new Set<string>();
     // Files a set showed that its page didn't: the state that renders a component, for one whose component wasn't on any page.
     const opens = new Map<string, { u: string; sets: StateSet[] }>();
     const visit = async (u: string) => {
@@ -986,13 +1002,22 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       if (same) await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
       await page.waitForTimeout(o.waitMs); await settle();
     };
+    // How many values the last setAll changed: none when each already held (a default), so there's nothing new to look at.
+    let changed = 0;
     const setAll = async (sets: StateSet[], sweep: (by?: string) => Promise<void>, before: StateSet[] = []) => {
       const done: StateSet[] = [];
+      changed = 0;
       for (const one of sets) {
-        const n = await inPage<number>(page, SET_STATE, { sets: [one] }).catch(() => 0);
-        if (!n) break;
+        const r = await inPage<SetResult>(page, SET_STATE, { sets: [one] }).catch(() => NONE_SET);
+        if (!r.found) break;
         done.push(one);
+        // Already holding (a default): nothing to wait for or look at again.
+        if (!r.set) continue;
+        changed += r.set;
         await page.waitForTimeout(o.waitMs); await settle();
+        // The app can undo an edit (an effect that syncs state from the URL): read it back.
+        const back = await inPage<SetResult>(page, SET_STATE, { sets: [one], check: true }).catch(() => NONE_SET);
+        for (const n of back.off) reverted.add(`${one.component}.${n}`);
         if (before.length + sets.length > 1) await sweep(`setting ${describeSets([...before, ...done])}`);
       }
       return done;
@@ -1028,6 +1053,8 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         const done = await setAll(g.sets, sweep);
         if (!done.length) continue;
         reached = true;
+        // Every value already held: this page as pass 1 saw it. Not counted as a try.
+        if (!changed) { say(u, `${what}: already so`); break; }
         if (g.sets.length === 1) await sweep(`setting ${what}`);
         await learn(u, done);
         const missed = g.sets.slice(done.length).map(x => x.component);
@@ -1063,7 +1090,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
             const one: StateSet = { ...b, slots: b.slots.map(x => (x === sl ? { ...x, value: v } : x)) };
             await visit(u);
             const sweep = sweeper(u);
-            if (!(await inPage<number>(page, SET_STATE, { sets: [one] }).catch(() => 0))) continue;
+            if (!(await inPage<SetResult>(page, SET_STATE, { sets: [one] }).catch(() => NONE_SET)).set) continue;
             swept++;
             await page.waitForTimeout(o.waitMs); await settle();
             await sweep(`setting ${describeSets([one])}`);
@@ -1100,6 +1127,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       for (const r of g.mine) if (remaining.includes(r)) note(r, `set ${all} on ${routeOf(via.u)}: still not shown`);
     }
     for (const [u, m] of said) o.log(`  state on ${u.replace(base.origin, '')}: ${m.join('; ')}`);
+    if (reverted.size) o.log(`  state: the app reverted ${[...reverted].slice(0, 8).join(', ')}${reverted.size > 8 ? ` +${reverted.size - 8}` : ''} after it was set (an effect that keeps it in step with the URL or a store)`);
     o.log(`  state: ${combos} combination${combos === 1 ? '' : 's'} tried${later.length ? `, ${later.length} whose component wasn't on the pages tried (${later.length - absent} set after the state that shows it)` : ''}${groups.size > combos ? `, ${groups.size - combos} not tried (its time share ran out)` : ''}`);
   }
 
@@ -1117,7 +1145,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       const again = await remount();
       if (!again.ok) return null;
       let set = 0;
-      for (const one of sets) { set += await inPage<number>(page, SET_STATE, { sets: [one], within: '#dsa-mount' }).catch(() => 0); await settle(1500); }
+      for (const one of sets) { set += (await inPage<SetResult>(page, SET_STATE, { sets: [one], within: '#dsa-mount' }).catch(() => NONE_SET)).found; await settle(1500); }
       if (!set) return null;
       const what = `setting ${describeSets(sets)}`;
       names.push(what);
@@ -1211,7 +1239,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
           // A first visit's saved state, so state read from storage starts as the component's default.
           const keys = (r.e.reach?.storage ?? []).filter(k => !SECRET.test(k));
           if (keys.length) await inPage(page, CLEAR_KEYS, keys);
-          const abs = path.resolve(d.root, r.e.file);
+          const abs = absOfTag(d, r.e.file);
           // The mount asks the app's server where it serves the file (/@dsa/where); these are the fallbacks.
           const files = [...(d.dir && !path.relative(d.dir, abs).startsWith('..') ? ['/' + path.relative(d.dir, abs).split(path.sep).join('/')] : []), '/@fs' + abs.split(path.sep).join('/')];
           // Mount one of the file's components and look for the element in what it drew.
@@ -1241,7 +1269,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
             const hook = need.match(/what (use[A-Z][\w$]*) reads/)?.[1] ?? said.threw.message.match(/\b(use[A-Z][\w$]*)\b/)?.[1] ?? '';
             // A bare context: its value shaped by how the component reads what the hook returns.
             const props = pv.context ? { value: hookValue(sourceOfThrow(d, said.threw, code, parent || r.e.within), said.threw.component || parent || r.e.within, hook) ?? {} } : mountProps({ ...r.e, within: pv.name, reach: undefined } as any, pcode);
-            wraps.push({ files: filesOf(pv.file), file: path.relative(d.root, pv.file).split(path.sep).join('/'), name: pv.name, props, ...(pv.context ? { context: true } : {}) });
+            wraps.push({ files: filesOf(pv.file), file: tagOfFile(d, pv.file) ?? path.relative(d.root, pv.file).split(path.sep).join('/'), name: pv.name, props, ...(pv.context ? { context: true } : {}) });
             said = await mountAs(parent || r.e.within);
           }
           providers = said.providers ?? 0;
@@ -1386,17 +1414,20 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
 /**
  * Runs in the page: set component state through React, so an element its conditions hide shows. For each
  * set, the component's fibers are found from elements its file draws (or any tagged element, walking up),
- * and each named state hook (by its place among the hooks that keep state) gets the value. Inside the
- * mounted drawing only when `within` is given. Returns how many were set.
+ * and each named state hook (by its place among the hooks that keep state) is read first: one that already
+ * holds the value (or, for true, any truthy value; for false, any falsy one) is left alone, so a default
+ * isn't set again. Inside the mounted drawing only when `within` is given. With `check`, nothing is set:
+ * it only reads. Returns the slots found, how many it set, and the names of those not holding their value.
  */
-const SET_STATE = `({ sets, within }) => {
+const SET_STATE = `({ sets, within, check }) => {
   const fiberOf = (el) => { const k = Object.keys(el).find((x) => x.startsWith('__reactFiber$')); return k ? el[k] : null; };
   const nameOf = (t) => !t ? '' : typeof t === 'function' ? (t.displayName || t.name || '') : (t.displayName || nameOf(t.render) || nameOf(t.type));
   const revive = (v) => Array.isArray(v) ? v.map(revive) : v && typeof v === 'object' ? (v.__dsa === 'fn' ? () => {} : v.__dsa === 'set' ? new Set() : v.__dsa === 'map' ? new Map() : Object.fromEntries(Object.entries(v).map(([k, x]) => [k, revive(x)]))) : v;
+  const holds = (cur, want) => want === true ? Boolean(cur) : want === false ? !cur : (() => { try { return JSON.stringify(cur) === JSON.stringify(want); } catch { return false; } })();
+  const out = { found: 0, set: 0, off: [] };
   const scope = within ? document.querySelector(within) : document;
-  if (!scope) return 0;
+  if (!scope) return out;
   const tagged = Array.from(scope.querySelectorAll('[data-dsa-src]')).filter((el) => within || !el.closest('#dsa-mount, #dsa-markup'));
-  let n = 0;
   for (const s of sets) {
     const own = tagged.filter((el) => el.getAttribute('data-dsa-src').startsWith(s.file + ':'));
     const from = own.length ? own : tagged.slice(0, 600);
@@ -1408,14 +1439,24 @@ const SET_STATE = `({ sets, within }) => {
       seen.add(f);
       const hooks = [];
       for (let h = f.memoizedState; h && typeof h === 'object' && 'next' in h; h = h.next) if (h.queue && typeof h.queue.dispatch === 'function') hooks.push(h);
-      for (const sl of s.slots) { const h = hooks[sl.index]; if (h) { try { h.queue.dispatch(revive(sl.value)); n++; } catch {} } }
+      for (const sl of s.slots) {
+        const h = hooks[sl.index];
+        if (!h) continue;
+        out.found++;
+        if (holds(h.memoizedState, sl.value)) continue;
+        if (check) { out.off.push(sl.name); continue; }
+        try { h.queue.dispatch(revive(sl.value)); out.set++; } catch {}
+      }
       if (own.length === 0) break;
     }
   }
-  return n;
+  return out;
 }`;
 
 /** Runs in the page: resolve once nothing in the DOM has changed for 250 ms, or after `max` ms. */
+interface SetResult { found: number; set: number; off: string[] }
+const NONE_SET: SetResult = { found: 0, set: 0, off: [] };
+
 const SETTLE = `(max) => new Promise((done) => {
   let t = 0;
   const end = () => { obs.disconnect(); clearTimeout(t); done(true); };
@@ -1903,8 +1944,7 @@ function sourceFileOfThrow(d: DrawWith, threw: NonNullable<Mounted['threw']>, ab
   try { p = decodeURIComponent(new URL(threw.src).pathname); } catch { return abs; }
   const at = p.indexOf('/@fs/');
   for (const f of at >= 0 ? [p.slice(at + 4)] : [path.join(d.dir ?? d.root, p), path.join(d.root, p)]) {
-    const rel = path.relative(d.root, f);
-    if (!rel.startsWith('..') && !path.isAbsolute(rel) && fs.existsSync(f)) return f;
+    if (tagOfFile(d, f) !== null && fs.existsSync(f)) return f;
   }
   return abs;
 }
@@ -1920,8 +1960,7 @@ function sourceOfThrow(d: DrawWith, threw: NonNullable<Mounted['threw']>, code: 
   const at = p.indexOf('/@fs/');
   const candidates = at >= 0 ? [p.slice(at + 4)] : [path.join(d.dir ?? d.root, p), path.join(d.root, p)];
   for (const f of candidates) {
-    const rel = path.relative(d.root, f);
-    if (rel.startsWith('..') || path.isAbsolute(rel)) continue;
+    if (tagOfFile(d, f) === null) continue;
     try { return fs.readFileSync(f, 'utf8'); } catch { /* not this one */ }
   }
   return code;
