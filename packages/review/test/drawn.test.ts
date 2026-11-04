@@ -1,6 +1,6 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { gateProps, markupOf, FN, MAP, SET, mountProps } from '../src/drawn.js';
+import { gateProps, markupOf, FN, MAP, SET, mountProps, stateValues } from '../src/drawn.js';
 
 // What can't be photographed is drawn from the code: its own JSX as static markup (no app code runs), and
 // props that meet the gates the scan traced, for mounting its component in the app's build.
@@ -79,4 +79,17 @@ function Node({ node }) { return <ul>{node.children.length}{node.children.map(n 
   let d = p.tree.root, levels = 0;
   while (d.children?.length) { d = d.children[0]; levels++; }
   assert.ok(levels >= 1 && levels <= 4 && Array.isArray(d.children), JSON.stringify(p.tree));
+});
+
+test("the values a root's nav state can take: compared, set, cased and typed", () => {
+  const app = `type Nav = 'Home' | 'Colours' | 'Prints';
+export function App() {
+  const [activeNav, setActiveNav] = useState<Nav>('Home');
+  const [tab, setTab] = useState('a');
+  const go = () => setActiveNav('Materials');
+  switch (activeNav) { case 'Lab': return null; default: break; }
+  return <div>{activeNav === 'Partners' && <P/>}{'Requests' === activeNav ? 1 : 2}{tab === 'x' && <i>{'Other'}</i>}</div>;
+}`;
+  assert.deepEqual(stateValues(app, 'activeNav').sort(), ['Colours', 'Home', 'Lab', 'Materials', 'Partners', 'Prints', 'Requests']);
+  assert.deepEqual(stateValues(app, 'tab'), ['x']);
 });

@@ -41,6 +41,9 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   component is often the root, on every page. One whose component isn't on any page tried is set after
   the state that first showed that component's file (a nav value that renders the view it's in), in one
   go, and the log says which. Each miss's line now says which page showed its own file, or that none did.
+  When no state set showed it, the root's nav state is set to each value its source names (compared with
+  it, passed to its setter, its `switch` cases, its literal type), by itself, to see which views each shows;
+  up to 60 values.
 - Live photos no longer depend on page order. Traced openers ("Edit Image", "Add") were replayed at most
   40 times per app run, so in a large app the order of pages decided which got replayed. Any change to
   what was still missing could push one past the limit. Now each page gets up to 12 replays,

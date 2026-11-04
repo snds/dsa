@@ -8,7 +8,7 @@ import { appSurface, openSurface } from '@snds/dsa';
 import { detectApp, discoverRoutes, ensureBrowser, linkCoreForChild, routeConfig, startApp, tagPlan } from './apps.js';
 
 import { READ_STYLE } from './rendered.js';
-import { NO_SIZE, SHOW_MARKUP, hookValue, markupOf, mountProps, parentComponent, readSource, stateSets, whatItNeeded, type StateSet } from './drawn.js';
+import { NO_SIZE, SHOW_MARKUP, hookValue, markupOf, mountProps, parentComponent, readSource, stateSets, stateValues, whatItNeeded, type StateSet } from './drawn.js';
 import { needsValue, patternTest, routeFiles, routesReaching } from './routes.js';
 import { describeNetwork, flowProblems, guardNetwork, routeUrl, runFlow, type Flow, type GuardStats } from './flows.js';
 
@@ -1038,6 +1038,42 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         if (!missed.length && (found || ++full >= 4)) break;
       }
       if (!reached) later.push({ ...g, at });
+    }
+    // Still no state showed their component: the root's nav state (a string the outermost level sets) set to
+    // each value its source names, by itself, keeping that level's other values (a setup flag off), to see
+    // which files each shows. Most-used outermost level first; up to 60 values.
+    const unseen = () => later.some(g => g.mine.some(r => remaining.includes(r)) && !opens.has(g.sets[0]!.file));
+    if (unseen()) {
+      const bases = new Map<string, { set: StateSet; n: number }>();
+      for (const g of groups.values()) {
+        const b = g.sets[0]!, k = `${b.file}#${b.component}`;
+        const had = bases.get(k);
+        bases.set(k, { set: had?.set ?? b, n: (had?.n ?? 0) + g.mine.length });
+      }
+      let swept = 0;
+      const showed: string[] = [];
+      for (const { set: b } of [...bases.values()].sort((x, y) => y.n - x.n)) {
+        const code = readSource(o.draw.root, b.file, o.draw.dir);
+        const u = pages.find(p => shown.get(p)?.has(b.file)) ?? pages[0]!;
+        if (!code) continue;
+        for (const sl of b.slots) {
+          if (typeof sl.value !== 'string') continue;
+          for (const v of stateValues(code, sl.name)) {
+            if (Date.now() >= stop || swept >= 60 || !unseen()) break;
+            const one: StateSet = { ...b, slots: b.slots.map(x => (x === sl ? { ...x, value: v } : x)) };
+            await visit(u);
+            const sweep = sweeper(u);
+            if (!(await inPage<number>(page, SET_STATE, { sets: [one] }).catch(() => 0))) continue;
+            swept++;
+            await page.waitForTimeout(o.waitMs); await settle();
+            await sweep(`setting ${describeSets([one])}`);
+            const had = opens.size;
+            await learn(u, [one]);
+            if (opens.size > had) showed.push(`${sl.name} = ${JSON.stringify(v)}`);
+          }
+        }
+      }
+      if (swept) o.log(`  state: set ${swept} nav value${swept === 1 ? '' : 's'} by itself to see what each shows${showed.length ? `; new files after ${showed.join(', ')}` : '; none showed a new file'}`);
     }
     // Its component on no page tried: after the state that first showed that component's file, in one go.
     for (const g of later) {

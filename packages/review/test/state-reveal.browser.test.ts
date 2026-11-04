@@ -213,3 +213,34 @@ test("a view only the root's state shows: its own state is set after the root's,
   assert.ok(idx.shots[target!.id] && !idx.shots[target!.id].drawn, `${JSON.stringify(target!.reach?.gates)}\n${all}`);
   assert.match(all, /ColoursView shows after activeNav = "Colours"\): found 1/);
 });
+
+// The same, but no missing element is gated on activeNav = "Colours" (only "Prints"): the nav state is set to
+// each value its source names, by itself, and "Colours" shows ColoursView's file, so openColour is set after it.
+test("a view no missing element's state shows: the nav state set to each value by itself finds it", { timeout: 300_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  const kit = path.resolve(import.meta.dirname, '../../dashboard/ui/node_modules');
+  if (!fs.existsSync(path.join(kit, 'vite')) || !fs.existsSync(path.join(kit, 'react'))) skip('no Vite installed');
+  const root = fixtureCopy();
+  const dir = path.join(root, 'apps', 'swept');
+  const files: Record<string, string> = {
+    ...PICKED,
+    'src/App.jsx': `import { useEffect, useState } from 'react';\nimport { VIEWS } from './views.js';\nexport function App() {\n  const [activeNav, setActiveNav] = useState('Home');\n  useEffect(() => { window.__socket?.on('go', () => setActiveNav('Colours')); }, []);\n  const View = VIEWS[activeNav];\n  return <main><nav>{activeNav}</nav>\n    {activeNav === 'Prints' && <div>\n      <button className="btn">Print all</button>\n    </div>}\n    {View ? <View /> : <p>Home</p>}</main>;\n}\n`,
+  };
+  for (const [f, c] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }); fs.writeFileSync(path.join(dir, f), c); }
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'swept', private: true, type: 'module', scripts: { dev: 'vite' }, dependencies: { '@acme/ds-react': '^4.9.0', react: '^18.3.0' } }));
+  fs.symlinkSync(kit, path.join(dir, 'node_modules'), 'dir');
+  const data = path.join(root, '.dsa');
+  await runPipeline({ root, dataDir: data, git: false, now: NOW });
+  const { evals } = await latestEvals(data);
+  const target = evals.find(e => e.file.endsWith('ColoursView.jsx') && e.match.text === 'Edit image');
+  assert.ok(target, evals.map(e => `${e.file}:${e.line} ${e.match.text}`).join('\n'));
+  const logs: string[] = [];
+  const config = loadConfig(root).config as any;
+  config.shots = { ...(config.shots ?? {}), maxMinutes: 2, waitMs: 200 };
+  await takeShots({ root, dataDir: data, config, target: 'swept', perGroup: 20, log: m => logs.push(m) });
+  const idx = JSON.parse(fs.readFileSync(path.join(data, 'shots', 'index.json'), 'utf8'));
+  const all = logs.join('\n');
+  assert.ok(idx.shots[target!.id] && !idx.shots[target!.id].drawn, `${JSON.stringify(target!.reach?.gates)}\n${all}`);
+  assert.match(all, /nav values? by itself to see what each shows; new files after activeNav = "Colours"/);
+  assert.match(all, /ColoursView shows after activeNav = "Colours"\): found 1/);
+});
