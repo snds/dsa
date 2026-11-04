@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import type { Label } from '@snds/dsa';
 import { lowerBound, r4, wilson } from './stats.js';
 import { sourceOf, trustRubric, type Source, type TrustScore } from './trust.js';
@@ -167,13 +168,53 @@ export function presentation(t: TrustScore) {
 export interface BenchResult {
   presentation: ReturnType<typeof presentation>;
   correctness: Correctness | null;
+  /** Precision of held-out claims at the ready bar, under k-fold cross-validation by file (--folds). */
+  heldOut?: HeldOut | undefined;
+}
+
+/** The fold a label falls in: by a hash of its app and file, so one file's labels never straddle folds. */
+export const foldOf = (l: Pick<Label, 'app' | 'file'>, folds: number) => crypto.createHash('sha1').update(`${l.app}/${l.file}`).digest()[0]! % folds;
+
+export interface HeldOutScore { claimed: number; right: number; precision: number | null; lowerBound: number; matched: number; labels: number }
+export interface HeldOut {
+  folds: number;
+  threshold: number;
+  /** The page's own scores, each fold's labels scored apart and summed (scores that never saw labels). */
+  uncalibrated: HeldOutScore;
+  /** Each fold's labels scored against the run calibrated on the other folds' labels (--fold-site), summed. */
+  calibrated: HeldOutScore | null;
+}
+
+/**
+ * Held-out precision at the ready bar. Labels split into `folds` by file; fold k is scored against
+ * `foldPayloads[k]`, a run calibrated without fold k (dsa labels split writes the training files). Without
+ * fold payloads only the uncalibrated side is scored.
+ */
+export function heldOut(labels: Label[], payload: any, opts: { folds: number; threshold: number; foldPayloads?: any[] | null }): HeldOut {
+  const score = (pick: (k: number) => any): HeldOutScore => {
+    let claimed = 0, right = 0, matched = 0;
+    for (let k = 0; k < opts.folds; k++) {
+      const c = correctness(labels.filter((l) => foldOf(l, opts.folds) === k), predictionsOf(pick(k)), opts.threshold);
+      claimed += c.claimed; right += c.right; matched += c.matched;
+    }
+    return { claimed, right, precision: claimed ? r4(right / claimed) : null, lowerBound: r4(lowerBound(right, claimed)), matched, labels: labels.length };
+  };
+  const fp = opts.foldPayloads;
+  if (fp && fp.length !== opts.folds) throw new Error(`--fold-site needs one run per fold (${opts.folds}), got ${fp.length}.`);
+  return { folds: opts.folds, threshold: opts.threshold, uncalibrated: score(() => payload), calibrated: fp ? score((k) => fp[k]) : null };
+}
+
+/** Training and held-out label files for k-fold cross-validation by file. */
+export function splitLabels(labels: Label[], folds: number): { train: Label[]; test: Label[] }[] {
+  return Array.from({ length: folds }, (_, k) => ({ train: labels.filter((l) => foldOf(l, folds) !== k), test: labels.filter((l) => foldOf(l, folds) === k) }));
 }
 
 /** Both numbers for one published page (or report payload). */
-export function bench(payload: any, labels: Label[] | null, opts: { cards?: CardFacts[] | null; dir?: string; threshold?: number } = {}): BenchResult {
+export function bench(payload: any, labels: Label[] | null, opts: { cards?: CardFacts[] | null; dir?: string; threshold?: number; folds?: number; foldPayloads?: any[] | null } = {}): BenchResult {
   const th = opts.threshold ?? payload.elements?.threshold ?? 0.9;
   const t = trustRubric(payload, { ...(opts.dir ? { dir: opts.dir } : {}), cards: opts.cards ?? null });
-  return { presentation: presentation(t), correctness: labels ? correctness(labels, predictionsOf(payload), th) : null };
+  const held = labels && opts.folds && opts.folds > 1 ? heldOut(labels, payload, { folds: opts.folds, threshold: th, foldPayloads: opts.foldPayloads ?? null }) : undefined;
+  return { presentation: presentation(t), correctness: labels ? correctness(labels, predictionsOf(payload), th) : null, ...(held ? { heldOut: held } : {}) };
 }
 
 /**
@@ -236,6 +277,11 @@ export function benchText(b: BenchResult, rep?: ReturnType<typeof repeatability>
       ...Object.entries(C.byApp).map(([k, v]) => `  ${k}: precision ${pct(v.precision.rate)} [${pct(v.precision.ci[0])}, ${pct(v.precision.ci[1])}] of ${v.precision.n}; accuracy ${pct(v.accuracy.rate)} of ${v.accuracy.n}.`),
       ...Object.entries(C.bySource).map(([k, v]) => `  ${k} pictures: precision ${pct(v.precision.rate)} [${pct(v.precision.ci[0])}, ${pct(v.precision.ci[1])}] of ${v.precision.n}; accuracy ${pct(v.accuracy.rate)} of ${v.accuracy.n}.`),
     );
+  }
+  const H = b.heldOut;
+  if (H) {
+    const one = (name: string, x: HeldOutScore) => `  ${name}: ${pct(x.precision)} (${x.right} of ${x.claimed} held-out claims; 95% lower bound ${pct(x.lowerBound)}), ${x.matched} of ${x.labels} labels matched.`;
+    lines.push(`Held out (${H.folds}-fold by file), precision at the ${H.threshold} bar:`, one('uncalibrated', H.uncalibrated), H.calibrated ? one('calibrated on the other folds', H.calibrated) : '  calibrated: no fold runs given (--fold-site, one per fold; dsa labels split writes their training labels).');
   }
   if (rep) lines.push(`Repeatability over ${rep.runs} runs, ${rep.elements} elements: passes flip ${rep.passFlips} (${pct(rep.passFlipRate)}), recommendations flip ${rep.verdictFlips} (${pct(rep.verdictFlipRate)}), ${rep.crossings} cross the ${rep.threshold} line as shown (${pct(rep.crossingRate)}; ${rep.scannerCrossings} on the scanner's own score); shown confidence spread mean ${rep.confidenceSpread.mean}, p90 ${rep.confidenceSpread.p90}, max ${rep.confidenceSpread.max}.`);
   return lines.join('\n');

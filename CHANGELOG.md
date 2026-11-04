@@ -8,6 +8,10 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- `dsa bench --folds <n>` reports held-out precision at the ready bar, with its one-sided 95% lower bound:
+  labels split into n folds by a hash of their file, each fold scored apart. With `--fold-site` (one run
+  per fold, each calibrated without that fold) it also scores the calibrated side. `dsa labels split`
+  writes each fold's training and held-out label files.
 - `dsa bench` scores two numbers and never merges them. Presentation: the trust rubric, with the card
   checks read from each published page in a headless browser (`--no-cards` leaves them untested).
   Correctness: dsa's recommendations against `labels.jsonl` ground truth, with abstention (under the

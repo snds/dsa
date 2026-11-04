@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { Command } from 'commander';
 import { labelsJsonl, readLabels, type AddonApi, type Label } from '@snds/dsa';
 import { resolveTargets } from '@snds/dsa/engine';
-import { bench, benchText, repeatability } from './bench.js';
+import { bench, benchText, repeatability, splitLabels } from './bench.js';
 import { PROBE_CARDS, type CardFacts } from './card-dom.js';
 import { historyLabels, migratedLabels, reviewQueue, stripTargets } from './labels.js';
 import { renderReport } from './report.js';
@@ -38,7 +38,9 @@ export function benchCommands(program: Command, api: AddonApi) {
     .option('--site <dir...>', 'published dashboards (dsa publish) to score; the first is benched, all of them are compared for repeatability (default: a report of the latest run)')
     .option('--no-cards', "don't open the pages in a browser: card checks stay untested")
     .option('--ready <n>', 'the ready bar (default: the report threshold)')
-    .action(async (o: { labels?: string; site?: string[]; cards: boolean; ready?: string }, cmd: Command) => {
+    .option('--folds <n>', 'also report held-out precision at the ready bar, labels split into n folds by file')
+    .option('--fold-site <path...>', 'per fold, a published page or report file of a run calibrated without that fold (dsa labels split)')
+    .action(async (o: { labels?: string; site?: string[]; cards: boolean; ready?: string; folds?: string; foldSite?: string[] }, cmd: Command) => {
       // --json is the CLI's own option (dsa --json bench, or dsa bench --json).
       const json = Boolean((cmd.optsWithGlobals() as { json?: boolean }).json);
       const labels = o.labels ? loadLabels(path.resolve(api.cwd, o.labels), api.out) : null;
@@ -55,7 +57,9 @@ export function benchCommands(program: Command, api: AddonApi) {
         payloads = [payloadOf(await writeTemp(await renderReport(ctx.root, ctx.config, ctx.dataDir, ctx.profile)))];
         dirs = [undefined]; cards = [null];
       }
-      const b = bench(payloads[0], labels, { cards: cards[0] ?? null, ...(dirs[0] ? { dir: dirs[0] } : {}), ...(threshold != null ? { threshold } : {}) });
+      const folds = o.folds ? Number(o.folds) : undefined;
+      const foldPayloads = o.foldSite?.length ? o.foldSite.map((f) => payloadOf(path.resolve(api.cwd, f))) : null;
+      const b = bench(payloads[0], labels, { cards: cards[0] ?? null, ...(dirs[0] ? { dir: dirs[0] } : {}), ...(threshold != null ? { threshold } : {}), ...(folds ? { folds, foldPayloads } : {}) });
       const rep = payloads.length > 1 ? repeatability(payloads, { cards, dirs, ...(threshold != null ? { threshold } : {}) }) : null;
       api.out(json ? JSON.stringify({ ...b, repeatability: rep }, null, 1) : benchText(b, rep));
     });
@@ -69,6 +73,19 @@ export function benchCommands(program: Command, api: AddonApi) {
       for (const e of errors) api.out(`${file}:${e.line}: ${e.message}`);
       api.out(`${ls.length} labels${errors.length ? `, ${errors.length} bad lines` : ', all valid'}.`);
       if (errors.length) process.exitCode = 1;
+    });
+  labels
+    .command('split <file>')
+    .description('write training and held-out label files for k-fold cross-validation by file: calibrate a run on each training file, then dsa bench --folds k --fold-site <runs>')
+    .requiredOption('--out <prefix>', 'writes <prefix>.train-<k>.jsonl and <prefix>.test-<k>.jsonl')
+    .option('--folds <n>', 'how many folds', '2')
+    .action((file: string, o: { out: string; folds: string }) => {
+      const parts = splitLabels(loadLabels(path.resolve(api.cwd, file), api.out), Number(o.folds));
+      parts.forEach((p, k) => {
+        writeLabels(path.resolve(api.cwd, `${o.out}.train-${k}.jsonl`), p.train);
+        writeLabels(path.resolve(api.cwd, `${o.out}.test-${k}.jsonl`), p.test);
+        api.out(`fold ${k}: ${p.train.length} training, ${p.test.length} held out.`);
+      });
     });
   labels
     .command('migrated')

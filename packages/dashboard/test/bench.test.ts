@@ -7,7 +7,7 @@ import type { Label } from '@snds/dsa';
 import { ACME_PROFILE, NOW, fixtureCopy, runPipeline, tmp } from '../../../test/engine/fixture.js';
 import { loadConfig as loadDsaConfig } from '../../../src/config.js';
 import { engineConfig } from '../../../src/engine/from-dsa.js';
-import { bench, benchText, correctness, predictionsOf, repeatability, type Prediction } from '../src/bench.js';
+import { bench, benchText, correctness, foldOf, heldOut, predictionsOf, repeatability, splitLabels, type Prediction } from '../src/bench.js';
 import { historyLabels, migratedLabels, reviewQueue, sourceFiles, sourceRef } from '../src/labels.js';
 import { lowerBound, wilson } from '../src/stats.js';
 import { payloadOf } from '../src/bench-cli.js';
@@ -210,4 +210,21 @@ test('history labels: a commit that swapped a raw element for a component labels
   const r = historyLabels({ app: { name: 'ledger', dir, role: 'consumer' } as any, components: new Set(['Button']), now: NOW });
   assert.equal(r.shallow, false);
   assert.deepEqual(r.labels.map((l) => [l.file, l.line, l.sourceRef, l.truth.use, l.truth.props, l.method]), [['src/Bar.tsx', 3, parent, 'Button', { variant: 'ghost', size: 'sm' }, 'history']]);
+});
+
+test('held-out precision at the bar: each fold scored against the run calibrated without it', () => {
+  const labels = Array.from({ length: 40 }, (_, i) => label(`f${i}`, 'Button', {}, { id: `L-${i}` }));
+  const parts = splitLabels(labels, 2);
+  assert.equal(parts[0]!.test.length + parts[1]!.test.length, 40);
+  assert.ok(parts.every((p, k) => p.test.every((l) => foldOf(l, 2) === k) && p.train.every((l) => foldOf(l, 2) !== k)));
+  const payloadOf = (conf: (i: number) => number, use: (i: number) => string) => ({ elements: { threshold: 0.9, evals: labels.map((l, i) => ({ id: `E-${i}`, target: 'ledger', file: `ledger/${l.file}`, line: 3, verdict: 'replace', use: use(i), props: {}, confidence: conf(i) })), questions: [] } });
+  // The plain run claims everything; one in ten is wrong. Fold runs only claim what is right.
+  const plain = payloadOf(() => 0.95, (i) => (i % 10 === 0 ? 'Toggle' : 'Button'));
+  const fold = payloadOf((i) => (i % 10 === 0 ? 0.5 : 0.95), (i) => (i % 10 === 0 ? 'Toggle' : 'Button'));
+  const h = heldOut(labels, plain, { folds: 2, threshold: 0.9, foldPayloads: [fold, fold] });
+  assert.deepEqual([h.uncalibrated.claimed, h.uncalibrated.right], [40, 36]);
+  assert.deepEqual([h.calibrated!.claimed, h.calibrated!.right, h.calibrated!.precision], [36, 36, 1]);
+  const b = bench(plain, labels, { folds: 2, foldPayloads: [fold, fold] });
+  assert.ok(/Held out \(2-fold by file\)/.test(benchText(b)), benchText(b));
+  assert.throws(() => heldOut(labels, plain, { folds: 2, threshold: 0.9, foldPayloads: [fold] }), /one run per fold/);
 });
