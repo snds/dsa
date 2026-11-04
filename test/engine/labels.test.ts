@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parse } from '@babel/parser';
-import { applyLabels, isotonic, lowerBound, readLabels, squeeze, type Label } from '../../src/engine/labels.js';
+import { applyLabels, isotonic, lowerBound, readLabels, readyCut, squeeze, type Label } from '../../src/engine/labels.js';
 import { reactFeatures, visitWithAncestors, resetFeatureCaches, type ElementFeatures } from '../../src/engine/scanners/features.js';
 import { classify } from '../../src/engine/classify.js';
 import { buildSignatures } from '../../src/engine/signatures.js';
@@ -153,11 +153,34 @@ test('labels: a top band too small for the bound makes nothing ready', () => {
   const evals = Array.from({ length: 150 }, (_, i) => ev(i, { confidence: 0.95 }));
   applyLabels(evals, evals.map(e => ({ id: e.id, truth: truth('Button') })), 0.9);
   assert.ok(evals.every(e => !e.calibration!.ready && e.confidence < 0.9));
-  assert.ok(evals[0]!.reasons.some(r => /top band across paths has 150 of 150 right/.test(r.text)));
+  assert.ok(evals[0]!.reasons.some(r => /no score has a band above it that clears 99% \(the top block has 150 of 150 right/.test(r.text)), JSON.stringify(evals[0]!.reasons));
 });
 
 test('labels: points that share a score are one block, whatever order they came in', () => {
   const blocks = isotonic([{ score: 0.9, ok: true }, { score: 0.9, ok: false }, { score: 0.9, ok: true }]);
   assert.equal(blocks.length, 1);
   assert.deepEqual([blocks[0]!.k, blocks[0]!.n], [2, 3]);
+});
+
+test('labels: the ready cut is the lowest score whose band clears 0.99, and it applies unchanged to unlabelled elements', () => {
+  // 280 clean labels from 0.95 up, then 20 at 0.90 with 3 wrong: a cut at 0.90 drags the bound under 0.99.
+  const pts = [...Array.from({ length: 280 }, (_, i) => ({ score: 0.95 + (i % 3) * 0.01, ok: true })), ...Array.from({ length: 20 }, (_, i) => ({ score: 0.9, ok: i >= 3 }))];
+  const c = readyCut(pts)!;
+  assert.equal(c.cut, 0.95);
+  assert.equal(c.n, 280);
+  assert.ok(c.lower >= 0.99);
+  assert.equal(readyCut(pts.slice(0, 200)), undefined, 'too few clean labels: no cut');
+});
+
+test('labels: held-out elements at or above the cut are ready; below it, or on a path with an error in the band, they are not', () => {
+  const train = Array.from({ length: 700 }, (_, i) => ev(i, { ruleId: i < 650 ? 'button.styled' : 'button.ghost', confidence: 0.98, ...(i >= 650 ? { props: { variant: 'ghost' } } : {}) }));
+  const labels: Label[] = train.map((e, i) => ({ id: e.id, truth: truth('Button', i === 660 ? { variant: 'link' } : e.props as Record<string, string>) }));
+  const held = [ev(900, { ruleId: 'button.styled', confidence: 0.98 }), ev(901, { ruleId: 'button.styled', confidence: 0.5 }), ev(902, { ruleId: 'button.ghost', confidence: 0.98, props: { variant: 'ghost' } })];
+  applyLabels([...train, ...held], labels, 0.9);
+  const [inBand, below, errPath] = held;
+  assert.ok(inBand!.calibration!.band, JSON.stringify(inBand!.calibration));
+  assert.equal(inBand!.calibration!.ready, true);
+  assert.ok(inBand!.confidence >= 0.9);
+  assert.equal(below!.calibration!.ready, false);
+  assert.equal(errPath!.calibration!.ready, false, 'its path has an error in the band, measured on the labels');
 });

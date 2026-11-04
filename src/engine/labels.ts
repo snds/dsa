@@ -13,9 +13,10 @@ import type { ElementEval } from './elements.js';
  *    agreement, as it is for reviewers' decisions. An element never calibrates itself.
  * 2. Isotonic calibration (pool-adjacent-violators) maps each path's score to its measured precision, so a
  *    higher score never means a lower precision. Paths with few labels share the pooled fit.
- * 3. "Ready" is decided on the pooled top band (the highest isotonic block over all paths): its one-sided
- *    95% lower bound must be at least 0.99 (about 270 clean labels), and the element's own path must
- *    show no error among its labels in that band. Everything else stays under the bar, its measured
+ * 3. "Ready" is decided on a pooled band of scores: every element scoring at or above a cut, where the
+ *    cut is the lowest score whose band (all paths' labels at or above it) has a one-sided 95% lower
+ *    bound of at least 0.99 (readyCut; about 270 clean labels). The element's own path must show no
+ *    error among its labels in that band. Everything else stays under the bar, its measured
  *    precision squeezed into [0, threshold) so blocks keep their order (squeeze).
  *
  * Without labels nothing changes, and each evaluation says its confidence is uncalibrated.
@@ -50,7 +51,7 @@ export interface Calibration {
   ready?: boolean | undefined;
   /** The fit came from all labels, because this path has too few. */
   pooled?: boolean | undefined;
-  /** The pooled top band that decides "ready": where it starts, its labels, and its lower bound. */
+  /** The ready band (readyCut): the cut it starts at, its labels across paths, and its lower bound. */
   band?: { from: number; n: number; right: number; lower: number } | undefined;
 }
 
@@ -155,6 +156,23 @@ function ruleStatsFrom(pairs: { e: ElementEval; l: Label }[], without?: string):
 }
 
 /**
+ * The ready cut: the lowest score c such that every labelled point scoring c or more, pooled across paths,
+ * has a one-sided 95% lower bound of at least READY_LOWER_BOUND. Undefined when no cut clears it.
+ */
+export function readyCut(points: { score: number; ok: boolean }[]): { cut: number; n: number; k: number; lower: number } | undefined {
+  const sorted = [...points].sort((a, b) => b.score - a.score);
+  let n = 0, k = 0, best: { cut: number; n: number; k: number; lower: number } | undefined;
+  for (let i = 0; i < sorted.length; i++) {
+    n++; if (sorted[i]!.ok) k++;
+    // Only between distinct scores: a cut takes every point at its score.
+    if (i + 1 < sorted.length && sorted[i + 1]!.score === sorted[i]!.score) continue;
+    const lower = lowerBound(k, n);
+    if (lower >= READY_LOWER_BOUND) best = { cut: sorted[i]!.score, n, k, lower: Math.round(lower * 1000) / 1000 };
+  }
+  return best;
+}
+
+/**
  * Calibrate every evaluation on the labels (in place). Returns how many labels matched an element.
  * Decided elements are left alone: a person's decision isn't a guess.
  */
@@ -180,13 +198,18 @@ export function applyLabels(evals: ElementEval[], labels: Label[], threshold: nu
   const pathPairs = new Map<string, typeof pairs>();
   for (const p of pairs) pathPairs.set(pathOf(p.e), [...(pathPairs.get(pathOf(p.e)) ?? []), p]);
   for (const [k, ps] of pathPairs) if (ps.length >= MIN_PATH_LABELS) byPath.set(k, isotonic(points(ps)));
-  // 3. Ready is decided on the pooled top band (all paths), where the labels add up: its lower bound must
-  //    reach 0.99, and the path's own labels in that band must show no error. The per-path fit still orders.
-  const band = pooled.length ? pooled[pooled.length - 1]! : undefined;
-  const bandLower = band ? lowerBound(band.k, band.n) : 0;
-  const bandReady = Boolean(band && band.n >= MIN_PATH_LABELS && bandLower >= READY_LOWER_BOUND);
+  // 3. Ready is decided on a pooled band of calibrated scores across paths, where labels add up: the band
+  //    is every score at or above a cut, and the cut is the LOWEST score at which the band's one-sided 95%
+  //    lower bound reaches 0.99. The path's own labels in the band must show no error. With no such cut,
+  //    nothing is ready. The cut is fitted on these labels and applies unchanged to every element.
+  const cut = readyCut(pairs.map(({ e, l }) => ({ score: e.confidence, ok: isCorrect(e, l) })));
+  const band = cut ? { lo: cut.cut, n: cut.n, k: cut.k } : undefined;
+  const bandLower = cut ? cut.lower : 0;
+  const bandReady = Boolean(cut);
   const pathErrorsInBand = new Map<string, number>();
   if (band) for (const p of pairs) if (p.e.confidence >= band.lo && !isCorrect(p.e, p.l)) pathErrorsInBand.set(pathOf(p.e), (pathErrorsInBand.get(pathOf(p.e)) ?? 0) + 1);
+  // For the reason text when nothing is ready: the best band there is (the top pooled block).
+  const top = pooled.length ? pooled[pooled.length - 1]! : undefined;
   for (const e of evals) {
     if (e.decided) continue;
     const key = pathOf(e);
@@ -202,8 +225,8 @@ export function applyLabels(evals: ElementEval[], labels: Label[], threshold: nu
     e.confidence = ready ? Math.max(threshold, Math.round(Math.min(0.98, band!.k / band!.n) * 1000) / 1000) : squeeze(precision, threshold);
     e.needsHuman = e.confidence < threshold;
     e.calibration = { status: 'calibrated', path: key, n: b.n, precision, lower, ready, ...(own ? {} : { pooled: true }), ...(band ? { band: { from: band.lo, n: band.n, right: band.k, lower: Math.round(bandLower * 1000) / 1000 } } : {}) };
-    const why = ready ? '' : !inBand ? ', below the top band' : !bandReady ? `; the top band across paths has ${band!.k} of ${band!.n} right, lower bound ${Math.round(bandLower * 1000) / 10}%, under the 99% that ready needs` : `; this path has ${pathErrorsInBand.get(key)} error(s) in the top band`;
-    e.reasons.push({ text: `Measured on labels: ${Math.round(precision * 100)}% right at this score (${b.k} of ${b.n}${own ? '' : ', all paths pooled'})${ready ? '; ready: the top band across paths clears 99% and this path has no error in it' : `, not ready${why}`}.`, delta: Math.round((e.confidence - before) * 100) / 100 });
+    const why = ready ? '' : !bandReady ? `; no score has a band above it that clears 99% (the top block has ${top?.k ?? 0} of ${top?.n ?? 0} right, lower bound ${Math.round(lowerBound(top?.k ?? 0, top?.n ?? 0) * 1000) / 10}%)` : !inBand ? `, below the ready cut (${band!.lo})` : `; this path has ${pathErrorsInBand.get(key)} error(s) in the ready band`;
+    e.reasons.push({ text: `Measured on labels: ${Math.round(precision * 100)}% right at this score (${b.k} of ${b.n}${own ? '' : ', all paths pooled'})${ready ? `; ready: the band at or above ${band?.lo} across paths clears 99% and this path has no error in it` : `, not ready${why}`}.`, delta: Math.round((e.confidence - before) * 100) / 100 });
   }
   return { matched: pairs.length, paths: byPath.size };
 }
