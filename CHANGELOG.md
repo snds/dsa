@@ -32,6 +32,21 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- Components didn't mount in an app whose Vite server sets a base path (or whose root is a folder below
+  the scan root): the mount asked for the file at a URL that server doesn't serve. The tagger now answers
+  `/@dsa/where`, the URL its own server serves a file at (its root and base applied), and the mount imports
+  that. When a file still can't load, its line says what the server answered for it, or which of its
+  imports failed, instead of "Failed to fetch dynamically imported module".
+- Fewer live photos after the sign-in change: every reload while exploring a page waited up to 8 seconds
+  for the network to go quiet, which an app that keeps polling never does. Only a route's first visit
+  waits now. A page that rendered something to use is swept even when some of its requests failed, and a
+  request the browser dropped because the page moved on isn't counted as a failed module.
+- An app's `vendor/` folders and what git ignores in its folder aren't treated as its usage, so a synced
+  copy of the design system's own tooling no longer makes recommendations. An app folder git ignores as
+  a whole is still scanned.
+- A drawing that came out with no size is no longer dropped: its line says why (its styles hide it, it's
+  empty in its markup, or its styles give it no size), and it's shown outlined at a small size, labelled
+  "Outline only" on its card. It doesn't count as seen.
 - Only 40 elements per app were drawn, and the rest were dropped with one total line. There's no count cap
   now, only a time budget (10 minutes per app), and each element is drawn on the page of a route that
   renders it without reloading the page for every one.

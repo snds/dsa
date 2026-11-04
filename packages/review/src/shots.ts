@@ -8,7 +8,7 @@ import { appSurface, openSurface } from '@snds/dsa';
 import { detectApp, discoverRoutes, ensureBrowser, linkCoreForChild, routeConfig, startApp, tagPlan } from './apps.js';
 
 import { READ_STYLE } from './rendered.js';
-import { SHOW_MARKUP, markupOf, mountProps, readSource } from './drawn.js';
+import { NO_SIZE, SHOW_MARKUP, markupOf, mountProps, readSource } from './drawn.js';
 import { needsValue, patternTest, routeFiles, routesReaching } from './routes.js';
 import { describeNetwork, flowProblems, guardNetwork, routeUrl, runFlow, type Flow, type GuardStats } from './flows.js';
 
@@ -424,16 +424,18 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     pg.on('pageerror', (e: any) => { pageErrors.push(String(e?.message ?? e).split('\n')[0]!); });
     const own = (r: any) => { try { return new URL(r.url()).origin === base.origin && r.resourceType() === 'script'; } catch { return false; } };
     pg.on('response', (r: any) => { if (!own(r.request())) return; modules.total++; if (r.status() >= 400) { modules.failed++; modules.first ||= `${new URL(r.url()).pathname} answered ${r.status()}`; } });
-    pg.on('requestfailed', (q: any) => { if (!own(q)) return; modules.total++; modules.failed++; modules.first ||= `${new URL(q.url()).pathname} failed (${q.failure()?.errorText ?? 'no answer'})`; });
+    // A request the browser dropped because the page moved on (ERR_ABORTED) is not a failed module.
+    pg.on('requestfailed', (q: any) => { if (!own(q) || /ABORTED|cancel/i.test(q.failure()?.errorText ?? '')) return; modules.total++; modules.failed++; modules.first ||= `${new URL(q.url()).pathname} failed (${q.failure()?.errorText ?? 'no answer'})`; });
   };
   watchPage = watch;
   watch(page);
-  /** After a page loads: did the app render? Its own modules mostly failing, or nothing to see and use (and it threw, or showed no text). */
+  /** After a page loads: did the app render? Nothing to use on it, and its own modules mostly failed, it threw, or it showed no text. */
   const didntRender = async (errorsBefore: number, mods: { total: number; failed: number }) => {
     const seen = await inPage<{ text: number; controls: number }>(page, RENDERED).catch(() => ({ text: 1, controls: 1 }));
     const total = modules.total - mods.total, failed = modules.failed - mods.failed;
     const threw = pageErrors.length > errorsBefore;
-    const bad = (total > 0 && failed * 2 > total) || (seen.controls === 0 && (seen.text === 0 || threw));
+    // A page with something to use rendered, whatever else failed: it's swept like any other.
+    const bad = seen.controls === 0 && ((total > 0 && failed * 2 > total) || seen.text === 0 || threw);
     if (bad && !broken.first) broken.first = (threw ? pageErrors[errorsBefore] : '') || modules.first || 'the page stayed blank';
     return bad;
   };
@@ -484,12 +486,14 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
    * Open a route. Signed in with signIn, move inside the app (a reload would drop tokens kept in
    * memory); landed on the sign-in page, sign in once and go on to the route wanted.
    */
-  const open = async (u: string, timeout = 60000) => {
+  const open = async (u: string, timeout = 60000, settle = false) => {
     const inApp = (() => { try { return new URL(page.url()).origin === base.origin; } catch { return false; } })();
     if (o.signIn && auth.done && inApp) await within(u);
     else {
       await page.goto(u, { waitUntil: 'domcontentloaded', timeout });
-      await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+      // Only a route's first visit waits for the network to go quiet (up to 8s): reloads while exploring
+      // don't, so an app that keeps polling doesn't spend the explore budget waiting.
+      if (settle) await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
       await page.waitForTimeout(o.waitMs);
     }
     if (o.signIn && onSignInPage() && !auth.expired) {
@@ -574,7 +578,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       const errorsBefore = pageErrors.length, mods = { total: modules.total, failed: modules.failed };
       try {
         // Dev servers can hold connections open; don't wait forever for "idle".
-        await open(u);
+        await open(u, 60000, true);
         if (auth.expired) break;
       } catch (e: any) {
         // Sent to another host to sign in: the network guard stops the page there.
@@ -801,7 +805,8 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
           const keys = (r.e.reach?.storage ?? []).filter(k => !SECRET.test(k));
           if (keys.length) await inPage(page, CLEAR_KEYS, keys);
           const abs = path.resolve(d.root, r.e.file);
-          const files = ['/@fs' + abs.split(path.sep).join('/'), ...(d.dir && !path.relative(d.dir, abs).startsWith('..') ? ['/' + path.relative(d.dir, abs).split(path.sep).join('/')] : [])];
+          // The mount asks the app's server where it serves the file (/@dsa/where); these are the fallbacks.
+          const files = [...(d.dir && !path.relative(d.dir, abs).startsWith('..') ? ['/' + path.relative(d.dir, abs).split(path.sep).join('/')] : []), '/@fs' + abs.split(path.sep).join('/')];
           const props = mountProps(r.e, code, callersOf(d, r.e.within, abs));
           const said = await inPage<{ ok: boolean; why?: string; providers?: number }>(page, MOUNT_IN_PAGE, [files, r.e.within, props, r.e.file])
             .catch((e: any): { ok: boolean; why?: string; providers?: number } => ({ ok: false, why: `the page failed while mounting (${String(e?.message ?? e).split('\n')[0]!.slice(0, 80)})` }));
@@ -818,23 +823,32 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
           if (!html) { out(`not drawn: no element at ${r.e.line}:${r.e.col} in its file as it is now${unmounted ? `; not mounted: ${unmounted}` : ''}`); continue; }
           if (!loaded) await visit(u);
           if (await inPage<boolean>(page, SHOW_MARKUP, html)) {
-            await inPage(page, `(id) => { const el = document.querySelector('[data-dsa-drawn="' + CSS.escape(id) + '"]'); if (el) el.setAttribute('data-dsa-shot', id); }`, r.id);
+            await inPage(page, MARK_DRAWN, r.id);
             how = 'markup';
           }
         }
         if (!how) { out(`not drawn: its markup didn't show on the page; not mounted: ${unmounted}`); continue; }
         const file = `${r.id}.png`;
         const content = await inPage(page, OWN_CONTENT, r.id).catch(() => null);
-        const cap = await capture(page, r.id, path.join(o.dir, file));
-        if (!cap) { out(`not drawn: the drawing had no size to photograph${unmounted ? `; not mounted: ${unmounted}` : ''}`); continue; }
+        let cap = await capture(page, r.id, path.join(o.dir, file));
+        // Drawn at 0×0: say why, and show it outlined at a small size so the picture still says what and where.
+        let placeholder = '';
+        if (!cap) {
+          // The capture let go of its mark: mark it again (the mount's element by its tag, the markup by its id).
+          if (how === 'mount') await inPage(page, FIND_IN_PAGE, [{ ...r, e: undefined }]).catch(() => {});
+          else await inPage(page, MARK_DRAWN, r.id).catch(() => {});
+          placeholder = (await inPage<string | null>(page, NO_SIZE, r.id).catch(() => null)) ?? '';
+          if (placeholder) cap = await capture(page, r.id, path.join(o.dir, file));
+        }
+        if (!cap) { out(`not drawn: the drawing had no size to photograph (${placeholder || "it wasn't on the page"})${unmounted ? `; not mounted: ${unmounted}` : ''}`); continue; }
         // A mount found by its exact source tag, and not blank, counts as seeing the element (seenInApp).
-        shots[r.id] = { file, page: u, matchScore: 1, drawn: how, ...(how === 'mount' && exact ? { exact: true } : {}), box: cap.box, content, ...(cap.blank ? { blank: true } : {}) };
+        shots[r.id] = { file, page: u, matchScore: 1, drawn: how, ...(how === 'mount' && exact ? { exact: true } : {}), box: cap.box, content, ...(cap.blank ? { blank: true } : {}), ...(placeholder ? { placeholder } : {}) };
         drawnIds.push(r.id);
         remaining = remaining.filter(x => x.id !== r.id);
         n++;
         const msg = how === 'mount' ? `drawn from the app's code (its component, in the app's build${providers ? `, with ${providers} of its providers` : ''})` : `drawn as markup only; not mounted: ${unmounted}`;
-        count(how === 'mount' ? "drawn from the app's code" : `markup only (not mounted: ${short(unmounted)})`);
-        o.log(`  ${where(r)} ${msg}${cap.blank ? ' · blank' : ''}`);
+        count(placeholder ? `shown outlined (no size: ${short(placeholder)})` : how === 'mount' ? "drawn from the app's code" : `markup only (not mounted: ${short(unmounted)})`);
+        o.log(`  ${where(r)} ${msg}${placeholder ? ` · shown outlined, it had no size: ${placeholder}` : ''}${cap.blank ? ' · blank' : ''}`);
       } catch (e: any) {
         loaded = '';
         out(`not drawn: the page failed while drawing (${String(e?.message ?? e).split('\n')[0]!.slice(0, 80)})${unmounted ? `; not mounted: ${unmounted}` : ''}`);
@@ -1384,10 +1398,14 @@ const HIDE_COVER = `(sel) => {
 }`;
 const RESTORE_COVER = `document.querySelectorAll('[data-dsa-hid]').forEach((x) => { const s = x.getAttribute('data-dsa-hid'); if (s) x.setAttribute('style', s); else x.removeAttribute('style'); x.removeAttribute('data-dsa-hid'); })`;
 
+/** Runs in the page: mark the markup drawn for this id as the one to photograph. */
+const MARK_DRAWN = `(id) => { const el = document.querySelector('[data-dsa-drawn="' + CSS.escape(id) + '"]'); if (el) el.setAttribute('data-dsa-shot', id); }`;
+/** The dev server's base ("/", or the config's base): where it serves /@vite/client from. */
+const VITE_BASE = `(() => { const s = Array.from(document.scripts).map((x) => x.src).find((u) => /\\/@vite\\/client$/.test(u)); return s ? new URL(s).pathname.replace(/@vite\\/client$/, '') : '/'; })()`;
 /** Runs in the page: load /@dsa/mount from the app's own Vite server and mount one component (drawn.ts), trying each file URL. */
-const MOUNT_IN_PAGE = `async ([files, name, props, file]) => { await import('/@dsa/mount'); return window.__dsaMount(files, name, props, file); }`;
+const MOUNT_IN_PAGE = `async ([files, name, props, file]) => { await import(${VITE_BASE} + '@dsa/mount'); return window.__dsaMount(files, name, props, file); }`;
 /** Runs in the page: does this build serve /@dsa/mount (dsa's runner, or dsaTag on)? */
-const MOUNT_PROBE = `async () => { try { await import('/@dsa/mount'); return typeof window.__dsaMount === 'function'; } catch { return false; } }`;
+const MOUNT_PROBE = `async () => { try { await import(${VITE_BASE} + '@dsa/mount'); return typeof window.__dsaMount === 'function'; } catch { return false; } }`;
 /** Runs in the page: forget these saved-state keys, as on a first visit. */
 const CLEAR_KEYS = `(keys) => { for (const k of keys) { try { localStorage.removeItem(k); sessionStorage.removeItem(k); } catch {} } return true; }`;
 

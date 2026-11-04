@@ -290,6 +290,36 @@ export function readSource(root: string, file: string, dir?: string): string | n
 
 
 /** Runs in the page: show static markup alone, on the app's page (its style sheets stay in the head; the live app is hidden, not removed). */
+/**
+ * Runs in the page, for a drawing that came out 0×0: why, in words a person can act on, and a fallback
+ * that still shows it. The element (and any wrapper hiding it) is made visible, given a small minimum
+ * size and a dashed outline, and, when the markup left it empty, labelled with its tag. Null when the
+ * element isn't on the page at all.
+ */
+export const NO_SIZE = `(id) => {
+  const el = document.querySelector('[data-dsa-shot="' + CSS.escape(id) + '"]');
+  if (!el) return null;
+  const cls = (x) => typeof x.className === 'string' && x.className.trim() ? ', class "' + x.className.trim().split(/\\s+/).slice(0, 3).join(' ') + '"' : '';
+  let why = '', hidden = [];
+  for (let x = el; x && x !== document.body; x = x.parentElement) if (getComputedStyle(x).display === 'none') hidden.push(x);
+  const st = getComputedStyle(el);
+  const empty = !el.textContent.trim() && !el.querySelector('img, svg, input, select, textarea, video, canvas, picture');
+  if (hidden.length) why = (hidden[0] === el ? 'its styles hide it' : 'a wrapper around it is hidden') + ' (display: none' + cls(hidden[0]) + ')';
+  else if (st.visibility === 'hidden') why = 'its styles hide it (visibility: hidden' + cls(el) + ')';
+  else if (empty) why = 'it is empty in its markup: its text and icons come from values or components only the running app fills in';
+  else if (parseFloat(st.width) === 0 || parseFloat(st.height) === 0) why = 'its styles give it no width or height' + (cls(el) ? ' (' + cls(el).slice(2) + ')' : '');
+  else why = 'it drew at 0×0 (its size comes from a layout around it that the drawing does not have)';
+  for (const x of hidden) x.style.setProperty('display', x === el ? 'inline-block' : 'block', 'important');
+  el.style.setProperty('visibility', 'visible', 'important');
+  if (getComputedStyle(el).display === 'inline') el.style.setProperty('display', 'inline-block', 'important');
+  el.style.setProperty('min-width', '48px', 'important');
+  el.style.setProperty('min-height', '24px', 'important');
+  el.style.setProperty('outline', '2px dashed #c2410c', 'important');
+  el.style.setProperty('outline-offset', '2px', 'important');
+  if (empty && !el.children.length && !/^(input|img|select|textarea|br|hr|svg)$/i.test(el.tagName)) el.textContent = '<' + el.tagName.toLowerCase() + '>';
+  return why;
+}`;
+
 export const SHOW_MARKUP = `(html) => {
   document.getElementById('dsa-mount')?.remove();
   document.getElementById('dsa-markup')?.remove();

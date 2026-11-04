@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -90,10 +91,37 @@ export function defaultExcludes(hostRoot: string): string[] {
   return isInside(hostRoot, APP_DIR) ? [] : [APP_DIR];
 }
 
-/** Recursive file walk honoring IGNORE_DIRS and excluded absolute paths. */
+/**
+ * What an app's own folder holds that isn't its usage, left out of element discovery: folders named
+ * vendor (synced copies of someone else's code, a design system's own tooling among them) and anything
+ * git ignores there (generated and downloaded files). Absolute paths, for walk's exclude.
+ */
+export function usageExcludes(dir: string): string[] {
+  const out: string[] = [];
+  const stack = [dir];
+  while (stack.length) {
+    const d = stack.pop()!;
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { continue; }
+    for (const e of entries) {
+      if (!e.isDirectory() || IGNORE_DIRS.has(e.name)) continue;
+      if (e.name === 'vendor') out.push(path.join(d, e.name));
+      else stack.push(path.join(d, e.name));
+    }
+  }
+  try {
+    const listed = execFileSync('git', ['-C', dir, 'ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory'], { encoding: 'utf8', timeout: 15000, maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
+    // Only what's inside the folder: an app git ignores as a whole (a clone, a fetched remote) is still scanned.
+    for (const f of listed.split('\0')) { const full = path.join(dir, f.replace(/\/$/, '')); if (f && full !== path.resolve(dir) && isInside(full, dir)) out.push(full); }
+  } catch { /* not in a git checkout */ }
+  return out;
+}
+
+/** Recursive file walk honoring IGNORE_DIRS and excluded absolute paths (folders, and files). */
 export function walk(dir: string, exts: Set<string>, exclude: string[] = [], includeTests = false): string[] {
   const out: string[] = [];
   const stack = [dir];
+  const files = new Set(exclude);
   while (stack.length) {
     const d = stack.pop()!;
     if (exclude.some(e => isInside(d, e))) continue;
@@ -108,7 +136,7 @@ export function walk(dir: string, exts: Set<string>, exclude: string[] = [], inc
       if (e.isDirectory()) {
         if (IGNORE_DIRS.has(e.name)) continue;
         stack.push(full);
-      } else if (e.isFile() && exts.has(path.extname(e.name).toLowerCase()) && (includeTests || !TEST_FILE.test(e.name))) {
+      } else if (e.isFile() && exts.has(path.extname(e.name).toLowerCase()) && (includeTests || !TEST_FILE.test(e.name)) && !files.has(full)) {
         out.push(full);
       }
     }

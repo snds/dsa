@@ -224,11 +224,21 @@ provider, props their parent passes. The mount gives it what the running app giv
 - **Unexported components.** The tagger keeps each file's components, exported or not, so a row or panel
   defined beside its parent can be mounted too. Production builds never have this: it's only on while
   tagging is.
+- **Its file.** The mount imports the file the way the app does. The tagger asks its own Vite server
+  where it serves the file (`/@dsa/where`), with that server's root and base applied, so an app in a folder
+  below the scan root, or one served under a base path like `/portal/`, mounts the same way.
 
 Every element that isn't reached live ends with a line in the log: drawn from the app's code, markup only
-with the reason it wasn't mounted (its file didn't load, it failed to render and the error, or it rendered
-without the element because a condition inside it wasn't met), or not drawn and why. The log ends with a
-count per reason. Drawing has a 10-minute budget per app; any left when it runs out say so.
+with the reason it wasn't mounted (its file didn't load and what the server answered for it or for the
+import that failed, it failed to render and the error, or it rendered without the element because a
+condition inside it wasn't met), or not drawn and why. A drawing that comes out with no size says why
+(its styles hide it, it's empty in its markup, its styles give it no size) and is shown outlined at a
+small size instead; its card says "Outline only" and it doesn't count as seen. The log ends with a count
+per reason. Drawing has a 10-minute budget per app; any left when it runs out say so.
+
+What isn't the app's own usage is left out of the scan: folders named `vendor` in the app's folder (a
+synced copy of someone else's code, such as the design system's own tooling) and anything git ignores
+there. An app folder git ignores as a whole is still scanned.
 
 ### How proposals are drawn
 

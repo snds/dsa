@@ -68,9 +68,9 @@ export interface TrustScore {
   sources: Record<Source, number>;
 }
 
-/** live: a photo of the running app. code: drawn from the app's code (counts). markup: markup only (doesn't). none: no picture. */
+/** live: a photo of the running app. code: drawn from the app's code (counts). markup: markup only, or a drawing shown outlined because it had no size (doesn't). none: no picture. */
 export type Source = 'live' | 'code' | 'markup' | 'none';
-const sourceOf = (s: any): Source => (!s ? 'none' : s.drawn === 'mount' ? 'code' : s.drawn ? 'markup' : 'live');
+const sourceOf = (s: any): Source => (!s ? 'none' : s.drawn === 'mount' && !s.placeholder ? 'code' : s.drawn ? 'markup' : 'live');
 
 /**
  * Score every recommendation in a report payload. `dir` is where the published page sits, to read the
