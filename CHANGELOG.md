@@ -37,6 +37,13 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   what was still missing could push one past the limit. Now each page gets up to 12 replays,
   openers that reveal the most go first, and an opener matched only by its words on one page is tried
   again on the next page that has it.
+- A modal a custom hook renders (`useDetailImages` returning `<ImageEditorModal open={!!editor} />`):
+  - The scan follows the hook to the component that calls it, and keeps the conditions where that
+    component renders what the hook returned (`{openColour && <section>{modal}</section>}`). Before, it
+    kept none.
+  - The hook's own state (`editor`) is set where React keeps it: in the calling component, after that
+    component's earlier hooks.
+  - A condition given as a prop (`open={!!editor}`) is read as its value's condition.
 - Apps that navigate by state in their root component, not by routes (`activeNav`, `setupTakeover`): an
   element's conditions are set level by level, outermost first. The root counts as on every page, and each
   component below is set once the level above has drawn it, with a photo after each level. A custom hook's

@@ -596,11 +596,17 @@ export function stateOrder(code: string, component: string, hookCode?: (name: st
   return orderOf(code, component, hookCode, 0).out;
 }
 
-function orderOf(code: string, component: string, hookCode: ((name: string) => string | null) | undefined, depth: number): { out: (string | null)[]; complete: boolean } {
+/** Where a custom hook's own state hooks begin among a component's (it keeps them in its caller's fiber), or -1. */
+export function hookStart(code: string, component: string, hook: string, hookCode?: (name: string) => string | null): number {
+  return orderOf(code, component, hookCode, 0).starts.get(hook) ?? -1;
+}
+
+function orderOf(code: string, component: string, hookCode: ((name: string) => string | null) | undefined, depth: number): { out: (string | null)[]; complete: boolean; starts: Map<string, number> } {
   const ast = parse(code);
   const fn = ast ? componentFn(ast, component) : null;
   const out: (string | null)[] = [];
-  if (!fn?.body?.body) return { out, complete: false };
+  const starts = new Map<string, number>();
+  if (!fn?.body?.body) return { out, complete: false, starts };
   // A custom hook the app declares: its own hooks keep state too (counted, unnamed). Null when it can't be read.
   const inner = (name: string): (string | null)[] | null => {
     if (depth > 3 || !hookCode) return null;
@@ -620,10 +626,10 @@ function orderOf(code: string, component: string, hookCode: ((name: string) => s
       if (!/^use[A-Z]/.test(c.name)) continue;
       if (c.name === 'useState' || c.name === 'useReducer') out.push(c.id?.type === 'ArrayPattern' && c.id.elements[0]?.type === 'Identifier' ? c.id.elements[0].name : null);
       else if (QUEUE_OTHER.test(c.name)) out.push(null);
-      else if (!NO_QUEUE.test(c.name)) { const k = inner(c.name); if (!k) return { out, complete: false }; out.push(...k); }
+      else if (!NO_QUEUE.test(c.name)) { const k = inner(c.name); if (!k) return { out, complete: false, starts }; if (!starts.has(c.name)) starts.set(c.name, out.length); out.push(...k); }
     }
   }
-  return { out, complete: true };
+  return { out, complete: true, starts };
 }
 
 /**
@@ -633,7 +639,7 @@ function orderOf(code: string, component: string, hookCode: ((name: string) => s
  */
 export function stateSets(gates: { test: string; negated: boolean; component?: string; file?: string }[], read: (file: string) => string | null, hookCode?: (name: string, from: string) => string | null): StateSet[] {
   const out = new Map<string, StateSet>();
-  for (const g of gates) {
+  for (const [gi, g] of gates.entries()) {
     if (!g.component || !g.file) continue;
     const code = read(g.file);
     if (!code) continue;
@@ -641,8 +647,22 @@ export function stateSets(gates: { test: string; negated: boolean; component?: s
     if (!order.some(Boolean)) continue;
     const ast = parse(code);
     const fn = ast ? componentFn(ast, g.component) : null;
+    // A condition passed as a prop (`open={!!editor}`): the prop must hold, so its value's condition does.
+    const asProp = g.test.match(/^[\w$]+=\{([\s\S]*)\}$/);
     let expr: any = null;
-    try { expr = babelParseExpression(g.test, { plugins: ['jsx', 'typescript'] }); } catch { continue; }
+    try { expr = babelParseExpression(asProp ? asProp[1]! : g.test, { plugins: ['jsx', 'typescript'] }); } catch { continue; }
+    // A custom hook keeps its state in the component that calls it, after that component's earlier hooks:
+    // the nearest condition above it whose component calls the hook, its state at that offset.
+    let target = { file: g.file, component: g.component }, offset = 0;
+    if (/^use[A-Z]/.test(g.component)) {
+      const callers = gates.slice(0, gi).reverse().concat(gates.slice(gi + 1)).filter(c => c.component && c.file && !/^use[A-Z]/.test(c.component) && (read(c.file) ?? '').includes(`${g.component}(`));
+      const c = callers[0];
+      if (!c) continue;
+      const at = hookStart(read(c.file!)!, c.component!, g.component, hookCode ? (n) => hookCode(n, c.file!) : undefined);
+      if (at < 0) continue;
+      target = { file: c.file!, component: c.component! };
+      offset = at;
+    }
     const want = new Map<string, Val>();
     const shapeFor = (x: string, truth: boolean): Val => {
       if (!truth) return false;
@@ -668,11 +688,11 @@ export function stateSets(gates: { test: string; negated: boolean; component?: s
     };
     visit(expr, !g.negated);
     if (!want.size) continue;
-    const key = `${g.file}|${g.component}`;
-    const s = out.get(key) ?? { file: g.file, component: g.component, slots: [] };
+    const key = `${target.file}|${target.component}`;
+    const s = out.get(key) ?? { file: target.file, component: target.component, slots: [] };
     for (const [name, value] of want) {
-      const index = order.filter(Boolean).length ? order.indexOf(name) : -1;
-      if (index >= 0 && !s.slots.some(x => x.name === name)) s.slots.push({ index, name, value });
+      const index = order.indexOf(name);
+      if (index >= 0 && !s.slots.some(x => x.index === offset + index)) s.slots.push({ index: offset + index, name, value });
     }
     if (s.slots.length) out.set(key, s);
   }
