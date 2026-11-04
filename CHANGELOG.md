@@ -28,6 +28,12 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   A spread or class constant it can't resolve makes the classifier abstain (`unclear`) instead of the old
   5% penalty. It runs only over files with something to resolve, loads the app's own `typescript` first,
   and is skipped with a note when there is no tsconfig or no `typescript`; the old penalty then stays.
+- Recommendations learn from the app's own migrations (`src/engine/precedent.ts`). Every system-component
+  use in the app is indexed with its props, extra classes, class constant, parents and state. A raw
+  element styled by a constant the app already put on a system component, or with the same classes as an
+  element a commit turned into one (`git log -p`, bounded), follows that migration as near-truth. A
+  system component of the picked kind right beside it lends its size. Otherwise the most similar uses are
+  named as evidence, and offered as an alternative when they differ.
 - The element scanner skips files that aren't product code: tests, stories, examples, demos, fixtures,
   mocks, stubs and docs, reusing the model extractor's list (`NON_PRODUCT`). The run notes how many it
   left out.

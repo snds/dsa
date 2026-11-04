@@ -4,6 +4,8 @@ import path from 'node:path';
 import { loadCatalog, withMetrics } from './catalog.js';
 import { appSettings, lookalikeMap, readExceptions, type Config } from './config.js';
 import { refineWithTypes } from './typecheck.js';
+import { buildPrecedent, type PrecedentIndex } from './precedent.js';
+import { readAliases } from './modules.js';
 import type { CodeScanResult } from './scanners/code.js';
 import { defaultExcludes, globMatch, targetRelative } from './paths.js';
 import type { Store, StoreFactory } from './store.js';
@@ -90,6 +92,7 @@ export interface RunOptions {
   log?: (msg: string) => void | undefined;
   /** false = skip the profile's agent-readiness provider. */
   readiness?: boolean | undefined;
+
   /**
    * The dsa config: when given, instances come from the system model (every framework and markup
    * the model reads) instead of the engine's code scanner. Look-alikes and element review still come
@@ -211,7 +214,8 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
       if (unused.length) notes.push(`${t.name}: ${unused.length} look-alike${unused.length === 1 ? '' : 's'} in ${new Set(unused.map(r => r.file)).size} unused file${new Set(unused.map(r => r.file)).size === 1 ? '' : 's'} (nothing the app renders imports them): not counted; delete rather than migrate.`);
       data.lookalikes.push(...kept);
       // Evaluate everything, exceptions included: the review shows deferred debt too, flagged as such.
-      evals.push(...evaluateRows({ root: opts.root, target: t, rows: res.lookalikes, exceptionOf, reachOf, map: roleMap, decisions: decisionFiles.get(t.name)!, stats, threshold, sigs, pageOf: id => page.get(id), hints, labPaths: config.review?.labPaths }));
+      const precedent = precedentFor(opts.root, t, res.instances, sigs, opts.git !== false);
+      evals.push(...evaluateRows({ root: opts.root, target: t, rows: res.lookalikes, exceptionOf, reachOf, map: roleMap, decisions: decisionFiles.get(t.name)!, stats, threshold, sigs, pageOf: id => page.get(id), hints, labPaths: config.review?.labPaths, precedent }));
     }
     if (res.nonProduct) notes.push(`${t.name}: ${res.nonProduct} look-alike${res.nonProduct === 1 ? '' : 's'} in tests, stories, fixtures, stubs or docs left out (not product code).`);
     for (const e of res.parseErrors.slice(0, 3)) notes.push(`Parse error skipped in ${e.file}: ${e.message}`);
@@ -311,7 +315,8 @@ export async function reevaluateElements(opts: { root: string; dataDir: string; 
       for (const r of res.lookalikes) if (r.features?.framework === 'react') reachOf.set(r, reachFor(graph, path.join(t.dir, targetRelative(opts.root, r.file, t.dir)), r.line, r.features.context.gates ?? []));
     } catch { /* the first pass noted it */ }
     for (const r of res.lookalikes) if (reachOf.get(r)?.status === 'unused' && !exceptionOf.has(r)) exceptionOf.set(r, 'unused');
-    evals.push(...evaluateRows({ root: opts.root, target: t, rows: res.lookalikes, exceptionOf, reachOf, map: roleMap, decisions: decisionFiles.get(t.name)!, stats, threshold, sigs, pageOf: id => page.get(id), hints, labPaths: config.review?.labPaths }));
+    const precedent = precedentFor(opts.root, t, res.instances, sigs, true);
+    evals.push(...evaluateRows({ root: opts.root, target: t, rows: res.lookalikes, exceptionOf, reachOf, map: roleMap, decisions: decisionFiles.get(t.name)!, stats, threshold, sigs, pageOf: id => page.get(id), hints, labPaths: config.review?.labPaths, precedent }));
   }
   const store = await opts.store(opts.dataDir);
   try {
@@ -327,6 +332,14 @@ export async function reevaluateElements(opts: { root: string; dataDir: string; 
     log(`Re-evaluated ${evals.length} elements with page placement from ${page.size} screenshots: ${changed} recommendation${changed === 1 ? '' : 's'} changed.`);
     return { changed, total: evals.length };
   } finally { store.close(); }
+}
+
+/** The app's own system-component uses and git migrations, to learn from (precedent.ts). */
+function precedentFor(root: string, t: Target, instances: CodeScanResult['instances'], sigs: SignatureSet | undefined, git: boolean): PrecedentIndex | undefined {
+  try {
+    const components = new Set([...(sigs?.components.keys() ?? []), ...instances.map(i => i.component)]);
+    return buildPrecedent(t.dir, instances.filter(i => i.target === t.name), f => path.join(t.dir, targetRelative(root, f, t.dir)), components, readAliases(t.dir, t.aliases), git);
+  } catch { return undefined; }
 }
 
 /**

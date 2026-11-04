@@ -11,6 +11,7 @@ import { withPlacement, type PagePlacement, type Region } from './placement.js';
 import { asHostCopy, systemIndex, hostCopyOf, isLabFile } from './host-context.js';
 import { importedFromSystem } from './scanners/features.js';
 import { readAliases } from './modules.js';
+import { applyPrecedent, type PrecedentIndex } from './precedent.js';
 
 /**
  * The element review: every native element the map covers gets an evaluation, with a
@@ -205,6 +206,8 @@ export function evaluateRows(opts: {
   hints?: Hint[] | undefined;
   /** Lab pages (globs relative to the app): specimens, kept out of Ready (dsa.config.json review.labPaths). */
   labPaths?: string[] | undefined;
+  /** The app's own system-component uses and past migrations (precedent.ts). */
+  precedent?: PrecedentIndex | undefined;
 }): ElementEval[] {
   const { root, target, rows, map, decisions, stats, threshold } = opts;
   const byFp = new Map(decisions.decisions.map(d => [d.fingerprint, d]));
@@ -247,6 +250,8 @@ export function evaluateRows(opts: {
         ariaLabel: literal(f.attrs['aria-label']), title: literal(f.attrs.title), role: literal(f.attrs.role), type: literal(f.attrs.type),
       },
     };
+    // What the app itself already did with this look (a migration, a sibling) is the strongest evidence there is.
+    if (opts.precedent) applyPrecedent(ev, opts.precedent, threshold, f.context.ancestors);
     // A host copy of a system component is decided by the parent first: import the system's component.
     const abs = path.join(target.dir, rel);
     const copy = f.framework === 'react' ? hostCopyOf(abs, f.context.within, sysIdx, n => importedFromSystem(abs, n, aliases)) : undefined;
