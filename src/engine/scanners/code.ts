@@ -5,6 +5,7 @@ import { parse as parseSfc } from '@vue/compiler-sfc';
 import { Parser as HtmlParser } from 'htmlparser2';
 import { displayPath, globMatch, walk } from '../paths.js';
 import { NON_PRODUCT } from '../../model/extract.js';
+import { extraKindOf, KIND_COMPONENT } from '../kinds.js';
 import { readAliases, resolveSpecifier, type ShimExports } from '../modules.js';
 import { loadClassReader, type ClassReader } from '../tailwind.js';
 import { allDsPackages, libraryOfPackage, lookalikeMap, type Config } from '../config.js';
@@ -133,6 +134,11 @@ function pushInstance(ctx: Ctx, file: string, line: number, pkg: string, compone
 }
 
 const DYNAMIC = '\u0000dynamic';
+
+function pushKind(ctx: Ctx, file: string, line: number, element: string, component: string, features: ElementFeatures) {
+  if (isNonProduct(path.relative(ctx.target.dir, file))) { ctx.res.nonProduct = (ctx.res.nonProduct ?? 0) + 1; return; }
+  ctx.res.lookalikes.push({ target: ctx.target.name, element, component, file: rel(ctx, file), line, col: features.col, features });
+}
 
 function pushLookalike(ctx: Ctx, file: string, line: number, element: string, attrs: Record<string, string>, features?: ElementFeatures) {
   if (!ctx.countLookalikes) return;
@@ -279,7 +285,15 @@ function scanScript(ctx: Ctx, file: string, src: string, ext: string) {
     // Native elements: read the whole element (children, ancestors) so the evaluator has facts to work with.
     if (node.type === 'JSXElement' && node.openingElement.name.type === 'JSXIdentifier' && /^[a-z]/.test(node.openingElement.name.name) && !bindings.has(node.openingElement.name.name)) {
       const name = node.openingElement.name.name;
-      if (!ctx.lookalikes[name] || !ctx.countLookalikes) return;
+      if (!ctx.countLookalikes) return;
+      // Kinds the element map doesn't list by tag: a skeleton <div>, a field <label> (kinds.ts).
+      if (!ctx.lookalikes[name]) {
+        if (!/^(div|span|label)$/.test(name) || ctx.config.extraKinds === false || inRenderProp(ancestors)) return;
+        const feats = reactFeatures(node, ancestors, src, file, ctx.aliases);
+        const kind = extraKindOf(node, feats);
+        if (kind) pushKind(ctx, file, node.loc?.start.line ?? 0, name, KIND_COMPONENT[kind], feats);
+        return;
+      }
       // render={<button />} hands the component the element it draws as (Base UI): the component's own element,
       // not a bypass. Content slots (action={<button>…</button>}) are still raw elements.
       if (inRenderProp(ancestors)) return;

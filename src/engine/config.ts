@@ -18,6 +18,8 @@ export interface Config {
   consumers?: ConsumerDef[] | undefined;
   /** Additional local repos (paths relative to the host root) scanned as consumers. */
   extraRepos?: ConsumerDef[] | undefined;
+  /** Scan the kinds the element map can't list by tag (a skeleton <div>, a field <label>); default on. */
+  extraKinds?: boolean | undefined;
   /** Raw elements that imitate DS components: element -> component. Overrides entries from rawElements. */
   lookalikes?: Record<string, string> | undefined;
   /** Path (from the host root) to the design system's element map, e.g. "packages/lint/raw-elements.json". */

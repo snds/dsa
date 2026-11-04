@@ -8,6 +8,10 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- Two scan kinds found by their own markup, not their tag (`src/engine/kinds.ts`): a Skeleton (a `<div>`
+  or `<span>` with `animate-pulse`, a muted fill and no children, all three required) and a Label (a
+  `<label>` with `htmlFor`, or wrapping a text field; never one holding a choice control or a button, which
+  is that control's own anatomy, and never one inside a Field component).
 - Recommendations apply hard constraints before ranking (`src/engine/constraints.ts`). An element with
   `aria-pressed`, `aria-current` or a selected state only maps to a component with a prop for it
   (`pressed`, `isActive`, `value`, or a `data-state` it writes). A component with a fixed role can't take

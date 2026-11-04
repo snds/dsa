@@ -322,6 +322,12 @@ function candidates(f: ElementFeatures, map: RoleMap): Candidate[] {
     case 'dialog': return f.fileUsesShowModal
       ? [role('native-dialog', 'dialog.imperative', 0.92, [{ text: 'File drives the dialog with showModal().', delta: 0 }]), role('dialog', 'dialog.declarative', 0.6, [])]
       : [role('dialog', 'dialog.declarative', 0.88, [{ text: 'Native <dialog> without showModal(): declarative Dialog fits.', delta: 0 }])];
+    case 'div': case 'span':
+      if (f.classes.tokens.includes('animate-pulse') && !f.children.text && !f.children.dynamicText && !f.children.elements.length && !f.children.icons)
+        return [role('skeleton', 'skeleton', 0.93, [{ text: 'A pulsing, muted, empty box: a loading placeholder (Skeleton).', delta: 0 }])];
+      return [role(f.element, 'unknown', 0.5, [{ text: `No rule for <${f.element}>.`, delta: 0 }])];
+    case 'label':
+      return [role('label', f.attrs.htmlFor !== undefined ? 'label.for' : 'label.wraps', f.attrs.htmlFor !== undefined ? 0.92 : 0.88, [{ text: f.attrs.htmlFor !== undefined ? 'A <label> pointing at a field (htmlFor): Label.' : 'A <label> wrapping a text field: Label.', delta: 0 }])];
     default: return [role(f.element, 'unknown', 0.5, [{ text: `No rule for <${f.element}>.`, delta: 0 }])];
   }
 }
