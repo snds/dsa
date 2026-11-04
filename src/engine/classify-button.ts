@@ -124,8 +124,12 @@ export function buttonCandidates(f: ElementFeatures, map: RoleMap, role: RoleFn)
     const def = map.roles['icon-button'];
     // Toolbar chrome (bordered, raised, control height) is Button variant="toolbar"; a full border is outline; a
     // one-side border is a divider from the group around it, not an outline.
-    const props = look.toolbar ? toolbarProps(def?.use) : { variant: look.border === 'box' ? 'outline' : (def?.props?.variant ?? 'ghost'), size: iconSize(def?.use, sizeKey, map) };
+    // A fill at rest is the variant's own (bg-secondary is secondary); only an unfilled icon button is ghost.
+    const filled = look.fill && look.border !== 'box' ? variantOf(f, map) : undefined;
+    const fillVariant = filled && filled.token && !/^(ghost|outline)$/.test(filled.key) ? filled : undefined;
+    const props = look.toolbar ? toolbarProps(def?.use) : { variant: look.border === 'box' ? 'outline' : fillVariant ? fillVariant.key : (def?.props?.variant ?? 'ghost'), size: iconSize(def?.use, sizeKey, map) };
     if (look.toolbar) r.push({ text: `Toolbar chrome (a border, a raised shadow, control height): variant "toolbar".`, delta: 0 });
+    else if (fillVariant) r.push({ text: `Filled at rest (${fillVariant.token}): variant "${fillVariant.key}".`, delta: 0 });
     else if (look.border === 'side') r.push({ text: 'Its border is on one side only: a divider from the group around it, not an outline.', delta: 0 });
     out.push(role('icon-button', 'button.icon', cellish ? 0.82 : 0.9, r, props));
     return out;

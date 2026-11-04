@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parse } from '@babel/parser';
-import { applyLabels, isotonic, lowerBound, readLabels, type Label } from '../../src/engine/labels.js';
+import { applyLabels, isotonic, lowerBound, readLabels, squeeze, type Label } from '../../src/engine/labels.js';
 import { reactFeatures, visitWithAncestors, resetFeatureCaches, type ElementFeatures } from '../../src/engine/scanners/features.js';
 import { classify } from '../../src/engine/classify.js';
 import { buildSignatures } from '../../src/engine/signatures.js';
@@ -101,4 +101,24 @@ test('labels: a run reads them from the option and says so', async () => {
   assert.ok(res.notes.some(n => /^Labels: 1 read, 1 matched/.test(n)), JSON.stringify(res.notes));
   const again = (await latestEvals(data)).evals.find(e => e.id === first.id)!;
   assert.equal(again.calibration?.status, 'uncalibrated', 'one label is too few for a fit: still uncalibrated, and says so');
+});
+
+test('labels: blocks that are not ready keep their order under the bar (no flattening to one value)', () => {
+  // Two paths' worth of scores: low scores mostly wrong, high scores mostly right; nothing reaches ready.
+  const evals = Array.from({ length: 60 }, (_, i) => ev(i, { confidence: i < 30 ? 0.6 : 0.95, ruleId: 'button.styled' }));
+  const labels: Label[] = evals.map((e, i) => ({ id: e.id, truth: truth(i < 30 ? (i < 10 ? 'Button' : 'Toggle') : (i < 58 ? 'Button' : 'Toggle')) }));
+  applyLabels(evals, labels, 0.9);
+  const low = evals[0]!, high = evals[59]!;
+  assert.equal(low.calibration?.ready, false);
+  assert.equal(high.calibration?.ready, false);
+  assert.ok(high.confidence < 0.9 && low.confidence < high.confidence, `${low.confidence} < ${high.confidence} < 0.9`);
+  assert.equal(high.confidence, squeeze(high.calibration!.precision!, 0.9), 'the measured precision, squeezed under the bar');
+});
+
+test('labels: a label naming any line of a multi-line opening tag matches the element', () => {
+  const e = ev(1, { file: 'app/src/Panel.tsx', line: 10, openEndLine: 14 } as Partial<ElementEval>);
+  const r = applyLabels([e], [{ app: 'app', file: 'src/Panel.tsx', line: 12, truth: truth('Button') }], 0.9);
+  assert.equal(r.matched, 1);
+  const outside = applyLabels([ev(2, { file: 'app/src/Panel.tsx', line: 10, openEndLine: 14 } as Partial<ElementEval>)], [{ app: 'app', file: 'src/Panel.tsx', line: 15, truth: truth('Button') }], 0.9);
+  assert.equal(outside.matched, 0);
 });

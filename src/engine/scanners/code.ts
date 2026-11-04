@@ -295,12 +295,16 @@ function scanScript(ctx: Ctx, file: string, src: string, ext: string) {
   });
 }
 
-/** Whether the element is the value of a `render` prop, the element a component draws as. */
-function inRenderProp(ancestors: any[]): boolean {
+/**
+ * Whether the element is the value of a `render` prop, the element a component draws as. A render
+ * function (render={({ field }) => <input …/>}, as form libraries use) returns the app's own UI, not the
+ * component's element, so crossing a function stops the search.
+ */
+export function inRenderProp(ancestors: any[]): boolean {
   for (let i = ancestors.length - 1; i >= 0; i--) {
     const a = ancestors[i];
     if (a.type === 'JSXAttribute') return a.name?.name === 'render';
-    if (a.type === 'JSXElement' || a.type === 'JSXFragment') return false;
+    if (a.type === 'JSXElement' || a.type === 'JSXFragment' || /Function/.test(a.type)) return false;
   }
   return false;
 }

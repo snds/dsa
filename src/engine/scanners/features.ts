@@ -38,6 +38,8 @@ export interface ElementFeatures {
   /** The whole element, whitespace collapsed, capped. */
   source: string;
   col: number;
+  /** The line its opening tag ends on (a tag can span lines): labels and lookups may name any line of it. */
+  openEndLine?: number | undefined;
   /** Table structure, when element is <table>. */
   table?: TableInfo | undefined;
   /** <select>: option count when literal. */
@@ -364,6 +366,7 @@ export function reactFeatures(el: any, ancestors: any[], src: string, file: stri
     children: childInfo(el.children ?? [], isIcon, isSys),
     context: { ...contextInfo(ancestors), ...setContextOf(ancestors, el), gates: gatesFrom(ancestors, el, src), regions: regionsOfAncestors(ancestors) },
     openTag: collapse(src.slice(open.start, open.end)).slice(0, 400),
+    openEndLine: open.loc?.end.line,
     source: collapse(src.slice(el.start, el.end)).slice(0, 700),
     col: (open.loc?.start.column ?? 0) + 1,
   };

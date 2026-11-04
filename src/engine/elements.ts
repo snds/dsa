@@ -80,6 +80,8 @@ export interface ElementEval extends Evaluation {
   decided?: { by: 'human' | 'agent' | 'policy'; decision: Recommendation; note?: string | undefined; who?: string | undefined; date?: string | undefined } | undefined;
   snippet: string;
   source: string;
+  /** The line its opening tag ends on, when the tag spans lines. */
+  openEndLine?: number | undefined;
   /** The shared class constant this element is styled by (PLUS_NOUN_LINK), if any. */
   styleKey?: string | undefined;
   /** Hash of the element's visual classes: identical styling clusters even without a constant. */
@@ -241,6 +243,7 @@ export function evaluateRows(opts: {
       exception: opts.exceptionOf.get(r) ?? (isLabFile(rel, opts.labPaths) ? 'lab' : undefined),
       reach: opts.reachOf?.get(r),
       snippet: f.openTag, source: f.source,
+      ...(f.openEndLine && f.openEndLine > r.line ? { openEndLine: f.openEndLine } : {}),
       styleKey: styleKeyOf(f.classes.viaConst),
       styleSig: styleSigOf(f.classes.tokens),
       classTokens: f.classes.tokens,

@@ -78,6 +78,14 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- A calibrated block that isn't ready was flattened to one score under the bar, which erased ranking and
+  coverage. It now keeps its measured precision, squeezed into [0, threshold) in order (`squeeze`).
+- A filled icon button (`bg-secondary` at rest) was always proposed as ghost. Its fill now picks the
+  variant; only an unfilled icon button is ghost.
+- Elements a render function returns (`render={({ field }) => <input …/>}`, as form libraries use) were
+  skipped as if they were a component's own `render={<button/>}` element. Crossing a function now stops
+  that check.
+- Labels may name any line of a multi-line opening tag (`openEndLine` on each evaluation).
 - Labels matched almost nothing on a real run: they were matched by element hash (which hashes the
   element's source text, not dsa's fingerprint) and by an exact file path. They now match by id, else by
   app, line and a file path that may carry a leading folder, and props compare as the bench compares

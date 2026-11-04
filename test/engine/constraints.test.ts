@@ -178,3 +178,24 @@ test('signatures: an outlined button whose base hides the border is outline, not
   assert.equal(e.use, 'Button');
   assert.equal(e.props?.variant, 'outline', JSON.stringify(e.signature));
 });
+
+test('icon buttons: a fill at rest picks the filled variant, not ghost', () => {
+  const e = classify(features(`export const A = () => <button aria-label="Replace" onClick={replace} className="inline-grid size-8 place-items-center rounded-md bg-secondary text-secondary-foreground hover:bg-secondary/80 shadow-sm"><Icon name="image" /></button>;`), systemRoleMap(), 0.9, acmeSigs());
+  assert.equal(e.use, 'Button');
+  assert.equal(e.props?.variant, 'secondary', JSON.stringify(e.reasons.map(r => r.text)));
+  const ghost = classify(features(`export const A = () => <button aria-label="Close" onClick={close} className="size-8 hover:bg-accent"><Icon name="close" /></button>;`), systemRoleMap(), 0.9, acmeSigs());
+  assert.equal(ghost.props?.variant, 'ghost', 'no fill at rest stays ghost');
+});
+
+import { inRenderProp } from '../../src/engine/scanners/code.js';
+
+test('scanner: an element in render={<button/>} is the component\'s own; one a render function returns is the app\'s', () => {
+  const at = (code: string) => {
+    let anc: any[] = [];
+    visitWithAncestors(parse(code, { sourceType: 'module', plugins: ['jsx', 'typescript'] }).program, (n: any, a: any[]) => { if (n.type === 'JSXElement' && /^(button|input)$/.test(n.openingElement.name.name)) anc = [...a]; });
+    return inRenderProp(anc);
+  };
+  assert.equal(at(`const A = () => <MenuTrigger render={<button type="button" />} />;`), true);
+  assert.equal(at(`const A = () => <Field control={c} name="x" render={({ field }) => <input {...field} className="h-8 border" />} />;`), false);
+  assert.equal(at(`const A = () => <Card action={<button onClick={go}>Go</button>} />;`), false);
+});

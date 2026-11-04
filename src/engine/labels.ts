@@ -14,7 +14,8 @@ import type { ElementEval } from './elements.js';
  * 2. Isotonic calibration (pool-adjacent-violators) maps each path's score to its measured precision, so a
  *    higher score never means a lower precision. Paths with few labels share the pooled fit.
  * 3. "Ready" needs the one-sided 95% lower bound of that precision to be at least 0.99. At zero errors that
- *    takes about 300 labels on the path (the rule of three). Under it, the element stays under the bar.
+ *    takes about 300 labels on the path (the rule of three). Under it, the element stays under the bar, its
+ *    precision squeezed into [0, threshold) so blocks keep their order (squeeze).
  *
  * Without labels nothing changes, and each evaluation says its confidence is uncalibrated.
  */
@@ -84,13 +85,21 @@ const sameFile = (a: string, b: string) => a === b || a.endsWith(`/${b}`) || b.e
  */
 export function labelFor(e: ElementEval, labels: Label[]): Label | undefined {
   return labels.find(l => l.id === e.id)
-    ?? labels.find(l => l.line === e.line && l.file !== undefined && sameFile(e.file, l.file) && (!l.app || l.app === e.target));
+    ?? labels.find(l => l.line === e.line && l.file !== undefined && sameFile(e.file, l.file) && (!l.app || l.app === e.target))
+    // A label may name any line of a multi-line opening tag.
+    ?? labels.find(l => l.line !== undefined && l.line > e.line && l.line <= (e.openEndLine ?? e.line) && l.file !== undefined && sameFile(e.file, l.file) && (!l.app || l.app === e.target));
 }
 
 /** Is the recommendation right by the label? The truth, or any acceptable alternative. */
 export const isCorrect = (e: Recommendation, l: Label) => same(e, l.truth) || (l.acceptableAlts ?? []).some(a => same(e, a) || (e.verdict === 'replace' && a.use === e.use && a.props === undefined));
 
 export const pathOf = (e: { ruleId: string; verdict: string }) => `${e.ruleId}|${e.verdict}`;
+
+/**
+ * A not-ready block's measured precision, mapped into [0, threshold) keeping order: v·(threshold − 0.001),
+ * to three decimals. A block that isn't ready can't claim, but ranking and coverage still see how good it is.
+ */
+export const squeeze = (v: number, threshold: number) => Math.floor(Math.max(0, Math.min(1, v)) * (threshold - 0.001) * 1000) / 1000;
 
 /** Wilson score interval, one-sided 95% lower bound. */
 export function lowerBound(k: number, n: number): number {
@@ -172,9 +181,8 @@ export function applyLabels(evals: ElementEval[], labels: Label[], threshold: nu
     const precision = Math.round((b.k / b.n) * 1000) / 1000, lower = Math.round(lowerBound(b.k, b.n) * 1000) / 1000;
     const ready = lower >= READY_LOWER_BOUND;
     const before = e.confidence;
-    let conf = Math.max(0.2, Math.min(0.98, precision));
-    if (!ready) conf = Math.min(conf, Math.round((threshold - 0.01) * 100) / 100);
-    e.confidence = Math.round(conf * 100) / 100;
+    // Not ready is only "not ready": the block keeps its place in the order, squeezed under the bar.
+    e.confidence = ready ? Math.round(Math.min(0.98, precision) * 1000) / 1000 : squeeze(precision, threshold);
     e.needsHuman = e.confidence < threshold;
     e.calibration = { status: 'calibrated', path: key, n: b.n, precision, lower, ready, ...(own ? {} : { pooled: true }) };
     e.reasons.push({ text: `Measured on labels: ${Math.round(precision * 100)}% right at this score (${b.k} of ${b.n}${own ? '' : ', all paths pooled'}); lower bound ${Math.round(lower * 1000) / 10}%${ready ? '' : ', under the 99% that ready needs'}.`, delta: Math.round((e.confidence - before) * 100) / 100 });
