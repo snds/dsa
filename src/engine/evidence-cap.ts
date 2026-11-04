@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { cardPicks, ownKey, ownOf } from './autopick.js';
+import { freshShots } from './fresh.js';
 import type { ElementEval } from './elements.js';
 import { proposalKey, readProposals } from './rendered.js';
 import { openStore } from './store.js';
@@ -20,8 +21,9 @@ export interface EvidenceCap { from: number; why: string[] }
 interface Evidence { shots: Record<string, any>; proposals: Record<string, any>; picks: Map<string, any> }
 
 function evidenceOf(dataDir: string, evals: ElementEval[], threshold: number): Evidence {
+  // Only this run's photos count (fresh.ts): one from an older run, or unstamped, is missing.
   let shots: Record<string, any> = {};
-  try { shots = JSON.parse(fs.readFileSync(path.join(dataDir, 'shots', 'index.json'), 'utf8')).shots ?? {}; } catch { /* no screenshots */ }
+  try { shots = freshShots(JSON.parse(fs.readFileSync(path.join(dataDir, 'shots', 'index.json'), 'utf8'))).shots; } catch { /* no screenshots */ }
   const picks = new Map<string, any>();
   // Uncapped, so the cap doesn't decide which questions exist and from them what's proposed.
   for (const c of cardPicks(dataDir, evals.map(uncapped), threshold)) for (const id of c.ids) picks.set(id, c.auto);
@@ -36,10 +38,14 @@ const uncapped = (e: ElementEval): ElementEval => ((e as any).evidenceCap ? { ..
  * drawing from the app's own code (Sean's call, "count it, labelled"): its component mounted through the
  * app's own Vite server and styles, found by its exact source tag, and not blank. It runs the real
  * component with the real styles, so it shows how the element looks, though not that it's reachable live
- * (placement still ignores it). Static markup doesn't count.
+ * (placement still ignores it). Static markup doesn't count. An isolated render (the shot index's
+ * `source: "isolated"`) counts ahead of a drawing with guessed props.
  */
 export function seenInApp(s: any): boolean {
   if (!s || s.blank || s.covered) return false;
+  // An isolated render: mounted in the app's own build with the props it was recorded with. It draws the
+  // element as the app does, so it counts, labelled as such (not as a live photo).
+  if (s.source === 'isolated') return true;
   if (s.drawn) return s.drawn === 'mount' && Boolean(s.exact);
   return Boolean(s.tagged || (s.matchScore ?? 0) >= PHOTO_MIN_MATCH);
 }
@@ -49,9 +55,11 @@ const visible = seenInApp;
 export function evidenceGaps(e: ElementEval, ev: Evidence, evals: ElementEval[]): string[] {
   const why: string[] = [];
   const own = ev.shots[e.id];
-  // A photo of the element, or of one that looks the same (the card shows one photo per look).
-  const sameLook = e.styleSig ? evals.filter((x) => x.styleSig === e.styleSig && x.id !== e.id).some((x) => visible(ev.shots[x.id])) : false;
-  if (!visible(own) && !sameLook) {
+  // Its own photo only. A photo of another element with the same classes isn't evidence of this one: the
+  // same classes can still draw differently (other words, another parent, a state), and the card labels
+  // that photo with the other element's file and line. The trust rubric applies the same rule.
+  void evals;
+  if (!visible(own)) {
     why.push(!own || (own.drawn && !seenInApp({ ...own, blank: false })) ? 'there is no photo of it in the app'
       : own.blank ? "its photo shows nothing (it may need a state the crawler couldn't set)"
       : own.covered ? 'something else covers it in its photo'

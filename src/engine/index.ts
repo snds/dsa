@@ -15,6 +15,7 @@ export * from './classify.js';
 export * from './config.js';
 export * from './autopick.js';
 export * from './evidence-cap.js';
+export * from './fresh.js';
 export * from './plain.js';
 export * from './png.js';
 export * from './elements.js';
