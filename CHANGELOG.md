@@ -37,6 +37,13 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   what was still missing could push one past the limit. Now each page gets up to 12 replays,
   openers that reveal the most go first, and an opener matched only by its words on one page is tried
   again on the next page that has it.
+- Apps that navigate by state in their root component, not by routes (`activeNav`, `setupTakeover`): an
+  element's conditions are set level by level, outermost first. The root counts as on every page, and each
+  component below is set once the level above has drawn it, with a photo after each level. A custom hook's
+  own state hooks are counted from its source, so a component that calls one before its `useState` can
+  still be set. The page's line says which level didn't show.
+- Drawings set state only as a last try, on a fresh drawing, after the traced clicks and the drawing's own
+  controls. Setting it first could change a drawing so that clicks which used to reveal an element didn't.
 - A `live.apps[name]` entry with only settings (`readPaths`, `readApi`, `auth`, `signIn`) and no `url` or
   `dir` no longer skips the app as "a live surface needs url or dir". Its settings apply to the app dsa
   starts itself, and the log names the reads it allows.

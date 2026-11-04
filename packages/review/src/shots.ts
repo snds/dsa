@@ -935,7 +935,17 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     if (!o.draw?.root) return [];
     const d = o.draw;
     const gates = (r.e.reach?.gates ?? []).map((g: any) => ({ ...g, file: g.file && path.isAbsolute(g.file) ? path.relative(d.root, g.file).split(path.sep).join('/') : g.file }));
-    try { return stateSets(gates, (f) => readSource(d.root, f, d.dir)); } catch { return []; }
+    // A custom hook's own hooks are counted from its source (the file itself, its imports, then the app).
+    const hookCode = (name: string, from: string) => {
+      const abs = path.resolve(d.root, from);
+      const read = (f?: string) => { try { return f ? fs.readFileSync(f, 'utf8') : ''; } catch { return ''; } };
+      const own = read(abs);
+      const decl = new RegExp(`\\b(?:function|const|let)\\s+${name}\\b`);
+      if (decl.test(own)) return own;
+      const f = importsNear(d, abs, 2).find(x => decl.test(read(x))) ?? declaredIn(d, name);
+      return f ? read(f) : null;
+    };
+    try { return stateSets(gates, (f) => readSource(d.root, f, d.dir), hookCode); } catch { return []; }
   }
   function describeSets(sets: StateSet[]) { return sets.flatMap(x => x.slots.map(sl => `${sl.name} = ${JSON.stringify(sl.value)}`.slice(0, 40))).join(', '); }
 
@@ -949,7 +959,10 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     if (!files || !o.draw?.root) return;
     const groups = new Map<string, { sets: StateSet[]; mine: Target[] }>();
     for (const r of remaining) {
-      const sets = stateFor(r).filter(x => files.has(x.file) || files.has(r.e.file));
+      // Every level, outermost first: the root (on every page) and components it only renders once its
+      // state is set. Found on the page by walking up from what it shows.
+      void files;
+      const sets = stateFor(r);
       if (!sets.length) continue;
       const k = JSON.stringify(sets);
       const g = groups.get(k) ?? { sets, mine: [] };
@@ -961,14 +974,22 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     for (const g of [...groups.values()].sort((a, b) => b.mine.length - a.mine.length)) {
       if (!remaining.length || tries >= 10 || Date.now() >= phase1End) break;
       if (!g.mine.some(r => remaining.includes(r))) continue;
-      const set = await inPage<number>(page, SET_STATE, { sets: g.sets }).catch(() => 0);
       tries++;
+      // Level by level: each set renders the next component down, which is set after it shows.
+      const done: StateSet[] = [];
+      for (const one of g.sets) {
+        const n = await inPage<number>(page, SET_STATE, { sets: [one] }).catch(() => 0);
+        if (!n) break;
+        done.push(one);
+        await page.waitForTimeout(o.waitMs); await settle();
+        if (g.sets.length > 1) await sweep(`setting ${describeSets(done)}`);
+      }
       const what = describeSets(g.sets);
-      if (!set) { said.push(`${what}: its component isn't on this page`); continue; }
-      await page.waitForTimeout(o.waitMs); await settle();
-      await sweep(`setting ${what}`);
+      if (!done.length) { said.push(`${what}: its component isn't on this page`); continue; }
+      if (g.sets.length === 1) await sweep(`setting ${what}`);
+      const missed = g.sets.slice(done.length).map(x => x.component);
       const found = g.mine.length - g.mine.filter(r => remaining.includes(r)).length;
-      said.push(`${what}: found ${found}`);
+      said.push(`${what}: found ${found}${missed.length ? ` (${missed.join(' › ')} didn't show after the levels above were set)` : ''}`);
       for (const r of g.mine) if (remaining.includes(r)) note(r, `set ${what} on ${routeOf(u)}: still not shown`);
       const same = page.url().split('#')[0] === u.split('#')[0];
       await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
@@ -982,17 +1003,23 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
    * An element its mounted component didn't show: click what the scan traced as opening it, then each of the
    * drawing's own toggles, tabs and menus (never one that saves, deletes or leaves), looking after each.
    */
-  async function revealInMount(r: Target, find: () => Promise<any>): Promise<{ hit: any; after: string; tried: string }> {
+  async function revealInMount(r: Target, find: () => Promise<any>, remount: () => Promise<Mounted>): Promise<{ hit: any; after: string; tried: string }> {
     const names: string[] = [];
-    // Its conditions on the drawing's own state, set through React.
-    const sets = stateFor(r);
-    if (sets.length && await inPage<number>(page, SET_STATE, { sets, within: '#dsa-mount' }).catch(() => 0)) {
-      await page.waitForTimeout(300);
-      const hit = await find();
+    // Last, on a fresh drawing (the clicks below changed this one): its conditions on the drawing's own
+    // state, set through React, level by level.
+    const byState = async () => {
+      const sets = stateFor(r);
+      if (!sets.length) return null;
+      const again = await remount();
+      if (!again.ok) return null;
+      let set = 0;
+      for (const one of sets) { set += await inPage<number>(page, SET_STATE, { sets: [one], within: '#dsa-mount' }).catch(() => 0); await settle(1500); }
+      if (!set) return null;
       const what = `setting ${describeSets(sets)}`;
-      if (hit) return { hit, after: what, tried: '' };
       names.push(what);
-    }
+      const hit = await find();
+      return hit ? { hit, after: what, tried: '' } : null;
+    };
     // A few seconds per element: drawing every element left must not cost more than the live pass did.
     const until = Date.now() + 8000;
     const use = async (event: string, value?: string) => {
@@ -1030,6 +1057,8 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       const hit = await find();
       if (hit) return { hit, after: name, tried: '' };
     }
+    const st = await byState();
+    if (st) return st;
     return { hit: null, after: '', tried: names.slice(0, 6).join(', ') + (names.length > 6 ? ', …' : '') };
   }
 
@@ -1117,7 +1146,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
             let hit = await find();
             // Behind a state inside it: the clicks the scan traced, then the drawing's own toggles, tabs and menus.
             let tried = '';
-            if (!hit) { const rv = await revealInMount(r, find); hit = rv.hit; revealed = rv.after; tried = rv.tried; }
+            if (!hit) { const rv = await revealInMount(r, find, () => mountAs(parent || r.e.within!)); hit = rv.hit; revealed = rv.after; tried = rv.tried; }
             if (hit) { how = 'mount'; exact = Boolean(hit.exact); drawnBy = parent; wrapped = wraps.map(w => w.name).join(', '); }
             else unmounted = `${label} mounted${providers ? ` with ${providers} of the app's providers` : ''}, but the element wasn't in what it drew (a condition inside it wasn't met${tried ? `; clicked ${tried} in it` : ''})`;
           } else {

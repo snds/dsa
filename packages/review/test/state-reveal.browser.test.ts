@@ -59,3 +59,42 @@ test("elements behind a component's own state are shown live by setting it", { t
   assert.match(all, /on \/colours after setting openColour = \{"name":""\}/);
   assert.match(all, /state on \/colours: .*found 1/);
 });
+
+// An app that navigates by its root's state, not routes: a custom hook first (its own hooks counted from
+// its source), then setupTakeover and activeNav; under it PartnersView's own open. Set outermost first.
+const NAV: Record<string, string> = {
+  'index.html': APP['index.html']!,
+  'public/app.css': APP['public/app.css']!,
+  'vite.config.js': APP['vite.config.js']!,
+  'src/main.jsx': `import { createRoot } from 'react-dom/client';\nimport { App } from './App.jsx';\ncreateRoot(document.getElementById('root')).render(<App />);\n`,
+  'src/useSession.js': `import { useEffect, useState } from 'react';\nexport function useSession() {\n  const [user, setUser] = useState(null);\n  useEffect(() => { setUser({ name: 'Ada' }); }, []);\n  return user;\n}\n`,
+  'src/App.jsx': `import { useState } from 'react';\nimport { useSession } from './useSession.js';\nimport { PartnersView } from './PartnersView.jsx';\nexport function App() {\n  const user = useSession();\n  const [setupTakeover, setSetupTakeover] = useState(true);\n  const [activeNav, setActiveNav] = useState('Home');\n  if (setupTakeover) return <main><h1>Finish setting up</h1><p>{user?.name}</p></main>;\n  return <main><nav>{activeNav}</nav>\n    {activeNav === 'Partners' && <PartnersView />}</main>;\n}\n`,
+  'src/PartnersView.jsx': `import { useState } from 'react';\nexport function PartnersView() {\n  const [open, setOpen] = useState(false);\n  return <section><h1>Partners</h1>\n    {open && <div>\n      <button className="btn">Add facility</button>\n    </div>}</section>;\n}\n`,
+};
+
+test("an app that navigates by its root's state: each level set, outermost first, and photographed live", { timeout: 300_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  const kit = path.resolve(import.meta.dirname, '../../dashboard/ui/node_modules');
+  if (!fs.existsSync(path.join(kit, 'vite')) || !fs.existsSync(path.join(kit, 'react'))) skip('no Vite installed');
+  // The custom hook's own state counts: App's setupTakeover is its second state hook, not its first.
+  assert.deepEqual(stateOrder(NAV['src/App.jsx']!, 'App', (n) => (n === 'useSession' ? NAV['src/useSession.js']! : null)), [null, 'setupTakeover', 'activeNav']);
+  assert.deepEqual(stateOrder(NAV['src/App.jsx']!, 'App'), []);
+  const root = fixtureCopy();
+  const dir = path.join(root, 'apps', 'partners');
+  for (const [f, c] of Object.entries(NAV)) { fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }); fs.writeFileSync(path.join(dir, f), c); }
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'partners', private: true, type: 'module', scripts: { dev: 'vite' }, dependencies: { '@acme/ds-react': '^4.9.0', react: '^18.3.0' } }));
+  fs.symlinkSync(kit, path.join(dir, 'node_modules'), 'dir');
+  const data = path.join(root, '.dsa');
+  await runPipeline({ root, dataDir: data, git: false, now: NOW });
+  const { evals } = await latestEvals(data);
+  const target = evals.find(e => e.file.endsWith('PartnersView.jsx') && e.match.text === 'Add facility');
+  assert.ok(target, evals.map(e => `${e.file}:${e.line} ${e.match.text}`).join('\n'));
+  const logs: string[] = [];
+  const config = loadConfig(root).config as any;
+  config.shots = { ...(config.shots ?? {}), maxMinutes: 2, waitMs: 200 };
+  await takeShots({ root, dataDir: data, config, target: 'partners', perGroup: 20, log: m => logs.push(m) });
+  const idx = JSON.parse(fs.readFileSync(path.join(data, 'shots', 'index.json'), 'utf8'));
+  const all = logs.join('\n');
+  assert.ok(idx.shots[target!.id] && !idx.shots[target!.id].drawn, `${JSON.stringify(target!.reach?.gates)}\n${all}`);
+  assert.match(all, /after setting setupTakeover = false, activeNav = "Partners", open = true/);
+});

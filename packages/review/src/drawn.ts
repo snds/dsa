@@ -592,24 +592,38 @@ const QUEUE_OTHER = /^use(Transition|ActionState|Optimistic|FormState)$/;
  * (`const [open, setOpen] = useState(…)` → open), null for another hook that keeps state. Stops at the
  * first custom hook, whose own hooks can't be counted from here.
  */
-export function stateOrder(code: string, component: string): (string | null)[] {
+export function stateOrder(code: string, component: string, hookCode?: (name: string) => string | null): (string | null)[] {
+  return orderOf(code, component, hookCode, 0).out;
+}
+
+function orderOf(code: string, component: string, hookCode: ((name: string) => string | null) | undefined, depth: number): { out: (string | null)[]; complete: boolean } {
   const ast = parse(code);
   const fn = ast ? componentFn(ast, component) : null;
   const out: (string | null)[] = [];
-  if (!fn?.body?.body) return out;
+  if (!fn?.body?.body) return { out, complete: false };
+  // A custom hook the app declares: its own hooks keep state too (counted, unnamed). Null when it can't be read.
+  const inner = (name: string): (string | null)[] | null => {
+    if (depth > 3 || !hookCode) return null;
+    const src = hookCode(name);
+    if (!src) return null;
+    const got = orderOf(src, name, hookCode, depth + 1);
+    // Only when every hook inside it was counted: one it couldn't read leaves the order unknown.
+    return got.complete ? got.out.map(() => null) : null;
+  };
   const nameOf = (c: any) => c?.type === 'Identifier' ? c.name : c?.property?.name ?? '';
   for (const st of fn.body.body) {
     const calls: { name: string; id: any }[] = [];
     if (st.type === 'VariableDeclaration') for (const d of st.declarations) { if (d.init?.type === 'CallExpression') calls.push({ name: nameOf(d.init.callee), id: d.id }); }
     else if (st.type === 'ExpressionStatement' && st.expression?.type === 'CallExpression') calls.push({ name: nameOf(st.expression.callee), id: null });
+    else if (st.type === 'ReturnStatement' && st.argument?.type === 'CallExpression') calls.push({ name: nameOf(st.argument.callee), id: null });
     for (const c of calls) {
       if (!/^use[A-Z]/.test(c.name)) continue;
       if (c.name === 'useState' || c.name === 'useReducer') out.push(c.id?.type === 'ArrayPattern' && c.id.elements[0]?.type === 'Identifier' ? c.id.elements[0].name : null);
       else if (QUEUE_OTHER.test(c.name)) out.push(null);
-      else if (!NO_QUEUE.test(c.name)) return out;
+      else if (!NO_QUEUE.test(c.name)) { const k = inner(c.name); if (!k) return { out, complete: false }; out.push(...k); }
     }
   }
-  return out;
+  return { out, complete: true };
 }
 
 /**
@@ -617,13 +631,13 @@ export function stateOrder(code: string, component: string): (string | null)[] {
  * `!singleView`, `mode === 'current'`, `a || b` false), that hook and a value: a literal from the test, a
  * value shaped by how the component reads it, or true / false. Gates on props or members are left alone.
  */
-export function stateSets(gates: { test: string; negated: boolean; component?: string; file?: string }[], read: (file: string) => string | null): StateSet[] {
+export function stateSets(gates: { test: string; negated: boolean; component?: string; file?: string }[], read: (file: string) => string | null, hookCode?: (name: string, from: string) => string | null): StateSet[] {
   const out = new Map<string, StateSet>();
   for (const g of gates) {
     if (!g.component || !g.file) continue;
     const code = read(g.file);
     if (!code) continue;
-    const order = stateOrder(code, g.component);
+    const order = stateOrder(code, g.component, hookCode ? (n) => hookCode(n, g.file!) : undefined);
     if (!order.some(Boolean)) continue;
     const ast = parse(code);
     const fn = ast ? componentFn(ast, g.component) : null;
