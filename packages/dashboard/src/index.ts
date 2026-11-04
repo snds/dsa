@@ -5,10 +5,17 @@ import { createRelay, relayEnvProblems, relayOptionsFromEnv } from '@snds/dsa/re
 import { buildReport } from './report.js';
 import { publish } from './publish.js';
 import { serve } from './server.js';
+import { benchCommands } from './bench-cli.js';
 
 export { buildReport, renderReport, type ReportOptions } from './report.js';
 export { publish, siteDir } from './publish.js';
 export { serve, startServer, readView, saveView, type ServeOptions } from './server.js';
+export { trustRubric, CRITERIA, CRITERION_TEXT, CARD_CRITERIA, type TrustScore, type TrustRow, type Criterion, type Source } from './trust.js';
+export { PROBE_CARDS, probeCards, type CardFacts } from './card-dom.js';
+export { bench, benchText, correctness, repeatability, predictionsOf, matchLabels, isCorrect, type BenchResult, type Correctness, type Prediction } from './bench.js';
+export { migratedLabels, historyLabels, reviewQueue, stripTargets, sourceRef, type QueueItem as LabelQueueItem } from './labels.js';
+export { payloadOf, cardsOf } from './bench-cli.js';
+export { wilson, lowerBound } from './stats.js';
 export { buildQueue, createIssues, syncLinks, readState, agentPrompt, PKG_DIR, type QueueItem } from './queue.js';
 
 /** Where `dsa run` and `dsa report` write the single-file report. */
@@ -34,6 +41,7 @@ export default defineAddon({
   ],
   commands(program: Command, api: AddonApi) {
     noReport(program, 'run');
+    benchCommands(program, api);
     noReport(program, 'reevaluate');
 
     program

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ConfigSchema } from "../config.js";
+import { LabelSchema } from "../labels.js";
 
 /**
  * Zod mirrors of the report types. They are the source of the JSON Schema
@@ -227,6 +228,7 @@ export const SCHEMA_FILES: SchemaFile[] = [
   { file: "ratchet-report.json", title: "dsa ratchet report", schema: RatchetReportSchema },
   { file: "checklist-report.json", title: "dsa checklist report", schema: ChecklistReportSchema },
   { file: "checklist-answers.json", title: "dsa.checklist.json", schema: ChecklistAnswersSchema },
+  { file: "label.json", title: "dsa labels.jsonl (one line)", schema: LabelSchema },
 ];
 
 export function toJsonSchema(entry: SchemaFile): Record<string, unknown> {

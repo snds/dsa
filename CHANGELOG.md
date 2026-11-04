@@ -8,6 +8,28 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- `dsa bench` scores two numbers and never merges them. Presentation: the trust rubric, with the card
+  checks read from each published page in a headless browser (`--no-cards` leaves them untested).
+  Correctness: dsa's recommendations against `labels.jsonl` ground truth, with abstention (under the
+  ready bar) kept apart from error. It reports precision, recall, abstention and error rate; how much
+  dsa could claim at 99% precision and from what confidence; a reliability curve in 0.05 bins with its
+  expected calibration error (ECE); the one-sided 95% lower bound on precision at the ready bar
+  (Clopper-Pearson); and Wilson intervals per app and per picture source. With several `--site`
+  folders of the same build it reports repeatability: rubric passes that flip, recommendations that
+  flip, the confidence spread, and cards that cross the ready line.
+- `labels.jsonl`: one label per line, `{id, app, file, line, sourceRef, elementHash, truth: {verdict,
+  use, props}, acceptableAlts, labeler, method, at, notes}`, with `method` one of human, migrated,
+  history, lint or consensus. `schema/label.json` and a zod validator (`LabelSchema`, `parseLabels`);
+  `dsa labels check <file>` validates a file.
+- `dsa labels` bootstraps ground truth from code that already answers. `migrated`: each app is copied to
+  a work folder with every system component stripped back to the markup it renders (its host tag and the
+  classes its variant and size add, its own classes kept, lines unchanged), and each is labelled with
+  what was there; scan the copy and bench it. Signatures now keep each variant and size's classes
+  (`classes`) for this. `history`: commits that turned a raw element into a system component label the
+  raw element at the commit before (a shallow clone says it has no history to read). `queue`: where dsa
+  and the labels, two labels, or a second judge's labels disagree, plus a seeded 10% random audit of the
+  rest, for people to check; human labels are never queued again. The apps are only read.
+
 - Only this run's screenshots count. The crawler stamps `shots/index.json` with its run
   (`run: { id, ref, at }`, `ref` the source commit or "worktree") and each shot with the run that took
   it and when (`run`, `at`). A shot from an older run taken before this run began, or one with no stamp
