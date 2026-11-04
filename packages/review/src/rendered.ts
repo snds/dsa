@@ -284,13 +284,13 @@ export async function renderProposals(opts: { root: string; config: Config; data
   try {
     for (const [k, p] of todo) {
       const s = sigOf(p.use);
-      if (!s) { items[k] = { ...noOwn(p), check: 'none', note: `${p.use} isn't a component dsa found in the design system's source, so it can't be drawn.`, hash: hashOf(p.use) }; continue; }
+      if (!s) { items[k] = { ...noOwn(p), check: 'none', noSource: true, note: `${p.use} isn't a component dsa found in the design system's source, so it can't be drawn.`, hash: hashOf(p.use) }; continue; }
       let best: Proposal | null = null;
       if (await source()) best = await fromSource(hpage, s, p, k, dir, hashOf(p.use));
       // Done: exact, with the element's own content, or (with none of its own) without a stand-in label.
       const done = (b: Proposal | null) => Boolean(b && b.check === 'exact' && b.shot && (p.own ? b.own : !b.content));
       if (!done(best) && (await storybook())) best = pickBetter(best, await fromStories(sbs!, s, p, k, dir, hashOf(p.use), rendered === 0));
-      items[k] = best ?? { ...noOwn(p), check: 'none', note: `${p.use} couldn't be drawn${sbWhy ? `: there's no Storybook to draw it from (${sbWhy})` : ''}.`, hash: hashOf(p.use) };
+      items[k] = best ?? { ...noOwn(p), check: 'none', ...(sbWhy ? { noSource: true } : {}), note: `${p.use} couldn't be drawn${sbWhy ? `: there's no Storybook to draw it from (${sbWhy})` : ''}.`, hash: hashOf(p.use) };
       rendered++;
       if (rendered % 10 === 0) log(`  rendered ${rendered}/${todo.length}…`);
     }
@@ -360,7 +360,7 @@ async function fromStories(sb: { url: string; stories: any[]; page: any }, s: an
   const rank = (x: any) => (/default|playground|basic|primary/i.test(x.name) ? 0 : /all|variant|size|matrix|gallery|overview/i.test(x.name) ? 1 : 2);
   const stemOf = (f: string) => path.basename(f).split('.')[0]!.toLowerCase();
   const candidates = sb.stories.filter(x => stemOf(x.importPath) === stemOf(s.file)).sort((a, b) => rank(a) - rank(b)).slice(0, 8);
-  if (!candidates.length) return { ...noOwn(p), check: 'none', via: 'story', note: `${p.use} has no story to draw it from (${path.basename(s.file)}).`, hash };
+  if (!candidates.length) return { ...noOwn(p), check: 'none', noSource: true, via: 'story', note: `${p.use} has no story to draw it from (${path.basename(s.file)}).`, hash };
   const args = argsParam(p.props);
   const hasProps = Object.keys(p.props).length > 0;
   // First every story as its authors wrote it: one that already shows these props shows them with real content

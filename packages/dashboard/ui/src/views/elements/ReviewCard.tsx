@@ -320,19 +320,19 @@ function LookTile({ look, group, target, proposal, compare, measure }: { look: L
   const chk = proposalCheck(proposal)
   const wide = (e.shot.box?.w ?? 0) > 340
   return (
-    <figure className={cn("m-0 flex min-w-0 flex-col gap-2 rounded-lg border bg-muted/20 p-2", wide && "md:col-span-2 xl:col-span-3")}>
+    <figure className={cn("m-0 flex min-w-0 flex-col gap-2 rounded-lg border bg-muted/20 p-2", wide && "md:col-span-2 xl:col-span-3")} data-element-id={e.id}>
       <SameScale
         app={{ url: e.shot.url, box: e.shot.box, alt: `${sourceLabel(e.shot)}: ${e.snippet.slice(0, 60)}`, onOpen: () => openAt(e.id) }}
         proposed={compare ? (exact ? { url: exact.url, alt: `Proposed: ${SYS} ${pickText(target)}` } : closest ? { url: closest.url, alt: `Closest ${SYS} variant: ${target.use} ${closest.key}` } : null) : undefined}
         appLabel={
           <>
-            {/* A photo of the running app (a covering layer may have been hidden), drawn from the app's code, or markup only. */}
+            {/* A photo of the running app (a covering layer may have been hidden), an isolated render, drawn from the app's code, or markup only. */}
             <span className="font-medium text-foreground" title={sourceTip(e.shot)}>{sourceLabel(e.shot)}</span>
             <Badge variant="outline" className="text-[10px] font-normal" title="The app this element is in">{e.target}</Badge>
             <button type="button" onClick={() => openCode(e.id)} className="truncate font-mono text-[11px] underline-offset-4 hover:text-foreground hover:underline" title="Open the code">{short(e.file)}:{e.line}</button>
-            {e.shot.drawn ? null : e.shot.tagged ? <span title="The app was built with source tags: this is the node this line of code made">matched by source tag</span>
+            {e.shot.drawn || e.shot.source === "isolated" ? null : e.shot.tagged ? <span title="The app was built with source tags: this is the node this line of code made">matched by source tag</span>
               : <span className="tabular-nums" title="How sure the crawler is that this is the element">match {Math.round(e.shot.match * 100)}%</span>}
-            {e.shot.drawn ? null : e.shot.tagged ? (e.shot.ties > 1 ? <span title="This line renders several nodes (a list); any of them stands for it">one of {e.shot.ties} rendered by this line</span> : null)
+            {e.shot.drawn || e.shot.source === "isolated" ? null : e.shot.tagged ? (e.shot.ties > 1 ? <span title="This line renders several nodes (a list); any of them stands for it">one of {e.shot.ties} rendered by this line</span> : null)
               : e.shot.shared > 1 ? <span title="Identical controls in other files match the same place on the page; which is which is a guess">one of {e.shot.shared} lines that look the same</span>
               : e.shot.ties > 1 && e.shot.alike >= e.shot.ties ? <span title="Several identical elements on the page match it; any of them shows how it looks">one of {e.shot.ties} alike on the page</span> : null}
             {e.shot.via && <span>shown on {e.shot.via}</span>}
@@ -353,7 +353,7 @@ function LookTile({ look, group, target, proposal, compare, measure }: { look: L
       {others.length > 0 && (
         <div className="flex flex-wrap gap-1" aria-label={`The other ${others.length} cases with this look`}>
           {others.map(x => (
-            <button key={x.id} type="button" onClick={() => openAt(x.id)} className="h-9 max-w-24 cursor-zoom-in overflow-hidden rounded border bg-background" title={`${x.target} · ${short(x.file)}:${x.line}`}>
+            <button key={x.id} type="button" onClick={() => openAt(x.id)} className="h-9 max-w-24 cursor-zoom-in overflow-hidden rounded border bg-background" title={`${x.target} · ${short(x.file)}:${x.line}`} data-element-id={x.id}>
               <img src={x.shot.url} alt={`Same look in ${x.target}: ${x.snippet.slice(0, 40)}`} loading="lazy" className="block h-full w-auto object-contain" />
             </button>
           ))}

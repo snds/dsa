@@ -391,5 +391,5 @@ export function ReviewControls({ items, auto, pattern, options, label }: { items
  * component, mounted with the app's styles, found by its exact tag: counts as seeing it); or markup only
  * (its JSX written out: shown, doesn't count).
  */
-export const sourceLabel = (s: any) => (s?.drawn === "mount" ? "Drawn from the app's code" : s?.drawn ? "Markup only" : "Live app screenshot")
-export const sourceTip = (s: any) => (s?.drawn === "mount" ? "Rendered from this file's component with the app's styles; not seen on a live page." : s?.drawn ? "This element's code written out as plain markup with the app's styles; no component ran." : undefined)
+export const sourceLabel = (s: any) => (s?.source === "isolated" ? "Isolated render" : s?.drawn === "mount" ? "Drawn from the app's code" : s?.drawn ? "Markup only" : "Live app screenshot")
+export const sourceTip = (s: any) => (s?.source === "isolated" ? "Mounted in the app's own build with the props it was seen with, so it draws as the app draws it; not a photo of a live page." : s?.drawn === "mount" ? "Rendered from this file's component with the app's styles and guessed props; not seen on a live page." : s?.drawn ? "This element's code written out as plain markup with the app's styles; no component ran." : undefined)

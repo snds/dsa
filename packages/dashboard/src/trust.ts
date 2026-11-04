@@ -1,139 +1,220 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { BLANK_INSET, CODE_TERMS, decodePng, isBlank, seenInApp } from '@snds/dsa/engine';
+import type { CardFacts } from './card-dom.js';
 
 /**
- * Can a person trust a recommendation from the card alone? Ten checks, all of which must hold on the
- * card where the person approves it (the review QA rubric):
+ * Can a person trust a recommendation from the card alone? This is the presentation score: it says
+ * whether the card shows enough to judge the recommendation, never whether the recommendation is right
+ * (that is `dsa bench`'s correctness score, kept apart on purpose).
  *
- *   C1  the current element is shown: a photo of the live app (matched by its source tag, or at or over the
- *       80% match the page shows), or a drawing from the app's code (its component mounted with the app's
- *       styles, found by its exact tag). Markup only doesn't count.
- *   C2  …and it is visible (the ringed box has painted pixels)
- *   C3  …and labelled (in the app, which app, file:line, match)
- *   C4  the proposal is rendered with the exact props and the element's own content
- *   C5  …and labelled (a render, the component and its props)
- *   C6  both side by side at the same scale
- *   C7  the reasons are in plain words (no attribute names, .map(), role=, braces, class names)
- *   C8  the place (file:line) opens the code
- *   C9  the stated confidence matches what can be seen: under the "ready" bar, or both C2 and C4
- *   C10 nothing is "not renderable" without a reason and a fallback image
+ * Each check is a pass, a fail, or not applicable. A check that depends on an earlier one is not
+ * applicable when that one fails, so one missing photo is counted once, not four times:
  *
- * Data decides C1, C2, C4, C9 and part of C7 and C10. What the card draws decides the rest; `card` says
- * what this version's card shows (CARD, kept true by the card's own tests), so an older card can be
- * scored on the same data.
+ *   shown          Current element shown: its own photo of the live app (found by its source tag, or at
+ *                  or over the 80% match the page shows), an isolated render (mounted in the app's build
+ *                  with recorded props), or a drawing from the app's code found by its exact tag; painted,
+ *                  not covered, and from this run (fresh.ts). Another element's photo doesn't count.
+ *   photoLabel     [card] The photo says what it is, the app, file:line and the match.        (needs shown)
+ *   opensCode      [card] Its file:line opens the code.                                        (needs shown)
+ *   drawable       The system has something to draw the proposal from. "No drawable source" is
+ *                  its own class, apart from a drawing that went wrong.                 (replacements only)
+ *   exact          The proposal is drawn exactly, with these props.                        (needs drawable)
+ *   own            …with the element's own content, where it can be carried. Not applicable to
+ *                  containers (their content is other elements); an element with none fails only when
+ *                  the drawing adds a story's sample label to it.                          (needs exact)
+ *   proposalLabel  [card] The proposal says "Proposed" (or which stand-in it is) and the component.
+ *   sameScale      [card] Photo and proposal one above the other at one CSS scale. (needs shown and a proposal)
+ *   plain          Reasons and how-lines in plain words: no attribute names, class names, utility classes
+ *                  (px-2, size-5) or CSS variables (--radius-md).
+ *   confidence     The confidence matches what can be seen: under the ready bar, or shown and drawn exactly
+ *                  with its own content.
+ *   fallback       Not drawn exactly: a reason and an image in its place.    (when exact fails, not
+ *                                                                              when nothing can draw it)
+ *
+ * [card] checks are read from the rendered card (card-dom.ts). Without it they are "untested": they
+ * neither pass nor fail, and the score says so.
  */
-export interface CardShows {
-  /** "In the app", the app, a clickable file:line and the match beside each photo. */
-  photoLabels: boolean;
-  /** A render with the component name and its props. */
-  proposalLabels: boolean;
-  /** The photo and the proposal at one CSS scale. */
-  sameScale: boolean;
-  /** The element's file:line opens the code viewer. */
-  placeOpens: boolean;
-  /** Reasons and "how" lines in plain words on the face, the scanner's own words in Technical details. */
-  plainReasons: boolean;
-  /** Where the exact proposal isn't rendered, a reason and an image in its place (closest variant, or the story as written). */
-  fallback: boolean;
-}
-
-/** What this version's card shows. */
-export const CARD: CardShows = { photoLabels: true, proposalLabels: true, sameScale: true, placeOpens: true, plainReasons: true, fallback: true };
-
-export const CRITERIA = ['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9', 'C10'] as const;
+export const CRITERIA = ['shown', 'photoLabel', 'opensCode', 'drawable', 'exact', 'own', 'proposalLabel', 'sameScale', 'plain', 'confidence', 'fallback'] as const;
 export type Criterion = (typeof CRITERIA)[number];
 export const CRITERION_TEXT: Record<Criterion, string> = {
-  C1: 'Current element shown', C2: '…and visible', C3: '…and labelled', C4: 'Proposal rendered exactly, own content', C5: '…and labelled',
-  C6: 'Same scale, side by side', C7: 'Reasons in plain words', C8: 'Place opens the code', C9: 'Confidence matches the evidence', C10: 'No render without reason and fallback',
+  shown: 'Current element shown',
+  photoLabel: 'Photo labelled on the card',
+  opensCode: 'Place opens the code',
+  drawable: 'The system has something to draw',
+  exact: 'Proposal drawn exactly',
+  own: 'Own content where it can be carried',
+  proposalLabel: 'Proposal labelled on the card',
+  sameScale: 'Side by side at one scale',
+  plain: 'Reasons in plain words',
+  confidence: 'Confidence matches the evidence',
+  fallback: 'No render without reason and fallback',
 };
+/** The checks read from the rendered card. */
+export const CARD_CRITERIA: Criterion[] = ['photoLabel', 'opensCode', 'proposalLabel', 'sameScale'];
 
 /** The page shows a photo only at or over this match (Elements.tsx SHOT_MIN). */
 export const SHOT_MIN = 0.8;
+
+/** Roles whose element holds other elements: its own content is those, so "own content" doesn't apply. */
+export const CONTAINER_ROLES = new Set(['static-table', 'data-table', 'clickable-region', 'native-dialog', 'drop-target', 'selector-card', 'choice-tile']);
+
+/** A proposal nothing can draw: the component isn't in the system's source or stories in a form dsa can find. */
+const NO_SOURCE = /isn't a component dsa found|isn't in the design system's Storybook|has no story to draw it from|there's no Storybook to draw it from/;
 
 const proposalKey = (use: string, props?: Record<string, unknown> | null) => {
   const p = Object.entries(props ?? {}).filter(([k, v]) => k !== 'render' && k !== 'asChild' && v != null).sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([k, v]) => `${k}=${v}`).join(';');
   return p ? `${use}|${p}` : use;
 };
 
+export type Outcome = 'pass' | 'fail' | 'na' | 'untested';
+
+/**
+ * Where an element's picture came from. live: a photo of the running app. isolated: mounted in the app's
+ * build with the props it was recorded with. guessed: drawn from the app's code with guessed props (counts
+ * when found by its exact tag). markup: markup only (doesn't count). none: no picture.
+ */
+export type Source = 'live' | 'isolated' | 'guessed' | 'markup' | 'none';
+export const sourceOf = (s: any): Source => (!s ? 'none' : s.source === 'isolated' ? 'isolated' : s.drawn === 'mount' ? 'guessed' : s.drawn ? 'markup' : 'live');
+
+export interface TrustRow {
+  id: string;
+  target: string;
+  pass: boolean;
+  failed: Criterion[];
+  untested: Criterion[];
+  outcomes: Record<Criterion, Outcome>;
+  source: Source;
+  /** Held "ready" only because an element with the same classes has a photo (the engine's old rule). */
+  siblingPhoto: boolean;
+}
+
 export interface TrustScore {
   recommendations: number;
   passing: number;
+  /** Passing as a percentage of recommendations (one decimal). */
   rate: number;
-  criteria: Record<Criterion, { pass: number; rate: number }>;
+  criteria: Record<Criterion, { pass: number; fail: number; na: number; untested: number; rate: number }>;
   /** Each criterion with how many recommendations fail it, most first. */
   blocking: { criterion: Criterion; text: string; failing: number }[];
-  rows: { id: string; target: string; pass: boolean; failed: Criterion[]; source: Source }[];
-  /** Where each element's picture came from, so a report can say "N live, M drawn from code". */
+  rows: TrustRow[];
+  /** Where each element's picture came from, so a report can say "N live, M isolated, K drawn from code". */
   sources: Record<Source, number>;
+  /** Left out of the score: unused code, lab pages, exceptions, ignored. */
+  excluded: { unused: number; lab: number; exception: number; ignored: number };
+  /** The card checks that weren't read from a rendered card. */
+  untested: Criterion[];
+  /** Photos set aside as not from this run, and the oldest that counts, per app (when the page carries it). */
+  freshness: any | null;
 }
-
-/** live: a photo of the running app. code: drawn from the app's code (counts). markup: markup only (doesn't). none: no picture. */
-export type Source = 'live' | 'code' | 'markup' | 'none';
-const sourceOf = (s: any): Source => (!s ? 'none' : s.drawn === 'mount' ? 'code' : s.drawn ? 'markup' : 'live');
 
 /**
  * Score every recommendation in a report payload. `dir` is where the published page sits, to read the
- * photos for C2 (without it, a photo with a box counts as visible unless the capture flagged it blank).
+ * photos for "painted" (without it, a photo with a box counts as painted unless the capture flagged it
+ * blank). `cards` is what the rendered card showed (card-dom.ts); without it the card checks are untested.
  */
-export function trustRubric(payload: any, opts: { card?: CardShows; dir?: string } = {}): TrustScore {
-  const card = opts.card ?? CARD;
+export function trustRubric(payload: any, opts: { dir?: string; cards?: CardFacts[] | null } = {}): TrustScore {
   const E = payload.elements;
   const th = E?.threshold ?? 0.9;
-  const evals: any[] = (E?.evals ?? []).filter((e: any) => !e.exception && e.reach?.status !== 'unused' && e.verdict !== 'ignore');
+  const all: any[] = E?.evals ?? [];
+  const excluded = { unused: 0, lab: 0, exception: 0, ignored: 0 };
+  const evals = all.filter((e: any) => {
+    if (e.reach?.status === 'unused' || e.exception === 'unused') { excluded.unused++; return false; }
+    if (e.exception === 'lab') { excluded.lab++; return false; }
+    if (e.exception) { excluded.exception++; return false; }
+    if (e.verdict === 'ignore') { excluded.ignored++; return false; }
+    return true;
+  });
   // What each card proposes: a question's (or part's) auto-pick, else the element's own recommendation.
   const proposes = new Map<string, any>();
   for (const q of E?.questions ?? []) {
     for (const p of q.parts ?? []) for (const id of p.ids) proposes.set(id, p.auto);
     for (const id of q.ids) if (!proposes.has(id)) proposes.set(id, q.auto);
   }
-  const visible = new Map<string, boolean>();
-  const seen = (e: any) => {
+  const painted = new Map<string, boolean>();
+  const isPainted = (e: any) => {
     if (e.shot?.blank) return false;
     if (!opts.dir) return Boolean(e.shot?.box);
     const f = path.join(opts.dir, e.shot.url);
-    if (!visible.has(f)) {
+    if (!painted.has(f)) {
       let v = false;
       try { v = !isBlank(decodePng(fs.readFileSync(f)), e.shot.box, 2, BLANK_INSET); } catch { v = false; }
-      visible.set(f, v);
+      painted.set(f, v);
     }
-    return visible.get(f)!;
+    return painted.get(f)!;
   };
-  const rows = evals.map((e) => {
+  // The rendered card's facts, by element id, else by app and place (pages from before ids were written).
+  const byId = new Map<string, CardFacts>(), byPlace = new Map<string, CardFacts>();
+  for (const c of opts.cards ?? []) {
+    if (c.id) { if (!byId.has(c.id) || byId.get(c.id)!.thumb) byId.set(c.id, c); }
+    if (c.target && c.place) { const k = `${c.target}\u0001${c.place}`; if (!byPlace.has(k) || byPlace.get(k)!.thumb) byPlace.set(k, c); }
+  }
+  const factsOf = (e: any): CardFacts | null => byId.get(e.id) ?? byPlace.get(`${e.target}\u0001${String(e.file).replace(/^[^/]+\//, '')}:${e.line}`) ?? null;
+  const tested = Boolean(opts.cards);
+  const shownOf = (e: any) => Boolean(e.shot && seenInApp({ ...e.shot, matchScore: e.shot.match }) && isPainted(e));
+  const bySig = new Map<string, any[]>();
+  for (const e of evals) if (e.styleSig) bySig.set(e.styleSig, [...(bySig.get(e.styleSig) ?? []), e]);
+
+  const rows: TrustRow[] = evals.map((e) => {
     const r = proposes.get(e.id) ?? (e.decided ? e.decided.decision : e);
     const replace = r?.verdict === 'replace' && Boolean(r.use);
     const key = replace ? proposalKey(r.use, r.props) : '';
     const p = replace ? (e.ownHash && E.proposals?.[`${key}#${e.ownHash}`]) || E.proposals?.[key] || null : null;
-    const fallback = Boolean(e.rendered?.systemShot || e.systemPreview || p?.fallback || (p?.url && (p.check !== 'exact' || p.content)));
-    // A blank or covered photo isn't shown on the card (it says so instead). A source tag is proof of place:
-    // the photo is of the node that line made, whatever any score says.
-    const shown = Boolean(e.shot && seenInApp({ ...e.shot, matchScore: e.shot.match }));
+    const o = {} as Record<Criterion, Outcome>;
+    const card = factsOf(e);
+    const fromCard = (ok: boolean | null | undefined): Outcome => (!tested ? 'untested' : ok ? 'pass' : 'fail');
+
+    const shown = shownOf(e);
+    o.shown = shown ? 'pass' : 'fail';
+    o.photoLabel = !shown ? 'na' : fromCard(card?.photoLabel);
+    o.opensCode = !shown ? 'na' : fromCard(card?.opensCode);
+
+    // Nothing to draw from (not in the system's source or stories): its own class. A proposal never drawn
+    // at all (no entry) is a drawing still to do, not a missing source.
+    const noSource = replace && Boolean(p && p.check === 'none' && !p.url && (p.noSource || NO_SOURCE.test(p.note ?? '')));
+    o.drawable = !replace ? 'na' : noSource ? 'fail' : 'pass';
+    const exact = replace && !noSource && p?.check === 'exact' && Boolean(p.url);
+    o.exact = !replace || noSource ? 'na' : exact ? 'pass' : 'fail';
     // Its own words or icon to show: the proposal must carry them, not a story's sample. (Older reports
     // carry no ownHash; an element with a label has content of its own.)
     const hasOwn = e.ownHash !== undefined ? Boolean(e.ownHash) : Boolean(e.label);
-    const c: Record<Criterion, boolean> = {} as any;
-    c.C1 = shown;
-    c.C2 = shown && seen(e);
-    c.C3 = shown && card.photoLabels;
-    c.C4 = !replace || (p?.check === 'exact' && Boolean(p.url) && (hasOwn ? Boolean(p.own) : !p.content));
-    c.C5 = !replace || (Boolean(p?.url) && card.proposalLabels);
-    c.C6 = !replace ? shown : shown && Boolean(p?.url) && card.sameScale;
-    const face = [...(e.reasons ?? []).map((x: any) => (card.plainReasons && x.plain !== undefined ? x.plain : x.text)), card.plainReasons ? e.how : e.howRaw ?? e.how].filter(Boolean);
-    c.C7 = face.every((t: string) => !CODE_TERMS.test(t));
-    c.C8 = card.placeOpens;
-    c.C9 = e.confidence < th || (c.C2 && c.C4);
-    c.C10 = c.C4 || (card.fallback && fallback && Boolean(p?.note || p?.content || !p?.url || p.check !== 'exact'));
-    const failed = CRITERIA.filter((k) => !c[k]);
-    return { id: e.id, target: e.target, pass: !failed.length, failed, source: sourceOf(e.shot) };
+    const container = CONTAINER_ROLES.has(e.role) || CONTAINER_ROLES.has(r?.role);
+    o.own = !exact || container || !hasOwn ? 'na' : p.own ? 'pass' : 'fail';
+    if (exact && !container && !hasOwn && p.content) o.own = 'fail';
+
+    const proposalShown = replace && Boolean(p?.url || p?.fallback || e.rendered?.systemShot || e.systemPreview);
+    o.proposalLabel = !replace || !proposalShown ? 'na' : !shown ? 'na' : fromCard(card?.proposalLabel);
+    o.sameScale = !shown || !replace || !proposalShown ? 'na' : fromCard(card?.sameScale);
+
+    const face = [...(e.reasons ?? []).map((x: any) => (x.plain !== undefined ? x.plain : x.text)), e.how].filter(Boolean);
+    o.plain = face.every((t: string) => !CODE_TERMS.test(t)) ? 'pass' : 'fail';
+
+    const seenAndDrawn = shown && (!replace || (exact && o.own !== 'fail'));
+    o.confidence = e.confidence < th || seenAndDrawn ? 'pass' : 'fail';
+
+    const fallback = Boolean(e.rendered?.systemShot || e.systemPreview || p?.fallback || (p?.url && (p.check !== 'exact' || p.content)));
+    o.fallback = !replace || noSource || o.exact === 'pass' ? 'na' : fallback && Boolean(p?.note || p?.content || !p?.url || p.check !== 'exact') ? 'pass' : 'fail';
+
+    const failed = CRITERIA.filter((k) => o[k] === 'fail');
+    const untested = CRITERIA.filter((k) => o[k] === 'untested');
+    const siblingPhoto = o.confidence === 'fail' && !shown && Boolean(e.styleSig) && (bySig.get(e.styleSig) ?? []).some((x) => x.id !== e.id && shownOf(x));
+    return { id: e.id, target: e.target, pass: !failed.length, failed, untested, outcomes: o, source: sourceOf(e.shot), siblingPhoto };
   });
   const n = rows.length;
-  const rate = (k: number) => (n ? Math.round((1000 * k) / n) / 10 : 0);
-  const criteria = Object.fromEntries(CRITERIA.map((k) => { const pass = rows.filter((r) => !r.failed.includes(k)).length; return [k, { pass, rate: rate(pass) }]; })) as TrustScore['criteria'];
+  const pct = (k: number, of: number) => (of ? Math.round((1000 * k) / of) / 10 : 0);
+  const criteria = Object.fromEntries(CRITERIA.map((k) => {
+    const c = { pass: 0, fail: 0, na: 0, untested: 0 };
+    for (const r of rows) c[r.outcomes[k]]++;
+    return [k, { ...c, rate: pct(c.pass, c.pass + c.fail) }];
+  })) as TrustScore['criteria'];
   const passing = rows.filter((r) => r.pass).length;
+  const sources = { live: 0, isolated: 0, guessed: 0, markup: 0, none: 0 } as Record<Source, number>;
+  for (const r of rows) sources[r.source]++;
   return {
-    recommendations: n, passing, rate: rate(passing), criteria,
-    blocking: CRITERIA.map((k) => ({ criterion: k, text: CRITERION_TEXT[k], failing: n - criteria[k].pass })).filter((b) => b.failing).sort((a, b) => b.failing - a.failing),
-    rows,
-    sources: { live: rows.filter((r) => r.source === 'live').length, code: rows.filter((r) => r.source === 'code').length, markup: rows.filter((r) => r.source === 'markup').length, none: rows.filter((r) => r.source === 'none').length },
+    recommendations: n, passing, rate: pct(passing, n), criteria,
+    blocking: CRITERIA.map((k) => ({ criterion: k, text: CRITERION_TEXT[k], failing: criteria[k].fail })).filter((b) => b.failing).sort((a, b) => b.failing - a.failing),
+    rows, sources, excluded,
+    untested: tested ? [] : CARD_CRITERIA,
+    freshness: E?.freshness ?? null,
   };
 }

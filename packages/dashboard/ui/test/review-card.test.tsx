@@ -6,12 +6,13 @@ import { createRoot, type Root } from "react-dom/client"
 
 // A review card shows its evidence plainly: each photo labelled (in the app, which app, file:line that
 // opens the code, match), the proposal labelled with its component and props, both drawn at one CSS
-// scale, reasons in plain words, and the zoom view proposing what the card proposes. Each check here
-// backs a claim in trust.ts's CARD, which the trust rubric scores against.
+// scale, reasons in plain words, and the zoom view proposing what the card proposes. The trust rubric
+// reads these same facts from the rendered card (card-dom.ts), so the last test runs it on this card.
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 let root: Root
-let m: { Elements: any; app: typeof import("@/lib/app"); CARD: Record<string, boolean> }
+let m: { Elements: any; app: typeof import("@/lib/app"); probe: typeof import("../../src/card-dom"); trust: typeof import("../../src/trust") }
+let payload: any
 
 const box = { x: 20, y: 30, w: 100, h: 36, cw: 240, ch: 120 }
 const ghost = { verdict: "replace", role: "button", use: "Button", props: { variant: "ghost" } }
@@ -28,7 +29,7 @@ const el = (id: string, target: string, file: string, o: object = {}) => ({
 beforeAll(async () => {
   const data = document.createElement("script")
   data.id = "dsa-data"; data.type = "application/json"
-  data.textContent = JSON.stringify({
+  payload = {
     serve: false, label: "Acme",
     targets: [{ name: "atlas", role: "consumer" }, { name: "ledger", role: "consumer" }],
     elements: {
@@ -56,9 +57,10 @@ beforeAll(async () => {
       },
       sources: {},
     },
-  })
+  }
+  data.textContent = JSON.stringify(payload)
   document.head.append(data)
-  m = { Elements: (await import("@/views/elements/Elements")).Elements, app: await import("@/lib/app"), CARD: (await import("../../src/trust")).CARD as any }
+  m = { Elements: (await import("@/views/elements/Elements")).Elements, app: await import("@/lib/app"), probe: await import("../../src/card-dom"), trust: await import("../../src/trust") }
 })
 
 beforeEach(() => m.app.setApp(null))
@@ -82,7 +84,6 @@ test("each photo is labelled: in the app, which app, file:line, match", async ()
   await mount()
   const panes = [...card("Ghost buttons").querySelectorAll('[data-pane="app"]')].map(p => p.textContent)
   expect(panes).toEqual(["Live app screenshotledgersrc/Toolbar.tsx:4match 100%", "Live app screenshotatlassrc/Bar.tsx:4match 100%"])
-  expect(m.CARD.photoLabels).toBe(true)
 })
 
 test("the proposal is labelled with its component and props", async () => {
@@ -91,7 +92,6 @@ test("the proposal is labelled with its component and props", async () => {
   expect(p.textContent).toContain("Proposed")
   expect(p.textContent).toContain("Buttonvariant ghost")
   expect(p.querySelector("img")!.getAttribute("src")).toBe("rendered/ghost.png")
-  expect(m.CARD.proposalLabels).toBe(true)
 })
 
 test("photo and proposal are drawn at one scale: real CSS size, the photo cropped to the element", async () => {
@@ -107,14 +107,12 @@ test("photo and proposal are drawn at one scale: real CSS size, the photo croppe
   Object.defineProperty(p, "naturalWidth", { value: 180 })
   await act(async () => { p.dispatchEvent(new Event("load")) })
   expect(p.style.width).toBe("90px")
-  expect(m.CARD.sameScale).toBe(true)
 })
 
 test("the place opens the code", async () => {
   await mount()
   await click(button(card("Ghost buttons").querySelector('[data-pane="app"]')!, /Toolbar\.tsx:4/))
   expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Toolbar.tsx")
-  expect(m.CARD.placeOpens).toBe(true)
 })
 
 test("reasons are plain on the face; the scanner's words are under Technical details", async () => {
@@ -127,7 +125,6 @@ test("reasons are plain on the face; the scanner's words are under Technical det
   await click(button(c, /^Technical details/))
   expect(c.textContent).toContain("aria-pressed: a latch.")
   expect(c.textContent).toContain("An icon-only Button: an aria-label.")
-  expect(m.CARD.plainReasons).toBe(true)
 })
 
 test("no exact render: the closest variant stands in, said as such, with why", async () => {
@@ -136,7 +133,6 @@ test("no exact render: the closest variant stands in, said as such, with why", a
   expect(p.textContent).toContain("Closest variant")
   expect(p.textContent).toContain("No Toggle story.")
   expect(p.querySelector("img")!.getAttribute("src")).toBe("rendered/closest.png")
-  expect(m.CARD.fallback).toBe(true)
 })
 
 test("the zoom view says how the element was revealed once, and proposes what the card proposes", async () => {
@@ -197,4 +193,29 @@ test("a recommendation the scanner was sure of, but no one can see yet, is held 
   expect(held.textContent).toBe("Held under 90% (the scanner said 96%): there is no photo of it in the app; the proposal (MenuItem) isn't drawn exactly yet.")
   expect(document.body.textContent).toContain("1 element the scanner was sure of is held under 90% until a person can see it")
   expect(card("Ghost buttons").querySelector('[data-slot="held-back"]')).toBeNull()
+})
+
+test("the rubric's card checks are read from this card: labels, the code opener, both panes at one scale", async () => {
+  await mount()
+  const cards = await m.probe.probeCards(document, { click: true })
+  const b1 = cards.find(c => c.id === "b1")!
+  expect(b1).toMatchObject({ target: "ledger", place: "src/Toolbar.tsx:4", thumb: false, photoLabel: true, opensCode: true, proposalLabel: true, sameScale: true })
+  // The code viewer was closed again after each check.
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
+  // A blank photo isn't shown, so it has no tile; the closest variant stands in with its label.
+  expect(cards.find(c => c.id === "k1")).toBeUndefined()
+  expect(cards.find(c => c.id === "t1")).toMatchObject({ proposalLabel: true, sameScale: true })
+  const s = m.trust.trustRubric(payload, { cards })
+  const outcomes = (id: string) => s.rows.find(r => r.id === id)!.outcomes
+  for (const k of ["photoLabel", "opensCode", "proposalLabel", "sameScale"] as const) expect(outcomes("b1")[k]).toBe("pass")
+  expect(s.untested).toEqual([])
+})
+
+test("a card that leaves out a label or the code opener fails those checks", async () => {
+  const host = await mount()
+  const pane = host.querySelector('figure[data-element-id="b1"] [data-pane="app"]')!
+  pane.querySelector('[title="The app this element is in"]')!.remove()
+  pane.querySelector<HTMLButtonElement>('button[title="Open the code"]')!.disabled = true
+  const b1 = (await m.probe.probeCards(document)).find(c => c.id === "b1")!
+  expect([b1.photoLabel, b1.opensCode, b1.sameScale]).toEqual([false, false, true])
 })

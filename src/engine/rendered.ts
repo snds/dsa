@@ -46,6 +46,8 @@ export interface Proposal {
   actual?: Record<string, string> | undefined;
   note?: string | undefined;
   hash?: string | undefined;
+  /** Nothing to draw it from: the component isn't in the system's source, or has no story or Storybook to draw from. */
+  noSource?: boolean | undefined;
   /** Drawn with the element's own content (its words, accessible name, icon), not the story's sample. */
   own?: boolean | undefined;
   /** When it couldn't be drawn with these props: the component's story as its authors wrote it, to show instead. */

@@ -10,6 +10,7 @@ import { takeShots } from './shots.js';
 
 export { detectApp, discoverRoutes, ensureBrowser, freePort, installAppDeps, linkCoreForChild, startApp, type AppPlan, type RunningApp } from './apps.js';
 export { takeShots, captureSession, type ShotResult } from './shots.js';
+export { onReviewPage } from './card-page.js';
 export { flowProblems, guardNetwork, routeUrl, runFlow, describeStep, NEVER, type Flow, type Step } from './flows.js';
 export { HARNESS, startProxy } from './sbproxy.js';
 export { READ_STYLE, argsParam, renderProposals, renderSignatures, renderIfStale, settleProposals, startStorybook, wantedProposals } from './rendered.js';
