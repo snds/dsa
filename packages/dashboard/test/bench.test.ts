@@ -8,7 +8,7 @@ import { ACME_PROFILE, NOW, fixtureCopy, runPipeline, tmp } from '../../../test/
 import { loadConfig as loadDsaConfig } from '../../../src/config.js';
 import { engineConfig } from '../../../src/engine/from-dsa.js';
 import { bench, benchText, correctness, foldOf, heldOut, predictionsOf, repeatability, splitLabels, type Prediction } from '../src/bench.js';
-import { historyLabels, migratedLabels, reviewQueue, sourceFiles, sourceRef } from '../src/labels.js';
+import { historyLabels, isLabelSource, migratedLabels, reviewQueue, sourceFiles, sourceRef } from '../src/labels.js';
 import { lowerBound, wilson } from '../src/stats.js';
 import { payloadOf } from '../src/bench-cli.js';
 import { renderReport } from '../src/report.js';
@@ -152,6 +152,7 @@ test('migrated labels never come from vendored copies or non-product files (the 
     fs.writeFileSync(path.join(dir, f), 'export {}\n');
   }
   assert.deepEqual(sourceFiles(dir), ['src/App.tsx', 'src/Panel.jsx']);
+  assert.deepEqual(['src/App.tsx', 'vendor/kit/src/Button.tsx', 'stories/a.tsx', 'src/x.stories.tsx', 'src/lib/util.ts'].map(isLabelSource), [true, false, false, false, false], 'history labels use the same rules');
 });
 
 test('migrated labels: components stripped back to markup in a copy, then scanned and benched', async () => {

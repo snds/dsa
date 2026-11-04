@@ -186,16 +186,32 @@ export interface HistoryPair {
   elementHash: string;
 }
 
+/** Tags the scanner reads as raw elements (by tag, or by their own markup). Other tags never pair. */
+const RAW_TAGS = new Set(["button", "input", "select", "textarea", "a", "label", "table", "dialog", "div", "span"]);
+
 /**
- * Raw-to-component swaps in one commit's diff (`git show -U0`): in a hunk, a removed line opening a raw
- * element and an added line opening one of `components` with literal props. Paired in order, one to one.
+ * Raw-to-component swaps in one commit's diff (`git show -U0`): in a hunk, a removed raw element's opening
+ * tag and an added opening tag of one of `components` with literal props. Opening tags may span lines (the
+ * props, or the className, on lines after the tag name); each side is read to the end of its tag. Paired
+ * in order, one to one.
  */
 export function historyPairs(diff: string, components: Set<string>): HistoryPair[] {
   const out: HistoryPair[] = [];
   let file: string | null = null;
   let removed: { line: number; tag: string; text: string }[] = [], added: { component: string; props: Record<string, string> }[] = [];
+  // An opening tag still being read, on either side.
+  let openRemoved: { line: number; tag: string; text: string } | null = null;
+  let openAdded: { component: string; text: string } | null = null;
   let oldLine = 0;
+  const closes = (t: string) => { let depth = 0; for (const ch of t) { if (ch === "{") depth++; else if (ch === "}") depth--; else if (ch === ">" && depth <= 0) return true; } return false; };
+  const finishAdded = (o: { component: string; text: string }) => {
+    const props: Record<string, string> = {};
+    for (const p of o.text.matchAll(/\b([a-z][\w]*)=(?:"([^"]*)"|\{["'`]([^"'`]*)["'`]\})/g)) if (p[1] !== "className") props[p[1]!] = p[2] ?? p[3] ?? "";
+    added.push({ component: o.component, props });
+  };
   const flush = () => {
+    if (openRemoved) { removed.push(openRemoved); openRemoved = null; }
+    if (openAdded) { finishAdded(openAdded); openAdded = null; }
     for (let i = 0; i < Math.min(removed.length, added.length); i++) {
       const r = removed[i]!, a = added[i]!;
       if (file) out.push({ file, line: r.line, rawTag: r.tag, component: a.component, props: a.props, elementHash: hashText(r.text.trim()) });
@@ -209,15 +225,29 @@ export function historyPairs(diff: string, components: Set<string>): HistoryPair
     const h = l.match(/^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@/);
     if (h) { flush(); oldLine = Number(h[1]); continue; }
     if (l.startsWith("-")) {
-      const m = l.slice(1).match(/<([a-z][a-z0-9]*)\b/);
-      if (m) removed.push({ line: oldLine, tag: m[1]!, text: l.slice(1) });
+      const body = l.slice(1);
+      if (openRemoved) {
+        openRemoved.text += ` ${body.trim()}`;
+        if (closes(body)) { removed.push(openRemoved); openRemoved = null; }
+      } else {
+        const m = body.match(/<([a-z][a-z0-9]*)\b(.*)$/);
+        if (m && RAW_TAGS.has(m[1]!)) {
+          const o = { line: oldLine, tag: m[1]!, text: body };
+          if (closes(m[2]!)) removed.push(o); else openRemoved = o;
+        }
+      }
       oldLine++;
     } else if (l.startsWith("+")) {
-      const m = l.slice(1).match(/<([A-Z][\w]*)\b([^>]*)/);
-      if (m && components.has(m[1]!)) {
-        const props: Record<string, string> = {};
-        for (const p of m[2]!.matchAll(/\b([a-z][\w]*)=(?:"([^"]*)"|\{["'`]([^"'`]*)["'`]\})/g)) if (p[1] !== "className") props[p[1]!] = p[2] ?? p[3] ?? "";
-        added.push({ component: m[1]!, props });
+      const body = l.slice(1);
+      if (openAdded) {
+        openAdded.text += ` ${body}`;
+        if (closes(body)) { finishAdded(openAdded); openAdded = null; }
+      } else {
+        const m = body.match(/<([A-Z][\w]*)\b(.*)$/);
+        if (m && components.has(m[1]!)) {
+          const o = { component: m[1]!, text: m[2]! };
+          if (closes(m[2]!)) finishAdded(o); else openAdded = o;
+        }
       }
     } else if (l.startsWith(" ")) oldLine++;
   }

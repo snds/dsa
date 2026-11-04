@@ -130,4 +130,29 @@ describe("history: a commit that swapped a raw element for a system component", 
     const pairs = historyPairs(diff, new Set(["Button"]));
     expect(pairs).toEqual([{ file: "src/Bar.tsx", line: 12, rawTag: "button", component: "Button", props: { variant: "ghost", size: "sm" }, elementHash: expect.any(String) }]);
   });
+  it("reads opening tags that span lines on either side, props and className on later lines", () => {
+    const diff = [
+      "diff --git a/src/Pane.tsx b/src/Pane.tsx",
+      "--- a/src/Pane.tsx",
+      "+++ b/src/Pane.tsx",
+      "@@ -20,5 +20,6 @@",
+      "-      <button",
+      "-        type=\"button\"",
+      "-        className=\"h-8 px-3 rounded border\"",
+      "-        onClick={() => close({ now: true })}",
+      "-      >",
+      "+      <Button",
+      "+        type=\"button\"",
+      "+        variant=\"outline\"",
+      "+        size=\"sm\"",
+      "+        onClick={() => close({ now: true })}",
+      "+      >",
+      "@@ -40,1 +41,1 @@",
+      "-      <div className=\"grid gap-2\">",
+      "+      <Button variant=\"ghost\">",
+    ].join("\n");
+    const pairs = historyPairs(diff, new Set(["Button"]));
+    expect(pairs.map((p) => [p.line, p.rawTag, p.props])).toEqual([[20, "button", { type: "button", variant: "outline", size: "sm" }], [40, "div", { variant: "ghost" }]]);
+    expect(pairs[0]!.elementHash).not.toBe(pairs[1]!.elementHash);
+  });
 });

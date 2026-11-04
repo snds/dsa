@@ -20,6 +20,13 @@ import { isCorrect, matchLabels, predictionsOf } from './bench.js';
 const SKIP_DIRS = /^(node_modules|\.git|dist|build|\.next|coverage|vendor|__tests__|__mocks__|__fixtures__|fixtures|test|tests|stories|examples?|demos?|playgrounds?|stubs|__stubs__|docs)$/;
 const SKIP_FILES = /\.(test|spec|stories|stub)\.[cm]?[jt]sx?$/;
 
+/** Whether a path inside an app is one labels may come from (the same rules as sourceFiles). */
+export function isLabelSource(rel: string): boolean {
+  const parts = rel.split(/[\\/]/);
+  const name = parts.pop() ?? '';
+  return /\.[jt]sx$/.test(name) && !SKIP_FILES.test(name) && !parts.some((d) => SKIP_DIRS.test(d) || d.startsWith('.'));
+}
+
 /** The app's .tsx and .jsx files, relative to it. */
 export function sourceFiles(dir: string, rel = ''): string[] {
   const out: string[] = [];
@@ -184,6 +191,8 @@ export function historyLabels(o: { app: Target; components: Set<string>; maxComm
     commits++;
     const diff = git('show', '-U0', '--no-color', '--format=', sha, '--', '*.tsx', '*.jsx');
     for (const p of historyPairs(diff, o.components)) {
+      // Vendored copies and non-product files: the scanner never reads them, so no label can match.
+      if (!isLabelSource(p.file)) continue;
       labels.push({
         id: labelId(o.app.name, p.file, p.line, parent, p.elementHash), app: o.app.name, file: p.file, line: p.line, sourceRef: parent, elementHash: p.elementHash,
         truth: { verdict: 'replace', use: p.component, ...(Object.keys(p.props).length ? { props: p.props } : {}) }, acceptableAlts: [],

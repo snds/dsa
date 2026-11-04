@@ -65,6 +65,9 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- History labels only read an opening tag on one line, so a component whose props sat on later lines
+  was labelled without them. Both sides now read to the end of the tag. Raw tags pair only when the
+  scanner reads that tag, and history labels skip vendored and non-product files, as migrated ones do.
 - A migrated label named only the size prop that was written, even when the element's className overrode
   it (`size="icon" className="size-7"` renders 28px). The size whose own pixels match the render is now an
   acceptable alternative, with the system's tokens followed to their values.
