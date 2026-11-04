@@ -8,6 +8,7 @@ import { dangerWords, lookOf, type Look } from './classify-look.js';
 import { inputCandidates, tableCandidates } from './classify-fields.js';
 import { a11yNotes, noHandler } from './classify-a11y.js';
 import { refineParts, requireContainer } from './classify-parts.js';
+import { applyConstraints, nearestSize } from './constraints.js';
 
 export { systemRoleMap, systemRoles, NEUTRAL_ROLES, roleMapFrom, type RoleMap } from './roles.js';
 
@@ -76,6 +77,8 @@ export interface Evaluation extends Recommendation {
   calibrated?: { n: number; agree: number; prior: number; propFixes?: number | undefined; component?: number | undefined } | undefined;
   /** The resting look read from the classes (classify-look.ts): what screenshot evidence may not overrule. */
   look?: { fill: boolean; border: Look['border']; fromBranch: boolean; toolbar: boolean; danger?: Look['danger'] } | undefined;
+  /** Why the classifier abstained (verdict unclear): the inputs it couldn't resolve, or the near tie. */
+  unclear?: string[] | undefined;
   /** Signature match behind the recommendation, when the component has one. */
   signature?: { component: string; variant: string; size: string; score: number; matched: string[]; mismatched: string[]; structure: string[]; runnerUp?: { variant: string; size: string; score: number } | undefined } | undefined;
 }
@@ -84,8 +87,19 @@ export interface Evaluation extends Recommendation {
 const LAYOUT = /^(-?translate-|align-|aspect-|min-h-|inline-grid$|outline-hidden$|-?m[trblxy]?-|w-|min-w|max-w|h-full|flex-1|flex-none|shrink|grow|self-|justify-|items-|place-|gap-|inline-flex$|flex$|inline-block$|block$|grid$|relative$|absolute$|fixed$|sticky$|inset|top-|right-|bottom-|left-|z-|overflow-|truncate$|whitespace-|order-|col-|row-|transition|duration-|ease-|focus-visible:|focus:|disabled:|aria-|data-|cursor-|select-none|pointer-events|opacity-50$|sr-only$|group(\/|$)|peer$|text-left$|text-center$|text-right$|leading-|tracking-|font-medium$|outline-none$)/;
 const base = (t: string) => t.replace(/^([a-z-]+:)+/, '');
 
+/** Two different components closer than this are a coin toss: abstain rather than pick. */
+export const THIN_MARGIN = 0.02;
+
 export function classify(f: ElementFeatures, map: RoleMap = systemRoleMap(), threshold = 0.9, sigs?: SignatureSet): Evaluation {
-  const cands = candidates(f, map);
+  let cands = candidates(f, map);
+  // Constraints first: candidates that can't carry the element's state, role or anatomy are out before ranking.
+  const ruledOut: string[] = [];
+  if (sigs) {
+    const { kept, rejected } = applyConstraints(cands, f, sigs);
+    for (const r of rejected) ruledOut.push(`${describe(r.candidate)} is ruled out: ${r.why}`);
+    if (kept.length) cands = kept;
+    else return abstainAll(f, cands, ruledOut, threshold);
+  }
   if (f.element === 'button' && isPopupTrigger(f)) for (const c of cands) c.reasons.push({ text: `It opens a ${f.attrs['aria-haspopup'] && f.attrs['aria-haspopup'] !== 'true' ? f.attrs['aria-haspopup'] : 'menu or popover'}, so keep it as the trigger and change only its look.`, delta: 0 });
   const sigInfo = new Map<Candidate, Evaluation['signature']>();
   if (sigs) for (const c of cands) { const s = refineWithSignature(c, f, sigs); if (s) sigInfo.set(c, s); }
@@ -124,8 +138,14 @@ export function classify(f: ElementFeatures, map: RoleMap = systemRoleMap(), thr
   const top = scored[0]!;
   let confidence = top.conf;
   let capped: Evaluation['capped'];
-  const reasons = [...top.reasons];
+  const reasons = [...top.reasons, ...ruledOut.map(text => ({ text: `${text}.`, delta: 0 }))];
   const second = scored[1];
+  // Abstain third: an input the pick depends on didn't resolve, or a different component is just as close.
+  const unclear = [...(top.c.abstain ?? [])];
+  if (second && round(top.conf - second.conf) < THIN_MARGIN && describe(second.c) !== describe(top.c) && (second.c.use !== top.c.use || second.c.verdict !== top.c.verdict)) {
+    unclear.push(`${describe(second.c)} scores ${pct(second.conf)} against ${pct(top.conf)}, too close to call`);
+  }
+  if (unclear.length) return abstain(f, top, scored, reasons, unclear, threshold, sigInfo.get(top.c));
   // A close call is a reason to ask a human, not a change of ranking: the winner keeps its score and the
   // confidence drops under the review threshold, flagged so a runner-up shown above it isn't a contradiction.
   // It is shown even when the score is already under the threshold: the alternative is part of the question.
@@ -146,6 +166,33 @@ export function classify(f: ElementFeatures, map: RoleMap = systemRoleMap(), thr
     alternatives: scored.slice(1, 3).map(s => ({ verdict: s.c.verdict, role: s.c.role, use: s.c.use, from: s.c.from, props: s.c.props, gap: s.c.gap, ...(s.c.how ? { how: s.c.how } : {}), confidence: round(s.conf) })),
     visualDiffs, a11y: a11yNotes(f), signature: sig, look: lookSummary(f, top.c),
   }, f, threshold);
+}
+
+/** Confidence of an abstention: under the review threshold, so a person always picks. */
+const abstainConfidence = (score: number, threshold: number) => Math.min(score, Math.max(0.5, threshold - 0.05));
+type Scored = { c: Candidate; reasons: { text: string; delta: number }[]; conf: number };
+const asAlternative = (s: Scored) => ({ verdict: s.c.verdict, role: s.c.role, use: s.c.use, from: s.c.from, props: s.c.props, gap: s.c.gap, ...(s.c.how ? { how: s.c.how } : {}), confidence: round(s.conf) });
+
+/** The classifier won't pick: verdict unclear, the best guesses offered as alternatives, and why in words. */
+function abstain(f: ElementFeatures, top: Scored, scored: Scored[], reasons: Scored['reasons'], why: string[], threshold: number, sig?: Evaluation['signature']): Evaluation {
+  const confidence = round(abstainConfidence(top.conf, threshold));
+  return {
+    verdict: 'unclear', role: top.c.role, ruleId: top.c.ruleId, confidence, score: round(top.conf), prior: round(top.c.prior),
+    reasons: [...reasons, { text: `Unclear: ${why.join('; ')}. A person should pick from the alternatives.`, delta: round(confidence - top.conf) }],
+    alternatives: scored.slice(0, 3).map(asAlternative), unclear: why,
+    visualDiffs: [], a11y: a11yNotes(f), signature: sig,
+  };
+}
+
+/** Every candidate was ruled out by a hard constraint: nothing to rank, so abstain and say what was tried. */
+function abstainAll(f: ElementFeatures, cands: Candidate[], ruledOut: string[], threshold: number): Evaluation {
+  const top = [...cands].sort((a, b) => b.prior - a.prior)[0]!;
+  const confidence = round(abstainConfidence(top.prior, threshold));
+  return {
+    verdict: 'unclear', role: top.role, ruleId: top.ruleId, confidence, score: round(top.prior), prior: round(top.prior),
+    reasons: [...top.reasons, ...ruledOut.map(text => ({ text: `${text}.`, delta: 0 })), { text: 'Unclear: every candidate was ruled out. A person should pick, or the system needs a component for this.', delta: round(confidence - top.prior) }],
+    alternatives: [], unclear: ruledOut, visualDiffs: [], a11y: a11yNotes(f),
+  };
 }
 
 /**
@@ -195,6 +242,18 @@ function refineWithSignature(c: Candidate, f: ElementFeatures, sigs: SignatureSe
   let matches = bestMatches(f, comp, sigs, s => plausible(s.variant) && (!hasIconSizes || (iconRole ? s.iconOnly : !s.iconOnly)) && (!ruleSize || s.size === ruleSize));
   if (!matches.length) matches = bestMatches(f, comp, sigs);
   if (!matches.length) return;
+  // Size by distance in resolved pixels, height then width as hard limits: a 20px button is never given
+  // the 32px size because its colours happen to match it better. What doesn't resolve, or sits exactly
+  // between two sizes, is a reason to abstain.
+  if (comp.axes.size) {
+    const fit = nearestSize(matches, elProps, sigs.values);
+    matches = fit.matches;
+    for (const w of [fit.unresolved, fit.tie]) if (w) (c.abstain ??= []).push(w);
+    for (const d of fit.dims) {
+      if (Math.abs(d.element - d.nearest) <= 0.5 || c.reasons.some(r => r.text.includes(`${d.element}px`))) continue;
+      c.reasons.push({ text: `It is ${d.element}px ${d.dim === 'height' ? 'high' : 'wide'}; the nearest ${c.use} size is ${d.nearest}px. Approve the change, or ask for a size that fits.`, delta: -0.02 });
+    }
+  }
   // The runner-up is the closest signature the element can tell apart from the best: Button link
   // default, lg and toolbar look the same to an element with no height, so naming lg says nothing.
   const best = matches[0]!;

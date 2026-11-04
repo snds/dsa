@@ -8,6 +8,23 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- Recommendations apply hard constraints before ranking (`src/engine/constraints.ts`). An element with
+  `aria-pressed`, `aria-current` or a selected state only maps to a component with a prop for it
+  (`pressed`, `isActive`, `value`, or a `data-state` it writes). A component with a fixed role can't take
+  an element with another one, and a `<button>` component can't hold another control. Signatures now
+  record each component's declared props and its primitive's state props (`props`).
+- Size is picked by distance in resolved pixels, following the system's tokens to their values, with
+  height and width as hard limits. A 20px icon button gets the 24px size, never the 32px one its colours
+  happen to match. Tailwind steps the size map doesn't list (`size-5`, `h-[30px]`) read as the nearest
+  size and say they are off the scale.
+- The classifier abstains: verdict `unclear`, with `unclear` saying why and the best guesses as
+  alternatives. It does so when a height doesn't resolve to pixels, when an element sits exactly between
+  two sizes, when a state-bearing element's pick can't be checked, when every candidate is ruled out, and
+  when two different components score within 0.02.
+- The element scanner skips files that aren't product code: tests, stories, examples, demos, fixtures,
+  mocks, stubs and docs, reusing the model extractor's list (`NON_PRODUCT`). The run notes how many it
+  left out.
+
 - Proposals are drawn without depending on stories. The system's component is mounted straight from its
   source through its own Vite, on a page that loads its Storybook preview file (CSS, providers,
   decorators), with the proposal's props and the element's own words and icon. Parts that live inside

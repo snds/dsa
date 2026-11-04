@@ -3,7 +3,8 @@ import path from 'node:path';
 import { parse as babelParse } from '@babel/parser';
 import { parse as parseSfc } from '@vue/compiler-sfc';
 import { Parser as HtmlParser } from 'htmlparser2';
-import { displayPath, walk } from '../paths.js';
+import { displayPath, globMatch, walk } from '../paths.js';
+import { NON_PRODUCT } from '../../model/extract.js';
 import { readAliases, resolveSpecifier, type ShimExports } from '../modules.js';
 import { loadClassReader, type ClassReader } from '../tailwind.js';
 import { allDsPackages, libraryOfPackage, lookalikeMap, type Config } from '../config.js';
@@ -27,6 +28,14 @@ export interface CodeScanResult {
   parseErrors: { file: string; message: string }[];
   /** Local modules found re-exporting or wrapping DS components. */
   shimModules?: number | undefined;
+  /** Look-alikes left out because their file isn't product code (tests, stories, fixtures, stubs, docs). */
+  nonProduct?: number | undefined;
+}
+
+/** Tests, stories, fixtures, stubs and docs, by the path inside the app (model/extract.ts's list). */
+export function isNonProduct(relToApp: string): boolean {
+  const p = relToApp.split(path.sep).join('/');
+  return NON_PRODUCT.some(g => globMatch(g, p));
 }
 
 export function scanCode(root: string, config: Config, target: Target, exclude: string[]): CodeScanResult {
@@ -127,6 +136,7 @@ const DYNAMIC = '\u0000dynamic';
 
 function pushLookalike(ctx: Ctx, file: string, line: number, element: string, attrs: Record<string, string>, features?: ElementFeatures) {
   if (!ctx.countLookalikes) return;
+  if (isNonProduct(path.relative(ctx.target.dir, file))) { ctx.res.nonProduct = (ctx.res.nonProduct ?? 0) + 1; return; }
   let component = ctx.lookalikes[element];
   if (!component) return;
   if (element === 'input') {

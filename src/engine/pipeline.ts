@@ -210,6 +210,7 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
       // Evaluate everything, exceptions included: the review shows deferred debt too, flagged as such.
       evals.push(...evaluateRows({ root: opts.root, target: t, rows: res.lookalikes, exceptionOf, reachOf, map: roleMap, decisions: decisionFiles.get(t.name)!, stats, threshold, sigs, pageOf: id => page.get(id), hints, labPaths: config.review?.labPaths }));
     }
+    if (res.nonProduct) notes.push(`${t.name}: ${res.nonProduct} look-alike${res.nonProduct === 1 ? '' : 's'} in tests, stories, fixtures, stubs or docs left out (not product code).`);
     for (const e of res.parseErrors.slice(0, 3)) notes.push(`Parse error skipped in ${e.file}: ${e.message}`);
     if (app.tokens) {
       // tokenSkip globs are relative to the app's own folder.

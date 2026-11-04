@@ -48,6 +48,13 @@ export interface ComponentSig {
    * props can be confirmed from its class list when it shows no data-variant or data-size.
    */
   axisClasses?: Record<string, Record<string, string[]>> | undefined;
+  /**
+   * Props the component declares (its parameter's destructured names and type members), the data-*
+   * attributes it sets, and the state props its headless primitive brings (a Toggle's pressed). The
+   * hard constraints (constraints.ts) read them: an element that announces a state can only become a
+   * component that can carry it.
+   */
+  props?: string[] | undefined;
   sigs: Signature[];
 }
 
@@ -174,7 +181,7 @@ function cvasIn(ast: any): Map<string, Cva> {
   return m;
 }
 
-interface RawComp { name: string; file: string; rootName: string; rootSource?: string | undefined; classTokens: string[]; cvaRefs: string[]; slots: string[]; childSlots: string[]; stockRef?: { file: string; name: string } | undefined }
+interface RawComp { name: string; file: string; rootName: string; rootSource?: string | undefined; classTokens: string[]; cvaRefs: string[]; slots: string[]; childSlots: string[]; props: string[]; stockRef?: { file: string; name: string } | undefined }
 
 function componentsIn(file: string): RawComp[] {
   const ast = parseFile(file);
@@ -207,7 +214,7 @@ function componentsIn(file: string): RawComp[] {
     const objName = rootName.split('.')[0];
     const imp = imports.get(objName);
     const stockRef = imp && /vendor\/shadcn/.test(imp.source) ? { file: resolveTs(file, imp.source), name: imp.name } : undefined;
-    out.push({ name, file, rootName, rootSource: imp?.source, classTokens: cls ? strs(cls.value).filter(t => !cvaRefs.includes(t)) : [], cvaRefs, slots: [...new Set(slots)], childSlots: [...new Set(childSlots)], stockRef });
+    out.push({ name, file, rootName, rootSource: imp?.source, classTokens: cls ? strs(cls.value).filter(t => !cvaRefs.includes(t)) : [], cvaRefs, slots: [...new Set(slots)], childSlots: [...new Set(childSlots)], props: declaredProps(fn, root, imp?.source), stockRef });
   }
   return out;
 }
@@ -244,6 +251,40 @@ function resolveTs(from: string, spec: string) {
   const base = path.resolve(path.dirname(from), spec);
   for (const c of [base, `${base}.tsx`, `${base}.ts`, path.join(base, 'index.tsx'), path.join(base, 'index.ts')]) if (fs.existsSync(c) && fs.statSync(c).isFile()) return c;
   return base;
+}
+
+/** Headless primitives and the state props they carry (Radix and Base UI names alike). */
+const STATE_PRIMITIVES: [RegExp, string[]][] = [
+  [/(^|[/-])toggle-group$/, ['value', 'data-state']],
+  [/(^|[/-])toggle$/, ['pressed', 'defaultPressed', 'onPressedChange', 'data-state']],
+  [/(^|[/-])tabs$/, ['value', 'data-state']],
+  [/(^|[/-])radio(-group)?$/, ['value', 'checked', 'data-state']],
+  [/(^|[/-])(checkbox|switch)$/, ['checked', 'data-state']],
+  [/(^|[/-])(select|combobox|listbox)$/, ['value', 'data-state']],
+  [/(^|[/-])(menu|dropdown-menu|context-menu|menubar)$/, ['checked', 'data-state']],
+  [/(^|[/-])(collapsible|accordion)$/, ['open', 'data-state']],
+];
+
+/**
+ * The prop names a component accepts or sets, read from its source: destructured parameters, members of an
+ * inline type literal, the data-* and aria-* attributes it writes, and its primitive's state props.
+ */
+function declaredProps(fn: any, root: any, rootSource: string | undefined): string[] {
+  const out = new Set<string>();
+  // forwardRef((props, ref) => …) and memo(…) hold the function as their first argument.
+  const f = fn?.type === 'CallExpression' ? fn.arguments?.[0] : fn;
+  const param = f?.params?.[0];
+  for (const p of param?.type === 'ObjectPattern' ? param.properties : []) {
+    const k = p.key?.name ?? p.key?.value;
+    if (k) out.add(k);
+  }
+  const ann = param?.typeAnnotation?.typeAnnotation;
+  const lits = ann?.type === 'TSTypeLiteral' ? [ann] : ann?.type === 'TSIntersectionType' ? ann.types.filter((t: any) => t.type === 'TSTypeLiteral') : [];
+  for (const l of lits) for (const m of l.members ?? []) { const k = m.key?.name ?? m.key?.value; if (k) out.add(k); }
+  for (const a of root?.openingElement?.attributes ?? []) { const k = a.name?.name; if (typeof k === 'string' && /^(data|aria)-/.test(k)) out.add(k); }
+  const src = (rootSource ?? '').replace(/\/index$/, '');
+  for (const [re, props] of STATE_PRIMITIVES) if (re.test(src)) { for (const x of props) out.add(x); break; }
+  return [...out].sort();
 }
 
 function tagOf(c: RawComp, stock?: RawComp): { tag: string; role?: string | undefined } {
@@ -383,7 +424,8 @@ export function buildSignatures(packages: { dir: string; name: string }[]): Sign
         const deeper = path.dirname(file) !== src;
         const axisClasses: Record<string, Record<string, string[]>> = {};
         for (const l of layers) if (l.cva) for (const [a, vs] of Object.entries(l.cva.variants)) for (const [v, t] of Object.entries(vs)) ((axisClasses[a] ??= {})[v] = [...new Set([...(axisClasses[a][v] ?? []), ...t])]);
-        if (!components.has(c.name) || (c.cvaRefs.length && !deeper)) components.set(c.name, { component: c.name, from, file, tag, role, childSlots, slot: c.slots[0] ?? stock?.slots[0], axes, defaults, ...(Object.keys(axisClasses).length ? { axisClasses } : {}), sigs });
+        const props = [...new Set([...c.props, ...(stock?.props ?? []), ...Object.keys(axes)])].sort();
+        if (!components.has(c.name) || (c.cvaRefs.length && !deeper)) components.set(c.name, { component: c.name, from, file, tag, role, childSlots, slot: c.slots[0] ?? stock?.slots[0], axes, defaults, ...(Object.keys(axisClasses).length ? { axisClasses } : {}), props, sigs });
       }
     }
   }
