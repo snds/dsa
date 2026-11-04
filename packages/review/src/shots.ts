@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileOfTag, tagPath } from '@snds/dsa/tag';
-import { BLANK_INSET, buildGraph, decodePng, groupKey, isBlank, latestEvals, materializeRemotes, resolveTargets, targetRelative, walk, type Config, type ElementEval } from '@snds/dsa/engine';
+import { BLANK_INSET, buildGraph, federate, decodePng, groupKey, isBlank, latestEvals, materializeRemotes, resolveTargets, targetRelative, walk, type Config, type ElementEval } from '@snds/dsa/engine';
 import { appSurface, openSurface } from '@snds/dsa';
 
 import { detectApp, discoverRoutes, ensureBrowser, linkCoreForChild, routeConfig, startApp, tagPlan } from './apps.js';
@@ -109,8 +109,13 @@ const STOP = /^(open|opened|show|shown|visible|true|false|null|undefined|mode|vi
  * crawl its routes in headless Chromium, capture examples, stop it. --url still works for an app
  * that's already running somewhere.
  */
-export async function takeShots(opts: { root: string; dataDir: string; config: Config; url?: string; routes?: string[]; perGroup?: number; target?: string; fresh?: boolean; /** Try every example not found last time again (screenshots already taken stay cached). */ retryMissing?: boolean; log?: (m: string) => void }): Promise<ShotResult> {
+export async function takeShots(given: { root: string; dataDir: string; config: Config; url?: string; routes?: string[]; perGroup?: number; target?: string; fresh?: boolean; /** Try every example not found last time again (screenshots already taken stay cached). */ retryMissing?: boolean; log?: (m: string) => void }): Promise<ShotResult> {
+  // Each app's own dsa.config.json merged in (its routes, flows); an `apps` key naming no app stops the run.
+  const fed = federate(given.root, given.config);
+  if (fed.unmatched.length) throw new Error(`apps ${fed.unmatched.map(k => `"${k}"`).join(', ')} in the config name${fed.unmatched.length === 1 ? 's' : ''} no app here. Apps found: ${resolveTargets(given.root, given.config).filter(t => t.role !== 'core').map(t => t.name).join(', ') || 'none'}. Key each by its folder or package name.`);
+  const opts = { ...given, config: fed.config };
   const log = opts.log ?? (() => {});
+  if (fed.merged.length) log(`Using the app's own dsa.config.json for ${fed.merged.join(', ')}.`);
   const pw = await ensureBrowser(log);
   const { evals } = await latestEvals(opts.dataDir);
   const dir = path.join(opts.dataDir, 'shots');

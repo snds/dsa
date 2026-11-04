@@ -302,7 +302,7 @@ export const ConfigSchema = z
       })
       .optional()
       .describe("Tailwind / shadcn-style systems: read classes the way the repo's own lint does."),
-    apps: z.record(z.string(), AppSchema).optional().describe("Per-app switches, keyed by app or workspace name. Anything not listed is fully measured."),
+    apps: z.record(z.string(), AppSchema).optional().describe("Per-app switches, keyed by app, workspace or package name (an app's own dsa.config.json adds its entry). Anything not listed is fully measured."),
     review: z
       .object({
         threshold: z.number().min(0).max(1).optional().describe("Below this confidence a human decides (default 0.9)."),

@@ -32,6 +32,10 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- An app's own `dsa.config.json` is merged into the run: its `apps` entry (routes, extra routes, flows;
+  the host's values win, lists are joined) and the folders its `scan.exclude` names. An `apps` key may be
+  the app's folder name or its package name. Screenshots stop with an error naming any `apps` key that
+  matches no app, and the apps it found.
 - An app outside the scan root: every path compared with a source tag is now named as the tagger names it
   (`<app folder>/<path>`), not relative to the root (`../…`). Openers were matched only by their words,
   state was set on the wrong component, and providers were refused as outside the scan root.
