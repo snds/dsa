@@ -180,11 +180,21 @@ export async function takeShots(opts: { root: string; dataDir: string; config: C
     if (!t) return undefined;
     try {
       const routes = routeFiles(t.dir, t.exclude ?? []);
-      if (!routes.length) return undefined;
       const g = buildGraph(t.dir, t.exclude ?? [], (t as any).aliases);
       const byId: Record<string, string[]> = {};
-      for (const e of need) byId[e.id] = routesReaching(routes, g, path.join(t.dir, targetRelative(opts.root, e.file, t.dir)));
-      return { byId, patterns: [...new Set(routes.map(r => r.path).filter(needsValue))] };
+      // The files a page must show for it to render each element: its own file and what imports it, three
+      // steps up, as source tags name them. Read off the page itself, so it holds when the routes don't say.
+      const near: Record<string, string[]> = {};
+      const tagOf = (f: string) => { const rel = path.relative(opts.root, f); return rel.startsWith('..') || path.isAbsolute(rel) ? null : rel.split(path.sep).join('/'); };
+      for (const e of need) {
+        const file = path.resolve(t.dir, targetRelative(opts.root, e.file, t.dir));
+        if (routes.length) byId[e.id] = routesReaching(routes, g, file);
+        const up = new Set([file]);
+        let wave = [file];
+        for (let k = 0; k < 3; k++) { const next: string[] = []; for (const f of wave) for (const i of g.importers.get(f) ?? []) if (!up.has(i)) { up.add(i); next.push(i); } wave = next; }
+        near[e.id] = [...up].map(tagOf).filter((x): x is string => Boolean(x));
+      }
+      return { byId, near, patterns: [...new Set(routes.map(r => r.path).filter(needsValue))] };
     } catch { return undefined; }
   };
   // Elements that can't be photographed are drawn from the code (shots.draw: false turns it off).
@@ -416,7 +426,7 @@ function callersOf(d: DrawWith, name: string, own: string): string[] {
 }
 
 /** What the scan knows about reaching each element (routes.ts): the routes that render its file, and the patterns that need a value. */
-interface ReachPlan { byId: Record<string, string[]>; patterns: string[] }
+interface ReachPlan { byId: Record<string, string[]>; patterns: string[]; /** Per element: its file and its importers three steps up, as tag paths. */ near?: Record<string, string[]> }
 
 async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawWith | undefined; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; examples: ElementEval[]; dir: string; storageState?: string | undefined; readApi?: boolean | undefined; readPaths?: string[] | undefined; signIn?: SignIn | undefined; maxPages: number; waitMs: number; log: (m: string) => void; reveal?: boolean; maxActions?: number; maxDepth?: number; maxMinutes?: number; maxReplays?: number }) {
   const shots: Record<string, any> = {};
@@ -592,6 +602,22 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   const wantRoute = () => { const n = new Map<string, number>(); for (const r of remaining) for (const p of r.routes ?? []) n.set(p, (n.get(p) ?? 0) + 1); return n; };
   const routeOf = (u: string) => { const x = new URL(u); return (x.hash.startsWith('#/') ? x.hash.slice(1) : x.pathname).replace(/(.)\/$/, '$1') || '/'; };
   const filled = new Map<string, Set<string>>();
+  // The files each visited page showed (by their source tags).
+  const shown = new Map<string, Set<string>>();
+  /**
+   * How many still-missing elements a page renders: by the scan's routes (any depth of the route's import
+   * tree), or because the page shows the element's file or a file importing it (three steps up).
+   */
+  const owns = (u: string) => {
+    const h = routeOf(u), files = shown.get(u);
+    let n = 0;
+    for (const r of remaining) {
+      if ((r.routes ?? []).some(p => needsValue(p) ? patternTest(p).test(h) : p === h)) { n++; continue; }
+      const near = o.reach?.near?.[r.id];
+      if (files && near?.some(f => files.has(f))) n++;
+    }
+    return n;
+  };
   const rank = () => {
     const h = hints();
     const want = wantRoute();
@@ -679,6 +705,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         continue;
       }
       pages.push(u);
+      shown.set(u, new Set<string>(await page.evaluate(SHOWN_FILES).catch(() => [])));
       if (await page.evaluate(`Boolean(document.querySelector('[data-dsa-src]'))`).catch(() => false)) taggedPages++;
       const links: string[] = await page.evaluate(`Array.from(document.querySelectorAll('a[href]')).map(a => a.href)`).catch(() => []);
       if (o.crawl) {
@@ -771,9 +798,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     const done2 = new Set<string>();
     while (remaining.length && Date.now() < deadline && o.reveal !== false && !signedOut() && !auth.expired && !isBroken()) {
       const words = [...hints(), ...traced().map(t => t.toLowerCase())];
-      // Pages whose route renders what's still missing first (by how much), then by the words they mention.
-      const want = wantRoute();
-      const owns = (u: string) => { const h = routeOf(u); let n = 0; for (const [p, k] of want) if (needsValue(p) ? patternTest(p).test(h) : p === h) n += k; return n; };
+      // Pages that render what's still missing first (by how much), then by the words they mention.
       const next = promising.filter(p => !done2.has(p.u)).map(p => ({ ...p, own: owns(p.u) })).sort((a, b) => b.own - a.own || b.score - a.score)[0];
       if (!next || !words.length && done2.size >= 20) break;
       done2.add(next.u);
@@ -1041,13 +1066,12 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
    * reloading and replaying the path. Never anything that deletes, saves, submits, sends, or closes.
    */
   async function explore(u: string, sweep: (revealedBy?: string) => Promise<void>) {
-    let budget = o.maxActions ?? 20;
+    // A page that renders what's missing: twice the interactions and time, and every control tried.
+    const own = owns(u) > 0;
+    let budget = (o.maxActions ?? 20) * (own ? 2 : 1);
     const startCount = remaining.length;
-    // A route the scan says renders a missing element's file (a pattern like /style/:id/samples too).
-    const here = routeOf(u);
-    const own = [...wantRoute().keys()].some(p => needsValue(p) ? patternTest(p).test(here) : p === here);
     const maxDepth = o.maxDepth ?? 3;
-    const pageStop = Math.min(deadline, Date.now() + 45_000);
+    const pageStop = Math.min(deadline, Date.now() + (own ? 90_000 : 45_000));
     const load = async () => { await open(u, 30000).catch(() => {}); };
     const sig = (): Promise<string> => page.evaluate(SIGNATURE).catch(() => '');
     const mark = (level: number) => inPage(page, MARK_SEEN, level).catch(() => {});
@@ -1110,10 +1134,13 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       return true;
     };
     await walk([], 0, await sig());
-    const used = (o.maxActions ?? 20) - budget;
+    const used = (o.maxActions ?? 20) * (own ? 2 : 1) - budget;
     o.log(`  explored ${u.replace(base.origin, '')}: ${used} interaction${used === 1 ? '' : 's'}, ${startCount - remaining.length} found${own ? ' (a page that renders what is missing: every control tried)' : ''}${budget <= 0 ? '; interaction budget (shots.maxActions) used' : Date.now() > pageStop ? '; out of time for this page' : ''}`);
   }
 }
+
+/** Runs in the page: the files its source tags name ("apps/x/src/A.tsx"), each once. */
+const SHOWN_FILES = `Array.from(new Set(Array.from(document.querySelectorAll('[data-dsa-src]')).map((e) => e.getAttribute('data-dsa-src').replace(/:\\d+:\\d*$/, ''))))`;
 
 /** Runs in the page: a short fingerprint of what's visible (URL, open overlays, visible controls, text size). */
 const SIGNATURE = `(() => {

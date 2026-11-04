@@ -37,6 +37,9 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   what was still missing could push one past the limit. Now each page gets up to 12 replays,
   openers that reveal the most go first, and an opener matched only by its words on one page is tried
   again on the next page that has it.
+- A page also counts as rendering a missing element when it shows that element's file, or a file that
+  imports it within three steps, read off the page's source tags. This holds where the scan can't tie a
+  route to its files, and for a modal a child of the page opens. Such pages get twice the interactions and time.
 - A page whose route the scan says renders a missing element is explored first, and every control on it
   is tried, whatever was tried on other pages. Each explored page gets a log line: how many interactions,
   how many found, and whether its budget ran out. Opener lines show the page's own route, hash included.
