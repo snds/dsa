@@ -8,7 +8,7 @@ import { dangerWords, lookOf, type Look } from './classify-look.js';
 import { inputCandidates, tableCandidates } from './classify-fields.js';
 import { a11yNotes, noHandler } from './classify-a11y.js';
 import { refineParts, requireContainer } from './classify-parts.js';
-import { applyConstraints, nearestSize } from './constraints.js';
+import { applyConstraints, nearestSize, type DsRules } from './constraints.js';
 
 export { systemRoleMap, systemRoles, NEUTRAL_ROLES, roleMapFrom, type RoleMap } from './roles.js';
 
@@ -92,19 +92,19 @@ export const FIT_GATE = 0.4;
 /** Two different components closer than this are a coin toss: abstain rather than pick. */
 export const THIN_MARGIN = 0.02;
 
-export function classify(f: ElementFeatures, map: RoleMap = systemRoleMap(), threshold = 0.9, sigs?: SignatureSet): Evaluation {
+export function classify(f: ElementFeatures, map: RoleMap = systemRoleMap(), threshold = 0.9, sigs?: SignatureSet, rules?: DsRules): Evaluation {
   let cands = candidates(f, map);
   // Constraints first: candidates that can't carry the element's state, role or anatomy are out before ranking.
   const ruledOut: string[] = [];
   if (sigs) {
-    const { kept, rejected } = applyConstraints(cands, f, sigs);
+    const { kept, rejected } = applyConstraints(cands, f, sigs, rules);
     for (const r of rejected) ruledOut.push(`${describe(r.candidate)} is ruled out: ${r.why}`);
     if (kept.length) cands = kept;
     else return abstainAll(f, cands, ruledOut, threshold);
   }
   if (f.element === 'button' && isPopupTrigger(f)) for (const c of cands) c.reasons.push({ text: `It opens a ${f.attrs['aria-haspopup'] && f.attrs['aria-haspopup'] !== 'true' ? f.attrs['aria-haspopup'] : 'menu or popover'}, so keep it as the trigger and change only its look.`, delta: 0 });
   const sigInfo = new Map<Candidate, Evaluation['signature']>();
-  if (sigs) for (const c of cands) { const s = refineWithSignature(c, f, sigs); if (s) sigInfo.set(c, s); }
+  if (sigs) for (const c of cands) { const s = refineWithSignature(c, f, sigs, rules); if (s) sigInfo.set(c, s); }
   // Shared adjustments: uncertainty about the input itself.
   // look: only matters when a component replaces the element (a gap or keep doesn't depend on the look).
   const shared: { text: string; delta: number; look?: boolean | undefined }[] = [];
@@ -217,7 +217,7 @@ function abstainAll(f: ElementFeatures, cands: Candidate[], ruledOut: string[], 
  * the match quality into the candidate's prior. The role (link, icon, ghost…) is a structural call
  * made by the rules; within it, the signature decides the props and says how close the fit is.
  */
-function refineWithSignature(c: Candidate, f: ElementFeatures, sigs: SignatureSet): Evaluation['signature'] | undefined {
+function refineWithSignature(c: Candidate, f: ElementFeatures, sigs: SignatureSet, rules?: DsRules): Evaluation['signature'] | undefined {
   if (c.verdict !== 'replace' || !c.use) return;
   const comp = sigs.components.get(c.use);
   if (!comp || !comp.sigs.length) return;
@@ -263,7 +263,7 @@ function refineWithSignature(c: Candidate, f: ElementFeatures, sigs: SignatureSe
   // the 32px size because its colours happen to match it better. What doesn't resolve, or sits exactly
   // between two sizes, is a reason to abstain.
   if (comp.axes.size) {
-    const fit = nearestSize(matches, elProps, sigs.values);
+    const fit = nearestSize(matches, elProps, sigs.values, rules?.controlScale);
     matches = fit.matches;
     for (const w of [fit.unresolved, fit.tie]) if (w) (c.abstain ??= []).push(w);
     for (const d of fit.dims) {

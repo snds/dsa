@@ -12,6 +12,7 @@ import { asHostCopy, systemIndex, hostCopyOf, isLabFile } from './host-context.j
 import { importedFromSystem } from './scanners/features.js';
 import { readAliases } from './modules.js';
 import { applyPrecedent, type PrecedentIndex } from './precedent.js';
+import type { DsRules } from './constraints.js';
 
 /**
  * The element review: every native element the map covers gets an evaluation, with a
@@ -210,6 +211,8 @@ export function evaluateRows(opts: {
   labPaths?: string[] | undefined;
   /** The app's own system-component uses and past migrations (precedent.ts). */
   precedent?: PrecedentIndex | undefined;
+  /** The app's design-system rules file, read as constraints (constraints.ts). */
+  rules?: DsRules | undefined;
 }): ElementEval[] {
   const { root, target, rows, map, decisions, stats, threshold } = opts;
   const byFp = new Map(decisions.decisions.map(d => [d.fingerprint, d]));
@@ -226,7 +229,7 @@ export function evaluateRows(opts: {
     // Where it sits (the components above it, and the page) is evidence too: fold it in before the rules run.
     const placed = withPlacement(r.features, opts.reachOf?.get(r)?.placement, opts.pageOf?.(`E-${fp}`));
     const f = placed.f;
-    let e = classify(f, map, threshold, opts.sigs);
+    let e = classify(f, map, threshold, opts.sigs, opts.rules);
     if (placed.reasons.length) e.reasons.splice(1, 0, ...placed.reasons);
     e = calibrate(e, statsWithout(stats.get(e.ruleId), fp));
     const rel = targetRelative(root, r.file, target.dir);

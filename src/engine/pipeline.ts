@@ -7,6 +7,7 @@ import { refineWithTypes } from './typecheck.js';
 import { buildPrecedent, type PrecedentIndex } from './precedent.js';
 import { readAliases } from './modules.js';
 import { applyLabels, readLabels } from './labels.js';
+import { readRules, type DsRules } from './constraints.js';
 import type { CodeScanResult } from './scanners/code.js';
 import { defaultExcludes, globMatch, targetRelative } from './paths.js';
 import type { Store, StoreFactory } from './store.js';
@@ -217,7 +218,8 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
       data.lookalikes.push(...kept);
       // Evaluate everything, exceptions included: the review shows deferred debt too, flagged as such.
       const precedent = precedentFor(opts.root, t, res.instances, sigs, opts.git !== false);
-      evals.push(...evaluateRows({ root: opts.root, target: t, rows: res.lookalikes, exceptionOf, reachOf, map: roleMap, decisions: decisionFiles.get(t.name)!, stats, threshold, sigs, pageOf: id => page.get(id), hints, labPaths: config.review?.labPaths, precedent }));
+      const rules = rulesFor(config, t, opts.configDir ?? opts.root, notes);
+      evals.push(...evaluateRows({ root: opts.root, target: t, rows: res.lookalikes, exceptionOf, reachOf, map: roleMap, decisions: decisionFiles.get(t.name)!, stats, threshold, sigs, pageOf: id => page.get(id), hints, labPaths: config.review?.labPaths, precedent, rules }));
     }
     if (res.nonProduct) notes.push(`${t.name}: ${res.nonProduct} look-alike${res.nonProduct === 1 ? '' : 's'} in tests, stories, fixtures, stubs or docs left out (not product code).`);
     for (const e of res.parseErrors.slice(0, 3)) notes.push(`Parse error skipped in ${e.file}: ${e.message}`);
@@ -320,7 +322,8 @@ export async function reevaluateElements(opts: { root: string; dataDir: string; 
     } catch { /* the first pass noted it */ }
     for (const r of res.lookalikes) if (reachOf.get(r)?.status === 'unused' && !exceptionOf.has(r)) exceptionOf.set(r, 'unused');
     const precedent = precedentFor(opts.root, t, res.instances, sigs, true);
-    evals.push(...evaluateRows({ root: opts.root, target: t, rows: res.lookalikes, exceptionOf, reachOf, map: roleMap, decisions: decisionFiles.get(t.name)!, stats, threshold, sigs, pageOf: id => page.get(id), hints, labPaths: config.review?.labPaths, precedent }));
+    const rules = rulesFor(config, t, opts.configDir ?? opts.root, []);
+    evals.push(...evaluateRows({ root: opts.root, target: t, rows: res.lookalikes, exceptionOf, reachOf, map: roleMap, decisions: decisionFiles.get(t.name)!, stats, threshold, sigs, pageOf: id => page.get(id), hints, labPaths: config.review?.labPaths, precedent, rules }));
   }
   const store = await opts.store(opts.dataDir);
   try {
@@ -337,6 +340,16 @@ export async function reevaluateElements(opts: { root: string; dataDir: string; 
     log(`Re-evaluated ${evals.length} elements with page placement from ${page.size} screenshots: ${changed} recommendation${changed === 1 ? '' : 's'} changed.`);
     return { changed, total: evals.length };
   } finally { store.close(); }
+}
+
+/** The app's design-system rules file (recommend.rules): relative to the app, else to the config's folder. */
+function rulesFor(config: Config, t: Target, configDir: string, notes: string[]): DsRules | undefined {
+  const rel = config.recommend?.rules;
+  if (!rel) return undefined;
+  const inApp = path.resolve(t.dir, rel);
+  const r = readRules(fs.existsSync(inApp) ? inApp : path.resolve(configDir, rel));
+  if ('error' in r) { notes.push(`${t.name}: design-system rules ${rel} ${r.error}; recommending without them.`); return undefined; }
+  return r;
 }
 
 /** Calibrate on the label set, from the option or the config's recommend.labels (relative to the config's folder). */

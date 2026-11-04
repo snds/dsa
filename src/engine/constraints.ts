@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { DYNAMIC, type ElementFeatures } from './scanners/features.js';
 import type { Candidate } from './classify-button.js';
 import type { Props, SigMatch, SignatureSet } from './signatures.js';
@@ -45,16 +46,58 @@ const FIELD_TAGS = new Set(['input', 'textarea', 'select']);
 export interface Rejection { candidate: Candidate; why: string }
 
 /**
+ * A consumer's machine-readable design-system rules (review item 22), read as constraints. Tolerant of
+ * shape, since teams write these by hand:
+ *
+ *   { "controlScale": [24, 28, 32, 36] | { "sm": 28, … },      control heights in px; others are off-limits
+ *     "preferPrimitives": { "button": "Button", "input[type=checkbox]": "Checkbox" } | ["Button", …],
+ *     "avoid": ["LegacyButton"] }                                 components never to recommend
+ *
+ * The object form of preferPrimitives is hard (that element only becomes that component); the list form
+ * is a preference among candidates that already fit.
+ */
+export interface DsRules { file: string; controlScale?: number[] | undefined; prefer?: Record<string, string> | undefined; preferList?: string[] | undefined; avoid?: string[] | undefined }
+
+export function readRules(file: string): DsRules | { error: string } {
+  let raw: any;
+  try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e: any) { return { error: fs.existsSync(file) ? `unreadable (${String(e?.message ?? e).split('\n')[0]!.slice(0, 80)})` : 'not found' }; }
+  const r: DsRules = { file };
+  const scale = raw?.controlScale ?? raw?.controls?.scale ?? raw?.sizes;
+  const nums = (Array.isArray(scale) ? scale : scale && typeof scale === 'object' ? Object.values(scale) : []).map((v: any) => (typeof v === 'number' ? v : pxOf(String(v), new Map()))).filter((v: any): v is number => typeof v === 'number');
+  if (nums.length) r.controlScale = [...new Set(nums)].sort((a, b) => a - b);
+  const pp = raw?.preferPrimitives ?? raw?.prefer;
+  if (Array.isArray(pp)) r.preferList = pp.filter((x: any) => typeof x === 'string');
+  else if (pp && typeof pp === 'object') r.prefer = Object.fromEntries(Object.entries(pp).filter(([, v]) => typeof v === 'string')) as Record<string, string>;
+  const avoid = raw?.avoid ?? raw?.forbid ?? raw?.deprecated;
+  if (Array.isArray(avoid)) r.avoid = avoid.filter((x: any) => typeof x === 'string');
+  else if (avoid && typeof avoid === 'object') r.avoid = Object.keys(avoid);
+  return r;
+}
+
+/** The component the rules prefer for this element: by tag, or tag[type=x] for inputs. */
+export function preferredFor(f: ElementFeatures, rules?: DsRules): string | undefined {
+  if (!rules?.prefer) return undefined;
+  const type = f.attrs.type && f.attrs.type !== DYNAMIC ? f.attrs.type.toLowerCase() : undefined;
+  return (type ? rules.prefer[`${f.element}[type=${type}]`] ?? rules.prefer[`${f.element}[type="${type}"]`] : undefined) ?? rules.prefer[f.element];
+}
+
+/**
  * Rule candidates out on what they can't be. Candidates whose component isn't in the signature set are
  * kept (nothing to check against); for an element with a state, that unchecked pick is unresolved, so
  * the classifier abstains if it wins.
  */
-export function applyConstraints(cands: Candidate[], f: ElementFeatures, sigs: SignatureSet): { kept: Candidate[]; rejected: Rejection[] } {
+export function applyConstraints(cands: Candidate[], f: ElementFeatures, sigs: SignatureSet, rules?: DsRules): { kept: Candidate[]; rejected: Rejection[] } {
   const needs = stateNeeds(f);
   const role = literalRole(f);
   const kept: Candidate[] = [], rejected: Rejection[] = [];
+  const preferred = preferredFor(f, rules);
+  const ruleFile = rules ? rules.file.split(/[\\/]/).pop() : '';
   for (const c of cands) {
     if (c.verdict !== 'replace' || !c.use) { kept.push(c); continue; }
+    // The consumer's own rules: components it avoids, and the one component it prefers for this element.
+    if (rules?.avoid?.includes(c.use)) { rejected.push({ candidate: c, why: `the app's rules (${ruleFile}) say to avoid ${c.use}` }); continue; }
+    if (preferred && preferred !== c.use) { rejected.push({ candidate: c, why: `the app's rules (${ruleFile}) say a <${f.element}> becomes ${preferred}` }); continue; }
+    if (rules?.preferList?.includes(c.use)) c.reasons.push({ text: `The app's rules (${ruleFile}) prefer ${c.use}.`, delta: 0.02 });
     const comp = sigs.components.get(c.use);
     if (!comp) {
       // Unchecked is unresolved: a state-bearing element can't go to a component nobody could read.
@@ -110,8 +153,14 @@ export interface SizeFit {
  * Keep only the signatures whose height (then width) is nearest the element's, in resolved pixels. A size
  * farther away than the nearest is never picked, however well its colours match.
  */
-export function nearestSize(matches: SigMatch[], el: Props, values: Map<string, string>): SizeFit {
+export function nearestSize(matches: SigMatch[], el: Props, values: Map<string, string>, scale?: number[]): SizeFit {
   const out: SizeFit = { matches, dims: [] };
+  // The app's control scale (its rules file): sizes whose height isn't on it are off-limits.
+  if (scale?.length) {
+    const on = matches.filter(m => { const h = pxOf(m.sig.props.get('height'), values); return h === undefined || scale.some(s => Math.abs(s - h) <= 0.5); });
+    if (!on.length) { out.unresolved = `no size of the component is on the app's control scale (${scale.join(', ')}px)`; return out; }
+    out.matches = on;
+  }
   for (const dim of ['height', 'width'] as const) {
     const ev = el.get(dim);
     if (!ev || !out.matches.length) continue;

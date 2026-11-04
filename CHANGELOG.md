@@ -44,6 +44,11 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   each evaluation says its confidence is uncalibrated (`calibration.status`).
 - Fit is a gate: a replacement whose signature matches under 40% of the element's look stays under the
   review threshold, and says so.
+- An app's machine-readable design-system rules file (`recommend.rules`, e.g.
+  `design-system.rules.json`) is read as constraints. `controlScale` (px, a list or a map) rules out
+  sizes off the scale; `preferPrimitives` as a map (`{ "button": "Button" }`) makes that the only
+  component for that element, and as a list prefers those components; `avoid` rules components out. A
+  missing or unreadable file is noted and the run goes on without it.
 - `recommend` in dsa.config.json: `labels` (path, relative to the config), `rules` (path, relative to
   each app) and `typescript` (boolean, default on).
 - The element scanner skips files that aren't product code: tests, stories, examples, demos, fixtures,

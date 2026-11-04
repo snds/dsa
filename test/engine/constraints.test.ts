@@ -111,3 +111,50 @@ test('constraints: a prop value the component does not allow is unresolved, not 
   assert.equal(e.verdict, 'unclear', JSON.stringify(e.reasons.map(r => r.text)));
   assert.ok(e.unclear?.some(w => /size="sm" isn't a value Toggle allows \(default, lg\)/.test(w)), JSON.stringify(e.unclear));
 });
+
+// Review item 22: the app's own design-system rules file, read as constraints.
+import { readRules } from '../../src/engine/constraints.js';
+
+function rulesFile(body: unknown): string {
+  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-rules-')), 'design-system.rules.json');
+  fs.writeFileSync(f, JSON.stringify(body));
+  return f;
+}
+
+test('rules: the shapes teams write are all read', () => {
+  const r = readRules(rulesFile({ controlScale: { sm: 28, md: '2rem' }, preferPrimitives: { button: 'Button' }, avoid: ['LegacyButton'] }));
+  assert.ok(!('error' in r));
+  if ('error' in r) return;
+  assert.deepEqual(r.controlScale, [28, 32]);
+  assert.deepEqual(r.prefer, { button: 'Button' });
+  assert.deepEqual(r.avoid, ['LegacyButton']);
+  assert.deepEqual(readRules('/nonexistent/rules.json'), { error: 'not found' });
+});
+
+test('rules: a size off the app\'s control scale is never picked', () => {
+  const f = features(`export const A = () => <button aria-label="Close" onClick={close} className="size-5 hover:bg-accent"><Icon name="close" /></button>;`);
+  const r = readRules(rulesFile({ controlScale: [28, 32] }));
+  assert.ok(!('error' in r));
+  const e = classify(f, systemRoleMap(), 0.9, acmeSigs(), r as any);
+  assert.equal(e.props?.size, 'icon-sm', 'the nearest size on the scale (28px), not 24px');
+});
+
+test('rules: avoided components are ruled out; a preferred component for the element is the only one', () => {
+  const code = `export const A = () => <button onClick={save} className="h-8 px-3 rounded bg-primary text-primary-foreground">Save</button>;`;
+  const avoid = classify(features(code), systemRoleMap(), 0.9, acmeSigs(), readRules(rulesFile({ avoid: ['Button'] })) as any);
+  assert.equal(avoid.verdict, 'unclear');
+  assert.ok(avoid.reasons.some(r => /say to avoid Button/.test(r.text)), JSON.stringify(avoid.reasons));
+  const prefer = classify(features(code), systemRoleMap(), 0.9, acmeSigs(), readRules(rulesFile({ preferPrimitives: { button: 'ActionButton' } })) as any);
+  assert.equal(prefer.verdict, 'unclear', 'the preferred component is not a candidate, so nothing fits');
+  assert.ok(prefer.reasons.some(r => /say a <button> becomes ActionButton/.test(r.text)));
+});
+
+test('config: recommend { labels, rules, typescript } parses and reaches the engine', async () => {
+  const { parseConfig } = await import('../../src/config.js');
+  const { engineConfig } = await import('../../src/engine/from-dsa.js');
+  const { ACME_PROFILE } = await import('./setup.js');
+  const c = parseConfig({ recommend: { labels: 'labels.jsonl', rules: 'design-system.rules.json', typescript: false } });
+  assert.deepEqual(c.recommend, { labels: 'labels.jsonl', rules: 'design-system.rules.json', typescript: false });
+  assert.deepEqual(engineConfig(c, ACME_PROFILE).recommend, { labels: 'labels.jsonl', rules: 'design-system.rules.json', typescript: false });
+  assert.throws(() => parseConfig({ recommend: { typescript: 'yes' } }));
+});
