@@ -82,6 +82,10 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   `git status` rewrites the index. Those reads now use plumbing only (`src/engine/git-read.ts`):
   `git diff-index --name-only HEAD --`, with each listed file confirmed by comparing `git hash-object` with
   the blob at HEAD, untracked files from `git ls-files --others`, and `GIT_OPTIONAL_LOCKS=0` throughout.
+- "Ready" is decided on the pooled top band across decision paths, where labels add up: the band's
+  one-sided 95% lower bound must reach 0.99, and the element's own path must show no error among its
+  labels in that band. Per-path fits still set the order. Points that share a score now start as one
+  block (their order among themselves meant a clean tail could split off).
 - A calibrated block that isn't ready was flattened to one score under the bar, which erased ranking and
   coverage. It now keeps its measured precision, squeezed into [0, threshold) in order (`squeeze`).
 - Isotonic calibration left equal neighbouring scores in separate one-label blocks, so a clean top band

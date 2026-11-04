@@ -13,8 +13,9 @@ import type { ElementEval } from './elements.js';
  *    agreement, as it is for reviewers' decisions. An element never calibrates itself.
  * 2. Isotonic calibration (pool-adjacent-violators) maps each path's score to its measured precision, so a
  *    higher score never means a lower precision. Paths with few labels share the pooled fit.
- * 3. "Ready" needs the one-sided 95% lower bound of that precision to be at least 0.99. At zero errors that
- *    takes about 300 labels on the path (the rule of three). Under it, the element stays under the bar, its
+ * 3. "Ready" is decided on the pooled top band (the highest isotonic block over all paths): its one-sided
+ *    95% lower bound must be at least 0.99 (about 270 clean labels), and the element's own path must
+ *    show no error among its labels in that band. Everything else stays under the bar, its measured
  *    precision squeezed into [0, threshold) so blocks keep their order (squeeze).
  *
  * Without labels nothing changes, and each evaluation says its confidence is uncalibrated.
@@ -49,6 +50,8 @@ export interface Calibration {
   ready?: boolean | undefined;
   /** The fit came from all labels, because this path has too few. */
   pooled?: boolean | undefined;
+  /** The pooled top band that decides "ready": where it starts, its labels, and its lower bound. */
+  band?: { from: number; n: number; right: number; lower: number } | undefined;
 }
 
 export const READY_LOWER_BOUND = 0.99;
@@ -112,8 +115,14 @@ export function lowerBound(k: number, n: number): number {
 export function isotonic(points: { score: number; ok: boolean }[]): { lo: number; hi: number; k: number; n: number }[] {
   const sorted = [...points].sort((a, b) => a.score - b.score);
   const blocks: { lo: number; hi: number; k: number; n: number }[] = [];
+  // Points that share a score are one block from the start: their order among themselves means nothing.
+  const groups: { lo: number; hi: number; k: number; n: number }[] = [];
   for (const p of sorted) {
-    blocks.push({ lo: p.score, hi: p.score, k: p.ok ? 1 : 0, n: 1 });
+    const g = groups[groups.length - 1];
+    if (g && g.hi === p.score) { g.n++; if (p.ok) g.k++; } else groups.push({ lo: p.score, hi: p.score, k: p.ok ? 1 : 0, n: 1 });
+  }
+  for (const g of groups) {
+    blocks.push({ ...g });
     while (blocks.length > 1) {
       const b = blocks[blocks.length - 1]!, a = blocks[blocks.length - 2]!;
       // Pool violators and ties: equal neighbours are one block, so the lower bound counts all of them.
@@ -171,7 +180,13 @@ export function applyLabels(evals: ElementEval[], labels: Label[], threshold: nu
   const pathPairs = new Map<string, typeof pairs>();
   for (const p of pairs) pathPairs.set(pathOf(p.e), [...(pathPairs.get(pathOf(p.e)) ?? []), p]);
   for (const [k, ps] of pathPairs) if (ps.length >= MIN_PATH_LABELS) byPath.set(k, isotonic(points(ps)));
-  // 3. Confidence is the measured precision; ready needs its lower bound at 0.99 or more.
+  // 3. Ready is decided on the pooled top band (all paths), where the labels add up: its lower bound must
+  //    reach 0.99, and the path's own labels in that band must show no error. The per-path fit still orders.
+  const band = pooled.length ? pooled[pooled.length - 1]! : undefined;
+  const bandLower = band ? lowerBound(band.k, band.n) : 0;
+  const bandReady = Boolean(band && band.n >= MIN_PATH_LABELS && bandLower >= READY_LOWER_BOUND);
+  const pathErrorsInBand = new Map<string, number>();
+  if (band) for (const p of pairs) if (p.e.confidence >= band.lo && !isCorrect(p.e, p.l)) pathErrorsInBand.set(pathOf(p.e), (pathErrorsInBand.get(pathOf(p.e)) ?? 0) + 1);
   for (const e of evals) {
     if (e.decided) continue;
     const key = pathOf(e);
@@ -180,13 +195,15 @@ export function applyLabels(evals: ElementEval[], labels: Label[], threshold: nu
     if (!blocks || !blocks.length) { e.calibration = { status: 'uncalibrated', path: key }; continue; }
     const b = blockAt(blocks, e.confidence)!;
     const precision = Math.round((b.k / b.n) * 1000) / 1000, lower = Math.round(lowerBound(b.k, b.n) * 1000) / 1000;
-    const ready = lower >= READY_LOWER_BOUND;
+    const inBand = Boolean(band && e.confidence >= band.lo);
+    const ready = bandReady && inBand && !pathErrorsInBand.get(key);
     const before = e.confidence;
     // Not ready is only "not ready": the block keeps its place in the order, squeezed under the bar.
-    e.confidence = ready ? Math.round(Math.min(0.98, precision) * 1000) / 1000 : squeeze(precision, threshold);
+    e.confidence = ready ? Math.max(threshold, Math.round(Math.min(0.98, band!.k / band!.n) * 1000) / 1000) : squeeze(precision, threshold);
     e.needsHuman = e.confidence < threshold;
-    e.calibration = { status: 'calibrated', path: key, n: b.n, precision, lower, ready, ...(own ? {} : { pooled: true }) };
-    e.reasons.push({ text: `Measured on labels: ${Math.round(precision * 100)}% right at this score (${b.k} of ${b.n}${own ? '' : ', all paths pooled'}); lower bound ${Math.round(lower * 1000) / 10}%${ready ? '' : ', under the 99% that ready needs'}.`, delta: Math.round((e.confidence - before) * 100) / 100 });
+    e.calibration = { status: 'calibrated', path: key, n: b.n, precision, lower, ready, ...(own ? {} : { pooled: true }), ...(band ? { band: { from: band.lo, n: band.n, right: band.k, lower: Math.round(bandLower * 1000) / 1000 } } : {}) };
+    const why = ready ? '' : !inBand ? ', below the top band' : !bandReady ? `; the top band across paths has ${band!.k} of ${band!.n} right, lower bound ${Math.round(bandLower * 1000) / 10}%, under the 99% that ready needs` : `; this path has ${pathErrorsInBand.get(key)} error(s) in the top band`;
+    e.reasons.push({ text: `Measured on labels: ${Math.round(precision * 100)}% right at this score (${b.k} of ${b.n}${own ? '' : ', all paths pooled'})${ready ? '; ready: the top band across paths clears 99% and this path has no error in it' : `, not ready${why}`}.`, delta: Math.round((e.confidence - before) * 100) / 100 });
   }
   return { matched: pairs.length, paths: byPath.size };
 }

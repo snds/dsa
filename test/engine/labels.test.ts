@@ -130,3 +130,34 @@ test('labels: equal neighbours pool into one block, so a clean top band is count
   assert.equal(blocks[1]!.n, 300);
   assert.ok(lowerBound(blocks[1]!.k, blocks[1]!.n) >= 0.99);
 });
+
+test('labels: ready is decided on the pooled top band; a path with an error in the band stays under the bar', () => {
+  const a = Array.from({ length: 700 }, (_, i) => ev(i, { ruleId: 'button.styled', confidence: 0.98 }));
+  const b = Array.from({ length: 100 }, (_, i) => ev(1000 + i, { ruleId: 'button.ghost', confidence: 0.98, props: { variant: 'ghost' } }));
+  const labels: Label[] = [
+    ...a.map(e => ({ id: e.id, truth: truth('Button') })),
+    ...b.map((e, i) => ({ id: e.id, truth: truth('Button', { variant: i === 0 ? 'link' : 'ghost' }) })),
+  ];
+  const fresh = [ev(5000, { ruleId: 'button.styled', confidence: 0.98 }), ev(5001, { ruleId: 'button.ghost', confidence: 0.98, props: { variant: 'ghost' } })];
+  // Scores at the clamp (0.98), so per-rule calibration leaves every element in one band.
+  applyLabels([...a, ...b, ...fresh], labels, 0.9);
+  const [okPath, errPath] = fresh;
+  assert.ok(okPath!.calibration!.band!.lower >= 0.99, JSON.stringify(okPath!.calibration));
+  assert.equal(okPath!.calibration!.ready, true);
+  assert.ok(okPath!.confidence >= 0.9);
+  assert.equal(errPath!.calibration!.ready, false, 'its own labels in the band have an error');
+  assert.ok(errPath!.confidence < 0.9);
+});
+
+test('labels: a top band too small for the bound makes nothing ready', () => {
+  const evals = Array.from({ length: 150 }, (_, i) => ev(i, { confidence: 0.95 }));
+  applyLabels(evals, evals.map(e => ({ id: e.id, truth: truth('Button') })), 0.9);
+  assert.ok(evals.every(e => !e.calibration!.ready && e.confidence < 0.9));
+  assert.ok(evals[0]!.reasons.some(r => /top band across paths has 150 of 150 right/.test(r.text)));
+});
+
+test('labels: points that share a score are one block, whatever order they came in', () => {
+  const blocks = isotonic([{ score: 0.9, ok: true }, { score: 0.9, ok: false }, { score: 0.9, ok: true }]);
+  assert.equal(blocks.length, 1);
+  assert.deepEqual([blocks[0]!.k, blocks[0]!.n], [2, 3]);
+});
