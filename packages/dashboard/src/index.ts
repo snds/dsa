@@ -58,10 +58,11 @@ export default defineAddon({
     program
       .command('report')
       .description('rebuild the HTML report from the latest run -> <data>/report/index.html')
-      .action(async (_o: unknown, cmd: Command) => {
+      .option('--run-dir <dir>', "one run's folder (its shots/ and rendered/): show that run's evidence, not the shared data folder's")
+      .action(async (o: { runDir?: string }, cmd: Command) => {
         const ctx = await api.context(cmd);
         await api.requireStore('report');
-        api.out(await buildReport(ctx.root, ctx.config, ctx.dataDir, ctx.profile, reportFile(ctx.dataDir)));
+        api.out(await buildReport(ctx.root, ctx.config, ctx.dataDir, ctx.profile, reportFile(ctx.dataDir), { runDir: o.runDir ? path.resolve(api.cwd, o.runDir) : undefined }));
       });
 
     program
@@ -69,13 +70,14 @@ export default defineAddon({
       .description('the dashboard as a static folder for any static host, mountable under a sub-path such as /dsa/ (default <data>/site); Re-scan goes through the scan relay, decisions where host.adapter says')
       .option('--out <dir>', 'where to write the site')
       .option('--relay <url>', 'the scan relay Re-scan goes through (default host.relay.url); docs/relay.md')
-      .action(async (o: { out?: string; relay?: string }, cmd: Command) => {
+      .option('--run-dir <dir>', "one run's folder (its shots/ and rendered/): publish that run's evidence, not the shared data folder's")
+      .action(async (o: { out?: string; relay?: string; runDir?: string }, cmd: Command) => {
         const ctx = await api.context(cmd);
         await api.requireStore('publish');
         if (o.relay && !/^https?:\/\//.test(o.relay)) throw new Error(`--relay needs the relay's full address (https://…), not "${o.relay}".`);
         const withRelay = o.relay ? { ...ctx, config: { ...ctx.config, host: { ...(ctx.config.host ?? { adapter: 'generic', github: { workflow: 'dsa.yml', label: 'dsa-decisions', server: 'https://github.com' } }), relay: { ...ctx.config.host?.relay, url: o.relay } } } } : ctx;
         const actions = (await deployOf(api.cwd, withRelay as typeof ctx)).actions();
-        const r = await publish(ctx.root, ctx.config, ctx.dataDir, ctx.profile, o.out ? path.resolve(api.cwd, o.out) : undefined, actions);
+        const r = await publish(ctx.root, ctx.config, ctx.dataDir, ctx.profile, o.out ? path.resolve(api.cwd, o.out) : undefined, actions, { runDir: o.runDir ? path.resolve(api.cwd, o.runDir) : undefined });
         api.out(`Published ${r.dir}: ${r.shots} screenshots, ${r.rendered} ${ctx.profile.label} renderings, ${(r.bytes / 1e6).toFixed(1)} MB.`);
       });
   },

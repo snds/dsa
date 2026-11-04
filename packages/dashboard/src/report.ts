@@ -2,7 +2,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { DEFAULT_THRESHOLD, autoPick, contentHash, ownOf, openStore, plainText, withPlain, withMetrics, appSettings, closestRendered, compareRendered, effectiveSettings, familyKey, figmaEnabled, homeOf, loadCatalog, patterns as stylePatterns, pushedThisWeek, questions, readEvents, readProposals, readRendered, renderIssue, renderedFor as composeRendered, resolveTargets, rowToFinding, sourceExcerpts, placeExcerpts, titleOf, type Config } from '@snds/dsa/engine';
+import { DEFAULT_THRESHOLD, freshShots, freshnessByApp, readShotIndex, autoPick, contentHash, ownOf, openStore, plainText, withPlain, withMetrics, appSettings, closestRendered, compareRendered, effectiveSettings, familyKey, figmaEnabled, homeOf, loadCatalog, patterns as stylePatterns, pushedThisWeek, questions, readEvents, readProposals, readRendered, renderIssue, renderedFor as composeRendered, resolveTargets, rowToFinding, sourceExcerpts, placeExcerpts, titleOf, type Config } from '@snds/dsa/engine';
 
 import { scanEstimate, type PageActions, type ResolvedProfile } from '@snds/dsa';
 import { buildQueue, PKG_DIR } from './queue.js';
@@ -11,8 +11,8 @@ import { buildQueue, PKG_DIR } from './queue.js';
  * Builds a single self-contained HTML report from the store: no server, opens from disk,
  * safe to attach or host anywhere. Data is embedded as JSON; the page renders it.
  */
-export async function buildReport(root: string, config: Config, dataDir: string, profile: ResolvedProfile, outFile: string): Promise<string> {
-  const html = await renderReport(root, config, dataDir, profile);
+export async function buildReport(root: string, config: Config, dataDir: string, profile: ResolvedProfile, outFile: string, opts: { runDir?: string | undefined } = {}): Promise<string> {
+  const html = await renderReport(root, config, dataDir, profile, { runDir: opts.runDir });
   fs.mkdirSync(path.dirname(outFile), { recursive: true });
   fs.writeFileSync(outFile, html);
   return outFile;
@@ -32,6 +32,11 @@ export interface ReportOptions {
   actions?: PageActions | null;
   /** When scans run by themselves (cron lines, UTC); a published page takes it from `actions`. */
   schedule?: string[] | undefined;
+  /**
+   * One run's folder (it holds that run's `shots/`, and `rendered/` when it has one): score and show that
+   * run's evidence instead of the shared data folder's, so photos from different runs never mix.
+   */
+  runDir?: string | undefined;
 }
 
 export async function renderReport(root: string, config: Config, dataDir: string, profile: ResolvedProfile, opts: ReportOptions = {}): Promise<string> {
@@ -137,18 +142,25 @@ export async function renderReport(root: string, config: Config, dataDir: string
     // Element review: every evaluation (trimmed), the questions for a human, shared styles, and example shots.
     const evalRows = await store.all<any>('select data from element_evals where run_id=$1 order by target, file, line', [runId]);
     const evals = evalRows.map(r => (typeof r.data === 'string' ? JSON.parse(r.data) : r.data));
-    const shotsFile = path.join(dataDir, 'shots', 'index.json');
-    const shotIdx = fs.existsSync(shotsFile) ? JSON.parse(fs.readFileSync(shotsFile, 'utf8')) : { shots: {} };
+    // This run's photos only (engine fresh.ts): one carried forward from an older run, or with no stamp,
+    // is treated as missing, and the page says how many and how old the oldest that counts is, per app.
+    const rawIdx = readShotIndex(dataDir, opts.runDir);
+    const fresh = freshShots(rawIdx);
+    const shotIdx = { ...rawIdx, shots: fresh.shots, missing: [...new Set([...(rawIdx.missing ?? []), ...Object.keys(fresh.stale)])] };
+    const appOfId = new Map<string, string>(evals.map((e: any) => [e.id, e.target]));
+    const evidenceDir = opts.runDir && fs.existsSync(path.join(opts.runDir, 'rendered')) ? opts.runDir : dataDir;
     const base = opts.base ?? '/';
-    const shotUrl = (f: string) => (opts.serve ? `${base}shots/${f}` : opts.site ? `shots/${f}` : `../shots/${f}`);
+    const shotUrl = (f: string) => (opts.serve ? `${base}shots/${f}` : opts.site ? `shots/${f}` : opts.runDir ? path.relative(path.dirname(path.join(dataDir, 'report', 'index.html')), path.join(opts.runDir, 'shots', f)).split(path.sep).join('/') : `../shots/${f}`);
     // A photo, and what the capture checked: blank (nothing painted in the box), covered (another layer on
     // top), how it was made to show (hover, focus), and ties (one of N alike; N source lines claim it).
     // Tagged: found by its source tag, so the place is exact (ties are then the nodes its one line made).
     const shotOf = (s: any) => ({ url: shotUrl(s.file), match: s.matchScore, page: s.page, box: s.box ?? null, revealedBy: s.revealedBy ?? null,
       ...(s.blank ? { blank: true } : {}), ...(s.covered ? { covered: true } : {}), ...(s.via ? { via: s.via } : {}), ...(s.ties > 1 ? { ties: s.ties, alike: s.alike ?? 1 } : {}), ...(s.shared ? { shared: s.shared } : {}), ...(s.tagged ? { tagged: true } : {}),
       // Drawn direct from code (mount, markup): shown, labelled, never a photo. Uncovered: covering layers hidden.
-      ...(s.drawn ? { drawn: s.drawn } : {}), ...(s.exact ? { exact: true } : {}), ...(s.uncovered ? { uncovered: s.uncovered } : {}) });
-    const renderedSet = readRendered(dataDir);
+      ...(s.drawn ? { drawn: s.drawn } : {}), ...(s.exact ? { exact: true } : {}), ...(s.uncovered ? { uncovered: s.uncovered } : {}),
+      // An isolated render: mounted in the app's build with the props it was recorded with. And the run that took it, and when.
+      ...(s.source ? { source: s.source } : {}), ...(s.run ? { run: s.run } : {}), ...(s.at ? { at: s.at } : {}) });
+    const renderedSet = readRendered(evidenceDir);
     const renderedUrl = (f: string) => (opts.serve ? `${base}rendered/${f}` : opts.site ? `rendered/${f}` : `../rendered/${f}`);
     // Element (as rendered in the app) vs the recommended system variant/size (as rendered in Storybook).
     const renderedFor = (e: any) => {
@@ -185,6 +197,7 @@ how: e.how ?? null, parent: e.parent ?? null, recipe: e.recipe ?? null,
         // Its own content's key: its proposal drawn with its words and icon is stored under proposalKey#ownHash.
         ownHash: contentHash(ownOf(e, shotIdx.shots[e.id])),
         shotMissing: !shotIdx.shots[e.id] && (shotIdx.missing ?? []).includes(e.id),
+        ...(fresh.stale[e.id] ? { staleShot: fresh.stale[e.id] } : {}),
         rendered: renderedFor(e),
         // What it takes to see the element (reach.ts), and the system's replacement as rendered, for cards without a screenshot.
         reach: e.reach ? { status: e.reach.status, why: e.reach.why, via: e.reach.via, steps: e.reach.steps.map((x: any) => x.label), gates: e.reach.gates.map((g: any) => ({ kind: g.kind, test: g.test, negated: g.negated, overlay: g.overlay, component: g.component })) } : null,
@@ -207,9 +220,11 @@ how: e.how ?? null, parent: e.parent ?? null, recipe: e.recipe ?? null,
       // The code viewer's text. dsa serve reads whole files on request (/api/source); a static page carries excerpts.
       sources: opts.serve ? null : sourceExcerpts(root, config, evals.map((e: any) => ({ target: e.target, file: e.file, line: e.line, span: typeof e.source === 'string' ? e.source.split('\n').length : 1 }))),
       shotsTaken: shotIdx.takenAt ?? null,
+      // Which run the photos are from, how many were set aside as older or unstamped, and the oldest that counts, per app.
+      freshness: { run: fresh.run, stale: Object.keys(fresh.stale).length, byApp: freshnessByApp(fresh, id => appOfId.get(id)) },
       rendered: renderedSet ? { takenAt: renderedSet.takenAt, source: renderedSet.source, combos: Object.values(renderedSet.components).reduce((a, c) => a + Object.keys(c).length, 0) } : null,
       // Each proposed replacement rendered with its exact props (dsa render), keyed like proposalKey: the review shows the options as they would look.
-      proposals: Object.fromEntries(Object.entries(readProposals(dataDir)).map(([k, p]) => [k, { use: p.use, props: p.props, check: p.check, url: p.shot ? renderedUrl(p.shot) : null, story: p.story ?? null, content: p.content ?? null, actual: p.actual ?? null, note: p.note ?? null, own: p.own ?? false, fallback: p.fallback ? renderedUrl(p.fallback) : null }])),
+      proposals: Object.fromEntries(Object.entries(readProposals(evidenceDir)).map(([k, p]) => [k, { use: p.use, props: p.props, check: p.check, url: p.shot ? renderedUrl(p.shot) : null, story: p.story ?? null, content: p.content ?? null, actual: p.actual ?? null, note: p.note ?? null, own: p.own ?? false, fallback: p.fallback ? renderedUrl(p.fallback) : null, ...(p.noSource ? { noSource: true } : {}) }])),
     });
     // Agent readiness: this run per repo (audit checks, the profile's usage checker by kind, reconciled with look-alikes), the trend, and bench runs.
     const provider = profile.readiness;

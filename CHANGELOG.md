@@ -8,6 +8,19 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- Only this run's screenshots count. The crawler stamps `shots/index.json` with its run
+  (`run: { id, ref, at }`, `ref` the source commit or "worktree") and each shot with the run that took
+  it and when (`run`, `at`). A shot from an older run taken before this run began, or one with no stamp
+  at all, is treated as missing by the confidence cap, the report and the trust rubric, and the card
+  says why (`staleShot`). The report carries `elements.freshness`: the run, how many photos were set
+  aside, and per app the oldest photo that counts and its age in hours before the run.
+- `dsa report --run-dir <dir>` and `dsa publish --run-dir <dir>` score and show one run's own folder
+  (its `shots/` and `rendered/`) instead of the shared data folder, so photos from different runs never
+  mix.
+- Isolated renders count as seeing the element, labelled "Isolated render": an element mounted in the
+  app's own build with the props it was recorded with (the shot index's `source: "isolated"`). A drawing
+  with guessed props stays a separate source (`guessed`) in the trust rubric.
+
 - Proposals are drawn without depending on stories. The system's component is mounted straight from its
   source through its own Vite, on a page that loads its Storybook preview file (CSS, providers,
   decorators), with the proposal's props and the element's own words and icon. Parts that live inside
@@ -22,6 +35,22 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   their element's own content.
 
 ### Fixed
+
+- The trust rubric counted one problem several times and assumed what the card shows. It now has
+  eleven checks, each a pass, a fail or not applicable, and a check that needs another doesn't apply
+  when that one fails: "current element shown" replaces C1/C2/C3/C6, so a missing photo counts once.
+  The photo label, the proposal label, side by side at one scale and "the place opens the code" are read
+  from the rendered card (`card-dom.ts`'s `PROBE_CARDS`; `onReviewPage` in @snds/dsa-review opens a
+  published page and shows every card), never from constants; without a rendered card they are
+  "untested". "Proposal drawn exactly" and "own content where it can be carried" are separate checks,
+  containers are not applicable to the second, and "the system has something to draw" is its own class
+  (proposals record `noSource`). Unused, lab, excepted and ignored elements are reported as counts.
+- Reasons in plain words now catch utility classes (`px-2`, `size-5`, `hover:bg-zinc-12`) and CSS
+  variables (`--radius-md`), which passed before.
+- The confidence cap counted a photo of another element with the same classes as evidence; the trust
+  rubric didn't, so cards were "ready" on a look-alike's photo. Both now take the element's own photo
+  only: the same classes can draw differently (other words, another parent, a state), and the card
+  labels that photo with the other element's place. The rubric flags such cards (`siblingPhoto`).
 
 - Cards showed a proposal with the story's sample content although the element had its own. The
   confidence cap changes which question an element is in, and so what its card proposes, and the last cap
