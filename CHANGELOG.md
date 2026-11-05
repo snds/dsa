@@ -32,6 +32,10 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- Exploring is guided by coverage (Chromium's JS coverage): each control is scored by the code it runs for
+  the first time in the files of what's still missing, and below the top level only a control that ran
+  some is followed further. The log says how much new code each page's exploring ran and which control ran
+  the most. `shots.coverage: false` turns it off.
 - An opt-in reach manifest (docs/reach-manifest.md). A dev build's `window.__DSA__ = { routes(), states(),
   go(name), seed() }` puts its routes first and each named state on in turn (those whose `reveals` name a
   missing element's file first); `dsa.reach.json` beside the app adds routes, and states that are a route

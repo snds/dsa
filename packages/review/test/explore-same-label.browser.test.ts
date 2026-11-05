@@ -49,4 +49,6 @@ test('the same words on another page are another control: "Edit Image" is tried 
   const idx = JSON.parse(fs.readFileSync(path.join(data, 'shots', 'index.json'), 'utf8'));
   assert.ok(idx.shots[target!.id] && !idx.shots[target!.id].drawn, logs.join('\n'));
   assert.match(idx.shots[target!.id].page, /\/samples$/);
+  // Exploring measures the code each control runs in the missing element's files (coverage), not only what it finds.
+  assert.match(logs.join('\n'), /explored .*new code blocks? run in missing elements' files/);
 });

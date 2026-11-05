@@ -283,7 +283,7 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
       const lines = (sh as any).ledger ?? process.env.DSA_LEDGER;
       if (lines) { const n = addToLedger(ledgerFile, readLedgerLines(path.resolve(opts.root, lines)), ledgerHash); if (n) log(`  ledger: ${n} record${n === 1 ? '' : 's'} added from ${lines}`); }
       const ledger = readLedger(ledgerFile, ledgerHash);
-      const r: Awaited<ReturnType<typeof session>> & { signIn?: string; expired?: boolean; broken?: string } = await session(pw, { ledger, reach: s.reach, draw: s.draw, url: s.url, routes: s.routes, first: s.first, flows: s.flows, crawl: s.crawl, examples: s.need, dir, storageState: s.storageState, readApi: s.readApi, readPaths: s.readPaths, signIn: s.signIn, maxPages: sh.maxPages ?? 90, pagesSet: sh.maxPages !== undefined, waitMs: sh.waitMs ?? 600, log, reveal: sh.reveal, maxActions: sh.maxActions ?? sh.maxTriggers, maxDepth: sh.maxDepth, maxMinutes: sh.maxMinutes, routeSource: s.routeSource, profiles: s.profiles, appDir: s.appDir, manifest: s.manifest });
+      const r: Awaited<ReturnType<typeof session>> & { signIn?: string; expired?: boolean; broken?: string } = await session(pw, { ledger, reach: s.reach, draw: s.draw, url: s.url, routes: s.routes, first: s.first, flows: s.flows, crawl: s.crawl, examples: s.need, dir, storageState: s.storageState, readApi: s.readApi, readPaths: s.readPaths, signIn: s.signIn, maxPages: sh.maxPages ?? 90, pagesSet: sh.maxPages !== undefined, waitMs: sh.waitMs ?? 600, log, reveal: sh.reveal, maxActions: sh.maxActions ?? sh.maxTriggers, maxDepth: sh.maxDepth, maxMinutes: sh.maxMinutes, routeSource: s.routeSource, profiles: s.profiles, appDir: s.appDir, manifest: s.manifest, coverage: (sh as any).coverage });
       const at = new Date().toISOString();
       if (r.ledger?.length) { const n = addToLedger(ledgerFile, r.ledger, ledgerHash); log(`  ledger: ${r.ledger.length} element${r.ledger.length === 1 ? '' : 's'} recorded rendering, ${n} new`); }
       const byId = new Map(s.need.map(e => [e.id, e]));
@@ -520,7 +520,7 @@ function callersOf(d: DrawWith, name: string, own: string): string[] {
 /** What the scan knows about reaching each element (routes.ts): the routes that render its file, and the patterns that need a value. */
 interface ReachPlan { byId: Record<string, string[]>; patterns: string[]; /** Per element: its file and its importers three steps up, as tag paths. */ near?: Record<string, string[]> }
 
-async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawWith | undefined; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; examples: ElementEval[]; dir: string; storageState?: string | undefined; readApi?: boolean | undefined; readPaths?: string[] | undefined; signIn?: SignIn | undefined; maxPages: number; waitMs: number; log: (m: string) => void; reveal?: boolean; maxActions?: number; maxDepth?: number; maxMinutes?: number; maxReplays?: number; routeSource?: RouteSource | undefined; appDir?: string | undefined; profiles?: Profile[] | undefined; pagesSet?: boolean | undefined; ledger?: Record<string, LedgerRec[]> | undefined; manifest?: ReachFile | undefined }) {
+async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawWith | undefined; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; examples: ElementEval[]; dir: string; storageState?: string | undefined; readApi?: boolean | undefined; readPaths?: string[] | undefined; signIn?: SignIn | undefined; maxPages: number; waitMs: number; log: (m: string) => void; reveal?: boolean; maxActions?: number; maxDepth?: number; maxMinutes?: number; maxReplays?: number; routeSource?: RouteSource | undefined; appDir?: string | undefined; profiles?: Profile[] | undefined; pagesSet?: boolean | undefined; ledger?: Record<string, LedgerRec[]> | undefined; manifest?: ReachFile | undefined; coverage?: boolean | undefined }) {
   const shots: Record<string, any> = {};
   const pages: string[] = [];
   let taggedPages = 0;
@@ -578,6 +578,8 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   };
   let watchPage: ((pg: any) => void) | null = null;
   const recorded: LedgerRec[] = [];
+  // Code run while exploring, in missing elements' files (covGain): kept across pages, so only new code counts.
+  const cov = { on: false, seen: new Set<string>(), page: 0, best: '', bestN: 0 };
   await launch();
   // A page can crash or close under the crawler (a heavy view, a control that closes the window):
   // start a fresh browser and carry on with the next page instead of losing the whole pass.
@@ -1598,6 +1600,39 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
    * interaction revealed, up to shots.maxDepth deep. Return to the parent state with Escape, or by
    * reloading and replaying the path. Never anything that deletes, saves, submits, sends, or closes.
    */
+  /**
+   * JS coverage while exploring (Chromium): which code each interaction ran for the first time in the files
+   * of what's still missing (their own and the files near them). Off with shots.coverage: false, or when the
+   * browser has no coverage.
+   */
+  async function covStart() {
+    cov.page = 0; cov.best = ''; cov.bestN = 0;
+    if (o.coverage === false || !page.coverage) { cov.on = false; return; }
+    try { await page.coverage.startJSCoverage({ resetOnNavigation: false }); cov.on = true; } catch { cov.on = false; }
+  }
+  async function covStop() { if (cov.on) { try { await page.coverage.stopJSCoverage(); } catch { /* closed */ } } }
+  async function covGain(what: string): Promise<number> {
+    if (!cov.on) return 0;
+    let entries: any[] = [];
+    try { entries = await page.coverage.stopJSCoverage(); await page.coverage.startJSCoverage({ resetOnNavigation: false }); } catch { cov.on = false; return 0; }
+    const want = new Set<string>();
+    for (const r of remaining) { want.add(r.e.file); for (const f of o.reach?.near?.[r.id] ?? []) want.add(f); }
+    let n = 0;
+    for (const e of entries) {
+      let p = '';
+      try { p = decodeURIComponent(new URL(e.url).pathname).replace(/^\/@fs/, ''); } catch { continue; }
+      if (!p || ![...want].some(f => p.endsWith('/' + f) || f.endsWith(p.replace(/^\//, '')))) continue;
+      for (const fn of e.functions ?? []) for (const r of fn.ranges ?? []) {
+        if (!r.count) continue;
+        const k = `${p}:${r.startOffset}:${r.endOffset}`;
+        if (!cov.seen.has(k)) { cov.seen.add(k); n++; }
+      }
+    }
+    cov.page += n;
+    if (n > cov.bestN) { cov.bestN = n; cov.best = what; }
+    return n;
+  }
+
   async function explore(u: string, sweep: (revealedBy?: string) => Promise<void>) {
     // A page that renders what's missing: twice the interactions and time, and every control tried.
     const own = owns(u) > 0;
@@ -1652,10 +1687,13 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         budget--;
         if (left()) { if (!(await replay(path))) return false; continue; }
         const after = await sig();
+        // What it ran: new code in the files of what's still missing. Below the top, only a control that ran
+        // some is followed further; "found" is almost always 0, so it can't tell a promising path from a dead one.
+        const gain = await covGain(describe([...path, a]));
         if (after !== before) {
           await sweep(describe([...path, a]));
           if (!remaining.length) return true;
-          if (level + 1 < maxDepth && a.kind !== 'hover') {
+          if (level + 1 < maxDepth && a.kind !== 'hover' && (level === 0 || !cov.on || gain > 0)) {
             const ok = await walk([...path, a], level + 1, after);
             if (!ok) { if (!(await replay(path))) return false; continue; }
           }
@@ -1668,9 +1706,11 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       }
       return true;
     };
+    await covStart();
     await walk([], 0, await sig());
+    await covStop();
     const used = (o.maxActions ?? 20) * (own ? 2 : 1) - budget;
-    o.log(`  explored ${u.replace(base.origin, '')}: ${used} interaction${used === 1 ? '' : 's'}, ${startCount - remaining.length} found${own ? ' (a page that renders what is missing: every control tried)' : ''}${budget <= 0 ? '; interaction budget (shots.maxActions) used' : Date.now() > pageStop ? '; out of time for this page' : ''}`);
+    o.log(`  explored ${u.replace(base.origin, '')}: ${used} interaction${used === 1 ? '' : 's'}, ${startCount - remaining.length} found${cov.on ? `, ${cov.page} new code block${cov.page === 1 ? '' : 's'} run in missing elements' files${cov.best ? ` (most by ${cov.best})` : ''}` : ''}${own ? ' (a page that renders what is missing: every control tried)' : ''}${budget <= 0 ? '; interaction budget (shots.maxActions) used' : Date.now() > pageStop ? '; out of time for this page' : ''}`);
   }
 }
 
