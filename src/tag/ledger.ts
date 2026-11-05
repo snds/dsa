@@ -12,7 +12,7 @@
  *
  * Values are copied with limits: functions become {"__dsa":"fn"}, a Set or Map {"__dsa":"set"|"map"},
  * React elements and DOM nodes null; depth 4, five items per list, 30 keys per object, 200 characters
- * per string; and a key that looks like a credential or personal detail (password, token, email, phone,
+ * per string; dsa's own marks (data-dsa-*) left out; and a key that looks like a credential or personal detail (password, token, email, phone,
  * address…) is "[redacted]". A copy that hit a limit is marked `cut`, so nobody sets it back as if whole.
  *
  * Records go to the crawler through `window.__dsaLedgerPut` when it exposes one, else to the dev server
@@ -46,7 +46,7 @@ export const LEDGER_RUNTIME = `(() => {
     const o = {};
     const keys = Object.keys(v);
     if (keys.length > 30) cut.on = true;
-    for (const k of keys.slice(0, 30)) o[k] = SECRET.test(k) ? '[redacted]' : copy(v[k], d + 1, seen);
+    for (const k of keys.slice(0, 30)) { if (k.startsWith('data-dsa-')) continue; o[k] = SECRET.test(k) ? '[redacted]' : copy(v[k], d + 1, seen); }
     return o;
   };
   const take = (v) => { cut.on = false; const value = copy(v, 0, new WeakSet()); return { value, cut: cut.on }; };

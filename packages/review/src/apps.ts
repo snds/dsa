@@ -49,7 +49,7 @@ export function detectApp(t: Target, config: Config): AppPlan | { target: string
  */
 export function tagPlan(plan: AppPlan, o: { root: string; dir: string; off?: boolean | undefined }): AppPlan {
   if (o.off) return plan;
-  const env = { DSA_TAG: '1', DSA_TAG_ROOT: o.root, DSA_TAG_DIR: o.dir };
+  const env = { DSA_TAG: '1', DSA_TAG_ROOT: o.root, DSA_TAG_DIR: o.dir, DSA_TAG_USES: '1' };
   if (plan.how === 'vite') {
     const vite = packageEntry(plan.cwd, 'vite');
     const core = packageEntry(path.dirname(fileURLToPath(import.meta.url)), '@snds/dsa', './tag');

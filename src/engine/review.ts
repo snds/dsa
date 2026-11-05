@@ -21,6 +21,16 @@ export async function latestEvals(dataDir: string, target?: string): Promise<{ r
   } finally { store.close(); }
 }
 
+/** The latest run's design-system component uses (the instances table): component, file and line, per app. */
+export async function latestInstances(dataDir: string, target?: string): Promise<{ target: string; component: string; file: string; line: number }[]> {
+  const store = await openStore(dataDir, 'review');
+  try {
+    const run = (await store.all<any>('select run_id from runs order by taken_at desc limit 1'))[0]?.run_id ?? null;
+    if (!run) return [];
+    return await store.all<any>(`select target, component, file, line from instances where run_id=$1 ${target ? 'and target=$2' : ''}`, target ? [run, target] : [run]);
+  } catch { return []; } finally { store.close(); }
+}
+
 export const effective = (e: ElementEval): Recommendation => e.decided?.decision ?? e;
 export const groupKey = (e: ElementEval) => `${e.element} → ${describe(effective(e))}`;
 

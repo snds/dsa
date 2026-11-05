@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { LEDGER_RUNTIME, fileOfTag, tagPath } from '@snds/dsa/tag';
 import { addToLedger, contentHash, readLedger, readLedgerLines, recordsFor, type LedgerRec } from './ledger.js';
-import { BLANK_INSET, buildGraph, federate, decodePng, groupKey, isBlank, latestEvals, materializeRemotes, resolveTargets, targetRelative, walk, type Config, type ElementEval } from '@snds/dsa/engine';
+import { BLANK_INSET, buildGraph, federate, latestInstances, decodePng, groupKey, isBlank, latestEvals, materializeRemotes, resolveTargets, targetRelative, walk, type Config, type ElementEval } from '@snds/dsa/engine';
 import { appSurface, openSurface } from '@snds/dsa';
 
 import { detectApp, discoverRoutes, ensureBrowser, linkCoreForChild, routeConfig, startApp, tagPlan } from './apps.js';
@@ -123,13 +123,15 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
   const dir = path.join(opts.dataDir, 'shots');
   fs.mkdirSync(dir, { recursive: true });
   const idxFile = path.join(dir, 'index.json');
-  const index: { shots: Record<string, any>; missing: string[]; pages: string[]; takenAt: string; misses?: Record<string, any>; run?: RunStamp } = fs.existsSync(idxFile) ? JSON.parse(fs.readFileSync(idxFile, 'utf8')) : { shots: {}, missing: [], pages: [], takenAt: '' };
+  const index: { shots: Record<string, any>; missing: string[]; pages: string[]; takenAt: string; misses?: Record<string, any>; run?: RunStamp; uses?: Record<string, any> } = fs.existsSync(idxFile) ? JSON.parse(fs.readFileSync(idxFile, 'utf8')) : { shots: {}, missing: [], pages: [], takenAt: '' };
   index.missing = []; index.pages = [];
   // This run: an id each new photo carries, the source it was taken from (its commit, or "worktree" when the
   // checkout has changes), and when. Cached photos keep their own stamp, so a report can tell an old one apart.
   index.run = { id: `${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`, ref: sourceRef(opts.root), at: new Date().toISOString() };
   const result: ShotResult = { captured: 0, missing: 0, pages: 0, apps: [] };
   const perGroup = opts.perGroup ?? 3;
+  // The app's own uses of design-system components (the scan's instances), photographed as examples.
+  const instances = await latestInstances(opts.dataDir).catch(() => []);
 
   // Cache: a screenshot (or a "not found") stays valid while the element's source file is unchanged,
   // up to shots.maxAgeDays (default 7; global CSS changes are caught by that expiry or --fresh).
@@ -283,8 +285,9 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
       const lines = (sh as any).ledger ?? process.env.DSA_LEDGER;
       if (lines) { const n = addToLedger(ledgerFile, readLedgerLines(path.resolve(opts.root, lines)), ledgerHash); if (n) log(`  ledger: ${n} record${n === 1 ? '' : 's'} added from ${lines}`); }
       const ledger = readLedger(ledgerFile, ledgerHash);
-      const r: Awaited<ReturnType<typeof session>> & { signIn?: string; expired?: boolean; broken?: string } = await session(pw, { ledger, reach: s.reach, draw: s.draw, url: s.url, routes: s.routes, first: s.first, flows: s.flows, crawl: s.crawl, examples: s.need, dir, storageState: s.storageState, readApi: s.readApi, readPaths: s.readPaths, signIn: s.signIn, maxPages: sh.maxPages ?? 90, pagesSet: sh.maxPages !== undefined, waitMs: sh.waitMs ?? 600, log, reveal: sh.reveal, maxActions: sh.maxActions ?? sh.maxTriggers, maxDepth: sh.maxDepth, maxMinutes: sh.maxMinutes, routeSource: s.routeSource, profiles: s.profiles, appDir: s.appDir, manifest: s.manifest, coverage: (sh as any).coverage });
+      const r: Awaited<ReturnType<typeof session>> & { signIn?: string; expired?: boolean; broken?: string } = await session(pw, { ledger, uses: instances.filter(i => s.target === '*' || i.target === s.target).map(i => ({ component: i.component, key: `${i.file}:${i.line}` })), reach: s.reach, draw: s.draw, url: s.url, routes: s.routes, first: s.first, flows: s.flows, crawl: s.crawl, examples: s.need, dir, storageState: s.storageState, readApi: s.readApi, readPaths: s.readPaths, signIn: s.signIn, maxPages: sh.maxPages ?? 90, pagesSet: sh.maxPages !== undefined, waitMs: sh.waitMs ?? 600, log, reveal: sh.reveal, maxActions: sh.maxActions ?? sh.maxTriggers, maxDepth: sh.maxDepth, maxMinutes: sh.maxMinutes, routeSource: s.routeSource, profiles: s.profiles, appDir: s.appDir, manifest: s.manifest, coverage: (sh as any).coverage });
       const at = new Date().toISOString();
+      if (Object.keys(r.uses ?? {}).length) { index.uses ??= {}; for (const [k, v] of Object.entries<any>(r.uses)) index.uses[k] = { ...v, run: index.run!.id, at }; log(`  ${Object.keys(r.uses).length} of the app's own uses of system components photographed as examples`); }
       if (r.ledger?.length) { const n = addToLedger(ledgerFile, r.ledger, ledgerHash); log(`  ledger: ${r.ledger.length} element${r.ledger.length === 1 ? '' : 's'} recorded rendering, ${n} new`); }
       const byId = new Map(s.need.map(e => [e.id, e]));
       if (r.signIn && !Object.keys(r.shots).length) {
@@ -520,7 +523,7 @@ function callersOf(d: DrawWith, name: string, own: string): string[] {
 /** What the scan knows about reaching each element (routes.ts): the routes that render its file, and the patterns that need a value. */
 interface ReachPlan { byId: Record<string, string[]>; patterns: string[]; /** Per element: its file and its importers three steps up, as tag paths. */ near?: Record<string, string[]> }
 
-async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawWith | undefined; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; examples: ElementEval[]; dir: string; storageState?: string | undefined; readApi?: boolean | undefined; readPaths?: string[] | undefined; signIn?: SignIn | undefined; maxPages: number; waitMs: number; log: (m: string) => void; reveal?: boolean; maxActions?: number; maxDepth?: number; maxMinutes?: number; maxReplays?: number; routeSource?: RouteSource | undefined; appDir?: string | undefined; profiles?: Profile[] | undefined; pagesSet?: boolean | undefined; ledger?: Record<string, LedgerRec[]> | undefined; manifest?: ReachFile | undefined; coverage?: boolean | undefined }) {
+async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawWith | undefined; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; examples: ElementEval[]; dir: string; storageState?: string | undefined; readApi?: boolean | undefined; readPaths?: string[] | undefined; signIn?: SignIn | undefined; maxPages: number; waitMs: number; log: (m: string) => void; reveal?: boolean; maxActions?: number; maxDepth?: number; maxMinutes?: number; maxReplays?: number; routeSource?: RouteSource | undefined; appDir?: string | undefined; profiles?: Profile[] | undefined; pagesSet?: boolean | undefined; ledger?: Record<string, LedgerRec[]> | undefined; manifest?: ReachFile | undefined; coverage?: boolean | undefined; uses?: { component: string; key: string }[] | undefined }) {
   const shots: Record<string, any> = {};
   const pages: string[] = [];
   let taggedPages = 0;
@@ -578,6 +581,24 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   };
   let watchPage: ((pg: any) => void) | null = null;
   const recorded: LedgerRec[] = [];
+  // Photos of the app's own uses of system components (shots/index.json "uses"): up to 3 per component, 150 in all.
+  const usesShot: Record<string, any> = {};
+  const usesPer = new Map<string, number>();
+  const photographUses = async (u: string) => {
+    if (!o.uses?.length || Object.keys(usesShot).length >= 150) return;
+    const want = o.uses.filter(x => !usesShot[x.key] && (usesPer.get(x.component) ?? 0) < 3);
+    if (!want.length) return;
+    const marked = await inPage<{ key: string; id: string }[]>(page, MARK_USES, want.map(x => x.key)).catch(() => []);
+    for (const m of marked) {
+      const w = want.find(x => x.key === m.key)!;
+      if ((usesPer.get(w.component) ?? 0) >= 3 || Object.keys(usesShot).length >= 150) continue;
+      const file = `${m.id}.png`;
+      const cap = await capture(page, m.id, path.join(o.dir, file)).catch(() => null);
+      if (!cap || cap.blank || cap.covered) continue;
+      usesShot[m.key] = { file, page: u, box: cap.box, ...(cap.context ? { context: cap.context } : {}), matchScore: 1, tagged: true, component: w.component };
+      usesPer.set(w.component, (usesPer.get(w.component) ?? 0) + 1);
+    }
+  };
   // Code run while exploring, in missing elements' files (covGain): kept across pages, so only new code counts.
   const cov = { on: false, seen: new Set<string>(), page: 0, best: '', bestN: 0 };
   await launch();
@@ -801,7 +822,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         if (n >= 2) { remaining = remaining.filter(x => x.id !== f.id); setAside.push(f.id); why[f.id] = `it renders under 2px wide or tall (on ${routeOf(u)}, each node its line drew)`; }
         continue;
       }
-      shots[f.id] = { file, page: u, matchScore: Math.round(f.score * 100) / 100, ties: f.ties, alike: f.alike, ...(f.tagged ? { tagged: true } : {}), ...((f as any).claimants > 1 ? { shared: (f as any).claimants } : {}), styles, placement, box: cap.box, revealedBy, content, ...(cap.blank ? { blank: true } : {}), ...(cap.covered ? { covered: true } : {}), ...(cap.uncovered ? { uncovered: cap.uncovered } : {}), ...(cap.via ? { via: cap.via } : {}) };
+      shots[f.id] = { file, page: u, matchScore: Math.round(f.score * 100) / 100, ties: f.ties, alike: f.alike, ...(f.tagged ? { tagged: true } : {}), ...((f as any).claimants > 1 ? { shared: (f as any).claimants } : {}), styles, placement, box: cap.box, ...(cap.context ? { context: cap.context } : {}), revealedBy, content, ...(cap.blank ? { blank: true } : {}), ...(cap.covered ? { covered: true } : {}), ...(cap.uncovered ? { uncovered: cap.uncovered } : {}), ...(cap.via ? { via: cap.via } : {}) };
       o.log(`  ${f.id} on ${u.replace(base.origin, '')}${revealedBy ? ` after ${revealedBy}` : ''} (${f.tagged ? `matched by source tag${f.ties > 1 ? `, one of ${f.ties} rendered by this line` : ''}` : `match ${Math.round(f.score * 100)}%`}${f.tagged ? '' : (f as any).claimants > 1 ? `, ${(f as any).claimants} source lines want the same control` : f.ties > 1 ? (f.alike >= f.ties ? `, one of ${f.ties} alike on the page` : `, a guess among ${f.ties} similar elements on the page`) : ''})${cap.blank ? ' · captured but blank' : cap.covered ? ' · covered by another layer' : cap.uncovered ? ` · ${cap.uncovered} covering layer${cap.uncovered > 1 ? 's' : ''} hidden` : cap.via ? ` · shows on ${cap.via}` : ''}`);
     }
     remaining = remaining.filter(r => !shots[r.id]);
@@ -927,6 +948,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       }
       const sweep = sweeper(u);
       await sweep();
+      await photographUses(u);
       // How much of what's still missing this page mentions (hint words and traced labels in its text): pass 2 goes there first.
       if (remaining.length && o.reveal !== false) {
         const words = [...hints(), ...traced().map(t => t.toLowerCase())];
@@ -1042,7 +1064,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   } finally {
     await browser.close().catch(() => {});
   }
-  return { ledger: recorded, shots, pages, missing: [...remaining.map(r => r.id), ...setAside, ...drawnIds], drawn: drawnIds.length, why, fileOn: Object.fromEntries(Object.entries(fileOn).map(([k, u]) => [k, u && routeOf(u)])), tried: Object.fromEntries(everyone.filter(r => r.tried?.length).map(r => [r.id, r.tried!])), tagged: { pages: taggedPages, of: pages.length }, ...(signedOut() || auth.expired ? { signIn: wall.at || o.url } : {}), ...(auth.expired ? { expired: true } : {}), ...(isBroken() ? { broken: broken.first } : {}) };
+  return { ledger: recorded, uses: usesShot, shots, pages, missing: [...remaining.map(r => r.id), ...setAside, ...drawnIds], drawn: drawnIds.length, why, fileOn: Object.fromEntries(Object.entries(fileOn).map(([k, u]) => [k, u && routeOf(u)])), tried: Object.fromEntries(everyone.filter(r => r.tried?.length).map(r => [r.id, r.tried!])), tagged: { pages: taggedPages, of: pages.length }, ...(signedOut() || auth.expired ? { signIn: wall.at || o.url } : {}), ...(auth.expired ? { expired: true } : {}), ...(isBroken() ? { broken: broken.first } : {}) };
 
   /**
    * The app's own reach manifest, when its dev build declares one (`window.__DSA__`, docs/reach-manifest.md):
@@ -1819,6 +1841,21 @@ const SEED_STORAGE = `({ local, session }) => {
   for (const [k, v] of Object.entries(session)) { try { v === null ? sessionStorage.removeItem(k) : sessionStorage.setItem(k, v); } catch {} }
 }`;
 
+/** Runs in the page: mark one visible node for each component use wanted (by "file:line"), for a photo. */
+const MARK_USES = `(keys) => {
+  const vis = (el) => { const r = el.getBoundingClientRect(); if (r.width < 2 || r.height < 2) return false; const st = getComputedStyle(el); return st.visibility !== 'hidden' && st.display !== 'none'; };
+  const all = Array.from(document.querySelectorAll('[data-dsa-use]')).filter((el) => !el.closest('#dsa-mount, #dsa-markup'));
+  const out = [];
+  for (const k of keys) {
+    const el = all.find((e) => e.getAttribute('data-dsa-use').startsWith(k + ':') && vis(e));
+    if (!el || el.hasAttribute('data-dsa-shot')) continue;
+    const id = 'use-' + k.replace(/[^\\w]+/g, '-').slice(-60);
+    el.setAttribute('data-dsa-shot', id);
+    out.push({ key: k, id });
+  }
+  return out;
+}`;
+
 interface SetResult { found: number; set: number; named?: number; off: string[] }
 const NONE_SET: SetResult = { found: 0, set: 0, off: [] };
 
@@ -2202,6 +2239,8 @@ export interface Captured {
   via?: 'hover' | 'focus';
   /** Layers hidden because they covered it (a toast, a sticky bar): the photo is still the app's page. */
   uncovered?: number;
+  /** A wider photo of the page around it (about 800 × 500), and where it sits in that photo. */
+  context?: { file: string; box: { x: number; y: number; w: number; h: number; cw: number; ch: number } };
 }
 
 /**
@@ -2220,9 +2259,11 @@ async function capture(page: any, id: string, file: string): Promise<Captured | 
   try {
     for (let i = 0; i < 5; i++) {
       const got = await captureNode(page, sel, file + (i ? `.${i}` : ''));
-      if (got && !got.blank && !got.covered) { if (i) fs.renameSync(file + `.${i}`, file); return got; }
-      if (got && !first) { first = got; if (i) fs.renameSync(file + `.${i}`, file); }
-      else if (got && i) fs.rmSync(file + `.${i}`, { force: true });
+      const ctx = file.replace(/\.png$/, '.ctx.png');
+      const keep = () => { if (!i) return; fs.renameSync(file + `.${i}`, file); if (fs.existsSync(ctx + `.${i}`)) fs.renameSync(ctx + `.${i}`, ctx); };
+      if (got && !got.blank && !got.covered) { keep(); return got; }
+      if (got && !first) { first = got; keep(); }
+      else if (got && i) { fs.rmSync(file + `.${i}`, { force: true }); fs.rmSync(ctx + `.${i}`, { force: true }); }
       if (!await inPage<boolean>(page, NEXT_NODE, sel).catch(() => false)) break;
     }
     return first;
@@ -2300,7 +2341,16 @@ async function captureNode(page: any, sel: string, file: string): Promise<Captur
       shot = await shoot();
     }
     fs.writeFileSync(file, shot.buf);
-    return { box: rel, ...(shot.blank ? { blank: true as const } : {}), ...(!shot.top ? { covered: true as const } : uncovered ? { uncovered } : {}), ...(via ? { via } : {}) };
+    // The page around it, for a person deciding: where it sits and what's near it.
+    let context: Captured['context'];
+    try {
+      const W = Math.min(800, vp.width), H = Math.min(500, vp.height);
+      const x0 = Math.max(0, Math.min(box.x + box.width / 2 - W / 2, vp.width - W)), y0 = Math.max(0, Math.min(box.y + box.height / 2 - H / 2, vp.height - H));
+      const ctxFile = file.replace(/\.png(\.\d+)?$/, '.ctx.png$1');
+      fs.writeFileSync(ctxFile, await page.screenshot({ clip: { x: x0, y: y0, width: W, height: H } }));
+      context = { file: path.basename(ctxFile).replace(/\.\d+$/, ''), box: { x: r(box.x - x0), y: r(box.y - y0), w: r(box.width), h: r(box.height), cw: W, ch: H } };
+    } catch { /* the photo stands without it */ }
+    return { box: rel, ...(context ? { context } : {}), ...(shot.blank ? { blank: true as const } : {}), ...(!shot.top ? { covered: true as const } : uncovered ? { uncovered } : {}), ...(via ? { via } : {}) };
   } catch { return null; }
   finally {
     await page.evaluate(RESTORE_COVER).catch(() => {});

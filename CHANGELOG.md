@@ -32,6 +32,11 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- For people reviewing a proposal: each live photo gets a wider photo of the page around it (`context`:
+  about 800 × 500, with where the element sits in it), and the app's own uses of design-system components
+  are photographed as examples (`uses` in shots/index.json, keyed "file:line", up to 3 per component). The
+  tagger marks each component use with `data-dsa-use` when dsa starts the app; it reaches the page when the
+  component passes its props on.
 - Exploring is guided by coverage (Chromium's JS coverage): each control is scored by the code it runs for
   the first time in the files of what's still missing, and below the top level only a control that ran
   some is followed further. The log says how much new code each page's exploring ran and which control ran

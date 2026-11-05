@@ -34,7 +34,15 @@ export interface TagOptions {
    * component that doesn't gets a prop it ignores (or warns about). True for all, or a list of names.
    */
   components?: boolean | string[] | undefined;
+  /**
+   * Mark where each component is used: `data-dsa-use="file:line:col"` on every component element, which
+   * reaches the page when the component passes unknown props to its element (shadcn-style components do),
+   * so the crawler can photograph the app's own uses of a design-system component. Default: DSA_TAG_USES=1.
+   */
+  uses?: boolean | undefined;
 }
+
+export const USE_ATTR = 'data-dsa-use';
 
 export const TAG_ATTR = 'data-dsa-src';
 
@@ -132,6 +140,7 @@ export function tagSource(code: string, file: string, o: TagOptions = {}): { cod
   // The scanner's own parser options, so lines and columns are the ones it records.
   try { ast = babelParse(code, { sourceType: 'unambiguous', errorRecovery: true, plugins: tsOnly ? ['typescript', 'decorators-legacy'] : ['jsx', 'typescript', 'decorators-legacy'] }); } catch { return null; }
   const comps = o.components;
+  const uses = o.uses ?? process.env.DSA_TAG_USES === '1';
   const edits: { at: number; text: string }[] = [];
   const tags: Tag[] = [];
   walk(ast.program, (n) => {
@@ -139,6 +148,9 @@ export function tagSource(code: string, file: string, o: TagOptions = {}): { cod
     const name = jsxName(n.name);
     if (!name) return;
     const host = n.name.type === 'JSXIdentifier' && /^[a-z]/.test(name) && !name.includes('-');
+    if (!host && uses && !FRAGMENT.test(name) && /^[A-Z]/.test(name.split('.').pop() ?? '') && !n.attributes.some((a: any) => a.type === 'JSXAttribute' && a.name?.name === USE_ATTR)) {
+      edits.push({ at: n.name.end, text: ` ${USE_ATTR}=${JSON.stringify(`${rel}:${n.loc.start.line}:${n.loc.start.column + 1}`)}` });
+    }
     if (!host && !(comps === true ? !FRAGMENT.test(name) : Array.isArray(comps) && comps.includes(name))) return;
     if (n.attributes.some((a: any) => a.type === 'JSXAttribute' && a.name?.name === TAG_ATTR)) return;
     const line = n.loc.start.line, col = n.loc.start.column + 1;
