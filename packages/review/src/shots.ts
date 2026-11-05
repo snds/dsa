@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { LEDGER_RUNTIME, fileOfTag, tagPath } from '@snds/dsa/tag';
+import { renderTests } from './testTier.js';
 import { addToLedger, contentHash, readLedger, readLedgerLines, recordsFor, type LedgerRec } from './ledger.js';
 import { BLANK_INSET, buildGraph, federate, latestInstances, decodePng, groupKey, isBlank, latestEvals, materializeRemotes, resolveTargets, targetRelative, walk, type Config, type ElementEval } from '@snds/dsa/engine';
 import { appSurface, openSurface } from '@snds/dsa';
@@ -123,7 +124,7 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
   const dir = path.join(opts.dataDir, 'shots');
   fs.mkdirSync(dir, { recursive: true });
   const idxFile = path.join(dir, 'index.json');
-  const index: { shots: Record<string, any>; missing: string[]; pages: string[]; takenAt: string; misses?: Record<string, any>; run?: RunStamp; uses?: Record<string, any>; ledgerCoverage?: Record<string, { own: number; component: number; file: number; none: number }> } = fs.existsSync(idxFile) ? JSON.parse(fs.readFileSync(idxFile, 'utf8')) : { shots: {}, missing: [], pages: [], takenAt: '' };
+  const index: { shots: Record<string, any>; missing: string[]; pages: string[]; takenAt: string; misses?: Record<string, any>; run?: RunStamp; uses?: Record<string, any>; ledgerCoverage?: Record<string, { own: number; component: number; file: number; none: number; tests: number }> } = fs.existsSync(idxFile) ? JSON.parse(fs.readFileSync(idxFile, 'utf8')) : { shots: {}, missing: [], pages: [], takenAt: '' };
   index.missing = []; index.pages = [];
   // This run: an id each new photo carries, the source it was taken from (its commit, or "worktree" when the
   // checkout has changes), and when. Cached photos keep their own stamp, so a report can tell an old one apart.
@@ -284,6 +285,16 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
       const ledgerHash = (f: string) => contentHash(absOfTag(at0, f));
       const lines = (sh as any).ledger ?? process.env.DSA_LEDGER;
       if (lines) { const n = addToLedger(ledgerFile, readLedgerLines(path.resolve(opts.root, lines)), ledgerHash); if (n) log(`  ledger: ${n} record${n === 1 ? '' : 's'} added from ${lines}`); }
+      // The app's own component tests, rendered with tags and the ledger on (testTier.ts): states the crawler can't reach.
+      const rt = (sh as any).renderTests as boolean | { maxMinutes?: number; include?: string[] } | undefined ?? (process.env.DSA_RENDER_TESTS === '1' ? true : undefined);
+      if (rt && at0.dir) {
+        const out = path.join(dir, 'ledger-tests.jsonl');
+        const t = await renderTests({ appDir: at0.dir, root: opts.root, dir: at0.dir, out, maxMinutes: typeof rt === 'object' ? rt.maxMinutes : undefined, include: typeof rt === 'object' ? rt.include : undefined, log });
+        if (t.records) {
+          const n = addToLedger(ledgerFile, readLedgerLines(out), ledgerHash);
+          log(`  tests: the app's own tests rendered ${t.records} tagged element${t.records === 1 ? '' : 's'} in ${t.files} file${t.files === 1 ? '' : 's'} (${t.seconds}s${t.tests ? `; test files: ${t.tests}` : ''}${t.why ? `; ${t.why}` : ''}); ${n} new in the ledger`);
+        } else log(`  tests: the app's own tests added nothing to the ledger: ${t.why ?? 'no reason given'} (${t.seconds}s)`);
+      }
       const ledger = readLedger(ledgerFile, ledgerHash);
       const r: Awaited<ReturnType<typeof session>> & { signIn?: string; expired?: boolean; broken?: string } = await session(pw, { ledger, uses: instances.filter(i => s.target === '*' || i.target === s.target).map(i => ({ component: i.component, key: `${i.file}:${i.line}` })), reach: s.reach, draw: s.draw, url: s.url, routes: s.routes, first: s.first, flows: s.flows, crawl: s.crawl, examples: s.need, dir, storageState: s.storageState, readApi: s.readApi, readPaths: s.readPaths, signIn: s.signIn, maxPages: sh.maxPages ?? 90, pagesSet: sh.maxPages !== undefined, waitMs: sh.waitMs ?? 600, log, reveal: sh.reveal, maxActions: sh.maxActions ?? sh.maxTriggers, maxDepth: sh.maxDepth, maxMinutes: sh.maxMinutes, routeSource: s.routeSource, profiles: s.profiles, appDir: s.appDir, manifest: s.manifest, coverage: (sh as any).coverage });
       const at = new Date().toISOString();
@@ -583,7 +594,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   };
   let watchPage: ((pg: any) => void) | null = null;
   const recorded: LedgerRec[] = [];
-  let ledgerCover: { own: number; component: number; file: number; none: number } | null = null;
+  let ledgerCover: { own: number; component: number; file: number; none: number; tests: number } | null = null;
   // Photos of the app's own uses of system components (shots/index.json "uses"): up to 3 per component, 150 in all.
   const usesShot: Record<string, any> = {};
   const usesPer = new Map<string, number>();
@@ -1131,7 +1142,8 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     const stop = Date.now() + (deadline - Date.now()) * 0.2;
     const groups = new Map<string, { u: string; sets: StateSet[]; mine: Target[] }>();
     for (const r of remaining) {
-      for (const rec of recordsFor(o.ledger!, r.src).slice(0, 2)) {
+      // Records from the app's tests ("test:") name a test, not a page: nothing to open.
+      for (const rec of recordsFor(o.ledger!, r.src).filter(x => !x.url.startsWith('test:')).slice(0, 2)) {
         let u = '';
         try { const x = new URL(rec.url); u = x.origin === base.origin ? rec.url : new URL(x.pathname + x.search + x.hash, base).toString(); } catch { continue; }
         const sets = statesOf(rec);
@@ -1508,20 +1520,37 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       const here = all.filter(x => fileOfSrc(x.src) === fileOfSrc(r.src));
       return here.length ? bestOf(here) : all.length ? bestOf(all) : undefined;
     };
+    // A component's recorded props, gaps filled: each prop from the first of its records that has a value (a copy
+    // that was cut, or held a node, leaves null), then, at every depth, from the props shaped from its source.
+    const recordedProps = (name: string, first: LedgerRec, shaped: Record<string, unknown>): Record<string, unknown> => {
+      const out: Record<string, unknown> = {};
+      for (const x of [first, ...(byOwner.get(name) ?? [])]) {
+        const p = x.owner?.props as Record<string, unknown> | null;
+        if (p && typeof p === 'object') for (const [k, v] of Object.entries(p)) if (out[k] == null && v != null) out[k] = v;
+      }
+      return fillProps(shaped, out) as Record<string, unknown>;
+    };
     // A list prop's item, from any record of the component where that list had one.
     const itemOf = (name: string) => (prop: string) => {
       for (const x of byOwner.get(name) ?? []) { const v = (x.owner!.props as any)?.[prop]; if (Array.isArray(v) && v.length && v[0] != null) return v[0]; }
       return undefined;
     };
     // How much of what wasn't reached live the ledger knows: its element, its component, its file, or nothing.
-    const cover = { own: 0, component: 0, file: 0, none: 0 };
+    const cover = { own: 0, component: 0, file: 0, none: 0, tests: 0 };
+    // What the crawl and people recorded, without the app's tests: what only the tests cover.
+    const live = (x: LedgerRec) => !x.url.startsWith('test:');
+    const liveFiles = new Set(Object.values(ledgerNow).flat().filter(live).map(x => fileOfSrc(x.src)));
     for (const r of remaining) {
-      if (recordsFor(ledgerNow, r.src).length) cover.own++;
+      const known = Boolean(ledgerNow[r.src]?.length || (r.e.within && recordOf(r, r.e.within)) || recFiles.has(fileOfSrc(r.src)));
+      const knownLive = Boolean(ledgerNow[r.src]?.some(live) || (r.e.within && byOwner.get(r.e.within)?.some(live)) || liveFiles.has(fileOfSrc(r.src)));
+      if (known && !knownLive) cover.tests++;
+      // Its own tag exactly: another node's on the same line doesn't count as the element having rendered.
+      if (ledgerNow[r.src]?.length) cover.own++;
       else if (r.e.within && recordOf(r, r.e.within)) cover.component++;
       else if (recFiles.has(fileOfSrc(r.src))) cover.file++;
       else cover.none++;
     }
-    o.log(`  ledger coverage: of ${remaining.length} not reached live, ${cover.own} recorded themselves, ${cover.component} whose component is recorded, ${cover.file} whose file is recorded, ${cover.none} neither`);
+    o.log(`  ledger coverage: of ${remaining.length} not reached live, ${cover.own} recorded themselves, ${cover.component} whose component is recorded, ${cover.file} whose file is recorded, ${cover.none} neither${cover.tests ? `; ${cover.tests} of these known only from the app's tests` : ''}`);
     ledgerCover = cover;
     const stop = Date.now() + (d.maxMinutes ?? 10) * 60_000;
     const max = d.max ?? Infinity;
@@ -1586,7 +1615,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
             const shaped = mountProps({ ...r.e, within: name }, code, callersOf(d, name, abs));
             const rec = recordOf(r, name);
             withRecorded = Boolean(rec);
-            const f = forceGates(r.e, name, rec ? { ...shaped, ...(rec.owner!.props as object) } : shaped, shaped, itemOf(name));
+            const f = forceGates(r.e, name, rec ? recordedProps(name, rec, shaped) : shaped, shaped, itemOf(name));
             forced = f.forced;
             return f.props;
           };
@@ -1644,7 +1673,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
             if (anc && rec && acode) {
               const ancMount = () => {
                 const shaped = mountProps({ ...r.e, within: anc } as ElementEval, acode);
-                const f = forceGates(r.e, anc, { ...shaped, ...(rec.owner!.props as object) }, shaped, itemOf(anc));
+                const f = forceGates(r.e, anc, recordedProps(anc, rec, shaped), shaped, itemOf(anc));
                 forced = f.forced;
                 return inPage<Mounted>(page, MOUNT_IN_PAGE, [filesOf(af), anc, f.props, fileOfSrc(rec.src), [], 'all'])
                   .catch((e: any): Mounted => ({ ok: false, why: `the page failed while mounting (${String(e?.message ?? e).split('\n')[0]!.slice(0, 80)})` }));
@@ -1838,7 +1867,12 @@ const SET_STATE = `({ sets, within, check }) => {
   const out = { found: 0, set: 0, named: 0, off: [] };
   const scope = within ? document.querySelector(within) : document;
   if (!scope) return out;
-  const tagged = Array.from(scope.querySelectorAll('[data-dsa-src]')).filter((el) => within || !el.closest('#dsa-mount, #dsa-markup'));
+  // Inside the drawing: its elements, and those it put in a portal elsewhere on the page (a dialog's content),
+  // told apart from the live page's by the React root they belong to.
+  const rootOf = (el) => { let f = fiberOf(el); while (f && f.return) f = f.return; return f && f.stateNode && f.stateNode.containerInfo; };
+  const tagged = within
+    ? Array.from(document.querySelectorAll('[data-dsa-src]')).filter((el) => scope.contains(el) || (!el.closest('#dsa-markup') && (() => { const c = rootOf(el); return c && scope.contains(c); })()))
+    : Array.from(scope.querySelectorAll('[data-dsa-src]')).filter((el) => !el.closest('#dsa-mount, #dsa-markup'));
   for (const s of sets) {
     const own = tagged.filter((el) => el.getAttribute('data-dsa-src').startsWith(s.file + ':'));
     const from = own.length ? own : tagged.slice(0, 600);
@@ -2468,6 +2502,18 @@ const RESTORE_COVER = `document.querySelectorAll('[data-dsa-hid]').forEach((x) =
 
 /** What /@dsa/mount answers (tag/index.ts). */
 type Mounted = { ok: boolean; why?: string; providers?: number; threw?: { message: string; component: string; src?: string } };
+
+/**
+ * Recorded values over shaped ones, never a null where the shape has a value: objects merged key by key, a
+ * list's items each filled from the shape's first item. Exported for tests.
+ */
+export function fillProps(shaped: unknown, rec: unknown): unknown {
+  const plain = (v: unknown): v is Record<string, unknown> => Boolean(v) && typeof v === 'object' && !Array.isArray(v) && !('__dsa' in (v as object));
+  if (rec == null) return shaped;
+  if (Array.isArray(rec)) { const item = Array.isArray(shaped) ? shaped[0] : undefined; return item === undefined ? rec : rec.map(x => fillProps(item, x)); }
+  if (plain(rec) && plain(shaped)) { const out: Record<string, unknown> = { ...shaped }; for (const [k, v] of Object.entries(rec)) out[k] = fillProps(shaped[k], v); return out; }
+  return rec;
+}
 
 /** The file of the component that threw: its own when the stack names one inside the scan root, else the element's. */
 function sourceFileOfThrow(d: DrawWith, threw: NonNullable<Mounted['threw']>, abs: string, name: string): string {

@@ -15,6 +15,10 @@
  * per string; dsa's own marks (data-dsa-*) left out; and a key that looks like a credential or personal detail (password, token, email, phone,
  * address…) is "[redacted]". A copy that hit a limit is marked `cut`, so nobody sets it back as if whole.
  *
+ * Under a test runner (dsa's render tier, packages/review testTier.ts) it records on each commit, before a test
+ * can unmount what it rendered (`__dsaLedgerSync`), and names where by the test (`__dsaLedgerWhere`, a
+ * "test:" address), not the URL, so the crawler never opens it.
+ *
  * Records go to the crawler through `window.__dsaLedgerPut` when it exposes one, else to the dev server
  * (`POST /@dsa/ledger`) when the tagger was started with DSA_LEDGER set, else they stay in
  * `window.__dsaLedger.all` for whoever reads them. Nothing leaves the machine.
@@ -54,11 +58,13 @@ export const LEDGER_RUNTIME = `(() => {
   const isComp = (f) => f.tag === 0 || f.tag === 1 || f.tag === 11 || f.tag === 14 || f.tag === 15;
   const hooksOf = (f) => { const out = []; for (let h = f.memoizedState; h && typeof h === 'object' && 'next' in h; h = h.next) if (h.queue && typeof h.queue.dispatch === 'function') out.push(h); return out; };
   const out = [];
+  const where = () => { try { return typeof window.__dsaLedgerWhere === 'function' ? String(window.__dsaLedgerWhere()) : location.href; } catch { return location.href; } };
   const record = (f) => {
     const el = f.stateNode;
     const src = el && el.getAttribute && el.getAttribute('data-dsa-src');
     if (!src || el.closest('#dsa-mount, #dsa-markup')) return;
-    const key = src + ' ' + location.href;
+    const here = where();
+    const key = src + ' ' + here;
     if (L.seen.has(key) || L.seen.size >= MAX) return;
     L.seen.add(key);
     const chain = [];
@@ -67,7 +73,7 @@ export const LEDGER_RUNTIME = `(() => {
     const owner = chain[0];
     const props = owner ? take(owner.memoizedProps) : null;
     const rec = {
-      src, url: location.href, at: Date.now(), w: Math.round(box.width), h: Math.round(box.height),
+      src, url: here, at: Date.now(), w: Math.round(box.width), h: Math.round(box.height),
       owner: owner ? { name: nameOf(owner.type), props: props.value, cut: props.cut } : null,
       ancestors: chain.slice().reverse().map((a) => ({ name: nameOf(a.type), hooks: a.tag === 1 ? [] : hooksOf(a).map((h) => { const t = take(h.memoizedState); const nm = names.get(h.queue.dispatch); return nm ? { ...t, name: nm.name } : t; }) })),
     };
@@ -109,7 +115,7 @@ export const LEDGER_RUNTIME = `(() => {
   }
   const prev = hook.onCommitFiberRoot;
   hook.onCommitFiberRoot = function (id, root) {
-    try { roots.add(root); if (!timer) timer = setTimeout(walk, 200); } catch {}
+    try { roots.add(root); if (window.__dsaLedgerSync) walk(); else if (!timer) timer = setTimeout(walk, 200); } catch {}
     return prev ? prev.apply(this, arguments) : undefined;
   };
   addEventListener('pagehide', () => { try { if (timer) { clearTimeout(timer); walk(); } } catch {} });

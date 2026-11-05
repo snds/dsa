@@ -144,9 +144,9 @@ test('the conditions on the props of the component mounted are forced over its r
   const f = forceGates(e([g('items.length > 0'), g('open'), g("mode === 'edit'")]), 'Panel', recorded, {}, (p) => p === 'items' ? { name: 'Fern' } : undefined);
   assert.deepEqual(f.props, { items: [{ name: 'Fern' }], open: true, mode: 'edit', title: 'Shelf' });
   assert.deepEqual(f.forced, ['items = [{"name":"Fern"}]', 'open = true', 'mode = "edit"']);
-  // Already holding: nothing forced. No recorded item: the shaped one, else an empty object.
+  // Already holding: nothing forced. No recorded item: the shaped one, else a word.
   assert.deepEqual(forceGates(e([g('open')]), 'Panel', { open: true }).forced, []);
-  assert.deepEqual(forceGates(e([g('items?.length')]), 'Panel', { items: [] }).props, { items: [{}] });
+  assert.deepEqual(forceGates(e([g('items?.length')]), 'Panel', { items: [] }).props, { items: ['a'] });
   // A gate on another component's own condition is left alone; one a caller passes as this prop holds.
   assert.deepEqual(forceGates(e([g('ready', 'Page')]), 'Panel', { ready: false }).forced, []);
   assert.deepEqual(forceGates(e([g('open={!!editor}', 'Page')]), 'Panel', {}, { open: false }).props, { open: true });
@@ -154,4 +154,14 @@ test('the conditions on the props of the component mounted are forced over its r
   assert.deepEqual(forceGates(e([g('!busy'), g('image != null')]), 'Panel', { busy: true, image: null }, { image: { src: '' } }).props, { busy: false, image: { src: '' } });
   // A name the component doesn't take isn't added.
   assert.deepEqual(forceGates(e([g('loaded')]), 'Panel', { open: true }).props, { open: true });
+});
+
+test('a state set for a condition takes its declared type, from the file or one it imports', () => {
+  const types = `export type Swatch = { hex: string; name: string; n: number };\nexport type Draft = { id: string };\n`;
+  const app = `import { useState } from 'react';\nimport type { Swatch } from '../lib/types';\nexport function Editor() {\n  const [palette, setPalette] = useState<Swatch[]>([]);\n  const [picked, setPicked] = useState<string | null>(null);\n  const [draft, setDraft] = useState<Draft | null>(null);\n  return <div>{palette.length > 0 && <ul />}{picked && <b />}{draft && <i />}</div>;\n}\ntype Draft = { id: string; at: number };\n`;
+  const read = (f: string) => f === 'src/app/Editor.tsx' ? app : f === 'src/lib/types.ts' ? types : null;
+  const value = (test: string) => stateSets([{ test, negated: false, component: 'Editor', file: 'src/app/Editor.tsx' }], read)[0]!.slots[0]!.value;
+  assert.deepEqual(value('palette.length > 0'), [{ hex: '', name: '', n: 0 }]);
+  assert.equal(value('picked'), 'a');
+  assert.deepEqual(value('draft'), { id: '', at: 0 });
 });

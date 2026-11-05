@@ -63,3 +63,10 @@ test('a tie among identical elements still shows how the element looks; a contro
   // The page's route names a file: its words decide which line it is.
   assert.deepEqual(pathWords('apps/billing/src/orders/OrderRow.tsx'), ['billing', 'orders', 'order']);
 });
+
+test('recorded props are filled where a copy was cut or held null, at every depth, never mounted with a null', async () => {
+  const { fillProps } = await import('../src/shots.js');
+  const shaped = { colour: { n: { r: 0 }, name: '' }, rows: [{ id: '', tags: [] }], onPick: { __dsa: 'fn' } };
+  const rec = { colour: { n: null, name: 'Fern' }, rows: [{ id: 'r1', tags: null }], onPick: null, extra: 3 };
+  assert.deepEqual(fillProps(shaped, rec), { colour: { n: { r: 0 }, name: 'Fern' }, rows: [{ id: 'r1', tags: [] }], onPick: { __dsa: 'fn' }, extra: 3 });
+});

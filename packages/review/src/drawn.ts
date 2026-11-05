@@ -34,6 +34,32 @@ export function gateProps(e: ElementEval): Record<string, string | boolean> {
   return out;
 }
 
+/** A value that passes a truthiness test: '' → 'a', 0 → 1, false → true, null → {}. */
+const truthy = (v: Val): Val => v === '' ? 'a' : v === 0 ? 1 : v === false ? true : v === null ? {} : v;
+
+/** A type written as text (`PaletteColour[]`, `string | null`), parsed. */
+function typeNode(text: string): any {
+  try { return (babelParse(`let __t: ${text};`, { sourceType: 'module', plugins: ['typescript'] }) as any).program.body[0].declarations[0].id.typeAnnotation.typeAnnotation; } catch { return null; }
+}
+
+/** Types declared in a file and in the local files it imports from (one step): what a state's type names. */
+function typesWithImports(ast: any, file: string, read: (file: string) => string | null): Map<string, any> {
+  const out = new Map<string, any>();
+  for (const s of ast?.program?.body ?? []) {
+    if (s.type !== 'ImportDeclaration' || !String(s.source.value).startsWith('.')) continue;
+    const base = path.posix.join(path.posix.dirname(file), s.source.value);
+    for (const f of [base, `${base}.ts`, `${base}.tsx`, `${base}/index.ts`, `${base}/index.tsx`]) {
+      const c = /\.(tsx?|jsx?)$/.test(f) ? read(f) : null;
+      const a = c ? parse(c) : null;
+      if (!a) continue;
+      for (const [k, v] of localTypes(a)) out.set(k, v);
+      break;
+    }
+  }
+  if (ast) for (const [k, v] of localTypes(ast)) out.set(k, v);
+  return out;
+}
+
 /** `x.length`, `x?.length > 0`, `x.length === 0`, `props.x.length >= 1`: the list, and whether the test wants it non-empty. */
 function lengthTest(e: any): { name: string; nonEmpty: boolean } | null {
   const list = (m: any): string | null => {
@@ -62,7 +88,8 @@ function lengthTest(e: any): { name: string; nonEmpty: boolean } | null {
 /**
  * The element's conditions on the props of the component mounted, made to hold over the props it's given
  * (recorded, or shaped from the source): a flag (`open`, `!!editor`, and `open={!!editor}` where a caller
- * passes it) true, a list read for its length (`palette.length > 0`) one item (`item` gives a recorded one),
+ * passes it) true, a list read for its length (`palette.length > 0`) one item (`item` gives a recorded one,
+ * else one shaped from the source, else a word),
  * a literal (`mode === 'edit'`) that literal. Gates on state are left to the state setter. Returns the props
  * and what it set, in words (`open = true`), so a drawing can say a condition was forced.
  */
@@ -97,7 +124,8 @@ export function forceGates(e: ElementEval, name: string, given: Record<string, u
       if (len.nonEmpty !== truth) { if (has) set(len.name, []); return; }
       if (has) return;
       const s = shaped[len.name];
-      const one = item?.(len.name) ?? (Array.isArray(s) && s.length ? s[0] : {});
+      // Nothing says what an item is: a word, which renders as text and reads as nothing (`{}` can't render).
+      const one = item?.(len.name) ?? (Array.isArray(s) && s.length ? s[0] : 'a');
       set(len.name, [one]);
       return;
     }
@@ -793,14 +821,33 @@ export function stateSets(gates: { test: string; negated: boolean; component?: s
     }
     const want = new Map<string, Val>();
     const initial = (x: string) => initialOf(code, x);
+    // A value of the state's declared type (`useState<PaletteColour[]>`, the type here or in a file it imports).
+    let types: Map<string, any> | null = null;
+    const typed = (x: string): any => {
+      const t = initial(x)?.type;
+      if (!t) return null;
+      types ??= typesWithImports(ast, g.file!, read);
+      return typeNode(t);
+    };
+    const itemOf = (x: string): Val | undefined => {
+      const t = typed(x);
+      const el = t?.type === 'TSArrayType' ? t.elementType : t?.type === 'TSTypeReference' && /^(Array|ReadonlyArray)$/.test(t.typeName?.name ?? '') ? t.typeParameters?.params?.[0] : null;
+      const v = el ? shapeOf(el, types!, 0) : undefined;
+      return v === undefined ? undefined : truthy(v);
+    };
     const shapeFor = (x: string, truth: boolean): Val | undefined => {
       const at = initial(x);
       const objecty = at ? /^(\{|\[|new\s)/.test(at.init) : false;
       if (!truth) return objecty ? undefined : false;
       if (objecty) return undefined;
       const v = fn ? usageOf(fn.body, (m) => m?.type === 'Identifier' && m.name === x, 0, ast) : undefined;
-      // Nothing read off it: true, unless its type says it's a value, not a flag (`useState<Colour | null>`).
-      if (v === undefined || v === '') return at?.type && !/\bboolean\b/.test(at.type) ? {} : true;
+      // Nothing read off it: a value of its type, or true unless its type says it's a value, not a flag.
+      if (v === undefined || v === '') {
+        const t = typed(x);
+        const tv = t ? shapeOf(t, types!, 0) : undefined;
+        if (tv !== undefined) return truthy(tv);
+        return at?.type && !/\bboolean\b/.test(at.type) ? {} : true;
+      }
       return v === 0 ? 1 : Array.isArray(v) && !v.length ? [''] : v;
     };
     const visit = (e: any, truth: boolean) => {
@@ -817,8 +864,10 @@ export function stateSets(gates: { test: string; negated: boolean; component?: s
       if (len) {
         if (!known(len.name)) return;
         if (len.nonEmpty !== truth) { want.set(len.name, []); return; }
+        // One item of its declared type, else as the component reads it.
+        const it = itemOf(len.name);
         const v = fn ? usageOf(fn.body, (m) => m?.type === 'Identifier' && m.name === len.name, 0, ast) : undefined;
-        want.set(len.name, Array.isArray(v) && v.length ? v.slice(0, 1) : [{}]);
+        want.set(len.name, it !== undefined ? [it] : Array.isArray(v) && v.length && v[0] !== '' ? v.slice(0, 1) : ['a']);
         return;
       }
       if (e.type === 'BinaryExpression' && /^[!=]==?$/.test(e.operator)) {

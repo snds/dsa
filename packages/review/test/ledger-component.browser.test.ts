@@ -21,8 +21,10 @@ const APP: Record<string, string> = {
   'public/app.css': '.btn { background: rgb(29, 78, 216); color: #fff; padding: 8px 16px; border: 0; margin: 4px; }',
   'vite.config.js': `export default { cacheDir: '../../.vite' };\n`,
   'src/main.jsx': `import { createRoot } from 'react-dom/client';\nimport { Library } from './Library.jsx';\ncreateRoot(document.getElementById('root')).render(<Library />);\n`,
-  'src/Shelf.jsx': `export function Shelf({ title, items }) {\n  return <section><h2>{title}</h2>\n    {items.length > 0 && <button className="btn">Open {items.length} in {title}</button>}\n  </section>;\n}\n`,
-  'src/Library.jsx': `import { Shelf } from './Shelf.jsx';\nexport function Library() {\n  return <main><h1>Library</h1><Shelf title="Ferns" items={[]} /></main>;\n}\n`,
+  'src/Shelf.jsx': `import { useState } from 'react';\nexport function Shelf({ title, items }) {\n  const [picked, setPicked] = useState([]);\n  const [tip, setTip] = useState(false);\n  return <section><h2>{title}</h2>\n    {items.length > 0 && <button className="btn">Open {items.length} in {title}</button>}\n    {picked.length > 0 && <button className="btn">Clear {picked[0].name}</button>}\n    {tip && <button className="btn">Hide tip</button>}\n  </section>;\n}\n`,
+  // A tray drawn in a portal, as a dialog's content is: its state is set where the portal put it.
+  'src/Tray.jsx': `import { useState } from 'react';\nimport { createPortal } from 'react-dom';\nexport function Tray({ label }) {\n  const [open, setOpen] = useState(false);\n  return createPortal(<aside><span>{label}</span>{open && <button className="btn">Close tray</button>}</aside>, document.body);\n}\n`,
+  'src/Library.jsx': `import { Shelf } from './Shelf.jsx';\nimport { Tray } from './Tray.jsx';\nexport function Library() {\n  return <main><h1>Library</h1><Shelf title="Ferns" items={[]} /><Tray label="Tools" /></main>;\n}\n`,
 };
 
 test('the ledger: an element its component rendered without is drawn with the component\'s recorded props, its condition forced', { timeout: 300_000 }, async ({ skip }) => {
@@ -56,4 +58,14 @@ test('the ledger: an element its component rendered without is drawn with the co
   // Shelf's recorded title, with the one item forced in.
   assert.match(String(shot.content?.text ?? ''), /Open 1 in Ferns/);
   assert.match(all, /an isolated render \(recorded props, condition forced: items = \[/);
+
+  // State inside the drawing, the drawing's own: a list one item, a flag true; and inside its portal.
+  const by = (text: RegExp) => evals.find(e => e.file.endsWith('.jsx') && text.test(e.match.text ?? ''));
+  for (const [re, set] of [[/Clear/, /setting picked = \[/], [/Hide tip/, /setting tip = true/], [/Close tray/, /setting open = true/]] as const) {
+    const e = by(re);
+    assert.ok(e, String(re));
+    const sh = idx.shots[e!.id];
+    assert.deepEqual([sh?.drawn, sh?.exact, sh?.source], ['mount', true, 'isolated'], `${re}\n${all}`);
+    assert.match(all, new RegExp(`${e!.id} .*after ${set.source}`));
+  }
 });
