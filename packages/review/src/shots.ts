@@ -1113,7 +1113,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   /** Open a page; reload when only its hash differs (going there wouldn't load it). */
   async function go(u: string) {
     const same = page.url().split('#')[0] === u.split('#')[0];
-    await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+    await gotoApp(u).catch(() => {});
     if (same) await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
     await page.waitForTimeout(o.waitMs); await settle();
   }
