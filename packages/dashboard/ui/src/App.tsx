@@ -13,6 +13,7 @@ import { Federation } from "@/views/Federation"
 import { Design } from "@/views/Design"
 import { Trends } from "@/views/Trends"
 import { Elements } from "@/views/elements/Elements"
+import { LabelReview } from "@/views/review/LabelReview"
 import { preloadIconFont, warmStorybook } from "@/views/elements/Picker"
 import { SettingsPage, SECTIONS, type SectionId } from "@/views/settings/SettingsPage"
 import { Readiness } from "@/views/Readiness"
@@ -28,7 +29,7 @@ import { canRun, detectRunning } from "@/lib/useScan"
 import { replaceRoute, routePath, useApp } from "@/lib/app"
 import { AppSelect } from "@/components/app-select"
 
-type ViewId = "overview" | "queue" | "system" | "federation" | "elements" | "usage" | "readiness" | "design" | "trends" | "settings"
+type ViewId = "overview" | "queue" | "system" | "federation" | "elements" | "review" | "usage" | "readiness" | "design" | "trends" | "settings"
 
 // Ordered by the questions people bring: how are we doing, what do we do, what is the system, who uses it.
 const VIEWS: { id: ViewId; label: string; hint: string }[] = [
@@ -37,6 +38,7 @@ const VIEWS: { id: ViewId; label: string; hint: string }[] = [
   { id: "system", label: "System", hint: "Every component: kind, variants, parts, tokens, use, and how it was found" },
   { id: "federation", label: "Apps", hint: "Child libraries and the apps that use the system" },
   ...(D.elements ? [{ id: "elements" as const, label: "Element Review", hint: D.elements.questions.length ? `${D.elements.questions.length} questions for a human` : `Native elements vs ${SYS}` }] : []),
+  ...(D.elements?.review ? [{ id: "review" as const, label: "Label Review", hint: `${D.elements.review.items.length} elements to check one at a time` }] : []),
   ...(D.usage ? [{ id: "usage" as const, label: "System Usage", hint: `Where ${SYS} tokens and components are used, per library` }] : []),
   ...(D.readiness?.length || D.bench?.length ? [{ id: "readiness" as const, label: "Agents & Benchmarks", hint: "Agent readiness per repo, the usage checker, and bench runs" }] : []),
   ...(D.modules?.figma ? [{ id: "design" as const, label: "Design Files", hint: "Figma crawl" }] : []),
@@ -221,6 +223,7 @@ function Shell() {
           : view === "system" ? <System />
           : view === "federation" ? <Federation />
           : view === "elements" ? <Elements key={app ?? ""} />
+          : view === "review" ? <LabelReview />
           : view === "readiness" ? <Readiness />
           : view === "usage" ? <Usage />
           : view === "design" ? <Design onSettings={() => go("settings", "general")} />

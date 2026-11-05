@@ -8,6 +8,24 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- Label Review: dsa's "ready" answers checked by people, one element at a time, written for a designer
+  who never needs to read code. Each item shows the element as the app draws it beside the proposal drawn
+  with the element's own words, both at their real size; where it sits on the page, named in plain words;
+  why dsa thinks so, in plain words (the scanner's own words and the code sit behind "Technical details");
+  where the app already uses the proposed component and props, and the main alternative; and the
+  alternatives dsa considered, drawn. One click answers Right, Wrong (then the right answer from the
+  system's allowed components and props only, drawn when a render exists, or "keep it" / "nothing fits")
+  or Not sure, with an optional comment. Answers are labels.jsonl rows with method "human": `dsa serve`
+  saves them to `<data>/labels/human.jsonl` (`POST /api/labels`, schema-checked); a published page keeps
+  them in the browser to download. The reviewer is the scan relay sign-in when there is one, else a name
+  entered once. The queue is `<data>/review-queue.jsonl` (from `dsa labels queue`) when present, else a
+  seeded 10% audit of the ready cards. Keyboard-operable, with screen-reader labels and no colour-only
+  meaning; checked with axe in light and dark.
+- Precedents: where the app already uses each proposed component, from the run's system-component uses
+  with their literal props read from the source (`propsAt`), or the engine's own `<data>/precedent.json`
+  when a run writes one. A use photographed by the crawler (`shots/index.json` `uses["<file>:<line>"]`)
+  shows its photo.
+
 - `dsa bench --folds <n>` reports held-out precision at the ready bar, with its one-sided 95% lower bound:
   labels split into n folds by a hash of their file, each fold scored apart. With `--fold-site` (one run
   per fold, each calibrated without that fold) it also scores the calibrated side. `dsa labels split`
@@ -64,6 +82,16 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   their element's own content.
 
 ### Fixed
+
+- A review card showed one photo per look, so an element with its own photo appeared only as a small
+  thumbnail of another element's (same classes, sometimes other words). Every element with a photo now
+  has its own labelled tile: its photo at card scale, where it sits, its source label, match and code
+  button. Elements that look and read the same sit together, marked as such, each with its own tile.
+- No near-empty review candidates. An element with no usable photo (none, blank, covered, a weak match,
+  markup only, or drawn with guessed props) or no exact proposal with its own words says "Needs evidence
+  before review", with the plain reason and what would fix it. Its card offers no decision for it, and it
+  is left out of `dsa labels queue` and of Label Review. An isolated render (recorded props) counts,
+  labelled as such. Code on an uncaptured card is behind a disclosure.
 
 - History labels paired a removed raw line with an added component line by their order in a hunk, so a
   wrapper `<div>` could become a `Button` and a button whose icon changed could become an `Icon`. Pairs
