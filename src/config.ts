@@ -78,6 +78,21 @@ const AppSchema = z.object({
     )
     .optional()
     .describe("Written-down UI sequences that reveal elements only a filled field or an upload shows."),
+  routeSource: z
+    .object({ module: z.string(), export: z.string() })
+    .optional()
+    .describe("A module of the app (path from its folder) whose export lists every route: an array, or a function (it may be async) that returns one, e.g. the app's route formatter over its registries. Loaded through the running app's build; its routes are visited first."),
+  profiles: z
+    .array(
+      z.object({
+        name: z.string(),
+        route: z.string(),
+        storage: z.record(z.string(), z.string().nullable()).optional(),
+        session: z.record(z.string(), z.string().nullable()).optional(),
+      }),
+    )
+    .optional()
+    .describe("Named starting states: a route opened with local (and session) storage seeded first, no clicking (a wizard step, a feature flag). null removes a key."),
   screenshots: z.boolean().optional().describe("false: never start this app for screenshots."),
   tag: z.boolean().optional().describe("false: start this app without source tags (data-dsa-src). By default dsa adds them when it starts the app, so screenshots match each element by its source line."),
 });
@@ -302,7 +317,7 @@ export const ConfigSchema = z
       })
       .optional()
       .describe("Tailwind / shadcn-style systems: read classes the way the repo's own lint does."),
-    apps: z.record(z.string(), AppSchema).optional().describe("Per-app switches, keyed by app or workspace name. Anything not listed is fully measured."),
+    apps: z.record(z.string(), AppSchema).optional().describe("Per-app switches, keyed by app, workspace or package name (an app's own dsa.config.json adds its entry). Anything not listed is fully measured."),
     review: z
       .object({
         threshold: z.number().min(0).max(1).optional().describe("Below this confidence a human decides (default 0.9)."),

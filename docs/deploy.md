@@ -196,7 +196,7 @@ Each element on a card is shown the best way available, under one of three label
 |---|---|---|
 | Live app screenshot | A photo of the running app. | Yes |
 | Live app screenshot | The same, after hiding a layer that sat over the element (a toast, a sticky bar). Up to three layers are hidden, then put back. | Yes |
-| Drawn from the app's code | The element's component, loaded through the app's own Vite dev server and drawn on one of its pages with the app's styles. Props come from the conditions the scan traced (`open && …` gets `open: true`). Only for apps dsa starts itself with Vite. | Yes, when it was found by its exact source tag and isn't blank |
+| Drawn from the app's code | The element's component, loaded through the app's own Vite dev server and drawn on one of its pages with the app's styles, inside the providers the live page has. Props come from its types, a call site's literal values, and the conditions the scan traced (`open && …` gets `open: true`). For apps dsa starts with Vite, and Vite builds with `dsaTag` on. | Yes, when it was found by its exact source tag and isn't blank |
 | Markup only | The element's own JSX as plain markup, shown on one of the app's pages so its style sheets apply. No app code runs. | No |
 
 **Why a drawing from the app's code counts.** It runs the real component, from the app's own files, with
@@ -209,6 +209,42 @@ It isn't proof the element is reachable live. So it never feeds placement (which
 in), the element still reads as not found live, and it's looked for live again when its file or the app's
 setup changes. Markup only is a sketch: shown so a reviewer knows roughly what the element is, never
 counted. Set `shots.draw: false` to turn drawings off.
+
+**How a component is mounted alone.** Most components need more than their file: a store or theme from a
+provider, props their parent passes. The mount gives it what the running app gives it:
+
+- **Providers.** It reads every context the live page provides near where the element belongs (the same
+  file's elements if the page shows any, else the deepest point of the page), then any other context the
+  page provides elsewhere, and wraps the component in them, with their live values. That covers what the
+  app's entry file sets up and providers deeper in the tree, without dsa knowing any library.
+- **Props.** Required props get a value shaped by their type (`''`, `0`, `false`, `[]`, a function that
+  does nothing, an object with its own required fields). Untyped props get one from how the body uses them
+  (`items.map(` gets a list, `onSave` a function). A call site's literal values (`<Badge count={3} />`)
+  win over those, and the conditions the scan traced win over everything.
+- **Unexported components.** The tagger keeps each file's components, exported or not, so a row or panel
+  defined beside its parent can be mounted too. Production builds never have this: it's only on while
+  tagging is.
+- **Its file.** The mount imports the file the way the app does. The tagger asks its own Vite server
+  where it serves the file (`/@dsa/where`), with that server's root and base applied, so an app in a folder
+  below the scan root, or one served under a base path like `/portal/`, mounts the same way.
+- **Render helpers.** An element made by a helper that isn't a component (`cellFor`, `renderBody`, a
+  function inside a component) is drawn by the component around it, or the one that calls it.
+- **State inside it.** When the component draws without the element, the mount clicks what the scan
+  traced as opening it, then the drawing's own tabs, toggles, menus and disclosures, one at a time, and
+  looks after each. It never clicks one that saves, deletes, submits or leaves.
+
+Every element that isn't reached live ends with a line in the log: drawn from the app's code, markup only
+with the reason it wasn't mounted (its file didn't load and what the server answered for it or for the
+import that failed; it failed to render, with the error's first line, the component that threw, and what
+it needed when its source says, such as "the prop invoice" or "what useSession reads (a provider above
+it)"; or it rendered without the element because a condition inside it wasn't met, and what it clicked), or not drawn and why. A drawing that comes out with no size says why
+(its styles hide it, it's empty in its markup, its styles give it no size) and is shown outlined at a
+small size instead; its card says "Outline only" and it doesn't count as seen. The log ends with a count
+per reason. Drawing has a 10-minute budget per app; any left when it runs out say so.
+
+What isn't the app's own usage is left out of the scan: folders named `vendor` in the app's folder (a
+synced copy of someone else's code, such as the design system's own tooling) and anything git ignores
+there. An app folder git ignores as a whole is still scanned.
 
 ### How proposals are drawn
 

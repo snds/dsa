@@ -621,7 +621,7 @@
               "additionalProperties": false
             },
             "apps": {
-              "description": "Per-app switches, keyed by app or workspace name. Anything not listed is fully measured.",
+              "description": "Per-app switches, keyed by app, workspace or package name (an app's own dsa.config.json adds its entry). Anything not listed is fully measured.",
               "type": "object",
               "propertyNames": {
                 "type": "string"
@@ -864,6 +864,67 @@
                         "name",
                         "route",
                         "steps"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "routeSource": {
+                    "description": "A module of the app (path from its folder) whose export lists every route: an array, or a function (it may be async) that returns one, e.g. the app's route formatter over its registries. Loaded through the running app's build; its routes are visited first.",
+                    "type": "object",
+                    "properties": {
+                      "module": {
+                        "type": "string"
+                      },
+                      "export": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "module",
+                      "export"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "profiles": {
+                    "description": "Named starting states: a route opened with local (and session) storage seeded first, no clicking (a wizard step, a feature flag). null removes a key.",
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "route": {
+                          "type": "string"
+                        },
+                        "storage": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "session": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "route"
                       ],
                       "additionalProperties": false
                     }

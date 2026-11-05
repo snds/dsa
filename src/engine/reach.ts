@@ -149,13 +149,17 @@ export function isUnused(g: Graph, file: string): boolean {
 interface Handler { label: string; event: Step['event']; line: number; col: number; pos: number; calls: Set<string>; component: string; tag: string; /** Children with a literal value (a tab, a toggle item, an option): onValueChange={setMode} picks one. */ options?: { value: string; line: number; col: number; pos: number; label: string }[] }
 interface Usage { name: string; line: number; props: Map<string, { text: string; ids: string[] }>; gates: Gate[]; component: string; regions: Region[] }
 interface Comp { name: string; start: number; end: number; props: Set<string> }
-interface FileInfo { setters: Map<string, string>; fnCalls: Map<string, Set<string>>; handlers: Handler[]; usages: Usage[]; comps: Comp[]; fns: { name: string; start: number; end: number }[]; defaultExport?: string | undefined; storage: Set<string>; params: Set<string> }
+interface FileInfo { setters: Map<string, string>; fnCalls: Map<string, Set<string>>; handlers: Handler[]; usages: Usage[]; comps: Comp[]; fns: { name: string; start: number; end: number }[]; defaultExport?: string | undefined; storage: Set<string>; params: Set<string>;
+  /** What a hook call is bound to (`const { modal } = useDetailImages()` → modal), by hook, with where. */
+  hookBinds: { hook: string; names: string[]; pos: number }[];
+  /** A value rendered as JSX (`{modal}`, `{images.modal}`): its names and the conditions around it. */
+  renders: { names: string[]; pos: number; gates: Gate[] }[] }
 
 function fileInfo(g: Graph, file: string): FileInfo | null {
   if (g.info.has(file)) return g.info.get(file)!;
   let src: string, ast: any;
   try { src = fs.readFileSync(file, 'utf8'); ast = babelParse(src, { sourceType: 'unambiguous', errorRecovery: true, plugins: ['jsx', 'typescript'] }); } catch { g.info.set(file, null); return null; }
-  const fi: FileInfo = { setters: new Map(), fnCalls: new Map(), handlers: [], usages: [], comps: [], fns: [], storage: new Set(), params: new Set() };
+  const fi: FileInfo = { setters: new Map(), fnCalls: new Map(), handlers: [], usages: [], comps: [], fns: [], storage: new Set(), params: new Set(), hookBinds: [], renders: [] };
   // setOpen(false) / setEditor(null) hide things: recorded as off:setOpen, not as a way to open.
   const off = (x: any) => { const a = x.arguments?.[0]; return a && ((a.type === 'BooleanLiteral' && !a.value) || a.type === 'NullLiteral' || (a.type === 'Identifier' && a.name === 'undefined')); };
   // setTab('media') is also recorded as setTab:media, so a gate `tab === 'media'` traces to the control that picks it.
@@ -168,6 +172,17 @@ function fileInfo(g: Graph, file: string): FileInfo | null {
     if (n.type === 'VariableDeclarator' && n.id?.type === 'ArrayPattern' && n.init?.type === 'CallExpression' && /use(State|Reducer)$/.test(n.init.callee?.name ?? n.init.callee?.property?.name ?? '')) {
       const [v, set] = n.id.elements;
       if (v?.type === 'Identifier' && set?.type === 'Identifier') fi.setters.set(v.name, set.name);
+    }
+    // const { modal } = useDetailImages() / const images = useDetailImages(): what a hook's result is bound to.
+    if (n.type === 'VariableDeclarator' && n.init?.type === 'CallExpression' && /^use[A-Z]/.test(n.init.callee?.name ?? '')) {
+      const names = n.id?.type === 'Identifier' ? [n.id.name] : n.id?.type === 'ObjectPattern' ? n.id.properties.map((p: any) => p.value?.name ?? p.key?.name).filter(Boolean) : n.id?.type === 'ArrayPattern' ? n.id.elements.map((e: any) => e?.name).filter(Boolean) : [];
+      if (names.length) fi.hookBinds.push({ hook: n.init.callee.name, names, pos: n.start });
+    }
+    // {modal} / {images.modal} in JSX, and the conditions around it.
+    if (n.type === 'JSXExpressionContainer' && (n.expression?.type === 'Identifier' || n.expression?.type === 'MemberExpression')) {
+      let e = n.expression; const names: string[] = [];
+      while (e?.type === 'MemberExpression') { if (e.property?.name) names.push(e.property.name); e = e.object; }
+      if (e?.type === 'Identifier') { names.push(e.name); fi.renders.push({ names, pos: n.start, gates: gatesFrom(anc, n, src) }); }
     }
     // Components: Capitalized functions; their destructured props.
     const fn = n.type === 'FunctionDeclaration' ? n : n.type === 'VariableDeclarator' && /Function|Arrow/.test(n.init?.type ?? '') ? n.init : n.type === 'VariableDeclarator' && n.init?.type === 'CallExpression' && /Function|Arrow/.test(n.init.arguments?.[0]?.type ?? '') ? n.init.arguments[0] : null;
@@ -270,7 +285,13 @@ export function reachFor(g: Graph, file: string, line: number, ownGates: Gate[])
       for (const pf of [f, ...(g.importers.get(f) ?? [])]) {
         const pi = fileInfo(g, pf);
         const caller = pi?.comps.find(x => x.name !== comp && (pi.fnCalls.get(x.name)?.has(comp) || pi.fnCalls.get(x.name)?.has('ref:' + comp)));
-        if (caller) { local = []; f = pf; comp = caller.name; break; }
+        if (caller) {
+          // A hook's JSX shows where the caller renders what the hook returned: the conditions around that.
+          const inCaller = (p: number) => caller.start <= p && p <= caller.end;
+          const bound = new Set(pi!.hookBinds.filter(b => b.hook === comp && inCaller(b.pos)).flatMap(b => b.names));
+          const at = bound.size ? pi!.renders.find(r => inCaller(r.pos) && r.names.some(x => bound.has(x))) : undefined;
+          local = at?.gates ?? []; f = pf; comp = caller.name; break;
+        }
       }
       if (levels[levels.length - 1]!.comp !== comp) continue;
     }

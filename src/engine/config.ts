@@ -216,6 +216,10 @@ export interface AppSettings {
   extraRoutes?: string[] | undefined;
   /** Written-down UI sequences for elements only a filled field, an upload, or a post reveals (flows.ts). */
   flows?: unknown[] | undefined;
+  /** A module of the app and the export that lists every route (an array, or a function returning one). */
+  routeSource?: { module: string; export: string } | undefined;
+  /** Routes opened with storage seeded first (null removes a key). */
+  profiles?: { name: string; route: string; storage?: Record<string, string | null> | undefined; session?: Record<string, string | null> | undefined }[] | undefined;
   /** false = never start this app for screenshots. */
   screenshots?: boolean | undefined;
   /** false = start this app without source tags (data-dsa-src); by default dsa adds them when it starts it. */
@@ -225,7 +229,7 @@ export const MEASURES = ['versions', 'components', 'lookalikes', 'tokens'] as co
 export type Measure = typeof MEASURES[number];
 
 /** Effective switches for one app: everything on unless the config says otherwise. */
-export function appSettings(c: Config, name: string): { [K in keyof AppSettings]-?: NonNullable<AppSettings[K]> } {
+export function appSettings(c: Config, name: string): { [K in Exclude<keyof AppSettings, 'routeSource' | 'profiles'>]-?: NonNullable<AppSettings[K]> } {
   const a = c.apps?.[name] ?? {};
   return { versions: a.versions !== false, components: a.components !== false, lookalikes: a.lookalikes !== false, tokens: a.tokens !== false, tokenSkip: a.tokenSkip ?? [], start: a.start ?? '', url: a.url ?? '', routes: a.routes ?? [], extraRoutes: a.extraRoutes ?? [], flows: a.flows ?? [], screenshots: a.screenshots !== false, tag: a.tag !== false };
 }

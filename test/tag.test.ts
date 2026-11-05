@@ -95,3 +95,31 @@ test('components are left alone unless asked for; then never a Fragment', () => 
   // Already tagged (the app's own dsaTag ran first): left as it is.
   assert.equal(tagSource('<button data-dsa-src="x">Go</button>', file, { when: true, root }), null);
 });
+
+test('the file\'s own components, exported or not, are kept for the mount, on its last line', () => {
+  const src = `import { memo } from 'react';\nfunction Row() { return <li>a</li>; }\nexport const List = memo(() => <ul><Row /></ul>);\nconst helper = () => 1;\ntype Props = {};\nexport default function Page() { return <List />; }\n`;
+  const r = tagSource(src, '/repo/apps/x/src/Page.tsx', { when: true, root: '/repo' })!;
+  assert.equal(r.code.split('\n').length, src.split('\n').length);
+  assert.ok(r.code.endsWith(';(globalThis.__dsaLocal ??= {})["apps/x/src/Page.tsx"] = { Row, List, Page };'), r.code);
+});
+
+test('a tag path maps back to its file, and to the URL a Vite server with a base serves it at', async () => {
+  const { fileOfTag, viteUrlOf } = await import('../src/tag/index.js');
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-tag-url-')));
+  const app = path.join(root, 'web', 'portal');
+  fs.mkdirSync(path.join(app, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(app, 'src', 'Row.tsx'), '');
+  const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-tag-out-')));
+  fs.mkdirSync(path.join(outside, 'src'));
+  fs.writeFileSync(path.join(outside, 'src', 'Card.tsx'), '');
+  const file = fileOfTag('web/portal/src/Row.tsx', root)!;
+  assert.equal(file, path.join(app, 'src', 'Row.tsx'));
+  // Under the server's root: its path from there, after the base. Elsewhere: /@fs/, after the base.
+  assert.equal(viteUrlOf(file, app, '/portal/'), '/portal/src/Row.tsx');
+  assert.equal(viteUrlOf(file, app), '/src/Row.tsx');
+  assert.equal(viteUrlOf(file, path.join(root, 'other'), '/'), `/@fs${file}`);
+  // An app folder outside the root reads "<folder>/<path>".
+  assert.equal(fileOfTag(`${path.basename(outside)}/src/Card.tsx`, root, outside), path.join(outside, 'src', 'Card.tsx'));
+  assert.equal(fileOfTag('web/portal/src/Gone.tsx', root), null);
+  assert.equal(fileOfTag('../etc/passwd', root), null);
+});
