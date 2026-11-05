@@ -34,6 +34,99 @@ export function gateProps(e: ElementEval): Record<string, string | boolean> {
   return out;
 }
 
+/** `x.length`, `x?.length > 0`, `x.length === 0`, `props.x.length >= 1`: the list, and whether the test wants it non-empty. */
+function lengthTest(e: any): { name: string; nonEmpty: boolean } | null {
+  const list = (m: any): string | null => {
+    if (!/MemberExpression$/.test(m?.type ?? '') || m.computed || m.property?.name !== 'length') return null;
+    const o = m.object;
+    if (o?.type === 'Identifier') return o.name;
+    if (/MemberExpression$/.test(o?.type ?? '') && !o.computed && o.object?.type === 'Identifier' && o.object.name === 'props') return o.property?.name ?? null;
+    return null;
+  };
+  const own = list(e);
+  if (own) return { name: own, nonEmpty: true };
+  if (e?.type !== 'BinaryExpression') return null;
+  const left = list(e.left), right = list(e.right);
+  const name = left ?? right;
+  const n = left ? e.right : e.left;
+  if (!name || n?.type !== 'NumericLiteral') return null;
+  const op = left ? e.operator : ({ '<': '>', '>': '<', '<=': '>=', '>=': '<=' } as Record<string, string>)[e.operator] ?? e.operator;
+  const k = n.value as number;
+  // Whether a list of one passes, and an empty one.
+  const at = (x: number) => op === '>' ? x > k : op === '>=' ? x >= k : op === '<' ? x < k : op === '<=' ? x <= k : /^==/.test(op) ? x === k : /^!=/.test(op) ? x !== k : null;
+  const one = at(1), none = at(0);
+  if (one === null || one === none) return null;
+  return { name, nonEmpty: one };
+}
+
+/**
+ * The element's conditions on the props of the component mounted, made to hold over the props it's given
+ * (recorded, or shaped from the source): a flag (`open`, `!!editor`, and `open={!!editor}` where a caller
+ * passes it) true, a list read for its length (`palette.length > 0`) one item (`item` gives a recorded one),
+ * a literal (`mode === 'edit'`) that literal. Gates on state are left to the state setter. Returns the props
+ * and what it set, in words (`open = true`), so a drawing can say a condition was forced.
+ */
+export function forceGates(e: ElementEval, name: string, given: Record<string, unknown>, shaped: Record<string, unknown> = {}, item?: (prop: string) => unknown): { props: Record<string, unknown>; forced: string[] } {
+  const props: Record<string, unknown> = { ...given };
+  const forced: string[] = [];
+  const takes = (x: string) => x in props || x in shaped;
+  const set = (x: string, v: unknown) => { props[x] = v; forced.push(`${x} = ${(JSON.stringify(v) ?? String(v)).slice(0, 30)}`); };
+  const truthy = (x: string, truth: boolean) => {
+    if (Boolean(props[x]) === truth) return;
+    if (!truth) return set(x, props[x] && typeof props[x] === 'object' ? null : false);
+    const s = shaped[x];
+    set(x, s && typeof s === 'object' ? s : true);
+  };
+  const root = (m: any): string | null => m?.type === 'Identifier' ? m.name : /MemberExpression$/.test(m?.type ?? '') && !m.computed && m.object?.type === 'Identifier' && m.object.name === 'props' ? m.property?.name ?? null : null;
+  const visit = (x: any, truth: boolean): void => {
+    if (!x) return;
+    const r = root(x);
+    if (r) { if (takes(r)) truthy(r, truth); return; }
+    if (x.type === 'UnaryExpression' && x.operator === '!') return visit(x.argument, !truth);
+    if (x.type === 'CallExpression' && x.callee?.name === 'Boolean' && x.arguments.length === 1) return visit(x.arguments[0], truth);
+    if (x.type === 'LogicalExpression') {
+      if ((x.operator === '&&' && truth) || (x.operator === '||' && !truth)) { visit(x.left, truth); visit(x.right, truth); }
+      else visit(x.left, truth);
+      return;
+    }
+    const len = lengthTest(x);
+    if (len) {
+      if (!takes(len.name)) return;
+      const v = props[len.name];
+      const has = Array.isArray(v) && v.length > 0;
+      if (len.nonEmpty !== truth) { if (has) set(len.name, []); return; }
+      if (has) return;
+      const s = shaped[len.name];
+      const one = item?.(len.name) ?? (Array.isArray(s) && s.length ? s[0] : {});
+      set(len.name, [one]);
+      return;
+    }
+    if (x.type === 'BinaryExpression' && /^[!=]==?$/.test(x.operator)) {
+      const id = root(x.left) ? x.left : root(x.right) ? x.right : null;
+      const lit = id === x.left ? x.right : x.left;
+      const n = id && root(id);
+      if (!n || !takes(n)) return;
+      // `x != null`, `x !== undefined`: x set.
+      if (lit?.type === 'NullLiteral' || (lit?.type === 'Identifier' && lit.name === 'undefined')) return truthy(n, x.operator.startsWith('!') === truth);
+      if (!/^(String|Numeric|Boolean)Literal$/.test(lit?.type ?? '')) return;
+      const eq = x.operator.startsWith('=') === truth;
+      if (eq && props[n] !== lit.value) set(n, lit.value);
+      else if (!eq && props[n] === lit.value) set(n, typeof lit.value === 'boolean' ? !lit.value : typeof lit.value === 'number' ? lit.value + 1 : `${lit.value}-other`);
+    }
+  };
+  for (const g of e.reach?.gates ?? []) {
+    const gc = (g as any).component as string | undefined;
+    // A condition a caller passes as this component's prop (`<Editor open={!!editor}>`): that prop holds.
+    const asProp = g.test.match(/^([\w$]+)=\{[\s\S]*\}$/);
+    if (asProp) { if (gc !== name && takes(asProp[1]!)) truthy(asProp[1]!, !g.negated); continue; }
+    if (gc ? gc !== name : e.within !== name) continue;
+    let expr: any = null;
+    try { expr = babelParseExpression(g.test, { plugins: ['jsx', 'typescript'] }); } catch { continue; }
+    visit(expr, !g.negated);
+  }
+  return { props, forced: [...new Set(forced)] };
+}
+
 /** A prop value the page turns into a function that does nothing. */
 export const FN = { __dsa: 'fn' } as const;
 /** A prop value the page turns into an empty Set, or an empty Map: what `.has(`, `.get(` are called on. */
@@ -717,6 +810,15 @@ export function stateSets(gates: { test: string; negated: boolean; component?: s
       if (e.type === 'LogicalExpression') {
         if ((e.operator === '&&' && truth) || (e.operator === '||' && !truth)) { visit(e.left, truth); visit(e.right, truth); }
         else visit(e.left, truth);
+        return;
+      }
+      // A list read for its length (`palette.length > 0`, `items.length`, `rows.length === 0`): one item, or none.
+      const len = lengthTest(e);
+      if (len) {
+        if (!known(len.name)) return;
+        if (len.nonEmpty !== truth) { want.set(len.name, []); return; }
+        const v = fn ? usageOf(fn.body, (m) => m?.type === 'Identifier' && m.name === len.name, 0, ast) : undefined;
+        want.set(len.name, Array.isArray(v) && v.length ? v.slice(0, 1) : [{}]);
         return;
       }
       if (e.type === 'BinaryExpression' && /^[!=]==?$/.test(e.operator)) {

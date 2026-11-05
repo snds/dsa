@@ -11,7 +11,7 @@ import { appSurface, openSurface } from '@snds/dsa';
 import { detectApp, discoverRoutes, ensureBrowser, linkCoreForChild, routeConfig, startApp, tagPlan } from './apps.js';
 
 import { READ_STYLE } from './rendered.js';
-import { NO_SIZE, SHOW_MARKUP, hookValue, markupOf, mountProps, parentComponent, holdsInitially, readSource, stateSets, stateValues, whatItNeeded, type StateSet } from './drawn.js';
+import { NO_SIZE, SHOW_MARKUP, forceGates, hookValue, markupOf, mountProps, parentComponent, holdsInitially, readSource, stateSets, stateValues, whatItNeeded, type StateSet } from './drawn.js';
 import { needsValue, patternTest, routeFiles, routesReaching } from './routes.js';
 import { describeNetwork, flowProblems, guardNetwork, routeUrl, runFlow, type Flow, type GuardStats } from './flows.js';
 
@@ -76,7 +76,7 @@ async function inPage<T = any>(page: any, src: string, arg?: unknown): Promise<T
 }
 
 /** Bump when finding or revealing elements changes, so earlier misses get another try. */
-const CRAWLER = 9;
+const CRAWLER = 10;
 
 interface Target { id: string; e: ElementEval; /** What was tried to reveal it, in plain words (kept with its miss). */ tried?: string[]; m: ElementEval['match']; /** Its source tag: file:line:col, as the scanner and the tagger write it. */ src: string; steps?: { label: string; event: 'click' | 'dblclick' | 'type' | 'choose'; value?: string | undefined; /** The control's own source line ("file:line:"), to find it by its tag. */ src?: string | undefined }[]; /** The routes whose component renders its file (routes.ts); empty: none does. */ routes?: string[]; hints: string[]; where: string[] }
 
@@ -123,7 +123,7 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
   const dir = path.join(opts.dataDir, 'shots');
   fs.mkdirSync(dir, { recursive: true });
   const idxFile = path.join(dir, 'index.json');
-  const index: { shots: Record<string, any>; missing: string[]; pages: string[]; takenAt: string; misses?: Record<string, any>; run?: RunStamp; uses?: Record<string, any> } = fs.existsSync(idxFile) ? JSON.parse(fs.readFileSync(idxFile, 'utf8')) : { shots: {}, missing: [], pages: [], takenAt: '' };
+  const index: { shots: Record<string, any>; missing: string[]; pages: string[]; takenAt: string; misses?: Record<string, any>; run?: RunStamp; uses?: Record<string, any>; ledgerCoverage?: Record<string, { own: number; component: number; file: number; none: number }> } = fs.existsSync(idxFile) ? JSON.parse(fs.readFileSync(idxFile, 'utf8')) : { shots: {}, missing: [], pages: [], takenAt: '' };
   index.missing = []; index.pages = [];
   // This run: an id each new photo carries, the source it was taken from (its commit, or "worktree" when the
   // checkout has changes), and when. Cached photos keep their own stamp, so a report can tell an old one apart.
@@ -287,6 +287,8 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
       const ledger = readLedger(ledgerFile, ledgerHash);
       const r: Awaited<ReturnType<typeof session>> & { signIn?: string; expired?: boolean; broken?: string } = await session(pw, { ledger, uses: instances.filter(i => s.target === '*' || i.target === s.target).map(i => ({ component: i.component, key: `${i.file}:${i.line}` })), reach: s.reach, draw: s.draw, url: s.url, routes: s.routes, first: s.first, flows: s.flows, crawl: s.crawl, examples: s.need, dir, storageState: s.storageState, readApi: s.readApi, readPaths: s.readPaths, signIn: s.signIn, maxPages: sh.maxPages ?? 90, pagesSet: sh.maxPages !== undefined, waitMs: sh.waitMs ?? 600, log, reveal: sh.reveal, maxActions: sh.maxActions ?? sh.maxTriggers, maxDepth: sh.maxDepth, maxMinutes: sh.maxMinutes, routeSource: s.routeSource, profiles: s.profiles, appDir: s.appDir, manifest: s.manifest, coverage: (sh as any).coverage });
       const at = new Date().toISOString();
+      // Per app: of what wasn't reached live, how much the ledger knows (its element, its component, its file, nothing).
+      if (r.ledgerCover) (index.ledgerCoverage ??= {})[s.target] = r.ledgerCover;
       if (Object.keys(r.uses ?? {}).length) { index.uses ??= {}; for (const [k, v] of Object.entries<any>(r.uses)) index.uses[k] = { ...v, run: index.run!.id, at }; log(`  ${Object.keys(r.uses).length} of the app's own uses of system components photographed as examples`); }
       if (r.ledger?.length) { const n = addToLedger(ledgerFile, r.ledger, ledgerHash); log(`  ledger: ${r.ledger.length} element${r.ledger.length === 1 ? '' : 's'} recorded rendering, ${n} new`); }
       const byId = new Map(s.need.map(e => [e.id, e]));
@@ -581,6 +583,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   };
   let watchPage: ((pg: any) => void) | null = null;
   const recorded: LedgerRec[] = [];
+  let ledgerCover: { own: number; component: number; file: number; none: number } | null = null;
   // Photos of the app's own uses of system components (shots/index.json "uses"): up to 3 per component, 150 in all.
   const usesShot: Record<string, any> = {};
   const usesPer = new Map<string, number>();
@@ -1079,7 +1082,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   } finally {
     await browser.close().catch(() => {});
   }
-  return { ledger: recorded, uses: usesShot, shots, pages, missing: [...remaining.map(r => r.id), ...setAside, ...drawnIds], drawn: drawnIds.length, why, fileOn: Object.fromEntries(Object.entries(fileOn).map(([k, u]) => [k, u && routeOf(u)])), tried: Object.fromEntries(everyone.filter(r => r.tried?.length).map(r => [r.id, r.tried!])), tagged: { pages: taggedPages, of: pages.length }, ...(signedOut() || auth.expired ? { signIn: wall.at || o.url } : {}), ...(auth.expired ? { expired: true } : {}), ...(isBroken() ? { broken: broken.first } : {}) };
+  return { ledger: recorded, ...(ledgerCover ? { ledgerCover } : {}), uses: usesShot, shots, pages, missing: [...remaining.map(r => r.id), ...setAside, ...drawnIds], drawn: drawnIds.length, why, fileOn: Object.fromEntries(Object.entries(fileOn).map(([k, u]) => [k, u && routeOf(u)])), tried: Object.fromEntries(everyone.filter(r => r.tried?.length).map(r => [r.id, r.tried!])), tagged: { pages: taggedPages, of: pages.length }, ...(signedOut() || auth.expired ? { signIn: wall.at || o.url } : {}), ...(auth.expired ? { expired: true } : {}), ...(isBroken() ? { broken: broken.first } : {}) };
 
   /**
    * The app's own reach manifest, when its dev build declares one (`window.__DSA__`, docs/reach-manifest.md):
@@ -1487,6 +1490,39 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     // Earlier runs' records, and this run's: an element can render and still not be photographed.
     const ledgerNow: Record<string, LedgerRec[]> = { ...(o.ledger ?? {}) };
     for (const rec of recorded) (ledgerNow[rec.src] ??= []).push(rec);
+    const fileOfSrc = (s: string) => s.replace(/:\d+:\d*$/, '');
+    // Records by the component that owns them: its props, recorded as it rendered any of its elements.
+    const byOwner = new Map<string, LedgerRec[]>();
+    const recFiles = new Set<string>();
+    for (const list of Object.values(ledgerNow)) for (const x of list) {
+      recFiles.add(fileOfSrc(x.src));
+      if (x.owner?.name && x.owner.props && typeof x.owner.props === 'object') (byOwner.get(x.owner.name) ?? byOwner.set(x.owner.name, []).get(x.owner.name)!).push(x);
+    }
+    // One with a size on the page and whole props first.
+    const bestOf = (l: LedgerRec[]) => l.slice().sort((a, b) => Number(b.w > 0 && !b.owner?.cut) - Number(a.w > 0 && !a.owner?.cut))[0];
+    // The props a component was recorded with: the element's own record, else any of the component's, its own file's first.
+    const recordOf = (r: Target, name: string): LedgerRec | undefined => {
+      const own = recordsFor(ledgerNow, r.src).find(x => x.owner?.name === name && x.owner.props && typeof x.owner.props === 'object');
+      if (own) return own;
+      const all = byOwner.get(name) ?? [];
+      const here = all.filter(x => fileOfSrc(x.src) === fileOfSrc(r.src));
+      return here.length ? bestOf(here) : all.length ? bestOf(all) : undefined;
+    };
+    // A list prop's item, from any record of the component where that list had one.
+    const itemOf = (name: string) => (prop: string) => {
+      for (const x of byOwner.get(name) ?? []) { const v = (x.owner!.props as any)?.[prop]; if (Array.isArray(v) && v.length && v[0] != null) return v[0]; }
+      return undefined;
+    };
+    // How much of what wasn't reached live the ledger knows: its element, its component, its file, or nothing.
+    const cover = { own: 0, component: 0, file: 0, none: 0 };
+    for (const r of remaining) {
+      if (recordsFor(ledgerNow, r.src).length) cover.own++;
+      else if (r.e.within && recordOf(r, r.e.within)) cover.component++;
+      else if (recFiles.has(fileOfSrc(r.src))) cover.file++;
+      else cover.none++;
+    }
+    o.log(`  ledger coverage: of ${remaining.length} not reached live, ${cover.own} recorded themselves, ${cover.component} whose component is recorded, ${cover.file} whose file is recorded, ${cover.none} neither`);
+    ledgerCover = cover;
     const stop = Date.now() + (d.maxMinutes ?? 10) * 60_000;
     const max = d.max ?? Infinity;
     let n = 0;
@@ -1520,6 +1556,8 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       if (!code) { out(`not drawn: its source file wasn't found (${r.e.file})`); continue; }
       let how: 'mount' | 'markup' | null = null;
       let isolated = false;
+      // The conditions set on its props to draw it (`open = true`), said with the drawing.
+      let forced: string[] = [];
       let exact = false;
       let unmounted = '';
       let providers = 0;
@@ -1540,11 +1578,18 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
           const wraps: { files: string[]; file: string; name: string; props: unknown; context?: boolean }[] = [];
           // The app's own providers first; every context the page provides only when that fails or doesn't show it.
           let scope: 'app' | 'all' = 'app';
-          // The props the app really passed it, from the ledger, when its owner is the component mounted: an
-          // isolated render of the element as it was, instead of props guessed from the source.
-          const rec = recordsFor(ledgerNow, r.src).find(x => x.owner?.props && typeof x.owner.props === 'object');
+          // The props the app really passed the component mounted, from the ledger (this element's record, or
+          // any of its component's): an isolated render, instead of props guessed from the source. Either way
+          // the element's conditions on those props are made to hold (forceGates).
           let withRecorded = false;
-          const propsFor = (name: string) => { withRecorded = Boolean(rec && rec.owner!.name === name); return withRecorded ? rec!.owner!.props : mountProps({ ...r.e, within: name }, code, callersOf(d, name, abs)); };
+          const propsFor = (name: string) => {
+            const shaped = mountProps({ ...r.e, within: name }, code, callersOf(d, name, abs));
+            const rec = recordOf(r, name);
+            withRecorded = Boolean(rec);
+            const f = forceGates(r.e, name, rec ? { ...shaped, ...(rec.owner!.props as object) } : shaped, shaped, itemOf(name));
+            forced = f.forced;
+            return f.props;
+          };
           const mountAs = (name: string) => inPage<Mounted>(page, MOUNT_IN_PAGE, [files, name, propsFor(name), r.e.file, wraps, scope])
             .catch((e: any): Mounted => ({ ok: false, why: `the page failed while mounting (${String(e?.message ?? e).split('\n')[0]!.slice(0, 80)})` }));
           const find = async () => ((await inPage<any[]>(page, FIND_IN_PAGE, [{ ...r, e: undefined }]).catch(() => [])) ?? [])[0] ?? null;
@@ -1588,6 +1633,31 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
             if (said.threw) need = whatItNeeded(sourceOfThrow(d, said.threw, code, parent || r.e.within), said.threw.component || parent || r.e.within, said.threw.message);
             unmounted = `${label}: ${said.why ?? 'no reason given'}${need ? `; it needed ${need}` : ''}${wraps.length ? ` (wrapped in ${wraps.map(w => w.name).join(', ')} from the source)` : ''}${searched.length ? `; provider search: ${searched.join('; ')}` : ''}`;
           }
+          // Its component never recorded: the nearest component above it that was, mounted from its own file
+          // with the props it was recorded with, the conditions on the way forced, then the state set.
+          if (!how && !recordOf(r, r.e.within)) {
+            const anc = [...(r.e.reach?.via ?? [])].reverse().find(nm => nm !== r.e.within && byOwner.has(nm));
+            const rec = anc ? bestOf(byOwner.get(anc)!) : undefined;
+            const af = rec ? absOfTag(d, fileOfSrc(rec.src)) : '';
+            let acode = '';
+            try { acode = af ? fs.readFileSync(af, 'utf8') : ''; } catch { /* moved */ }
+            if (anc && rec && acode) {
+              const ancMount = () => {
+                const shaped = mountProps({ ...r.e, within: anc } as ElementEval, acode);
+                const f = forceGates(r.e, anc, { ...shaped, ...(rec.owner!.props as object) }, shaped, itemOf(anc));
+                forced = f.forced;
+                return inPage<Mounted>(page, MOUNT_IN_PAGE, [filesOf(af), anc, f.props, fileOfSrc(rec.src), [], 'all'])
+                  .catch((e: any): Mounted => ({ ok: false, why: `the page failed while mounting (${String(e?.message ?? e).split('\n')[0]!.slice(0, 80)})` }));
+              };
+              const m = await ancMount();
+              if (m.ok) {
+                let hit = await find();
+                if (!hit) { const rv = await revealInMount(r, find, ancMount); hit = rv.hit; revealed = rv.after; }
+                if (hit) { how = 'mount'; exact = Boolean(hit.exact); drawnBy = anc; isolated = exact; providers = m.providers ?? 0; }
+                else unmounted += `; ${anc}, the nearest component above it the ledger recorded, mounted with its recorded props, but the element wasn't in what it drew`;
+              } else unmounted += `; ${anc}, the nearest component above it the ledger recorded: ${m.why ?? 'not mounted'}`;
+            }
+          }
           if (!how) note(r, `not mounted: ${unmounted}`);
         }
         if (!how) {
@@ -1614,11 +1684,11 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         }
         if (!cap) { out(`not drawn: the drawing had no size to photograph (${placeholder || "it wasn't on the page"})${unmounted ? `; not mounted: ${unmounted}` : ''}`); continue; }
         // A mount found by its exact source tag, and not blank, counts as seeing the element (seenInApp).
-        shots[r.id] = { file, page: u, matchScore: 1, drawn: how, ...(how === 'mount' && exact ? { exact: true } : {}), box: cap.box, content, ...(cap.blank ? { blank: true } : {}), ...(placeholder ? { placeholder } : {}), ...(isolated ? { source: 'isolated' } : {}) };
+        shots[r.id] = { file, page: u, matchScore: 1, drawn: how, ...(how === 'mount' && exact ? { exact: true } : {}), box: cap.box, content, ...(cap.blank ? { blank: true } : {}), ...(placeholder ? { placeholder } : {}), ...(isolated ? { source: 'isolated' } : {}), ...(how === 'mount' && forced.length ? { forced } : {}) };
         drawnIds.push(r.id);
         remaining = remaining.filter(x => x.id !== r.id);
         n++;
-        const msg = how === 'mount' ? `drawn from the app's code${isolated ? ' with the props the app passed it (recorded): an isolated render' : ''} (${drawnBy ? `${drawnBy}, the component around it` : 'its component'}, in the app's build${providers ? `, with ${providers} of its providers` : ''}${wrapped ? `, ${wrapped} found in the source` : ''}${revealed ? `, after ${revealed.startsWith('setting ') ? revealed : `clicking ${revealed}`} in it` : ''})` : `drawn as markup only; not mounted: ${unmounted}`;
+        const msg = how === 'mount' ? `drawn from the app's code${isolated ? ` with the props the app passed it (recorded): an isolated render${forced.length ? ` (recorded props, condition forced: ${forced.join(', ')})` : ''}` : forced.length ? ` (condition forced: ${forced.join(', ')})` : ''} (${drawnBy ? `${drawnBy}, the component around it` : 'its component'}, in the app's build${providers ? `, with ${providers} of its providers` : ''}${wrapped ? `, ${wrapped} found in the source` : ''}${revealed ? `, after ${revealed.startsWith('setting ') ? revealed : `clicking ${revealed}`} in it` : ''})` : `drawn as markup only; not mounted: ${unmounted}`;
         count(placeholder ? `shown outlined (no size: ${short(placeholder)})` : how === 'mount' ? "drawn from the app's code" : `markup only (not mounted: ${short(unmounted)})`);
         o.log(`  ${where(r)} ${msg}${placeholder ? ` · shown outlined, it had no size: ${placeholder}` : ''}${cap.blank ? ' · blank' : ''}`);
       } catch (e: any) {
