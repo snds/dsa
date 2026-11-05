@@ -479,19 +479,46 @@ function EvidenceNote({ e }: { e: any }) {
     <div className="flex flex-col gap-1 rounded-md border border-dashed px-2 py-1.5 text-xs" data-slot="needs-evidence">
       <b className="font-medium">Needs evidence before review</b>
       {e.review.missing.map((m: any, i: number) => <span key={i}>{m.why} <span className="text-muted-foreground">To fix: {m.fix}</span></span>)}
+      <TechnicalDetails lines={e.review.missing.map((m: any) => m.detail)} />
     </div>
   )
 }
 
 /** Elements on this card that can't be decided yet: why, once per reason, and what would fix it. */
 function NeedsEvidence({ items, some }: { items: any[]; some?: boolean }) {
-  const reasons = new Map<string, { fix: string; n: number }>()
-  for (const e of items) for (const m of e.review?.missing ?? []) { const r = reasons.get(m.why) ?? { fix: m.fix, n: 0 }; r.n++; reasons.set(m.why, r) }
+  const reasons = evidenceGroups(items)
   return (
     <div className="flex flex-col gap-1 rounded-md border border-dashed px-3 py-2 text-sm" data-slot="needs-evidence">
       <b className="font-medium">{some ? `${items.length} of these need evidence before review` : "Needs evidence before review"}</b>
       <span className="text-xs text-muted-foreground">A decision needs the element as the app shows it and the proposal drawn with its own content. Until both exist, nothing is asked.</span>
-      <ul className="list-disc pl-4 text-xs">{[...reasons].map(([why, r]) => <li key={why}>{why}{items.length > 1 ? ` (${r.n})` : ""} <span className="text-muted-foreground">To fix: {r.fix}</span></li>)}</ul>
+      <ul className="list-disc pl-4 text-xs">{reasons.map(r => <li key={r.kind}>{r.text} <span className="text-muted-foreground">To fix: {r.fix}</span></li>)}</ul>
+      <TechnicalDetails lines={items.flatMap((e: any) => (e.review?.missing ?? []).map((m: any) => m.detail))} />
     </div>
+  )
+}
+
+/**
+ * The reasons on a card, plain and grouped, the most common first: "12 aren't reached yet: they only show
+ * after steps in a flow, such as opening …". One element's reason is said as it is.
+ */
+export function evidenceGroups(items: any[]): { kind: string; text: string; fix: string; n: number }[] {
+  const g = new Map<string, { kind: string; why: string; group?: string; fix: string; n: number }>()
+  for (const e of items) for (const m of e.review?.missing ?? []) {
+    const k = m.kind ?? m.why
+    const r = g.get(k) ?? { kind: k, why: m.why, group: m.group, fix: m.fix, n: 0 }
+    r.n++; g.set(k, r)
+  }
+  return [...g.values()].sort((a, b) => b.n - a.n).map(r => ({ kind: r.kind, fix: r.fix, n: r.n, text: r.n > 1 && r.group ? `${r.n} ${r.group}.` : r.n > 1 ? `${r.why} (${r.n})` : r.why }))
+}
+
+/** The code-level account (conditions, components), folded away: for engineers, never needed to decide. */
+function TechnicalDetails({ lines }: { lines: (string | undefined)[] }) {
+  const all = [...new Set(lines.filter(Boolean) as string[])]
+  if (!all.length) return null
+  return (
+    <details className="text-xs" data-slot="evidence-details">
+      <summary className="cursor-pointer text-muted-foreground underline-offset-4 hover:underline">Technical details (for engineers)</summary>
+      <ul className="mt-1 list-disc pl-4 text-muted-foreground">{all.slice(0, 12).map(l => <li key={l}>{l}</li>)}{all.length > 12 && <li>{all.length - 12} more</li>}</ul>
+    </details>
   )
 }

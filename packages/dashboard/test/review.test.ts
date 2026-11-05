@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { tmp } from '../../../test/engine/fixture.js';
-import { evidenceOf, pageName, withReview } from '../src/review.js';
+import { canDecideNow, evidenceOf, pageName, stepWords, withReview } from '../src/review.js';
 import { reviewQueue } from '../src/labels.js';
 import { appendHumanLabels, humanLabelsFile } from '../src/server.js';
 
@@ -31,7 +31,7 @@ test('a person is only asked when both halves are real; otherwise it says why an
   const cases: [object, RegExp][] = [
     [{ shot: null }, /no photo of it/],
     [{ shot: null, staleShot: { why: 'older-run' } }, /older run/],
-    [{ shot: null, reach: { why: 'it shows only after a step the crawler could not take' } }, /couldn't reach it/],
+    [{ shot: null, reach: { why: 'it shows only after a step the crawler could not take' } }, /hasn't reached it yet/],
     [{ shot: shot({ drawn: 'mount', exact: true }) }, /guessed props/],
     [{ shot: shot({ drawn: 'markup' }) }, /Only its markup/],
     [{ shot: shot({ blank: true }) }, /shows nothing/],
@@ -106,4 +106,40 @@ test('answers are saved as human labels, schema-checked; a second answer from th
   assert.ok(appendHumanLabels(data, [{ ...row('replace', 'Button'), method: 'migrated' }]).errors[0]!.includes('human'));
   assert.ok(appendHumanLabels(data, [{ ...row('replace') }]).errors.length, 'a replace names its component');
   assert.equal(path.basename(path.dirname(humanLabelsFile(data))), 'labels');
+});
+
+test('every element a person can decide now is offered, before the audit, by the rule Element Review counts with', () => {
+  const p = withReview(payload([
+    el('open1', { needsHuman: true, confidence: 0.6 }),
+    el('open2', { needsHuman: true, confidence: 0.5 }),
+    el('decided', { needsHuman: true, decided: { decision: { verdict: 'keep' } } }),
+    el('nophoto', { needsHuman: true, shot: null }),
+    el('sure', {}),
+  ]), { audit: 1 });
+  const E = p.elements;
+  const now = E.evals.filter(canDecideNow).map((e: any) => e.id);
+  assert.deepEqual(now, ['open1', 'open2']);
+  assert.deepEqual(E.evals.filter((e: any) => e.review.decideNow).map((e: any) => e.id), now, 'stamped for the page');
+  assert.equal(E.review.decideNow, 2);
+  assert.deepEqual(E.review.items.map((i: any) => [i.id, i.why]), [['open1', 'decide'], ['open2', 'decide'], ['sure', 'audit']]);
+});
+
+test('what the crawler could not reach is said plainly; the code conditions are kept apart for engineers', () => {
+  const E = payload([]).elements;
+  const gated = (o: object) => evidenceOf(E, el('x', { shot: null, reach: { status: 'gated', why: 'Renders only when `!fullSearch && mode === "button"` in AddSheet, opened by “Message on : Open request -” in Bell; 10 more conditions above it (main › App).', ...o } }), null).missing[0]!;
+  const flow = gated({ gates: [{ kind: 'condition', test: '!fullSearch' }], steps: ['Message on : Open request -'] });
+  assert.equal(flow.kind, 'flow');
+  assert.equal(flow.why, "The crawler hasn't reached it yet: it only shows after steps in a flow, such as opening “Message on …: Open request …”.");
+  assert.match(flow.group, /^aren't reached yet: they only show after steps in a flow/);
+  assert.doesNotMatch(flow.why + flow.group, /`|&&|conditions above|›/, 'no code on the face');
+  assert.match(flow.detail!, /fullSearch/, 'the code conditions stay, for engineers');
+  assert.equal(gated({ gates: [{ kind: 'overlay', overlay: 'dialog' }], steps: [] }).kind, 'overlay');
+  assert.equal(gated({ gates: [{ kind: 'condition', test: 'x' }], steps: [] }).kind, 'state');
+  assert.equal(gated({ status: 'page', gates: [], steps: [] }).kind, 'unphotographed');
+});
+
+test("a control's words from the code show the values it fills in as gaps", () => {
+  assert.equal(stepWords('Message on : Open request -'), 'Message on …: Open request …');
+  assert.equal(stepWords({ label: 'Save' }), 'Save');
+  assert.equal(stepWords(''), '');
 });

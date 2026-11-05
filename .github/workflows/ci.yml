@@ -49,3 +49,9 @@ jobs:
         run: |
           node dist/schema/generate.js
           git diff --exit-code -- schema
+      # The report's UI is committed built (templates/ui), so the suite never needs the build. Built
+      # again here: a bundle older than ui/src would serve old screens.
+      - name: The committed report UI matches its source
+        run: |
+          pnpm --filter @snds/dsa-dashboard-ui build
+          git diff --exit-code -- packages/dashboard/templates/ui

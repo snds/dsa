@@ -17,7 +17,40 @@ export interface Evidence {
   /** How the current element is shown: a live photo or an isolated render. Null when it can't be. */
   current: 'live' | 'isolated' | null;
   /** What's missing, in plain words, and what would fix each. Empty when ready. */
-  missing: { why: string; fix: string }[];
+  missing: Missing[];
+}
+
+/**
+ * One thing missing. `why` is the plain reason for this element; `kind` groups the same reason across
+ * elements, and `group` says it for several ("12 aren't reached yet: …"). `detail` is the code-level
+ * account (conditions, components), for engineers only.
+ */
+export interface Missing { why: string; fix: string; kind: string; group: string; detail?: string | undefined }
+
+/** A control's words from the code, with the values the code fills in shown as "…": "Message on …: Open request …". */
+export function stepWords(l: unknown): string {
+  const t = String((l as any)?.label ?? l ?? '').replace(/\s+/g, ' ').trim();
+  return t.replace(/\s+([:;,])/g, ' …$1').replace(/\s*[-–—:;,]+$/, ' …').replace(/^[-–—:;,]+\s*/, '… ').replace(/(…\s*){2,}/g, '… ').trim();
+}
+
+/** Why the crawler hasn't photographed it, in plain words, from how it is reached. */
+function unreached(e: any): Missing {
+  const r = e.reach ?? {};
+  const detail = r.why ? String(r.why) : undefined;
+  const fix = 'Add a route or a flow that opens it, or record it while someone uses the app (dsa record).';
+  const steps = (r.steps ?? []).map(stepWords).filter(Boolean);
+  const last = (r.gates ?? [])[r.gates?.length - 1];
+  if (r.status === 'page')
+    return { kind: 'unphotographed', why: "It shows on a page, but the crawler hasn't photographed it yet.", group: "show on a page, but the crawler hasn't photographed them yet", fix: 'Take the screenshots again; if it stays missing, add the page as a route.', detail };
+  if (steps.length) {
+    const first = `opening “${steps[0]}”`;
+    return { kind: 'flow', why: `The crawler hasn't reached it yet: it only shows after steps in a flow, such as ${first}.`, group: `aren't reached yet: they only show after steps in a flow, such as ${first}`, fix, detail };
+  }
+  if (last?.kind === 'overlay') {
+    const where = last.overlay ? `a ${last.overlay}` : 'a menu or a dialog';
+    return { kind: 'overlay', why: `The crawler hasn't reached it yet: it only shows inside ${where}, and nothing it found opens that.`, group: `aren't reached yet: they only show inside a menu, dialog or panel nothing found opens`, fix, detail };
+  }
+  return { kind: 'state', why: "The crawler hasn't reached it yet: it only shows in a state the crawler can't set yet, such as a setting, a filter or some data.", group: "aren't reached yet: they only show in a state the crawler can't set yet, such as a setting, a filter or some data", fix, detail };
 }
 
 /** What the element's card proposes: a question's (or part's) pick, else its own recommendation. */
@@ -58,26 +91,26 @@ export function evidenceOf(E: any, e: any, pick: any): Evidence {
   const s = e.shot;
   let current: Evidence['current'] = null;
   if (!s) {
-    if (e.staleShot) missing.push({ why: 'Its only photo is from an older run, so it may not show the code as it is now.', fix: 'Take the screenshots again.' });
-    else if (e.reach?.why) missing.push({ why: `The crawler couldn't reach it: ${String(e.reach.why).replace(/\.$/, '')}.`, fix: 'Add a route or a flow that opens it, or record it while someone uses the app.' });
-    else missing.push({ why: 'There is no photo of it in the app.', fix: 'Take screenshots of the app (dsa run with screenshots on).' });
-  } else if (s.blank) missing.push({ why: 'Its photo shows nothing: it may need a state the crawler could not set.', fix: 'Add a flow that puts the page in that state.' });
-  else if (s.covered) missing.push({ why: 'Something else covers it in its photo.', fix: 'Take the photo again with the covering layer closed.' });
+    if (e.staleShot) missing.push({ kind: 'stale', why: 'Its only photo is from an older run, so it may not show the code as it is now.', group: 'have only an old photo, from before the code changed', fix: 'Take the screenshots again.' });
+    else if (e.reach?.why) missing.push(unreached(e));
+    else missing.push({ kind: 'no-photo', why: 'There is no photo of it in the app.', group: 'have no photo in the app', fix: 'Take screenshots of the app (dsa run with screenshots on).' });
+  } else if (s.blank) missing.push({ kind: 'blank', why: 'Its photo shows nothing: it may need a state the crawler could not set.', group: 'have a photo that shows nothing', fix: 'Add a flow that puts the page in that state.' });
+  else if (s.covered) missing.push({ kind: 'covered', why: 'Something else covers it in its photo.', group: 'are covered by something else in their photos', fix: 'Take the photo again with the covering layer closed.' });
   else if (s.source === 'isolated') current = 'isolated';
-  else if (s.drawn === 'markup') missing.push({ why: 'Only its markup could be drawn, not the element as the app draws it.', fix: 'Reach it in the running app, or record its props so it can be drawn as an isolated render.' });
-  else if (s.drawn) missing.push({ why: 'It was drawn from the code with guessed props, so it may not look like the real thing.', fix: 'Reach it in the running app, or record its props so it can be drawn as an isolated render.' });
-  else if (!s.tagged && (s.match ?? 0) < SHOT_MIN) missing.push({ why: 'Its photo may be of a different element that looks like it.', fix: 'Build the app with source tags, so the photo is found by its line.' });
+  else if (s.drawn === 'markup') missing.push({ kind: 'markup', group: 'could only be drawn as markup, not as the app draws them', why: 'Only its markup could be drawn, not the element as the app draws it.', fix: 'Reach it in the running app, or record its props so it can be drawn as an isolated render.' });
+  else if (s.drawn) missing.push({ kind: 'guessed', group: 'were drawn with guessed props, so they may not look like the real thing', why: 'It was drawn from the code with guessed props, so it may not look like the real thing.', fix: 'Reach it in the running app, or record its props so it can be drawn as an isolated render.' });
+  else if (!s.tagged && (s.match ?? 0) < SHOT_MIN) missing.push({ kind: 'unsure-photo', group: 'have a photo that may be of a different element', why: 'Its photo may be of a different element that looks like it.', fix: 'Build the app with source tags, so the photo is found by its line.' });
   else current = 'live';
   if (pick?.verdict === 'replace' && pick.use) {
     const p = proposalFor(E, e, pick);
     const what = [pick.use, ...Object.entries(pick.props ?? {}).filter(([k]) => k !== 'render').map(([k, v]) => `${k} ${v}`)].join(', ');
     const container = CONTAINER_ROLES.has(e.role) || CONTAINER_ROLES.has(pick.role);
-    if (p && p.check === 'none' && !p.url && (p.noSource || NO_SOURCE.test(p.note ?? ''))) missing.push({ why: `The system has nothing to draw ${pick.use} from.`, fix: `Add a story or source for ${pick.use}, or propose another component.` });
-    else if (!p?.url) missing.push({ why: `The proposal (${what}) isn't drawn yet.`, fix: 'Draw the proposals (dsa render).' });
-    else if (p.check !== 'exact') missing.push({ why: `The proposal (${what}) is only drawn as a near match, not with these props.`, fix: 'Draw the proposals (dsa render).' });
+    if (p && p.check === 'none' && !p.url && (p.noSource || NO_SOURCE.test(p.note ?? ''))) missing.push({ kind: 'no-source', group: 'propose a component the system has nothing to draw from', why: `The system has nothing to draw ${pick.use} from.`, fix: `Add a story or source for ${pick.use}, or propose another component.` });
+    else if (!p?.url) missing.push({ kind: 'not-drawn', group: "have a proposal that isn't drawn yet", why: `The proposal (${what}) isn't drawn yet.`, fix: 'Draw the proposals (dsa render).' });
+    else if (p.check !== 'exact') missing.push({ kind: 'near-match', group: 'have a proposal drawn only as a near match', why: `The proposal (${what}) is only drawn as a near match, not with these props.`, fix: 'Draw the proposals (dsa render).' });
     // A stand-in icon reads as a different control; sample words as a different label: neither is decidable.
-    else if (!container && /stand-in|^icon|icon .*couldn't be loaded/.test(p.content ?? '')) missing.push({ why: "The proposal is drawn with a stand-in icon, not this element's own icon, so it may read as a different control.", fix: "Take the photo again so its icon is recorded, then draw the proposal again (dsa render)." });
-    else if (!container && (e.ownHash || p.content) && !drawnWithOwnWords(p, e)) missing.push({ why: p.own ? "The proposal's words aren't this element's own." : "The proposal shows the system's sample words, not this element's own.", fix: 'Draw the proposal again once its own words are known (a photo records them).' });
+    else if (!container && /stand-in|^icon|icon .*couldn't be loaded/.test(p.content ?? '')) missing.push({ kind: 'stand-in-icon', group: "have a proposal drawn with a stand-in icon, not their own", why: "The proposal is drawn with a stand-in icon, not this element's own icon, so it may read as a different control.", fix: "Take the photo again so its icon is recorded, then draw the proposal again (dsa render)." });
+    else if (!container && (e.ownHash || p.content) && !drawnWithOwnWords(p, e)) missing.push({ kind: 'not-own-words', group: "have a proposal drawn with other words than their own", why: p.own ? "The proposal's words aren't this element's own." : "The proposal shows the system's sample words, not this element's own.", fix: 'Draw the proposal again once its own words are known (a photo records them).' });
   }
   return { ready: !missing.length, current, missing };
 }
@@ -107,7 +140,16 @@ export function pageName(url: string | null | undefined): string {
   return words.join(' › ');
 }
 
-export interface ReviewQueueEntry { id: string; why: 'disagree' | 'audit'; note?: string | undefined }
+export interface ReviewQueueEntry { id: string; why: 'decide' | 'disagree' | 'audit'; note?: string | undefined }
+
+/**
+ * Can a person decide this element now? The one rule both review pages use: Element Review counts these
+ * under "Need a decision", and Label Review offers every one of them. Live, open (a person must decide it
+ * and no one has), with a real photo and a real proposal (its evidence is ready).
+ */
+export function canDecideNow(e: any): boolean {
+  return Boolean(e?.review?.ready) && !e.exception && e.reach?.status !== 'unused' && e.verdict !== 'ignore' && !e.decided && Boolean(e.needsHuman);
+}
 
 /** One place the app already uses a system component, with its props and, when the crawler has one, its photo. */
 export interface Precedent { app: string; file: string; line: number; component: string; props: Record<string, string>; shot?: { url: string; box: any; page?: string | undefined; pageName: string } | null }
@@ -131,18 +173,23 @@ export function withReview(payload: any, o: {
   for (const e of E.evals ?? []) {
     const pick = picks.get(e.id) ?? (e.decided ? e.decided.decision : e);
     e.review = { ...evidenceOf(E, e, pick), pageName: pageName(e.shot?.page) };
+    e.review.decideNow = canDecideNow(e);
   }
   const ready = live.filter((e: any) => e.review.ready);
-  // The queue: what `dsa labels queue` chose (disagreements, then its audit), kept only where it can be
-  // reviewed; else every ready "ready" card drawn at random, a tenth of them, the same draw each time.
+  // The queue: every element a person can decide now (the ones Element Review counts), then what
+  // `dsa labels queue` chose (disagreements, then its audit), kept only where it can be reviewed; else a
+  // tenth of the sure "ready" ones drawn at random, the same draw each time, to check them.
   const byId = new Map<string, any>(live.map((e: any) => [e.id, e]));
-  let entries: ReviewQueueEntry[];
-  if (o.queue?.length) entries = o.queue.filter((q) => byId.get(q.id)?.review.ready);
+  const open: ReviewQueueEntry[] = live.filter(canDecideNow).map((e: any) => ({ id: e.id, why: 'decide' as const }));
+  let more: ReviewQueueEntry[];
+  if (o.queue?.length) more = o.queue.filter((q) => byId.get(q.id)?.review.ready);
   else {
     const share = o.audit ?? 0.1;
     const draw = (id: string) => parseInt(hashText(`${o.seed ?? 'dsa'}\u0001${id}`).slice(0, 8), 16) / 0xffffffff;
-    entries = ready.filter((e: any) => !e.decided && !e.needsHuman && draw(e.id) < share).map((e: any) => ({ id: e.id, why: 'audit' as const }));
+    more = ready.filter((e: any) => !e.decided && !e.needsHuman && draw(e.id) < share).map((e: any) => ({ id: e.id, why: 'audit' as const }));
   }
+  const queued = new Set(open.map((q) => q.id));
+  const entries = [...open, ...more.filter((q) => !queued.has(q.id) && (queued.add(q.id), true))];
   const defaults = new Map((o.system ?? []).map((c) => [c.component, c.defaults ?? {}]));
   const key = (use: string, props: Record<string, unknown> | undefined) => `${use}|${JSON.stringify(canonicalProps(props, defaults.get(use) ?? {}))}`;
   const precedents: Record<string, Precedent[]> = {};
@@ -162,6 +209,6 @@ export function withReview(payload: any, o: {
     };
   });
   const setAside = live.filter((e: any) => !e.review.ready).length;
-  E.review = { items, setAside, ready: ready.length, system: o.system ?? [], precedentSource: o.precedents ? 'uses' : 'none' };
+  E.review = { items, setAside, ready: ready.length, decideNow: open.length, system: o.system ?? [], precedentSource: o.precedents ? 'uses' : 'none' };
   return payload;
 }

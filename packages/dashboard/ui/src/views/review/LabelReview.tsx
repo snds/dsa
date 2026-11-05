@@ -149,7 +149,7 @@ export function LabelReview() {
           </span>
         </div>
         <p className="text-sm text-muted-foreground">
-          {item.why === "disagree" ? "dsa and an earlier answer disagree here." : "Picked at random from the ones dsa calls ready, to check them."}
+          {item.why === "decide" ? "dsa isn't sure about this one, so a person decides." : item.why === "disagree" ? "dsa and an earlier answer disagree here." : "Picked at random from the ones dsa calls ready, to check them."}
           {R.setAside ? ` ${R.setAside} other elements need evidence before anyone can review them, so they aren't asked.` : ""}
         </p>
         {!signedIn && (

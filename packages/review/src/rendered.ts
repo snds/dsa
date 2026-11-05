@@ -157,6 +157,16 @@ export async function renderSignatures(opts: { root: string; config: Config; dat
  * The card's pick is also wanted with each element's own content (its words, accessible name and icon),
  * keyed by that content, so the proposal shows the element as it would be, not a story's sample.
  */
+/**
+ * A cached drawing can stand: its inputs hash the same, and, drawn with the element's own content, it
+ * says which words it drew and they are the element's now. One made before drawings recorded their words
+ * (no `text`) is drawn again, so the review can tell its words are the element's own.
+ */
+export function reusable(c: Proposal, p: Wanted, hash: string): boolean {
+  if (c.hash !== hash) return false;
+  return !(c.own && p.own && c.text !== (p.own.text ?? ''));
+}
+
 export interface Wanted { use: string; props: Record<string, string>; own?: OwnContent; /** The file the element's icon component comes from (when only its name is known), to draw that icon. */ iconFile?: string | undefined }
 
 export async function wantedProposals(dataDir: string, threshold?: number, root?: string): Promise<Map<string, Wanted>> {
@@ -239,7 +249,7 @@ export async function renderProposals(opts: { root: string; config: Config; data
   const todo: [string, Wanted][] = [];
   for (const [k, p] of want) {
     const c = prev[k];
-    if (c && c.hash === hashOf(p.use) && (!c.shot || fs.existsSync(path.join(opts.dataDir, 'rendered', c.shot)))) items[k] = c; else todo.push([k, p]);
+    if (c && reusable(c, p, hashOf(p.use)) && (!c.shot || fs.existsSync(path.join(opts.dataDir, 'rendered', c.shot)))) items[k] = c; else todo.push([k, p]);
   }
   const reused = Object.keys(items).length;
   const write = () => {

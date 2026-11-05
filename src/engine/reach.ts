@@ -427,7 +427,10 @@ function describeReach(gates: Reach['gates'], steps: Step[], chain: string[]): s
   if (!gates.length) return `Rendered directly on a page${path}.`;
   const g = gates[gates.length - 1]!;
   const inner = g.kind === 'overlay' ? `inside a ${g.overlay}${g.component ? ` in ${g.component}` : ''}` : `only when ${g.negated ? 'not ' : ''}\`${g.test}\`${g.component ? ` in ${g.component}` : ''}`;
-  const name = (s: Step) => (s.label ? `“${s.label.length > 32 ? s.label.slice(0, 30) + '…' : s.label}”` : 'an unlabelled control');
+  // A label read from the code loses the values it fills in ("Message on {date}: Open request {id} -"):
+  // shown as "…" so it reads as words with gaps, not as garbled text.
+  const words = (l: string) => l.replace(/\s+([:;,])/g, ' …$1').replace(/\s*[-–—:;,]+$/, ' …').replace(/^[-–—:;,]+\s*/, '… ').replace(/(…\s*){2,}/g, '… ').trim();
+  const name = (s: Step) => { const l = words(s.label); return l ? `“${l.length > 32 ? l.slice(0, 30) + '…' : l}”` : 'an unlabelled control'; };
   const how = steps.length ? `, opened by ${steps.map(s => `${s.event === 'type' ? 'typing in ' : s.event === 'choose' ? `choosing “${s.value}” in ` : ''}${name(s)}${s.event === 'dblclick' ? ' (double-click)' : ''}${s.component ? ` in ${s.component}` : ''}`).join(' then ')}` : '';
   const outer = gates.length > 1 ? `; ${gates.length - 1} more condition${gates.length > 2 ? 's' : ''} above it` : '';
   return `Renders ${inner}${how}${outer}${path}.`;

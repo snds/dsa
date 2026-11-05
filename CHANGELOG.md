@@ -18,9 +18,18 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   or Not sure, with an optional comment. Answers are labels.jsonl rows with method "human": `dsa serve`
   saves them to `<data>/labels/human.jsonl` (`POST /api/labels`, schema-checked); a published page keeps
   them in the browser to download. The reviewer is the scan relay sign-in when there is one, else a name
-  entered once. The queue is `<data>/review-queue.jsonl` (from `dsa labels queue`) when present, else a
-  seeded 10% audit of the ready cards. Keyboard-operable, with screen-reader labels and no colour-only
+  entered once. The queue is every element a person can decide now (one rule, `canDecideNow`, shared
+  with Element Review's "Need a decision" count, so the two agree), then `<data>/review-queue.jsonl`
+  (from `dsa labels queue`) when present, else a seeded 10% audit of the ready cards. Keyboard-operable, with screen-reader labels and no colour-only
   meaning; checked with axe in light and dark.
+- Element Review: a "Needs evidence" filter beside "Needs you". "Needs you" now counts only cards a
+  person can decide now, so it matches "Need a decision". What each card is missing is said plainly and
+  grouped with a count ("12 aren't reached yet: they only show after steps in a flow, such as opening
+  …"); the code conditions sit behind "Technical details". A control's words read from the code show the
+  values the code fills in as "…" ("Message on …: Open request …"), not as stray punctuation.
+- CI fails when the committed report UI (`packages/dashboard/templates/ui`) isn't built from `ui/src`.
+- `dsa render` draws again a cached proposal drawn with the element's own content that doesn't record
+  which words it drew (made before drawings recorded them), or drew other words than the element has now.
 - Precedents: where the app already uses each proposed component, from the run's system-component uses
   with their literal props read from the source (`propsAt`), or the engine's own `<data>/precedent.json`
   when a run writes one. A use photographed by the crawler (`shots/index.json` `uses["<file>:<line>"]`)

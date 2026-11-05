@@ -254,6 +254,11 @@ const wordsOf = (e: any) => String(e?.shot?.content?.text ?? e?.label ?? "").rep
 export const ownWords = (p: any, e: any): boolean => Boolean(p?.own) && (typeof p.text === "string" ? p.text.replace(/\s+/g, " ").trim() === wordsOf(e) : !wordsOf(e))
 /** An element a person can decide: its own photo (or isolated render) and its proposal both real (review.ts). */
 export const decidable = (e: any): boolean => Boolean(e?.shot) && (!e.review || e.review.ready === true)
+/**
+ * A person can decide this element now: the rule Label Review uses to offer it (report review.ts
+ * canDecideNow, stamped as review.decideNow), less what was decided on this page since.
+ */
+export const decideNow = (e: any): boolean => !e?.decided && (e?.review?.decideNow ?? (decidable(e) && Boolean(e?.needsHuman)))
 
 /** How far a rendered proposal can be trusted, in words. */
 export const proposalCheck = (p: any): { text: string; warn: boolean } | null =>

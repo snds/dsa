@@ -7,13 +7,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Note, SectionTitle, Stat } from "@/components/bits"
 import { D, fmtDT, short, SYS } from "@/lib/dsa"
 import { unstage, useStaged } from "@/lib/staged"
-import { decidable, ElCtx, ElementRow, sameDecision } from "./shared"
+import { decideNow, ElCtx, ElementRow, sameDecision } from "./shared"
 import { StagedBar } from "./StagedBar"
 import { Picker } from "./Picker"
 import { Lightbox } from "./Lightbox"
 import { CodeViewer } from "./CodeViewer"
 import { Destination } from "./Destination"
-import { NO_HOME, destinations, matches, styleName, unitsFor } from "./units"
+import { NO_HOME, destinations, matches as byStatus, styleName, unitsFor, type Unit } from "./units"
 import { useApp } from "@/lib/app"
 
 /** Below this, the crawler's best on-page match may be a different element (shared classes, no shared label). */
@@ -65,14 +65,19 @@ export function Elements() {
   }, [staged, E, byId])
 
   const units = unitsFor(mine, qs, byId, stagedKeys)
+  // A decision is one a person can make now: a card with an element whose photo and proposal are both
+  // real (the same rule Label Review offers by). Open cards with none wait for evidence, apart, so
+  // "Needs you" and "Need a decision" are one number.
+  const matches = (u: Unit, show: string) =>
+    show === "open" ? u.status === "open" && u.items.some(decideNow)
+    : show === "evidence" ? u.status === "open" && !u.items.some(decideNow)
+    : byStatus(u, show)
   const count = (show: string) => units.filter(u => matches(u, show)).length
-  // A decision is one a person can make: a card with an element whose photo and proposal are both real.
-  // The rest wait for evidence, counted apart, so the two numbers add up to what's open.
-  const openUnits = units.filter(u => matches(u, "open"))
-  const decidableIn = openUnits.filter(u => u.items.some(decidable))
-  const waiting = openUnits.flatMap(u => u.items).filter((e: any) => !decidable(e)).length
+  const decidableIn = units.filter(u => matches(u, "open"))
+  const decideNowCount = mine.filter(decideNow).length
+  const waiting = units.filter(u => u.status === "open").flatMap(u => u.items).filter((e: any) => !e.decided && !decideNow(e)).length
   const elementsIn = (show: string) => units.filter(u => matches(u, show)).reduce((a, u) => a + u.items.length, 0)
-  const [show, setShow] = React.useState(() => (count("open") ? "open" : "all"))
+  const [show, setShow] = React.useState(() => (count("open") ? "open" : count("evidence") ? "evidence" : "all"))
   // A card stays where it was when the filter was set, so answering one under "Needs you" doesn't
   // make it vanish mid-review. Changing the filter re-sorts.
   const [kept, setKept] = React.useState<Set<string>>(() => new Set(units.filter(u => matches(u, show)).map(u => u.key)))
@@ -82,14 +87,14 @@ export function Elements() {
   const [closed, setClosed] = React.useState<Set<string>>(new Set())
   const setOpen = (home: string, open: boolean) => setClosed(c => { const n = new Set(c); if (open) n.delete(home); else n.add(home); return n })
   const gaps = units.filter(u => u.home === NO_HOME && u.status !== "decided")
-  const filters = [["open", "Needs you"], ...(!D.serve && count("staged") ? [["staged", "Staged"]] : []), ["ready", "Ready"], ["decided", "Decided"], ["all", "All"]] as [string, string][]
+  const filters = [["open", "Needs you"], ["evidence", "Needs evidence"], ...(!D.serve && count("staged") ? [["staged", "Staged"]] : []), ["ready", "Ready"], ["decided", "Decided"], ["all", "All"]] as [string, string][]
 
   return (
     <ElCtx.Provider value={ctx}>
       <div className="flex flex-col">
         <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-          <Stat label="Need a decision" value={decidableIn.length} detail={`${decidableIn.reduce((a, u) => a + u.items.filter(decidable).length, 0)} elements you can decide now`} active={show === "open"} onClick={() => pick(["open"])} />
-          <Stat label="Needs evidence" value={waiting} detail="elements no one can decide yet: each card says what's missing" />
+          <Stat label="Need a decision" value={decidableIn.length} detail={`${decideNowCount} element${decideNowCount === 1 ? "" : "s"} you can decide now`} active={show === "open"} onClick={() => pick(["open"])} />
+          <Stat label="Needs evidence" value={waiting} detail="elements no one can decide yet: each card says what's missing" active={show === "evidence"} onClick={() => pick(["evidence"])} />
           <Stat label="Ready to migrate" value={elementsIn("ready")} detail={`At or above ${Math.round(th * 100)}%, seen and drawn, in ${count("ready")} groups`} active={show === "ready"} onClick={() => pick(["ready"])} />
           <Stat label="Decided" value={elementsIn("decided")} detail={staged.length && !D.serve ? `${staged.length} staged in this browser` : `${count("decided")} decisions`} active={show === "decided"} onClick={() => pick(["decided"])} />
           <Stat label={`No ${SYS} home yet`} value={gaps.reduce((a, u) => a + u.items.length, 0)} detail={`${gaps.length} pattern${gaps.length === 1 ? "" : "s"} to propose or map`} />
