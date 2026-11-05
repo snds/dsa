@@ -71,3 +71,14 @@ export function Button({ variant, size, ...props }: any) { return <button data-s
     expect(b.axes).toEqual({ variant: ['default', 'outline'], size: ['sm', 'lg'] });
   });
 });
+
+describe('a system that is a folder of components (no package src/)', () => {
+  it('reads the components straight from the folder', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-uifolder-'));
+    fs.writeFileSync(path.join(dir, 'button.tsx'), comp('Button', 'inline-flex h-9'));
+    fs.writeFileSync(path.join(dir, 'badge.tsx'), comp('Badge', 'rounded-full'));
+    const sigs = buildSignatures([{ dir, name: '@/components/ui' }]);
+    expect([...sigs.components.keys()].sort()).toEqual(['Badge', 'Button']);
+    expect(sigs.components.get('Button')!.axes.variant).toEqual(['default', 'ghost']);
+  });
+});

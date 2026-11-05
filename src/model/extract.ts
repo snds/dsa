@@ -13,10 +13,21 @@ import { addFacets, type ClassExtension } from "./facets.js";
  */
 
 // Inside a library, examples, demos and fixtures declare things that aren't the system's.
-const NOT_DECLARATIONS = ["**/examples/**", "**/example/**", "**/demos/**", "**/demo/**", "**/__fixtures__/**", "**/fixtures/**", "**/playground/**", "**/playgrounds/**", "**/__mocks__/**"];
+export const NOT_DECLARATIONS = ["**/examples/**", "**/example/**", "**/demos/**", "**/demo/**", "**/__fixtures__/**", "**/fixtures/**", "**/playground/**", "**/playgrounds/**", "**/__mocks__/**"];
 // Exports that are plumbing, not components: providers, contexts, hooks' data, flags, defaults, settings.
 export const PLUMBING = /(Context|Data|Flags?|Prefix|Config|Configuration|Utils?|Props|Hooks?|Store|Kinds?|Sizes|Types|Variants|Options|Constants|Defaults|Helpers?|Adapter|Service|Manager|Registry|Settings|Locale|Messages|PropsProvider|RootProvider|Alignments|Positions|Placements|Directions|Orientations|Sizes|Kinds|Key|Symbol|Map|Presets|Builder|Factory|Controller)$|^Default[A-Z]/;
-const SKIP_DIRS = ["**/node_modules/**", "**/dist/**", "**/build/**", "**/*.d.ts", "**/*.test.*", "**/*.spec.*", "**/__tests__/**", "**/*.stories.*", "**/stories/**"];
+export const SKIP_DIRS = ["**/node_modules/**", "**/dist/**", "**/build/**", "**/*.d.ts", "**/*.test.*", "**/*.spec.*", "**/__tests__/**", "**/*.stories.*", "**/stories/**"];
+/**
+ * Files that aren't product code in an app: tests, stories, examples, demos, fixtures, mocks (the two
+ * lists above, build output aside), plus stubs and docs. The element scanner skips them too: a raw
+ * button in a test or a docs page isn't something to migrate.
+ */
+export const NON_PRODUCT = [
+  ...SKIP_DIRS.filter((g) => !/node_modules|dist|build|\.d\.ts/.test(g)),
+  ...NOT_DECLARATIONS,
+  "**/stubs/**", "**/__stubs__/**", "**/*.stub.*", "**/docs/**",
+];
+
 // Stylesheets that hold settings, helpers or utilities, not components.
 const NON_COMPONENT_STYLE = /(^|\/)(_?(root|variables|config|functions|utilities|helpers|reboot|maps|tokens|settings|grid|print)(\.import)?\.(s?css|less)$|(utilities|helpers|mixins|functions|vendor|settings|tools)\/|(-grid|-reboot|-utilities|\.min)\.css$)/i;
 

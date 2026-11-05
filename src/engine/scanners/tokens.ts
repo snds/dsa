@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { changedFiles, gitRead } from '../git-read.js';
 import { displayPath, walk } from '../paths.js';
 import { DEFAULT_TOKEN_PATTERNS, type Config } from '../config.js';
 import { loadClassReader } from '../tailwind.js';
@@ -21,12 +21,12 @@ const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(
 
 export function gitTouchedFiles(root: string, days: number): Set<string> | null {
   try {
-    const out = execFileSync('git', ['-C', root, 'log', `--since=${days}.days`, '--name-only', '--pretty=format:'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 });
-    const top = execFileSync('git', ['-C', root, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    // Uncommitted work counts as new too.
-    const dirty = execFileSync('git', ['-C', root, 'status', '--porcelain'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
-      .split('\n').map(l => l.slice(3).trim()).filter(Boolean);
-    return new Set([...out.split('\n'), ...dirty].filter(Boolean).map(f => path.join(top, f)));
+    const log = gitRead(root, ['log', `--since=${days}.days`, '--name-only', '--pretty=format:']);
+    const top = gitRead(root, ['rev-parse', '--show-toplevel']);
+    if (!log.ok || !top.ok) return null;
+    // Uncommitted work counts as new too (read without git status, which rewrites the index).
+    const dirty = changedFiles(root);
+    return new Set([...log.out.split('\n'), ...dirty].filter(Boolean).map(f => path.join(top.out, f)));
   } catch {
     return null;
   }

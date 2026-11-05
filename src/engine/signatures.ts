@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { parse as babelParse } from '@babel/parser';
@@ -50,6 +51,15 @@ export interface ComponentSig {
    * props can be confirmed from its class list when it shows no data-variant or data-size.
    */
   axisClasses?: Record<string, Record<string, string[]>> | undefined;
+  /**
+   * Props the component declares (its parameter's destructured names and type members), the data-*
+   * attributes it sets, and the state props its headless primitive brings (a Toggle's pressed). The
+   * hard constraints (constraints.ts) read them: an element that announces a state can only become a
+   * component that can carry it.
+   */
+  props?: string[] | undefined;
+  /** The values each prop's type allows (Button size "xs" | "sm" | …), from the TypeScript checker. */
+  allowed?: Record<string, string[]> | undefined;
   sigs: Signature[];
 }
 
@@ -176,7 +186,7 @@ function cvasIn(ast: any): Map<string, Cva> {
   return m;
 }
 
-interface RawComp { name: string; file: string; rootName: string; rootSource?: string | undefined; classTokens: string[]; cvaRefs: string[]; slots: string[]; childSlots: string[]; stockRef?: { file: string; name: string } | undefined }
+interface RawComp { name: string; file: string; rootName: string; rootSource?: string | undefined; classTokens: string[]; cvaRefs: string[]; slots: string[]; childSlots: string[]; props: string[]; stockRef?: { file: string; name: string } | undefined }
 
 function componentsIn(file: string): RawComp[] {
   const ast = parseFile(file);
@@ -209,7 +219,7 @@ function componentsIn(file: string): RawComp[] {
     const objName = rootName.split('.')[0];
     const imp = imports.get(objName);
     const stockRef = imp && /vendor\/shadcn/.test(imp.source) ? { file: resolveTs(file, imp.source), name: imp.name } : undefined;
-    out.push({ name, file, rootName, rootSource: imp?.source, classTokens: cls ? strs(cls.value).filter(t => !cvaRefs.includes(t)) : [], cvaRefs, slots: [...new Set(slots)], childSlots: [...new Set(childSlots)], stockRef });
+    out.push({ name, file, rootName, rootSource: imp?.source, classTokens: cls ? strs(cls.value).filter(t => !cvaRefs.includes(t)) : [], cvaRefs, slots: [...new Set(slots)], childSlots: [...new Set(childSlots)], props: declaredProps(fn, root, imp?.source), stockRef });
   }
   return out;
 }
@@ -246,6 +256,40 @@ function resolveTs(from: string, spec: string) {
   const base = path.resolve(path.dirname(from), spec);
   for (const c of [base, `${base}.tsx`, `${base}.ts`, path.join(base, 'index.tsx'), path.join(base, 'index.ts')]) if (fs.existsSync(c) && fs.statSync(c).isFile()) return c;
   return base;
+}
+
+/** Headless primitives and the state props they carry (Radix and Base UI names alike). */
+const STATE_PRIMITIVES: [RegExp, string[]][] = [
+  [/(^|[/-])toggle-group$/, ['value', 'data-state']],
+  [/(^|[/-])toggle$/, ['pressed', 'defaultPressed', 'onPressedChange', 'data-state']],
+  [/(^|[/-])tabs$/, ['value', 'data-state']],
+  [/(^|[/-])radio(-group)?$/, ['value', 'checked', 'data-state']],
+  [/(^|[/-])(checkbox|switch)$/, ['checked', 'data-state']],
+  [/(^|[/-])(select|combobox|listbox)$/, ['value', 'data-state']],
+  [/(^|[/-])(menu|dropdown-menu|context-menu|menubar)$/, ['checked', 'data-state']],
+  [/(^|[/-])(collapsible|accordion)$/, ['open', 'data-state']],
+];
+
+/**
+ * The prop names a component accepts or sets, read from its source: destructured parameters, members of an
+ * inline type literal, the data-* and aria-* attributes it writes, and its primitive's state props.
+ */
+function declaredProps(fn: any, root: any, rootSource: string | undefined): string[] {
+  const out = new Set<string>();
+  // forwardRef((props, ref) => …) and memo(…) hold the function as their first argument.
+  const f = fn?.type === 'CallExpression' ? fn.arguments?.[0] : fn;
+  const param = f?.params?.[0];
+  for (const p of param?.type === 'ObjectPattern' ? param.properties : []) {
+    const k = p.key?.name ?? p.key?.value;
+    if (k) out.add(k);
+  }
+  const ann = param?.typeAnnotation?.typeAnnotation;
+  const lits = ann?.type === 'TSTypeLiteral' ? [ann] : ann?.type === 'TSIntersectionType' ? ann.types.filter((t: any) => t.type === 'TSTypeLiteral') : [];
+  for (const l of lits) for (const m of l.members ?? []) { const k = m.key?.name ?? m.key?.value; if (k) out.add(k); }
+  for (const a of root?.openingElement?.attributes ?? []) { const k = a.name?.name; if (typeof k === 'string' && /^(data|aria)-/.test(k)) out.add(k); }
+  const src = (rootSource ?? '').replace(/\/index$/, '');
+  for (const [re, props] of STATE_PRIMITIVES) if (re.test(src)) { for (const x of props) out.add(x); break; }
+  return [...out].sort();
 }
 
 function tagOf(c: RawComp, stock?: RawComp): { tag: string; role?: string | undefined } {
@@ -335,6 +379,15 @@ function allTsx(src: string): string[] {
 }
 
 /**
+ * Where a system's components are: a package's src/, or, for a system that is a folder of components
+ * itself (a shadcn-style components/ui folder inside an app, with no src/ of its own), the folder.
+ */
+export function componentRoot(dir: string): string {
+  const src = path.join(dir, 'src');
+  return fs.existsSync(src) ? src : dir;
+}
+
+/**
  * Build signatures from the core packages. `packages` maps package dirs to their npm names,
  * so a component file maps to its public import (@acme/ui/button).
  */
@@ -342,7 +395,7 @@ export function buildSignatures(packages: { dir: string; name: string }[]): Sign
   const { aliases, values } = readTokenAliases(packages.map(p => p.dir));
   const components = new Map<string, ComponentSig>();
   for (const pkg of packages) {
-    const src = path.join(pkg.dir, 'src');
+    const src = componentRoot(pkg.dir);
     if (!fs.existsSync(src)) continue;
     const exportsMap = readExports(pkg.dir, pkg.name);
     for (const file of componentFiles(src)) {
@@ -385,7 +438,8 @@ export function buildSignatures(packages: { dir: string; name: string }[]): Sign
         const deeper = path.dirname(file) !== src;
         const axisClasses: Record<string, Record<string, string[]>> = {};
         for (const l of layers) if (l.cva) for (const [a, vs] of Object.entries(l.cva.variants)) for (const [v, t] of Object.entries(vs)) ((axisClasses[a] ??= {})[v] = [...new Set([...(axisClasses[a][v] ?? []), ...t])]);
-        if (!components.has(c.name) || (c.cvaRefs.length && !deeper)) components.set(c.name, { component: c.name, from, file, tag, role, childSlots, slot: c.slots[0] ?? stock?.slots[0], axes, defaults, ...(Object.keys(axisClasses).length ? { axisClasses } : {}), sigs });
+        const props = [...new Set([...c.props, ...(stock?.props ?? []), ...Object.keys(axes)])].sort();
+        if (!components.has(c.name) || (c.cvaRefs.length && !deeper)) components.set(c.name, { component: c.name, from, file, tag, role, childSlots, slot: c.slots[0] ?? stock?.slots[0], axes, defaults, ...(Object.keys(axisClasses).length ? { axisClasses } : {}), props, sigs });
       }
     }
   }
@@ -399,7 +453,7 @@ export function buildSignatures(packages: { dir: string; name: string }[]): Sign
  * their signatures are the base component's, re-keyed: IconButton sm ≡ Button icon-sm, every variant.
  */
 function deriveSizeMapped(dir: string, components: Map<string, ComponentSig>) {
-  const src = path.join(dir, 'src');
+  const src = componentRoot(dir);
   if (!fs.existsSync(src)) return;
   for (const file of componentFiles(src)) {
     const ast = parseFile(file);
@@ -539,4 +593,17 @@ export function signatureSummary(set: SignatureSet) {
     component: c.component, from: c.from, file: c.file, slot: c.slot, tag: c.tag, role: c.role, childSlots: c.childSlots, axes: c.axes, defaults: c.defaults, ...(c.axisClasses ? { axisClasses: c.axisClasses } : {}),
     sigs: c.sigs.map(s => ({ variant: s.variant, size: s.size, props: Object.fromEntries(s.props) })),
   }));
+}
+
+/**
+ * A hash of the system's signature set: each component's axes, defaults and the properties of every
+ * variant × size, without file paths. Two runs on the same system agree; another system differs. A saved
+ * calibration records it (labels.ts).
+ */
+export function signatureHash(set: SignatureSet): string {
+  const comps = [...set.components.values()].sort((a, b) => (a.component < b.component ? -1 : 1)).map(c => ({
+    c: c.component, tag: c.tag, axes: c.axes, defaults: c.defaults,
+    sigs: c.sigs.map(s => [s.variant, s.size, [...s.props].sort((x, y) => (x[0] < y[0] ? -1 : 1))]),
+  }));
+  return crypto.createHash('sha256').update(JSON.stringify(comps)).digest('hex');
 }

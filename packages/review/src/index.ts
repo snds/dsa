@@ -142,7 +142,7 @@ function printShots(r: Awaited<ReturnType<typeof shotsAndEvidence>>, label: stri
   if (r.shots.apps.length && r.shots.apps.every(a => a.signIn || a.broken || a.skipped)) log(`${r.shots.captured} screenshots: no app could be seen (${r.shots.apps.some(a => a.broken) ? "it didn't render" : 'it asked for sign-in'}), so nothing counts as "not found".`);
   else log(`${r.shots.captured} screenshots; ${r.shots.missing} examples not found (${r.shots.pages} pages). On each page the crawler opened menus, popovers, and disclosures, switched tabs and views, hovered rows, and followed what those revealed (shots.maxDepth deep); what's left needs a specific flow (a selected record, a filled form) or a route to list in apps["name"].routes.`);
   const ev = r.evidence;
-  if (ev.measured) log(`Rendered evidence: ${ev.measured} elements measured against ${label} in the browser · ${ev.confirmed} confirmed · ${ev.switched} variant switched (sent to a human).`);
+  if (ev.measured) log(`Rendered evidence: ${ev.measured} elements measured against ${label} in the browser · ${ev.confirmed} confirmed · ${ev.disagreed} disagreed (pick kept, sent to a human)${ev.unclear ? ` · ${ev.unclear} unclear` : ""}.`);
 }
 
 export default defineAddon({

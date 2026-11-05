@@ -2,7 +2,15 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadCatalog, withMetrics } from './catalog.js';
-import { appSettings, readExceptions, type Config } from './config.js';
+import { appSettings, lookalikeMap, readExceptions, type Config } from './config.js';
+import { refineWithTypes } from './typecheck.js';
+import { buildPrecedent, type PrecedentIndex } from './precedent.js';
+import { readAliases } from './modules.js';
+import { applyCalibration, applyLabels, labelsRecord, loadCalibration, readLabels, saveCalibration } from './labels.js';
+import { gitRead } from './git-read.js';
+import { dsaVersion } from '../version.js';
+import { readRules, type DsRules } from './constraints.js';
+import type { CodeScanResult } from './scanners/code.js';
 import { defaultExcludes, globMatch, targetRelative, usageExcludes } from './paths.js';
 import type { Store, StoreFactory } from './store.js';
 import { effectiveSettings } from './settings.js';
@@ -24,7 +32,7 @@ import { buildGraph, reachFor, type Reach } from './reach.js';
 import { readPagePlacement } from './placement.js';
 import { evaluateRows, loadRoleMap, readDecisions, ruleStats, DEFAULT_THRESHOLD, type ElementEval } from './elements.js';
 import { resetFeatureCaches } from './scanners/features.js';
-import { buildSignatures, signatureSummary, type SignatureSet } from './signatures.js';
+import { buildSignatures, signatureHash, signatureSummary, type SignatureSet } from './signatures.js';
 import { resetSystemIndex } from './host-context.js';
 import { useSystem } from './system.js';
 import type { ResolvedProfile } from '../profile.js';
@@ -88,6 +96,14 @@ export interface RunOptions {
   log?: (msg: string) => void | undefined;
   /** false = skip the profile's agent-readiness provider. */
   readiness?: boolean | undefined;
+  /** A labels.jsonl to calibrate confidence on (labels.ts). Overrides the config's recommend.labels. */
+  labels?: string | undefined;
+  /** A saved calibration file to apply instead of fitting one (overrides recommend.calibration). */
+  calibration?: string | undefined;
+  /** Apply a calibration fitted for another system (a different signature set): a cross-system test. */
+  forceCalibration?: boolean | undefined;
+  /** Save the calibration fitted on the labels to this file. */
+  saveCalibration?: string | undefined;
   /**
    * The dsa config: when given, instances come from the system model (every framework and markup
    * the model reads) instead of the engine's code scanner. Look-alikes and element review still come
@@ -190,6 +206,7 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
     const tEx = [...excludes, ...(t.exclude ?? []), ...(t.role === 'core' ? [] : usageExcludes(t.dir))];
     const app = appSettings(config, t.name);
     const res = scanCode(opts.root, config, t, tEx);
+    if (app.lookalikes) applyTypes(opts.root, config, t, res, notes, sigs);
     if (reading) res.instances = instancesFromReading(reading, opts.root, t, config.designSystem.core.name);
     if (app.components) data.instances.push(...res.instances);
     if (app.lookalikes) {
@@ -208,8 +225,11 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
       if (unused.length) notes.push(`${t.name}: ${unused.length} look-alike${unused.length === 1 ? '' : 's'} in ${new Set(unused.map(r => r.file)).size} unused file${new Set(unused.map(r => r.file)).size === 1 ? '' : 's'} (nothing the app renders imports them): not counted; delete rather than migrate.`);
       data.lookalikes.push(...kept);
       // Evaluate everything, exceptions included: the review shows deferred debt too, flagged as such.
-      evals.push(...evaluateRows({ root: opts.root, target: t, rows: res.lookalikes, exceptionOf, reachOf, map: roleMap, decisions: decisionFiles.get(t.name)!, stats, threshold, sigs, pageOf: id => page.get(id), hints, labPaths: config.review?.labPaths }));
+      const precedent = precedentFor(opts.root, t, res.instances, sigs, opts.git !== false);
+      const rules = rulesFor(config, t, opts.configDir ?? opts.root, notes);
+      evals.push(...evaluateRows({ root: opts.root, target: t, rows: res.lookalikes, exceptionOf, reachOf, map: roleMap, decisions: decisionFiles.get(t.name)!, stats, threshold, sigs, pageOf: id => page.get(id), hints, labPaths: config.review?.labPaths, precedent, rules }));
     }
+    if (res.nonProduct) notes.push(`${t.name}: ${res.nonProduct} look-alike${res.nonProduct === 1 ? '' : 's'} in tests, stories, fixtures, stubs or docs left out (not product code).`);
     for (const e of res.parseErrors.slice(0, 3)) notes.push(`Parse error skipped in ${e.file}: ${e.message}`);
     if (app.tokens) {
       // tokenSkip globs are relative to the app's own folder.
@@ -256,6 +276,8 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
     await store.insertMany('instances', ['run_id', 'target', 'library', 'pkg', 'component', 'file', 'line', 'framework', 'overrides'], data.instances.map(i => [runId, i.target, i.library, i.pkg, i.component, i.file, i.line, i.framework, i.overrides.join(',')]));
     await store.insertMany('lookalikes', ['run_id', 'target', 'element', 'component', 'file', 'line'], data.lookalikes.map(l => [runId, l.target, l.element, l.component, l.file, l.line]));
     await store.insertMany('tokens', ['run_id', 'target', 'file', 'raw_values', 'token_refs', 'is_new'], data.tokens.map(t => [runId, t.target, t.file, t.rawValues, t.tokenRefs, t.isNew]));
+    // Confidence is measured precision where labels exist (labels.ts); otherwise it says it's uncalibrated.
+    calibrateOnLabels(evals, config, { labels: opts.labels, calibration: opts.calibration, force: opts.forceCalibration, save: opts.saveCalibration }, opts.configDir ?? opts.root, threshold, notes, sigs);
     // Nothing is "ready" that a person can't see: no photo or no exact render keeps it under the bar (evidence-cap.ts).
     applyEvidenceCap(opts.dataDir, evals, threshold);
     await store.insertMany('element_evals', ['run_id', 'id', 'target', 'file', 'line', 'element', 'role', 'verdict', 'use_component', 'confidence', 'needs_human', 'exception', 'decided', 'data'],
@@ -299,6 +321,7 @@ export async function reevaluateElements(opts: { root: string; dataDir: string; 
   for (const t of targets.filter(t => t.role !== 'core' && appSettings(config, t.name).lookalikes)) {
     const tEx = [...excludes, ...(t.exclude ?? []), ...(t.role === 'core' ? [] : usageExcludes(t.dir))];
     const res = scanCode(opts.root, config, t, tEx);
+    applyTypes(opts.root, config, t, res, [], sigs);
     const { exceptionOf } = exceptLookalikes(opts.root, config, t, res.lookalikes, [], new Date());
     const reachOf = new Map<Lookalike, Reach>();
     try {
@@ -306,7 +329,9 @@ export async function reevaluateElements(opts: { root: string; dataDir: string; 
       for (const r of res.lookalikes) if (r.features?.framework === 'react') reachOf.set(r, reachFor(graph, path.join(t.dir, targetRelative(opts.root, r.file, t.dir)), r.line, r.features.context.gates ?? []));
     } catch { /* the first pass noted it */ }
     for (const r of res.lookalikes) if (reachOf.get(r)?.status === 'unused' && !exceptionOf.has(r)) exceptionOf.set(r, 'unused');
-    evals.push(...evaluateRows({ root: opts.root, target: t, rows: res.lookalikes, exceptionOf, reachOf, map: roleMap, decisions: decisionFiles.get(t.name)!, stats, threshold, sigs, pageOf: id => page.get(id), hints, labPaths: config.review?.labPaths }));
+    const precedent = precedentFor(opts.root, t, res.instances, sigs, true);
+    const rules = rulesFor(config, t, opts.configDir ?? opts.root, []);
+    evals.push(...evaluateRows({ root: opts.root, target: t, rows: res.lookalikes, exceptionOf, reachOf, map: roleMap, decisions: decisionFiles.get(t.name)!, stats, threshold, sigs, pageOf: id => page.get(id), hints, labPaths: config.review?.labPaths, precedent, rules }));
   }
   const store = await opts.store(opts.dataDir);
   try {
@@ -315,6 +340,7 @@ export async function reevaluateElements(opts: { root: string; dataDir: string; 
     const before = new Map((await store.all<any>('select id, data from element_evals where run_id=$1', [runId])).map(r => { const d = typeof r.data === 'string' ? JSON.parse(r.data) : r.data; return [r.id, `${d.role}|${d.use}|${JSON.stringify(d.props ?? {})}`]; }));
     const changed = evals.filter(e => before.has(e.id) && before.get(e.id) !== `${e.role}|${e.use}|${JSON.stringify(e.props ?? {})}`).length;
     await store.exec('delete from element_evals where run_id=$1', [runId]);
+    calibrateOnLabels(evals, config, {}, opts.configDir ?? opts.root, threshold, [], sigs);
     // Nothing is "ready" that a person can't see: no photo or no exact render keeps it under the bar (evidence-cap.ts).
     applyEvidenceCap(opts.dataDir, evals, threshold);
     await store.insertMany('element_evals', ['run_id', 'id', 'target', 'file', 'line', 'element', 'role', 'verdict', 'use_component', 'confidence', 'needs_human', 'exception', 'decided', 'data'],
@@ -322,6 +348,69 @@ export async function reevaluateElements(opts: { root: string; dataDir: string; 
     log(`Re-evaluated ${evals.length} elements with page placement from ${page.size} screenshots: ${changed} recommendation${changed === 1 ? '' : 's'} changed.`);
     return { changed, total: evals.length };
   } finally { store.close(); }
+}
+
+/** The app's design-system rules file (recommend.rules): relative to the app, else to the config's folder. */
+function rulesFor(config: Config, t: Target, configDir: string, notes: string[]): DsRules | undefined {
+  const rel = config.recommend?.rules;
+  if (!rel) return undefined;
+  const inApp = path.resolve(t.dir, rel);
+  const r = readRules(fs.existsSync(inApp) ? inApp : path.resolve(configDir, rel));
+  if ('error' in r) { notes.push(`${t.name}: design-system rules ${rel} ${r.error}; recommending without them.`); return undefined; }
+  return r;
+}
+
+/**
+ * Confidence from labels: apply a saved calibration (recommend.calibration or --calibration), refusing one
+ * fitted for another system unless forced; else fit one on the label set (recommend.labels or --labels)
+ * and, when asked, save it with its labels' hashes, the engine's revision and the system's signature hash.
+ */
+function calibrateOnLabels(evals: ElementEval[], config: Config, o: { labels?: string | undefined; calibration?: string | undefined; force?: boolean | undefined; save?: string | undefined }, configDir: string, threshold: number, notes: string[], sigs?: SignatureSet) {
+  const sigHash = sigs ? signatureHash(sigs) : 'none';
+  const load = o.calibration ?? config.recommend?.calibration;
+  if (load) {
+    const file = path.resolve(configDir, load);
+    const { calibration, crossSystem } = loadCalibration(file, sigHash, o.force ?? config.recommend?.calibrationForce ?? false);
+    applyCalibration(evals, calibration.model, threshold);
+    notes.push(`Calibration from ${load}: fitted on ${calibration.labels.reduce((a, l) => a + l.count, 0)} labels (${calibration.model.matched} matched), engine ${calibration.engine.sha.slice(0, 12)}; ready cut ${calibration.model.cut ? calibration.model.cut.cut : 'none'}.${crossSystem ? ' FORCED ACROSS SYSTEMS: it was fitted for another signature set, so it is a cross-system test, not this system\'s calibration.' : ''}`);
+    return;
+  }
+  const lfile = o.labels ?? config.recommend?.labels;
+  const abs = lfile ? path.resolve(configDir, lfile) : undefined;
+  const read = abs ? readLabels(abs) : { labels: [], skipped: 0 };
+  if (lfile && !read.labels.length) notes.push(`No labels read from ${lfile}${read.skipped ? ` (${read.skipped} unreadable lines)` : ''}: confidence stays uncalibrated.`);
+  const r = applyLabels(evals, read.labels, threshold);
+  if (read.labels.length) notes.push(`Labels: ${read.labels.length} read${read.skipped ? `, ${read.skipped} skipped` : ''}, ${r.matched} matched an element; ${r.paths} decision path${r.paths === 1 ? '' : 's'} with a fit of their own.`);
+  if (o.save && r.model && abs) {
+    const sha = gitRead(path.dirname(new URL(import.meta.url).pathname), ['rev-parse', 'HEAD']);
+    saveCalibration(path.resolve(configDir, o.save), { version: 1, createdAt: new Date().toISOString(), engine: { version: dsaVersion(), sha: sha.ok ? sha.out : 'unknown' }, signatureHash: sigHash, labels: [labelsRecord(abs, read.labels.length)], threshold, model: r.model });
+    notes.push(`Calibration saved to ${o.save}.`);
+  }
+}
+
+/** The app's own system-component uses and git migrations, to learn from (precedent.ts). */
+function precedentFor(root: string, t: Target, instances: CodeScanResult['instances'], sigs: SignatureSet | undefined, git: boolean): PrecedentIndex | undefined {
+  try {
+    const components = new Set([...(sigs?.components.keys() ?? []), ...instances.map(i => i.component)]);
+    return buildPrecedent(t.dir, instances.filter(i => i.target === t.name), f => path.join(t.dir, targetRelative(root, f, t.dir)), components, readAliases(t.dir, t.aliases), git);
+  } catch { return undefined; }
+}
+
+/**
+ * The TypeScript checker over what Babel couldn't read (typecheck.ts): spreads and class constants.
+ * Optional: skipped with a note when the app has no tsconfig or no `typescript` can be loaded.
+ */
+function applyTypes(root: string, config: Config, t: Target, res: CodeScanResult, notes: string[], sigs?: SignatureSet) {
+  if (config.recommend?.typescript === false) return;
+  const { allowTypes, inputTypes } = lookalikeMap(root, config);
+  const ref = refineWithTypes(res.lookalikes, r => path.join(t.dir, targetRelative(root, r.file, t.dir)), t.dir, root, allowTypes, inputTypes, res.instances, new Set(sigs?.components.keys() ?? []));
+  // The system's prop unions are the only values a recommendation may set (constraints.ts).
+  for (const [name, u] of ref.unions) { const c = sigs?.components.get(name); if (c) c.allowed = { ...(c.allowed ?? {}), ...u }; }
+  if (ref.note) notes.push(`${t.name}: type checker skipped (${ref.note}). Spreads and class constants are read by Babel alone.`);
+  if (ref.dropped.length) {
+    res.lookalikes = res.lookalikes.filter(r => !ref.dropped.includes(r));
+    notes.push(`${t.name}: ${ref.dropped.length} input${ref.dropped.length === 1 ? '' : 's'} left out: the type checker found an allowed type in a spread (a file input).`);
+  }
 }
 
 /**

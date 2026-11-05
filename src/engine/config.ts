@@ -18,6 +18,8 @@ export interface Config {
   consumers?: ConsumerDef[] | undefined;
   /** Additional local repos (paths relative to the host root) scanned as consumers. */
   extraRepos?: ConsumerDef[] | undefined;
+  /** Scan the kinds the element map can't list by tag (a skeleton <div>, a field <label>); default on. */
+  extraKinds?: boolean | undefined;
   /** Raw elements that imitate DS components: element -> component. Overrides entries from rawElements. */
   lookalikes?: Record<string, string> | undefined;
   /** Path (from the host root) to the design system's element map, e.g. "packages/lint/raw-elements.json". */
@@ -26,6 +28,11 @@ export interface Config {
   rawElementExceptions?: string | undefined;
   /** Where each app keeps element review decisions, relative to the app's folder. */
   rawElementDecisions?: string | undefined;
+  /**
+   * How recommendations are made (dsa.config.json `recommend`): labels to calibrate confidence on, the
+   * consumer's DS rules file, and whether the TypeScript checker runs (default: when it can).
+   */
+  recommend?: { labels?: string | undefined; rules?: string | undefined; typescript?: boolean | undefined; calibration?: string | undefined; calibrationForce?: boolean | undefined } | undefined;
   /** Element review: below this confidence an agent must ask a human (0..1, default 0.9). */
   review?: {
     threshold?: number | undefined;
