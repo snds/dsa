@@ -40,6 +40,7 @@ export function engineConfig(c: DsaConfig, profile: ResolvedProfile = NEUTRAL_PR
   if (c.tokens?.patterns) out.tokenPatterns = c.tokens.patterns;
   const review = clean({ threshold: c.review?.threshold, labPaths: c.review?.labPaths });
   if (Object.keys(review).length) out.review = review;
+  if (c.recommend) out.recommend = clean({ ...c.recommend });
   const tw = c.tailwind ? { ...c.tailwind } : profile.files.tierLeakage || profile.files.semanticCss ? {} : undefined;
   if (tw) {
     if (!tw.tierLeakageSpec && profile.files.tierLeakage) tw.tierLeakageSpec = profile.files.tierLeakage;

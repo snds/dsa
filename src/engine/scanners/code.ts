@@ -3,7 +3,9 @@ import path from 'node:path';
 import { parse as babelParse } from '@babel/parser';
 import { parse as parseSfc } from '@vue/compiler-sfc';
 import { Parser as HtmlParser } from 'htmlparser2';
-import { displayPath, walk } from '../paths.js';
+import { displayPath, globMatch, walk } from '../paths.js';
+import { NON_PRODUCT } from '../../model/extract.js';
+import { extraKindOf, KIND_COMPONENT } from '../kinds.js';
 import { readAliases, resolveSpecifier, type ShimExports } from '../modules.js';
 import { loadClassReader, type ClassReader } from '../tailwind.js';
 import { allDsPackages, libraryOfPackage, lookalikeMap, type Config } from '../config.js';
@@ -27,6 +29,14 @@ export interface CodeScanResult {
   parseErrors: { file: string; message: string }[];
   /** Local modules found re-exporting or wrapping DS components. */
   shimModules?: number | undefined;
+  /** Look-alikes left out because their file isn't product code (tests, stories, fixtures, stubs, docs). */
+  nonProduct?: number | undefined;
+}
+
+/** Tests, stories, fixtures, stubs and docs, by the path inside the app (model/extract.ts's list). */
+export function isNonProduct(relToApp: string): boolean {
+  const p = relToApp.split(path.sep).join('/');
+  return NON_PRODUCT.some(g => globMatch(g, p));
 }
 
 export function scanCode(root: string, config: Config, target: Target, exclude: string[]): CodeScanResult {
@@ -125,8 +135,14 @@ function pushInstance(ctx: Ctx, file: string, line: number, pkg: string, compone
 
 const DYNAMIC = '\u0000dynamic';
 
+function pushKind(ctx: Ctx, file: string, line: number, element: string, component: string, features: ElementFeatures) {
+  if (isNonProduct(path.relative(ctx.target.dir, file))) { ctx.res.nonProduct = (ctx.res.nonProduct ?? 0) + 1; return; }
+  ctx.res.lookalikes.push({ target: ctx.target.name, element, component, file: rel(ctx, file), line, col: features.col, features });
+}
+
 function pushLookalike(ctx: Ctx, file: string, line: number, element: string, attrs: Record<string, string>, features?: ElementFeatures) {
   if (!ctx.countLookalikes) return;
+  if (isNonProduct(path.relative(ctx.target.dir, file))) { ctx.res.nonProduct = (ctx.res.nonProduct ?? 0) + 1; return; }
   let component = ctx.lookalikes[element];
   if (!component) return;
   if (element === 'input') {
@@ -269,7 +285,15 @@ function scanScript(ctx: Ctx, file: string, src: string, ext: string) {
     // Native elements: read the whole element (children, ancestors) so the evaluator has facts to work with.
     if (node.type === 'JSXElement' && node.openingElement.name.type === 'JSXIdentifier' && /^[a-z]/.test(node.openingElement.name.name) && !bindings.has(node.openingElement.name.name)) {
       const name = node.openingElement.name.name;
-      if (!ctx.lookalikes[name] || !ctx.countLookalikes) return;
+      if (!ctx.countLookalikes) return;
+      // Kinds the element map doesn't list by tag: a skeleton <div>, a field <label> (kinds.ts).
+      if (!ctx.lookalikes[name]) {
+        if (!/^(div|span|label)$/.test(name) || ctx.config.extraKinds === false || inRenderProp(ancestors)) return;
+        const feats = reactFeatures(node, ancestors, src, file, ctx.aliases);
+        const kind = extraKindOf(node, feats);
+        if (kind) pushKind(ctx, file, node.loc?.start.line ?? 0, name, KIND_COMPONENT[kind], feats);
+        return;
+      }
       // render={<button />} hands the component the element it draws as (Base UI): the component's own element,
       // not a bypass. Content slots (action={<button>…</button>}) are still raw elements.
       if (inRenderProp(ancestors)) return;
@@ -285,12 +309,16 @@ function scanScript(ctx: Ctx, file: string, src: string, ext: string) {
   });
 }
 
-/** Whether the element is the value of a `render` prop, the element a component draws as. */
-function inRenderProp(ancestors: any[]): boolean {
+/**
+ * Whether the element is the value of a `render` prop, the element a component draws as. A render
+ * function (render={({ field }) => <input …/>}, as form libraries use) returns the app's own UI, not the
+ * component's element, so crossing a function stops the search.
+ */
+export function inRenderProp(ancestors: any[]): boolean {
   for (let i = ancestors.length - 1; i >= 0; i--) {
     const a = ancestors[i];
     if (a.type === 'JSXAttribute') return a.name?.name === 'render';
-    if (a.type === 'JSXElement' || a.type === 'JSXFragment') return false;
+    if (a.type === 'JSXElement' || a.type === 'JSXFragment' || /Function/.test(a.type)) return false;
   }
   return false;
 }

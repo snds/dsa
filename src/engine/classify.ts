@@ -8,6 +8,7 @@ import { dangerWords, lookOf, type Look } from './classify-look.js';
 import { inputCandidates, tableCandidates } from './classify-fields.js';
 import { a11yNotes, noHandler } from './classify-a11y.js';
 import { refineParts, requireContainer } from './classify-parts.js';
+import { applyConstraints, nearestSize, type DsRules } from './constraints.js';
 
 export { systemRoleMap, systemRoles, NEUTRAL_ROLES, roleMapFrom, type RoleMap } from './roles.js';
 
@@ -76,6 +77,8 @@ export interface Evaluation extends Recommendation {
   calibrated?: { n: number; agree: number; prior: number; propFixes?: number | undefined; component?: number | undefined } | undefined;
   /** The resting look read from the classes (classify-look.ts): what screenshot evidence may not overrule. */
   look?: { fill: boolean; border: Look['border']; fromBranch: boolean; toolbar: boolean; danger?: Look['danger'] } | undefined;
+  /** Why the classifier abstained (verdict unclear): the inputs it couldn't resolve, or the near tie. */
+  unclear?: string[] | undefined;
   /** Signature match behind the recommendation, when the component has one. */
   signature?: { component: string; variant: string; size: string; score: number; matched: string[]; mismatched: string[]; structure: string[]; runnerUp?: { variant: string; size: string; score: number } | undefined } | undefined;
 }
@@ -84,16 +87,37 @@ export interface Evaluation extends Recommendation {
 const LAYOUT = /^(-?translate-|align-|aspect-|min-h-|inline-grid$|outline-hidden$|-?m[trblxy]?-|w-|min-w|max-w|h-full|flex-1|flex-none|shrink|grow|self-|justify-|items-|place-|gap-|inline-flex$|flex$|inline-block$|block$|grid$|relative$|absolute$|fixed$|sticky$|inset|top-|right-|bottom-|left-|z-|overflow-|truncate$|whitespace-|order-|col-|row-|transition|duration-|ease-|focus-visible:|focus:|disabled:|aria-|data-|cursor-|select-none|pointer-events|opacity-50$|sr-only$|group(\/|$)|peer$|text-left$|text-center$|text-right$|leading-|tracking-|font-medium$|outline-none$)/;
 const base = (t: string) => t.replace(/^([a-z-]+:)+/, '');
 
-export function classify(f: ElementFeatures, map: RoleMap = systemRoleMap(), threshold = 0.9, sigs?: SignatureSet): Evaluation {
-  const cands = candidates(f, map);
+/** Under this signature fit, confidence is held under the review threshold (review item 20). */
+export const FIT_GATE = 0.4;
+/** Two different components closer than this are a coin toss: abstain rather than pick. */
+export const THIN_MARGIN = 0.02;
+
+export function classify(f: ElementFeatures, map: RoleMap = systemRoleMap(), threshold = 0.9, sigs?: SignatureSet, rules?: DsRules): Evaluation {
+  let cands = candidates(f, map);
+  // Constraints first: candidates that can't carry the element's state, role or anatomy are out before ranking.
+  const ruledOut: string[] = [];
+  if (sigs) {
+    const { kept, rejected } = applyConstraints(cands, f, sigs, rules);
+    for (const r of rejected) ruledOut.push(`${describe(r.candidate)} is ruled out: ${r.why}`);
+    if (kept.length) cands = kept;
+    else return abstainAll(f, cands, ruledOut, threshold);
+  }
   if (f.element === 'button' && isPopupTrigger(f)) for (const c of cands) c.reasons.push({ text: `It opens a ${f.attrs['aria-haspopup'] && f.attrs['aria-haspopup'] !== 'true' ? f.attrs['aria-haspopup'] : 'menu or popover'}, so keep it as the trigger and change only its look.`, delta: 0 });
   const sigInfo = new Map<Candidate, Evaluation['signature']>();
-  if (sigs) for (const c of cands) { const s = refineWithSignature(c, f, sigs); if (s) sigInfo.set(c, s); }
+  if (sigs) for (const c of cands) { const s = refineWithSignature(c, f, sigs, rules); if (s) sigInfo.set(c, s); }
   // Shared adjustments: uncertainty about the input itself.
   // look: only matters when a component replaces the element (a gap or keep doesn't depend on the look).
   const shared: { text: string; delta: number; look?: boolean | undefined }[] = [];
   if (f.classes.unresolved.length) shared.push({ text: `Part of the styling comes from outside (${[...new Set(f.classes.unresolved)].slice(0, 3).join(', ')}), so the look may differ from what was read.`, delta: -0.06, look: true });
-  if (f.hasSpread) shared.push({ text: 'Other code passes extra settings in ({...props}); check the callers.', delta: -0.05 });
+  // Spreads and class constants: the type checker resolves them when it ran; what it couldn't is a reason to abstain.
+  const unresolvedInputs: string[] = [];
+  if (f.hasSpread) {
+    const t = f.typed;
+    if (t?.spread === 'resolved') shared.push({ text: `The type checker resolved its spread ({...${t.spreadText ?? 'props'}}): nothing in it changes what the element is.`, delta: 0 });
+    else if (t?.spread === 'unresolved') unresolvedInputs.push(`its spread ({...${t.spreadText ?? 'props'}}) can set ${(t.open ?? []).map(k => (k === 'index' ? 'any attribute' : k === 'any' ? 'anything' : k)).join(', ')}, and the type checker can't say to what`);
+    else shared.push({ text: 'Other code passes extra settings in ({...props}); check the callers. (No type checker ran to resolve it.)', delta: -0.05 });
+  }
+  if (f.typed?.classes?.length) unresolvedInputs.push(`the class constant${f.typed.classes.length === 1 ? '' : 's'} ${f.typed.classes.slice(0, 3).join(', ')} ${f.typed.classes.length === 1 ? "doesn't" : "don't"} resolve to classes`);
   if (f.framework !== 'react') shared.push({ text: 'Template element: no parent or child context available.', delta: -0.1 });
   if (f.classes.viaConst.length) shared.push({ text: `Styled by the shared style ${sharedStyleWords(f.classes.viaConst)}.`, delta: 0 });
   // Migrating a control that does nothing is pointless until someone decides it should exist.
@@ -124,8 +148,14 @@ export function classify(f: ElementFeatures, map: RoleMap = systemRoleMap(), thr
   const top = scored[0]!;
   let confidence = top.conf;
   let capped: Evaluation['capped'];
-  const reasons = [...top.reasons];
+  const reasons = [...top.reasons, ...ruledOut.map(text => ({ text: `${text}.`, delta: 0 }))];
   const second = scored[1];
+  // Abstain third: an input the pick depends on didn't resolve, or a different component is just as close.
+  const unclear = [...unresolvedInputs, ...(top.c.abstain ?? [])];
+  if (second && round(top.conf - second.conf) < THIN_MARGIN && describe(second.c) !== describe(top.c) && (second.c.use !== top.c.use || second.c.verdict !== top.c.verdict)) {
+    unclear.push(`${describe(second.c)} scores ${pct(second.conf)} against ${pct(top.conf)}, too close to call`);
+  }
+  if (unclear.length) return abstain(f, top, scored, reasons, unclear, threshold, sigInfo.get(top.c));
   // A close call is a reason to ask a human, not a change of ranking: the winner keeps its score and the
   // confidence drops under the review threshold, flagged so a runner-up shown above it isn't a contradiction.
   // It is shown even when the score is already under the threshold: the alternative is part of the question.
@@ -136,6 +166,13 @@ export function classify(f: ElementFeatures, map: RoleMap = systemRoleMap(), thr
     confidence = cap;
   }
   const sig = sigInfo.get(top.c);
+  // Fit is a gate, not a footnote: a component that matches under FIT_GATE of the element's measured
+  // properties would change its look too much to ship without a person.
+  if (sig && top.c.verdict === 'replace' && sig.score < FIT_GATE && sig.matched.length + sig.mismatched.length > 0) {
+    const cap = Math.min(confidence, Math.max(0.5, threshold - 0.05));
+    reasons.push({ text: `Fit gate: ${describe(top.c)} matches ${Math.round(sig.score * 100)}% of its look (under ${Math.round(FIT_GATE * 100)}%). A person should confirm the change of look.`, delta: round(cap - confidence) });
+    confidence = cap;
+  }
   // With a signature, differences are named per property against the component; otherwise the unexplained classes.
   const visualDiffs = top.c.verdict !== 'replace' ? [] : sig ? [...sig.mismatched] : visualDifferences(f, top.c);
   if (toneLost(elLook, top.c) && !visualDiffs.some(d => /red/.test(d))) visualDiffs.push(`red ${dangerWords(elLook.danger!)} (danger tone)`);
@@ -148,12 +185,39 @@ export function classify(f: ElementFeatures, map: RoleMap = systemRoleMap(), thr
   }, f, threshold);
 }
 
+/** Confidence of an abstention: under the review threshold, so a person always picks. */
+const abstainConfidence = (score: number, threshold: number) => Math.min(score, Math.max(0.5, threshold - 0.05));
+type Scored = { c: Candidate; reasons: { text: string; delta: number }[]; conf: number };
+const asAlternative = (s: Scored) => ({ verdict: s.c.verdict, role: s.c.role, use: s.c.use, from: s.c.from, props: s.c.props, gap: s.c.gap, ...(s.c.how ? { how: s.c.how } : {}), confidence: round(s.conf) });
+
+/** The classifier won't pick: verdict unclear, the best guesses offered as alternatives, and why in words. */
+function abstain(f: ElementFeatures, top: Scored, scored: Scored[], reasons: Scored['reasons'], why: string[], threshold: number, sig?: Evaluation['signature']): Evaluation {
+  const confidence = round(abstainConfidence(top.conf, threshold));
+  return {
+    verdict: 'unclear', role: top.c.role, ruleId: top.c.ruleId, confidence, score: round(top.conf), prior: round(top.c.prior),
+    reasons: [...reasons, { text: `Unclear: ${why.join('; ')}. A person should pick from the alternatives.`, delta: round(confidence - top.conf) }],
+    alternatives: scored.slice(0, 3).map(asAlternative), unclear: why,
+    visualDiffs: [], a11y: a11yNotes(f), signature: sig,
+  };
+}
+
+/** Every candidate was ruled out by a hard constraint: nothing to rank, so abstain and say what was tried. */
+function abstainAll(f: ElementFeatures, cands: Candidate[], ruledOut: string[], threshold: number): Evaluation {
+  const top = [...cands].sort((a, b) => b.prior - a.prior)[0]!;
+  const confidence = round(abstainConfidence(top.prior, threshold));
+  return {
+    verdict: 'unclear', role: top.role, ruleId: top.ruleId, confidence, score: round(top.prior), prior: round(top.prior),
+    reasons: [...top.reasons, ...ruledOut.map(text => ({ text: `${text}.`, delta: 0 })), { text: 'Unclear: every candidate was ruled out. A person should pick, or the system needs a component for this.', delta: round(confidence - top.prior) }],
+    alternatives: [], unclear: ruledOut, visualDiffs: [], a11y: a11yNotes(f),
+  };
+}
+
 /**
  * Pick variant/size by matching the element against the component's generated signatures, and fold
  * the match quality into the candidate's prior. The role (link, icon, ghost…) is a structural call
  * made by the rules; within it, the signature decides the props and says how close the fit is.
  */
-function refineWithSignature(c: Candidate, f: ElementFeatures, sigs: SignatureSet): Evaluation['signature'] | undefined {
+function refineWithSignature(c: Candidate, f: ElementFeatures, sigs: SignatureSet, rules?: DsRules): Evaluation['signature'] | undefined {
   if (c.verdict !== 'replace' || !c.use) return;
   const comp = sigs.components.get(c.use);
   if (!comp || !comp.sigs.length) return;
@@ -192,9 +256,26 @@ function refineWithSignature(c: Candidate, f: ElementFeatures, sigs: SignatureSe
   const elProps = normalize(f.classes.tokens, sigs.aliases);
   const elHasSize = ['height', 'width'].some(k => elProps.has(k));
   const ruleSize = !elHasSize && c.props?.size && comp.axes.size?.includes(c.props.size) ? c.props.size : undefined;
-  let matches = bestMatches(f, comp, sigs, s => plausible(s.variant) && (!hasIconSizes || (iconRole ? s.iconOnly : !s.iconOnly)) && (!ruleSize || s.size === ruleSize));
+  // A square box with no side padding (size-7, or h-7 w-7) is an icon-sized control even when its content is
+  // passed in ({children}): it takes an icon size, never a text size of the same height.
+  const squareBox = elProps.has('height') && elProps.get('height') === elProps.get('width') && (!elProps.has('px') || /^0(rem|px)?$/.test(elProps.get('px')!));
+  const iconSized = iconRole || (squareBox && !f.children.text && c.role !== 'link-button');
+  if (squareBox && !iconRole && iconSized && hasIconSizes) c.reasons.push({ text: 'A square box with no side padding: an icon-sized control, so an icon size.', delta: 0 });
+  let matches = bestMatches(f, comp, sigs, s => plausible(s.variant) && (!hasIconSizes || (iconSized ? s.iconOnly : !s.iconOnly)) && (!ruleSize || s.size === ruleSize));
   if (!matches.length) matches = bestMatches(f, comp, sigs);
   if (!matches.length) return;
+  // Size by distance in resolved pixels, height then width as hard limits: a 20px button is never given
+  // the 32px size because its colours happen to match it better. What doesn't resolve, or sits exactly
+  // between two sizes, is a reason to abstain.
+  if (comp.axes.size) {
+    const fit = nearestSize(matches, elProps, sigs.values, rules?.controlScale);
+    matches = fit.matches;
+    for (const w of [fit.unresolved, fit.tie]) if (w) (c.abstain ??= []).push(w);
+    for (const d of fit.dims) {
+      if (Math.abs(d.element - d.nearest) <= 0.5 || c.reasons.some(r => r.text.includes(`${d.element}px`))) continue;
+      c.reasons.push({ text: `It is ${d.element}px ${d.dim === 'height' ? 'high' : 'wide'}; the nearest ${c.use} size is ${d.nearest}px. Approve the change, or ask for a size that fits.`, delta: -0.02 });
+    }
+  }
   // The runner-up is the closest signature the element can tell apart from the best: Button link
   // default, lg and toolbar look the same to an element with no height, so naming lg says nothing.
   const best = matches[0]!;
@@ -246,6 +327,12 @@ function candidates(f: ElementFeatures, map: RoleMap): Candidate[] {
     case 'dialog': return f.fileUsesShowModal
       ? [role('native-dialog', 'dialog.imperative', 0.92, [{ text: 'File drives the dialog with showModal().', delta: 0 }]), role('dialog', 'dialog.declarative', 0.6, [])]
       : [role('dialog', 'dialog.declarative', 0.88, [{ text: 'Native <dialog> without showModal(): declarative Dialog fits.', delta: 0 }])];
+    case 'div': case 'span':
+      if (f.classes.tokens.includes('animate-pulse') && !f.children.text && !f.children.dynamicText && !f.children.elements.length && !f.children.icons)
+        return [role('skeleton', 'skeleton', 0.93, [{ text: 'A pulsing, muted, empty box: a loading placeholder (Skeleton).', delta: 0 }])];
+      return [role(f.element, 'unknown', 0.5, [{ text: `No rule for <${f.element}>.`, delta: 0 }])];
+    case 'label':
+      return [role('label', f.attrs.htmlFor !== undefined ? 'label.for' : 'label.wraps', f.attrs.htmlFor !== undefined ? 0.92 : 0.88, [{ text: f.attrs.htmlFor !== undefined ? 'A <label> pointing at a field (htmlFor): Label.' : 'A <label> wrapping a text field: Label.', delta: 0 }])];
     default: return [role(f.element, 'unknown', 0.5, [{ text: `No rule for <${f.element}>.`, delta: 0 }])];
   }
 }

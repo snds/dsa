@@ -11,6 +11,8 @@ import { withPlacement, type PagePlacement, type Region } from './placement.js';
 import { asHostCopy, systemIndex, hostCopyOf, isLabFile } from './host-context.js';
 import { importedFromSystem } from './scanners/features.js';
 import { readAliases } from './modules.js';
+import { applyPrecedent, type PrecedentIndex } from './precedent.js';
+import type { DsRules } from './constraints.js';
 
 /**
  * The element review: every native element the map covers gets an evaluation, with a
@@ -59,6 +61,8 @@ export interface Policy {
 export interface DecisionsFile { file: string; decisions: Decision[]; policies: Policy[] }
 
 export interface ElementEval extends Evaluation {
+  /** Whether confidence is measured precision on labels (labels.ts), and how sure that measurement is. */
+  calibration?: import('./labels.js').Calibration | undefined;
   /** Held under the review threshold for want of evidence a person can see (evidence-cap.ts): the scanner's score and why. */
   evidenceCap?: { from: number; why: string[] } | undefined;
   id: string;
@@ -76,6 +80,8 @@ export interface ElementEval extends Evaluation {
   decided?: { by: 'human' | 'agent' | 'policy'; decision: Recommendation; note?: string | undefined; who?: string | undefined; date?: string | undefined } | undefined;
   snippet: string;
   source: string;
+  /** The line its opening tag ends on, when the tag spans lines. */
+  openEndLine?: number | undefined;
   /** The shared class constant this element is styled by (PLUS_NOUN_LINK), if any. */
   styleKey?: string | undefined;
   /** Hash of the element's visual classes: identical styling clusters even without a constant. */
@@ -205,6 +211,10 @@ export function evaluateRows(opts: {
   hints?: Hint[] | undefined;
   /** Lab pages (globs relative to the app): specimens, kept out of Ready (dsa.config.json review.labPaths). */
   labPaths?: string[] | undefined;
+  /** The app's own system-component uses and past migrations (precedent.ts). */
+  precedent?: PrecedentIndex | undefined;
+  /** The app's design-system rules file, read as constraints (constraints.ts). */
+  rules?: DsRules | undefined;
 }): ElementEval[] {
   const { root, target, rows, map, decisions, stats, threshold } = opts;
   const byFp = new Map(decisions.decisions.map(d => [d.fingerprint, d]));
@@ -221,7 +231,7 @@ export function evaluateRows(opts: {
     // Where it sits (the components above it, and the page) is evidence too: fold it in before the rules run.
     const placed = withPlacement(r.features, opts.reachOf?.get(r)?.placement, opts.pageOf?.(`E-${fp}`));
     const f = placed.f;
-    let e = classify(f, map, threshold, opts.sigs);
+    let e = classify(f, map, threshold, opts.sigs, opts.rules);
     if (placed.reasons.length) e.reasons.splice(1, 0, ...placed.reasons);
     e = calibrate(e, statsWithout(stats.get(e.ruleId), fp));
     const rel = targetRelative(root, r.file, target.dir);
@@ -233,6 +243,7 @@ export function evaluateRows(opts: {
       exception: opts.exceptionOf.get(r) ?? (isLabFile(rel, opts.labPaths) ? 'lab' : undefined),
       reach: opts.reachOf?.get(r),
       snippet: f.openTag, source: f.source,
+      ...(f.openEndLine && f.openEndLine > r.line ? { openEndLine: f.openEndLine } : {}),
       styleKey: styleKeyOf(f.classes.viaConst),
       styleSig: styleSigOf(f.classes.tokens),
       classTokens: f.classes.tokens,
@@ -247,6 +258,8 @@ export function evaluateRows(opts: {
         ariaLabel: literal(f.attrs['aria-label']), title: literal(f.attrs.title), role: literal(f.attrs.role), type: literal(f.attrs.type),
       },
     };
+    // What the app itself already did with this look (a migration, a sibling) is the strongest evidence there is.
+    if (opts.precedent) applyPrecedent(ev, opts.precedent, threshold, f.context.ancestors);
     // A host copy of a system component is decided by the parent first: import the system's component.
     const abs = path.join(target.dir, rel);
     const copy = f.framework === 'react' ? hostCopyOf(abs, f.context.within, sysIdx, n => importedFromSystem(abs, n, aliases)) : undefined;

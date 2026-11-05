@@ -19,7 +19,11 @@ import { borderOf, boxOf, CELL_ICON_BUTTON, lookOf, resting, sizeKeyOfPx, SMALLE
  * collapsing them into "toggle" sent hosts to ToggleGroup for sidebars and row expanders.
  */
 
-export interface Candidate extends Recommendation { ruleId: string; prior: number; reasons: { text: string; delta: number }[] }
+export interface Candidate extends Recommendation {
+  ruleId: string; prior: number; reasons: { text: string; delta: number }[];
+  /** Inputs this candidate's pick depends on that couldn't be resolved: the classifier abstains (unclear) when it wins. */
+  abstain?: string[] | undefined;
+}
 export type RoleFn = (r: string, ruleId: string, prior: number, reasons: Candidate['reasons'], props?: Record<string, string>) => Candidate;
 
 const hasVariantPrefix = (t: string) => /^[a-z-]+:/.test(t);
@@ -120,8 +124,12 @@ export function buttonCandidates(f: ElementFeatures, map: RoleMap, role: RoleFn)
     const def = map.roles['icon-button'];
     // Toolbar chrome (bordered, raised, control height) is Button variant="toolbar"; a full border is outline; a
     // one-side border is a divider from the group around it, not an outline.
-    const props = look.toolbar ? toolbarProps(def?.use) : { variant: look.border === 'box' ? 'outline' : (def?.props?.variant ?? 'ghost'), size: iconSize(def?.use, sizeKey, map) };
+    // A fill at rest is the variant's own (bg-secondary is secondary); only an unfilled icon button is ghost.
+    const filled = look.fill && look.border !== 'box' ? variantOf(f, map) : undefined;
+    const fillVariant = filled && filled.token && !/^(ghost|outline)$/.test(filled.key) ? filled : undefined;
+    const props = look.toolbar ? toolbarProps(def?.use) : { variant: look.border === 'box' ? 'outline' : fillVariant ? fillVariant.key : (def?.props?.variant ?? 'ghost'), size: iconSize(def?.use, sizeKey, map) };
     if (look.toolbar) r.push({ text: `Toolbar chrome (a border, a raised shadow, control height): variant "toolbar".`, delta: 0 });
+    else if (fillVariant) r.push({ text: `Filled at rest (${fillVariant.token}): variant "${fillVariant.key}".`, delta: 0 });
     else if (look.border === 'side') r.push({ text: 'Its border is on one side only: a divider from the group around it, not an outline.', delta: 0 });
     out.push(role('icon-button', 'button.icon', cellish ? 0.82 : 0.9, r, props));
     return out;
@@ -154,9 +162,9 @@ export function buttonCandidates(f: ElementFeatures, map: RoleMap, role: RoleFn)
   // Ghost text button: no box at rest, fills on hover.
   if (text && !linky && !boxy && hoverFill && !f.classes.selectedSwitch && !regionSignals.length && !has(/^w-full$/)) {
     const sz = size.key ?? (textSize === 'xs' ? 'xs' : 'sm');
-    out.push(role('button', 'button.ghost', size.key ? 0.92 : 0.89, [
+    out.push(role('button', 'button.ghost', size.key && size.px === undefined ? 0.92 : 0.89, [
       { text: 'Quiet button: no fill until hover (ghost).', delta: 0 },
-      { text: size.key ? `Size ${sz} from ${size.token}.` : `Size ${sz} inferred from ${textSize ? `text-${textSize === 'xs' ? 'xs' : 'sm'}` : 'padding'}.`, delta: 0 },
+      { text: size.px !== undefined ? `Size ${sz}: the nearest to its ${size.px}px height (${size.token}), which isn't on the scale.` : size.key ? `Size ${sz} from ${size.token}.` : `Size ${sz} inferred from ${textSize ? `text-${textSize === 'xs' ? 'xs' : 'sm'}` : 'padding'}.`, delta: 0 },
     ], { variant: 'ghost', size: sz }));
   }
   // Quiet text action: muted text, no box, no hover fill.
@@ -188,7 +196,8 @@ export function buttonCandidates(f: ElementFeatures, map: RoleMap, role: RoleFn)
     const v = variantOf(f, map);
     const r: Candidate['reasons'] = [{ text: 'A text button with its own box (a fill or border, and padding).', delta: 0 }];
     r.push(v.token ? { text: `Variant ${v.key} from ${v.token}.`, delta: 0 } : { text: 'Couldn\'t read its emphasis from the classes; variant left at default.', delta: -0.08 });
-    r.push(size.key ? { text: `Size ${size.key} from ${size.token}.`, delta: 0 } : { text: 'Its height isn\'t on the button size scale; size left at default.', delta: -0.04 });
+    r.push(size.key && size.px !== undefined ? { text: `Its height (${size.px}px, ${size.token}) isn't on the button size scale; ${size.key} is the nearest size.`, delta: -0.02 }
+      : size.key ? { text: `Size ${size.key} from ${size.token}.`, delta: 0 } : { text: 'Its height isn\'t on the button size scale; size left at default.', delta: -0.04 });
     if (f.classes.selectedSwitch) r.push({ text: 'Its look switches on a condition: it may be a toggle.', delta: -0.08 });
     out.push(role('button', 'button.styled', 0.92, r, { variant: v.key, ...(size.key && size.key !== 'default' ? { size: size.key } : {}) }));
   }
@@ -256,10 +265,21 @@ export function variantOf(f: ElementFeatures, map: RoleMap): { key: string; toke
   return { key: 'default' };
 }
 
-export function sizeOf(tokens: string[], map: RoleMap, square = false): { key?: string | undefined; token?: string | undefined } {
+export function sizeOf(tokens: string[], map: RoleMap, square = false): { key?: string | undefined; token?: string | undefined; px?: number | undefined } {
   for (const [key, re] of map.sizes) {
     const tok = tokens.find(t => !hasVariantPrefix(t) && (re.test(t) || (square && re.test(t.replace(/^w-/, 'h-')))));
     if (tok) return { key, token: tok };
+  }
+  // A Tailwind step the size map doesn't list (size-5, h-[30px]): the nearest size by pixels, with its px
+  // so the reason can say it is off the scale. Icon-only boxes are measured by boxOf instead.
+  if (square) return {};
+  for (const t of tokens) {
+    if (hasVariantPrefix(t)) continue;
+    const m = /^(h|size)-(?:(\d+(?:\.\d+)?)|\[(\d+(?:\.\d+)?)px\])$/.exec(t);
+    if (!m) continue;
+    const px = m[3] !== undefined ? Number(m[3]) : Number(m[2]) * 4;
+    const key = sizeKeyOfPx(px);
+    if (map.sizes.some(([k]) => k === key)) return { key, token: t, px };
   }
   return {};
 }

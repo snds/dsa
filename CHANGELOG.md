@@ -8,6 +8,63 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- Two scan kinds found by their own markup, not their tag (`src/engine/kinds.ts`): a Skeleton (a `<div>`
+  or `<span>` with `animate-pulse`, a muted fill and no children, all three required) and a Label (a
+  `<label>` with `htmlFor`, or wrapping a text field; never one holding a choice control or a button, which
+  is that control's own anatomy, and never one inside a Field component).
+- A system can be a folder of components (a shadcn-style `components/ui` inside an app): when the system's
+  folder has no `src/`, its signatures are read from the folder itself.
+- Recommendations apply hard constraints before ranking (`src/engine/constraints.ts`). An element with
+  `aria-pressed`, `aria-current` or a selected state only maps to a component with a prop for it
+  (`pressed`, `isActive`, `value`, or a `data-state` it writes). A component with a fixed role can't take
+  an element with another one, and a `<button>` component can't hold another control. Signatures now
+  record each component's declared props and its primitive's state props (`props`).
+- Size is picked by distance in resolved pixels, following the system's tokens to their values, with
+  height and width as hard limits. A 20px icon button gets the 24px size, never the 32px one its colours
+  happen to match. Tailwind steps the size map doesn't list (`size-5`, `h-[30px]`) read as the nearest
+  size and say they are off the scale.
+- The classifier abstains: verdict `unclear`, with `unclear` saying why and the best guesses as
+  alternatives. It does so when a height doesn't resolve to pixels, when an element sits exactly between
+  two sizes, when a state-bearing element's pick can't be checked, when every candidate is ruled out, and
+  when two different components score within 0.02.
+- An optional TypeScript checker, run with each app's own `tsconfig.json` (`src/engine/typecheck.ts`).
+  It resolves what Babel can't read: spreads (`<input {...getInputProps()}>` carrying `type: "file"` is a
+  file input, not an `Input`), class constants whose type is a string literal, wrappers' props, and the
+  system's prop unions, read at one use of each component, as the only values a recommendation may set.
+  A spread or class constant it can't resolve makes the classifier abstain (`unclear`) instead of the old
+  5% penalty. It runs only over files with something to resolve, loads the app's own `typescript` first,
+  and is skipped with a note when there is no tsconfig or no `typescript`; the old penalty then stays.
+- Recommendations learn from the app's own migrations (`src/engine/precedent.ts`). Every system-component
+  use in the app is indexed with its props, extra classes, class constant, parents and state. A raw
+  element styled by a constant the app already put on a system component, or with the same classes as an
+  element a commit turned into one (`git log -p`, bounded), follows that migration as near-truth. A
+  system component of the picked kind right beside it lends its size. Otherwise the most similar uses are
+  named as evidence, and offered as an alternative when they differ.
+- Confidence is measured precision on a label set (`src/engine/labels.ts`). A `labels.jsonl` (one
+  labelled element per line: `id`, `app`, `file`, `line`, `sourceRef`, `elementHash`, `truth` with
+  `verdict`, `use`, `props`, `acceptableAlts`, `labeler`, `method`, `at`, `notes`) is read from
+  `recommend.labels` or `dsa run --labels`. Labels feed `calibrate()`, which never ran before for want of
+  decisions, then an isotonic fit maps each decision path's score (rule and verdict) to its measured
+  precision, pooled when a path has under 20 labels. "Ready" needs the one-sided 95% lower bound of that
+  precision at 0.99 or more, so about 300 clean labels on a path. Without labels nothing changes, and
+  each evaluation says its confidence is uncalibrated (`calibration.status`).
+- Fit is a gate: a replacement whose signature matches under 40% of the element's look stays under the
+  review threshold, and says so.
+- An app's machine-readable design-system rules file (`recommend.rules`, e.g.
+  `design-system.rules.json`) is read as constraints. `controlScale` (px, a list or a map) rules out
+  sizes off the scale; `preferPrimitives` as a map (`{ "button": "Button" }`) makes that the only
+  component for that element, and as a list prefers those components; `avoid` rules components out. A
+  missing or unreadable file is noted and the run goes on without it.
+- A saved calibration file. `dsa run --labels <file> --save-calibration <out>` writes what was fitted
+  (rule stats, per-path isotonic fits, the ready cut or none) with the labels' paths, content hashes and
+  counts, the engine's version and revision, and a hash of the system's signature set. `--calibration`
+  (or `recommend.calibration`) applies it instead of fitting. A file fitted for another system is refused
+  unless forced (`--force-calibration`, `recommend.calibrationForce`), and a forced run says so in its notes.
+- `recommend` in dsa.config.json: `labels` (path, relative to the config), `rules` (path, relative to
+  each app), `typescript` (boolean, default on), `calibration` (path) and `calibrationForce` (boolean).
+- The element scanner skips files that aren't product code: tests, stories, examples, demos, fixtures,
+  mocks, stubs and docs, reusing the model extractor's list (`NON_PRODUCT`). The run notes how many it
+  left out.
 - Drawing from the app's code works for components that can't render alone. The mount wraps the
   component in every provider the live app has at that point (the store, theme, query client or router its
   entry file sets up, and ones deeper in the tree), read off the running page with their live values. It
@@ -30,7 +87,45 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 - `scripts/proposal-gaps.mjs` counts, on a published dashboard, why proposals aren't drawn exactly with
   their element's own content.
 
+### Changed
+
+- Screenshots confirm a pick; they never switch it. When the running app looks more like another variant
+  (at least 60% alike and 0.15 ahead of the pick), the pick stays, its confidence drops under the review
+  threshold, and the other variant is offered as an alternative ranked below it. A pick the rendering
+  clearly contradicts (under 40% alike, another variant 80% or more), with nothing in the classes against
+  it, becomes `unclear`. `applyRenderedEvidence` reports `disagreed` and `unclear`; `switched` is always 0.
+
 ### Fixed
+
+- dsa ran `git status` on checkouts it only reads (the token scan's new-code check, the live check), and
+  `git status` rewrites the index. Those reads now use plumbing only (`src/engine/git-read.ts`):
+  `git diff-index --name-only HEAD --`, with each listed file confirmed by comparing `git hash-object` with
+  the blob at HEAD, untracked files from `git ls-files --others`, and `GIT_OPTIONAL_LOCKS=0` throughout.
+- "Ready" is decided on a pooled band of calibrated scores across decision paths, where labels add up.
+  The band is every score at or above a cut; the cut is the lowest score whose band (all paths' labels at
+  or above it) has a one-sided 95% lower bound of at least 0.99 (`readyCut`). The element's own path must
+  show no error among its labels in that band. With no such cut, nothing is ready. The cut is fitted on
+  the labels given and applies unchanged to every element, so a held-out fold is judged by the training
+  fold's cut. Per-path fits still set the order. Points that share a score start as one isotonic block.
+- A calibrated block that isn't ready was flattened to one score under the bar, which erased ranking and
+  coverage. It now keeps its measured precision, squeezed into [0, threshold) in order (`squeeze`).
+- Isotonic calibration left equal neighbouring scores in separate one-label blocks, so a clean top band
+  never had enough labels for its lower bound. Equal neighbours now pool into one block.
+- A square button with no side padding whose content is passed in (`size-7`, `{children}`) took a text
+  size of the same height (xs). A square, unpadded box now takes an icon size (icon-sm).
+- A filled icon button (`bg-secondary` at rest) was always proposed as ghost. Its fill now picks the
+  variant; only an unfilled icon button is ghost.
+- Elements a render function returns (`render={({ field }) => <input …/>}`, as form libraries use) were
+  skipped as if they were a component's own `render={<button/>}` element. Crossing a function now stops
+  that check.
+- Labels may name any line of a multi-line opening tag (`openEndLine` on each evaluation).
+- Labels matched almost nothing on a real run: they were matched by element hash (which hashes the
+  element's source text, not dsa's fingerprint) and by an exact file path. They now match by id, else by
+  app, line and a file path that may carry a leading folder, and props compare as the bench compares
+  them ("default" is the same as unset).
+- Outlined buttons were read as secondary when their classes hide the border first and colour it later
+  (`border border-transparent … border-border`, as copied or rendered markup has it). The border was read
+  as "none", which ruled the outline variant out. Border classes now resolve last-wins, as `cn()` does.
 
 - An app whose page rewrites its own URL as it loads (a home that redirects, or sets a hash) aborts the
   navigation that brought the crawler there, though the app loaded. That now counts as arrived (on the app's

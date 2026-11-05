@@ -52,11 +52,21 @@ const stateful = (tokens: string[]) => tokens.map(variantsOf).filter(v => v.pref
 const FILL = /^bg-(?!transparent$|none$|inherit$|current$|clip-|origin-|repeat|no-repeat|cover$|contain$|center$|fixed$|local$|scroll$|gradient-|linear-|radial-|conic-|blend-)/;
 const BOX_WIDTH = /^border(-[0-9]+|-\[\d+(\.\d+)?px\])?$/;
 const SIDE_WIDTH = /^border-[lrtbxyse](-[0-9]+|-\[\d+(\.\d+)?px\])?$/;
-const NO_BORDER = /^border-(0|none|transparent)$/;
 
+/** A border colour class (border-border, border-input, border-transparent), not a width, side or style. */
+const BORDER_COLOR = /^border-(?!(?:[lrtbxyse]|\d|\[\d|collapse|separate|solid|dashed|dotted|double|hidden|none)(?:-|$))/;
+
+/**
+ * Whether the resting classes draw a box, a one-side divider, or nothing. Later classes win, as cn() and
+ * tailwind-merge resolve them: `border border-transparent … border-border` is a visible outline (a base
+ * that hides the border, then a variant that colours it), and `border … border-0` is no border.
+ */
 export function borderOf(rest: string[]): Look['border'] {
-  if (rest.some(t => NO_BORDER.test(t))) return 'none';
-  if (rest.some(t => BOX_WIDTH.test(t))) return 'box';
+  if (rest.includes('border-none')) return 'none';
+  const lastWidth = [...rest].reverse().find(t => BOX_WIDTH.test(t) || t === 'border-0');
+  const lastColor = [...rest].reverse().find(t => BORDER_COLOR.test(t));
+  if (lastWidth === 'border-0' || lastColor === 'border-transparent') return 'none';
+  if (lastWidth) return 'box';
   if (rest.some(t => SIDE_WIDTH.test(t))) return 'side';
   return 'none';
 }

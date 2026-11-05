@@ -71,6 +71,9 @@ export const NEUTRAL_ROLES: RoleMap['roles'] = {
   'menu-radio-item': { use: 'DropdownMenuRadioItem' },
   'menu-sub-trigger': { use: 'DropdownMenuSubTrigger' },
   'row-expander': { use: 'Button', props: { variant: 'ghost' }, how: 'A ghost Button with aria-expanded; inside a data table, the table\'s own grouped rows.' },
+  // Kinds found by their own markup, not their tag (kinds.ts).
+  skeleton: { use: 'Skeleton' },
+  label: { use: 'Label' },
 };
 
 /** Button evidence most Tailwind systems share (shadcn's class names). */
