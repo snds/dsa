@@ -1366,7 +1366,19 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       const f = importsNear(d, abs, 2).find(x => decl.test(read(x))) ?? declaredIn(d, name);
       return f ? read(f) : null;
     };
-    try { return stateSets(gates, (f) => readSource(d.root, f, d.dir), hookCode); } catch { return []; }
+    let sets: StateSet[] = [];
+    try { sets = stateSets(gates, (f) => readSource(d.root, f, d.dir), hookCode); } catch { return []; }
+    // A value the app really held in that state (the ledger, by the component and the hook's name) over one
+    // made from its type: a list with items, a truthy value where truth is wanted; a whole copy only.
+    const fits = (want: unknown, v: unknown) => Array.isArray(want) ? Array.isArray(v) && (want.length === 0 ? v.length === 0 : v.length > 0) : want === true ? Boolean(v) : want === false ? !v : typeof want === 'object' && want ? Boolean(v) && typeof v === 'object' && Object.entries(want as object).every(([k, x]) => typeof x !== 'string' || (v as any)[k] === x || x === '') : JSON.stringify(v) === JSON.stringify(want);
+    for (const set of sets) for (const sl of set.slots) {
+      if (!sl.name || sl.name.startsWith('#')) continue;
+      for (const list of Object.values(o.ledger ?? {})) {
+        const h = list.flatMap(x => x.ancestors).filter(a => a.name === set.component).flatMap(a => a.hooks).find(h => h.name === sl.name && !h.cut && h.value != null && fits(sl.value, h.value));
+        if (h) { sl.value = cleanRecorded(h.value, undefined, false) as any; (sl as any).recorded = true; break; }
+      }
+    }
+    return sets;
   }
   function describeSets(sets: StateSet[]) { return sets.flatMap(x => x.slots.map(sl => `${sl.name} = ${JSON.stringify(sl.value)}`.slice(0, 40))).join(', '); }
 
@@ -1709,13 +1721,22 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       await open(u, 30000);
       loaded = page.url(); loadedFor = u;
     };
-    for (const { r, u } of queue) {
+    // Every element's first try before any retry: a retry (a caller further on, a recorded context, a value
+    // filled after a throw, the nearest recorded component above it) never costs another element its first
+    // try. Retries get only the time left; what's left after that is drawn as markup from its first try.
+    const later: { r: Target; u: string }[] = [];
+    const firstWhy = new Map<string, string>();
+    const drawOne = async ({ r, u }: { r: Target; u: string }, mode0: 'first' | 'retry' | 'final') => {
+      const mode = mode0 === 'retry' && Date.now() > stop ? 'final' : mode0;
+      const retry = mode === 'retry';
+      // A retry this element could use, held for the second pass on its first try.
+      let wantsRetry = false;
       ownNow = Boolean(ledgerNow[r.src]?.length);
-      if (ownNow) ownCount++;
+      if (ownNow && mode0 !== 'retry') ownCount++;
       const out = (msg: string) => { note(r, msg); count(`not drawn (${short(msg.replace(/^not drawn: /, '').replace(/; not mounted.*$/, ''))})`); o.log(`  ${where(r)} ${msg}`); };
-      if (n >= max || Date.now() > stop) { out(`not drawn: ${n >= max ? `over the ${max} drawings per app` : 'out of time for drawings'}`); continue; }
+      if (n >= max || (mode === 'first' && Date.now() > stop)) { out(`not drawn: ${n >= max ? `over the ${max} drawings per app` : 'out of time for drawings'}`); return; }
       const code = readSource(d.root, r.e.file, d.dir);
-      if (!code) { out(`not drawn: its source file wasn't found (${r.e.file})`); continue; }
+      if (!code) { out(`not drawn: its source file wasn't found (${r.e.file})`); return; }
       let how: 'mount' | 'markup' | null = null;
       let isolated = false;
       // The conditions set on its props to draw it (`open = true`), said with the drawing.
@@ -1734,6 +1755,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       let revealed = '', drawnBy = '', wrapped = '';
       try {
         if (!canMount) unmounted = "this build doesn't serve /@dsa/mount";
+        else if (mode === 'final') unmounted = `${firstWhy.get(r.id) ?? 'not mounted'} (no time left for a retry)`;
         else if (!r.e.within) unmounted = 'the scan found no component around it';
         else {
           await visit(u);
@@ -1784,7 +1806,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
               const { found, read } = callersOfFn(d, r.e.within, abs);
               const order = [...found.filter(c => byOwner.has(c.name)), ...found.filter(c => !byOwner.has(c.name))];
               const failed: string[] = [];
-              for (const c of order.slice(0, 4)) {
+              for (const c of order.slice(0, 2)) {
                 host = { files: filesOf(c.abs), file: tagOfFile(d, c.abs) ?? r.e.file, code: c.code, abs: c.abs };
                 parent = c.name;
                 hostNote = `, which calls ${r.e.within}, in ${host.file}${byOwner.has(c.name) ? ', with its recorded props' : ''}`;
@@ -1793,7 +1815,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
                 failed.push(`${c.name} (${host.file}): ${(probe.why ?? 'not mounted').slice(0, 80)}`);
               }
               if (!order.length) hostNote = `; no component calls ${r.e.within} (searched ${read} files of the app by its name and by names it's imported under)`;
-              else if (failed.length === Math.min(order.length, 4)) hostNote += `; callers tried: ${failed.join('; ')}`;
+              else if (failed.length === Math.min(order.length, 2)) hostNote += `; callers tried: ${failed.join('; ')}`;
             }
           }
           const first = parent || r.e.within;
@@ -1830,7 +1852,8 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
           }
           // Still throwing, and its record lists the providers above it: each wrapped around it with the value
           // the app gave it (contexts the tagger named), once.
-          if (!said.ok && said.threw && stateRec?.contexts?.length) {
+          if (!said.ok && said.threw && stateRec?.contexts?.length && !retry) wantsRetry = true;
+          else if (!said.ok && said.threw && stateRec?.contexts?.length) {
             const add = stateRec.contexts.filter(c => !wraps.some(w => w.context && `${w.file}#${w.name}` === c.name)).slice(0, 6);
             for (const c of add) {
               const [cf, cn] = [c.name.slice(0, c.name.lastIndexOf('#')), c.name.slice(c.name.lastIndexOf('#') + 1)];
@@ -1840,7 +1863,8 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
             if (add.length) { const again = await mountAs(parent || r.e.within); if (again.ok || again.threw?.message !== said.threw.message) said = again; }
           }
           // A read off nothing in its own props: that value filled with the kind the read needs, and one more try.
-          if (!said.ok && said.threw && !host.abs.includes('node_modules')) {
+          if (!said.ok && said.threw && !host.abs.includes('node_modules') && !retry) wantsRetry = true;
+          else if (!said.ok && said.threw && !host.abs.includes('node_modules')) {
             const who = said.threw.component || parent || r.e.within;
             const nr = nullRead(sourceOfThrow(d, said.threw, host.code, who), who, said.threw.message);
             if (nr && who === (parent || r.e.within)) {
@@ -1900,7 +1924,8 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
           }
           // Its component never recorded: the nearest component above it that was, mounted from its own file
           // with the props it was recorded with, the conditions on the way forced, then the state set.
-          if (!how && !recordOf(r, r.e.within)) {
+          if (!how && !recordOf(r, r.e.within) && !retry && (r.e.reach?.via ?? []).some(nm => nm !== r.e.within && byOwner.has(nm))) wantsRetry = true;
+          else if (!how && !recordOf(r, r.e.within)) {
             const anc = [...(r.e.reach?.via ?? [])].reverse().find(nm => nm !== r.e.within && byOwner.has(nm));
             const rec = anc ? bestOf(byOwner.get(anc)!) : undefined;
             const af = rec ? absOfTag(d, fileOfSrc(rec.src)) : '';
@@ -1923,7 +1948,8 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
               } else unmounted += `; ${anc}, the nearest component above it the ledger recorded: ${m.why ?? 'not mounted'}`;
             }
           }
-          if (!how) {
+          // Counted once: on the try that decides it (not a first try held for its retry).
+          if (!how && !(mode === 'first' && wantsRetry)) {
             note(r, `not mounted: ${unmounted}`);
             // Why, grouped: what its component threw, or the condition inside it the drawing didn't meet.
             const threw = unmounted.match(/failed to render: ([^;]*)/)?.[1];
@@ -1940,16 +1966,17 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
             }
           }
         }
+        if (!how && mode === 'first' && wantsRetry) { firstWhy.set(r.id, unmounted); later.push({ r, u }); return; }
         if (!how) {
           const html = markupOf(code, r.e, r.id);
-          if (!html) { out(`not drawn: no element at ${r.e.line}:${r.e.col} in its file as it is now${unmounted ? `; not mounted: ${unmounted}` : ''}`); continue; }
+          if (!html) { out(`not drawn: no element at ${r.e.line}:${r.e.col} in its file as it is now${unmounted ? `; not mounted: ${unmounted}` : ''}`); return; }
           if (!loaded) await visit(u);
           if (await inPage<boolean>(page, SHOW_MARKUP, html)) {
             await inPage(page, MARK_DRAWN, r.id);
             how = 'markup';
           }
         }
-        if (!how) { out(`not drawn: its markup didn't show on the page; not mounted: ${unmounted}`); continue; }
+        if (!how) { out(`not drawn: its markup didn't show on the page; not mounted: ${unmounted}`); return; }
         const file = `${r.id}.png`;
         const content = await inPage(page, OWN_CONTENT, r.id).catch(() => null);
         let cap = await capture(page, r.id, path.join(o.dir, file));
@@ -1962,7 +1989,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
           placeholder = (await inPage<string | null>(page, NO_SIZE, r.id).catch(() => null)) ?? '';
           if (placeholder) cap = await capture(page, r.id, path.join(o.dir, file));
         }
-        if (!cap) { out(`not drawn: the drawing had no size to photograph (${placeholder || "it wasn't on the page"})${unmounted ? `; not mounted: ${unmounted}` : ''}`); continue; }
+        if (!cap) { out(`not drawn: the drawing had no size to photograph (${placeholder || "it wasn't on the page"})${unmounted ? `; not mounted: ${unmounted}` : ''}`); return; }
         // A mount found by its exact source tag, and not blank, counts as seeing the element (seenInApp).
         shots[r.id] = { file, page: u, matchScore: 1, drawn: how, ...(how === 'mount' && exact ? { exact: true } : {}), box: cap.box, content, ...(cap.blank ? { blank: true } : {}), ...(placeholder ? { placeholder } : {}), ...(isolated ? { source: 'isolated' } : {}), ...(how === 'mount' && forced.length ? { forced } : {}) };
         drawnIds.push(r.id);
@@ -1977,7 +2004,13 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         out(`not drawn: the page failed while drawing (${String(e?.message ?? e).split('\n')[0]!.slice(0, 80)})${unmounted ? `; not mounted: ${unmounted}` : ''}`);
         if (/closed|crash|Target/i.test(String(e?.message))) await relaunch();
       }
-    }
+    };
+    const t0 = Date.now();
+    for (const q of queue) await drawOne(q, 'first');
+    const firstMs = Date.now() - t0, t1 = Date.now();
+    for (const q of later) await drawOne(q, 'retry');
+    const secs = (ms: number) => `${Math.round(ms / 100) / 10}s`;
+    o.log(`  drawing time: ${secs(firstMs)} on ${queue.length} first tries, ${secs(Date.now() - t1)} on ${later.length} held for a retry${Date.now() > stop && later.length ? ' (out of time: the rest drawn as markup from their first try)' : ''}`);
     if (tally.size) o.log(`  drawings: ${[...tally].sort((a, b) => b[1] - a[1]).map(([w, k]) => `${k} ${w}`).join('; ')}`);
     const top = (m: Map<string, number>) => [...m].sort((a, b) => b[1] - a[1]).slice(0, 10);
     // Each thrown cause with where it was thrown (the first frame in the app's code): a store, a context, a hook.

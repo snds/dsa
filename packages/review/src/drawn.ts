@@ -34,6 +34,22 @@ export function gateProps(e: ElementEval): Record<string, string | boolean> {
   return out;
 }
 
+/**
+ * The member of a union type whose `tag` field is `value` (`{ t: 'ctx'; x: number } | { t: 'panelMenu' }`),
+ * shaped: through aliases and `| null`. Null when the type has no such member.
+ */
+function memberOf(t: any, types: Map<string, any>, tag: string, value: unknown, depth = 0): Record<string, Val> | null {
+  if (!t || depth > 3) return null;
+  if (t.type === 'TSTypeReference' && t.typeName?.type === 'Identifier' && types.has(t.typeName.name)) return memberOf(types.get(t.typeName.name), types, tag, value, depth + 1);
+  if (t.type === 'TSUnionType') { for (const x of t.types) { const m = memberOf(x, types, tag, value, depth + 1); if (m) return m; } return null; }
+  const l = literalOf(t, types);
+  const f = l?.members?.find((m: any) => m.type === 'TSPropertySignature' && m.key?.name === tag);
+  const ft = f?.typeAnnotation?.typeAnnotation;
+  if (ft?.type !== 'TSLiteralType' || ft.literal.value !== value) return null;
+  const v = objectOf(l, types, 0);
+  return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, Val> : null;
+}
+
 /** A value that passes a truthiness test: '' → 'a', 0 → 1, false → true, null → {}. */
 const truthy = (v: Val): Val => v === '' ? 'a' : v === 0 ? 1 : v === false ? true : v === null ? {} : v;
 
@@ -990,6 +1006,17 @@ export function stateSets(gates: { test: string; negated: boolean; component?: s
         const v = fn ? usageOf(fn.body, (m) => m?.type === 'Identifier' && m.name === len.name, 0, ast) : undefined;
         want.set(len.name, it !== undefined ? [it] : Array.isArray(v) && v.length && v[0] !== '' ? v.slice(0, 1) : ['a']);
         return;
+      }
+      // A tag on a state that holds one of several shapes (`float?.t === 'panelMenu'`): that shape, from the
+      // union member of its type whose tag is the literal, else just the tag.
+      if (e.type === 'BinaryExpression' && /^[!=]==?$/.test(e.operator) && e.operator.startsWith('=') === truth) {
+        const mem = [e.left, e.right].find((x: any) => /MemberExpression$/.test(x?.type ?? '') && !x.computed && x.object?.type === 'Identifier' && known(x.object.name) && x.property?.name);
+        const lit = mem === e.left ? e.right : e.left;
+        if (mem && /^(String|Numeric|Boolean)Literal$/.test(lit?.type ?? '')) {
+          const tag = mem.property.name as string;
+          want.set(mem.object.name, { ...(memberOf(typed(mem.object.name), types ?? new Map(), tag, lit.value) ?? {}), [tag]: lit.value });
+          return;
+        }
       }
       if (e.type === 'BinaryExpression' && /^[!=]==?$/.test(e.operator)) {
         const [id, lit] = e.left.type === 'Identifier' ? [e.left, e.right] : [e.right, e.left];

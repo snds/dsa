@@ -194,3 +194,10 @@ test('the props a component hands a helper on a line, and a value of their decla
   assert.deepEqual(typedProp(code, 'Compare', 'quotes', '/app/src/Compare.tsx', read), [{ id: '', price: { n: 0 } }]);
   assert.equal(typedProp(code, 'Compare', 'label', '/app/src/Compare.tsx', read), 'a');
 });
+
+test('a tag on a state holding one of several shapes sets it to that shape: the union member with the tag', () => {
+  const code = `import { useState } from 'react';\ntype Float = { t: 'ctx'; x: number; y: number } | { t: 'panelMenu'; panel: string };\nexport function Grid() {\n  const [float, setFloat] = useState<Float | null>(null);\n  return <div>{float?.t === 'panelMenu' && <b />}{float?.t === 'ctx' && <i />}</div>;\n}\n`;
+  const value = (test: string) => stateSets([{ test, negated: false, component: 'Grid', file: 'g.tsx' }], () => code)[0]!.slots[0]!.value;
+  assert.deepEqual(value("float?.t === 'panelMenu'"), { t: 'panelMenu', panel: '' });
+  assert.deepEqual(value("float?.t === 'ctx'"), { t: 'ctx', x: 0, y: 0 });
+});

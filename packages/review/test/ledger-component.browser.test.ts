@@ -117,6 +117,8 @@ test('the ledger: an element its component rendered without is drawn with the co
   const cheap = idx.shots[of(/Cheapest/)!.id];
   assert.deepEqual([cheap?.drawn, cheap?.exact], ['mount', true], all);
   assert.match(all, /after filling quotes, which it passes to cheapest/);
+  // Every first try before a retry: the helper's fill is a retry, given the time left after first tries.
+  assert.match(all, /drawing time: [\d.]+s on \d+ first tries, [\d.]+s on [1-9]\d* held for a retry/);
   // What changed since the last run (none before this one): every drawing is new.
   assert.match(all, /drawings changed since the last run: \+[1-9]\d* now drawn from the app's code/);
   assert.ok(idx.drawChanges?.library?.gained?.includes(of(/Cheapest/)!.id), JSON.stringify(idx.drawChanges));
