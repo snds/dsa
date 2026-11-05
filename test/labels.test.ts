@@ -131,6 +131,12 @@ describe("history: a commit that swapped a raw element for a system component", 
     expect(r.map((p) => [p.line, p.rawTag, p.component, p.props])).toEqual([[4, "span", "Badge", { size: "default", variant: "default" }], [5, "button", "Button", { size: "default", variant: "ghost" }]]);
   });
 
+  it("a component imported through the app's owned copy of the system counts by its name", () => {
+    const before = `export const A = () => (\n  <button className="h-8">Save</button>\n);\n`;
+    const after = `import { Button } from "~/components/ui/button";\nimport { Fancy } from "~/components/ui/fancy";\nexport const A = () => (\n  <Button size="sm">Save</Button>\n);\n`;
+    expect(pairs(before, after, [{ oldStart: 2, oldLines: 1, newStart: 1, newLines: 4 }]).map((p) => [p.component, p.props])).toEqual([["Button", { size: "sm", variant: "default" }]]);
+  });
+
   it("an element whose child changed (an icon swap) is not a label", () => {
     const before = `${imp}\nexport const A = () => (\n  <button onClick={go}>\n    <Icon name="edit" />\n  </button>\n);\n`;
     const after = `${imp}\nexport const A = () => (\n  <button onClick={go}>\n    <Icon name="pencil" size="sm" />\n  </button>\n);\n`;

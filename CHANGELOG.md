@@ -70,7 +70,9 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   are now read from both versions of the file (`historyPairsInFile`): a removed raw element pairs with an
   added system component whose host tag matches, nearest first by position in the hunk, one to one.
   Render slots don't count, an element still there afterwards (only a child changed) is not a label,
-  dynamic props make a pair unsure, and vendored and non-product files are skipped.
+  dynamic props make a pair unsure, and vendored and non-product files are skipped. A component imported
+  through the app's owned copy of the system (`~/components/ui/button`) counts when its name is one of the
+  system's components, since older code often imported it that way.
 - Props compare by one rule on both sides (`canonicalProps`): each component's own defaults filled in,
   from its cva defaultVariants. History labels store them filled; `dsa bench` reads them from the run's
   `signatures.json` (`--signatures`, or the data folder's).

@@ -57,15 +57,28 @@ function walk(node: any, fn: (n: any) => void) {
   }
 }
 
-/** Local names imported from the system's packages, to the component each one is. */
-export function systemImports(src: string, packages: string[]): Map<string, string> {
+/**
+ * The app's own copy of the system's components (shadcn-style owned source: ~/components/ui/button,
+ * @/components/ui/button). Older code often imported the system through it, so history reads it as the
+ * system when the imported name is one of the system's components.
+ */
+export const OWNED_UI = /^(\.{1,2}\/|[~@]\/)(.*\/)?components\/ui(\/|$)/;
+
+/** Local names imported from the system's packages (or, with `owned`, the app's owned copy), to the component each one is. */
+export function systemImports(src: string, packages: string[], owned?: { pattern: RegExp; names: Set<string> }): Map<string, string> {
   const out = new Map<string, string>();
   let ast: any;
   try { ast = parseTsx(src); } catch { return out; }
   const fromSystem = (m: string) => packages.some((p) => m === p || m.startsWith(`${p}/`));
   for (const n of ast.program.body) {
-    if (n.type !== "ImportDeclaration" || !fromSystem(n.source.value)) continue;
-    for (const s of n.specifiers) if (s.type === "ImportSpecifier") out.set(s.local.name, s.imported.name ?? s.imported.value);
+    if (n.type !== "ImportDeclaration") continue;
+    const sys = fromSystem(n.source.value), own = !sys && owned?.pattern.test(n.source.value);
+    if (!sys && !own) continue;
+    for (const s of n.specifiers) {
+      if (s.type !== "ImportSpecifier") continue;
+      const name = s.imported.name ?? s.imported.value;
+      if (sys || owned!.names.has(name)) out.set(s.local.name, name);
+    }
   }
   return out;
 }
@@ -245,9 +258,11 @@ function elementsOf(src: string): { node: any; line: number; openEnd: number; na
  * - A raw element that is still there afterwards (a raw element of its tag at its place in the new
  *   version: only a child changed, e.g. an icon swap) is not a label.
  * - Props are literal or the pair is skipped, with the component's defaults filled in (canonicalProps).
+ * - A component imported from the app's owned copy of the system (OWNED_UI) counts when its name is one
+ *   of the system's components.
  */
 export function historyPairsInFile(o: { file: string; before: string; after: string; hunks: Hunk[]; packages: string[]; targets: Map<string, StripTarget> }): HistoryPair[] {
-  const imports = systemImports(o.after, o.packages);
+  const imports = systemImports(o.after, o.packages, { pattern: OWNED_UI, names: new Set(o.targets.keys()) });
   const inOld = (line: number) => o.hunks.find((h) => h.oldLines > 0 && line >= h.oldStart && line < h.oldStart + h.oldLines);
   const inNew = (line: number) => o.hunks.find((h) => h.newLines > 0 && line >= h.newStart && line < h.newStart + h.newLines);
   const before = elementsOf(o.before), after = elementsOf(o.after);
