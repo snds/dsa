@@ -8,7 +8,9 @@
  * - its size on the page;
  * - its owner component: the nearest component above it, by name, and that component's props;
  * - each component above it, outermost first, with the values of its state hooks, in React's order, each
- *   with its name when the tagger named it (`__dsaStateName`, below).
+ *   with its name when the tagger named it (`__dsaStateName`, below);
+ * - the value each context provider above it gives, innermost first, for contexts the tagger named
+ *   (`__dsaName`, "file#Name"), so a drawing can give a component the value the app gave it.
  *
  * Values are copied with limits: functions become {"__dsa":"fn"}, a Set or Map {"__dsa":"set"|"map"},
  * React elements and DOM nodes null; depth 4, five items per list, 30 keys per object, 200 characters
@@ -70,13 +72,22 @@ export const LEDGER_RUNTIME = `(() => {
     const chain = [];
     for (let a = f.return; a && chain.length < 12; a = a.return) if (isComp(a) && nameOf(a.type)) chain.push(a);
     const box = el.getBoundingClientRect ? el.getBoundingClientRect() : { width: 0, height: 0 };
+    const contexts = [];
+    for (let a = f.return; a && contexts.length < 8; a = a.return) {
+      if (a.tag !== 10) continue;
+      const c = a.type && (a.type._context || a.type);
+      const nm = c && c.__dsaName;
+      if (nm && !contexts.some((x) => x.name === nm)) { const t = take(a.memoizedProps && a.memoizedProps.value); contexts.push({ name: nm, value: t.value, cut: t.cut }); }
+    }
     const owner = chain[0];
     const props = owner ? take(owner.memoizedProps) : null;
     const rec = {
       src, url: here, at: Date.now(), w: Math.round(box.width), h: Math.round(box.height),
       owner: owner ? { name: nameOf(owner.type), props: props.value, cut: props.cut } : null,
       ancestors: chain.slice().reverse().map((a) => ({ name: nameOf(a.type), hooks: a.tag === 1 ? [] : hooksOf(a).map((h) => { const t = take(h.memoizedState); const nm = names.get(h.queue.dispatch); return nm ? { ...t, name: nm.name } : t; }) })),
+      ...(contexts.length ? { contexts } : {}),
     };
+    if (JSON.stringify(rec).length > 24000) delete rec.contexts;
     if (JSON.stringify(rec).length > 24000) { rec.ancestors = rec.ancestors.map((a) => ({ name: a.name, hooks: [] })); if (rec.owner) { rec.owner.props = null; rec.owner.cut = true; } }
     out.push(rec);
     L.all.push(rec);

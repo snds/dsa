@@ -485,6 +485,13 @@ export function providerFor(d: DrawWith, message: string, need: string, from: st
       if (hf) why.push(`no provider or createContext in ${short(hf)}`);
     }
   }
+  // Read straight off a context (`useContext(StoreCtx)`): that context, given a value.
+  const direct = need.match(/a provider for ([A-Z][\w$]*)/)?.[1];
+  if (!file && !hook && direct) {
+    const cf = find(direct);
+    if (cf && inRoot(cf) && new RegExp(`\\b${direct.replace(/\$/g, '\\$')}\\s*(?::[^=]+)?=\\s*(?:React\\.)?createContext\\b`).test(read(cf))) return { name: direct, file: cf, context: true };
+    why.push(cf ? `${direct} in ${short(cf)} isn't made by createContext there` : `no declaration of ${direct}`);
+  }
   if (!name || !file) return null;
   if (!inRoot(file)) { why.push(`${short(file)} is outside the scan root`); return null; }
   return { name, file };
@@ -532,8 +539,12 @@ function setPath(o: Record<string, unknown>, at: string[], v: unknown) {
 
 /** The app's source files with their text, read once: where a hook or function's callers are looked for. */
 const textIndex = new WeakMap<DrawWith, [string, string][]>();
-/** A component in the app that calls `name(` (a hook, or a function that returns JSX), outside its own file. */
-function callerOf(d: DrawWith, name: string, own: string): { abs: string; name: string; code: string } | null {
+/**
+ * Components in the app that call `name(` (a hook, or a function that returns JSX), outside its own file, six
+ * at most: by its name, or by the name a file imports it under (`import { useX as useY }`). A barrel or a
+ * re-export keeps the name, so callers through one are found the same way. With how many files were read.
+ */
+function callersOfFn(d: DrawWith, name: string, own: string): { found: { abs: string; name: string; code: string }[]; read: number } {
   let idx = textIndex.get(d);
   if (!idx) {
     idx = [];
@@ -543,13 +554,17 @@ function callerOf(d: DrawWith, name: string, own: string): { abs: string; name: 
     }
     textIndex.set(d, idx);
   }
-  const call = new RegExp(`\\b${name.replace(/[$]/g, '\\$')}\\s*\\(`);
+  const esc = name.replace(/[$]/g, '\\$');
+  const found: { abs: string; name: string; code: string }[] = [];
   for (const [f, code] of idx) {
-    if (f === own || !call.test(code)) continue;
-    const c = parentComponent(code, name, 0);
-    if (c) return { abs: f, name: c, code };
+    if (f === own || !code.includes(name)) continue;
+    const local = code.match(new RegExp(`\\b${esc}\\s+as\\s+([\\w$]+)`))?.[1] ?? name;
+    if (!new RegExp(`\\b${local.replace(/[$]/g, '\\$')}\\s*\\(`).test(code)) continue;
+    const c = parentComponent(code, local, 0);
+    if (c && !found.some(x => x.name === c && x.abs === f)) found.push({ abs: f, name: c, code });
+    if (found.length >= 6) break;
   }
-  return null;
+  return { found, read: idx.length };
 }
 
 /** An app's tests and stories, read once: each file's path and what it imports, by name without its extension. */
@@ -664,7 +679,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   const recorded: LedgerRec[] = [];
   let ledgerCover: { own: number; component: number; file: number; none: number; tests: number } | null = null;
   let ledgerGaps: { file: string; elements: number; test: string | null; story: string | null; when?: string; unused?: boolean }[] | null = null;
-  let drawCauses: { threw: [string, number][]; unmet: [string, number][] } | null = null;
+  let drawCauses: { threw: [string, number, string[]][]; unmet: [string, number][] } | null = null;
   // Photos of the app's own uses of system components (shots/index.json "uses"): up to 3 per component, 150 in all.
   const usesShot: Record<string, any> = {};
   const usesPer = new Map<string, number>();
@@ -1509,8 +1524,10 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
    * An element its mounted component didn't show: click what the scan traced as opening it, then each of the
    * drawing's own toggles, tabs and menus (never one that saves, deletes or leaves), looking after each.
    */
-  async function revealInMount(r: Target, find: () => Promise<any>, remount: () => Promise<Mounted>): Promise<{ hit: any; after: string; tried: string }> {
+  async function revealInMount(r: Target, find: () => Promise<any>, remount: () => Promise<Mounted>): Promise<{ hit: any; after: string; tried: string; reverted?: string[] }> {
     const names: string[] = [];
+    // State set in the drawing that the component then set back (a popover's onOpenChange, an effect).
+    let reverted: string[] = [];
     // Last, on a fresh drawing (the clicks below changed this one): its conditions on the drawing's own
     // state, set through React, level by level.
     const byState = async () => {
@@ -1524,6 +1541,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       const what = `setting ${describeSets(sets)}`;
       names.push(what);
       const hit = await find();
+      if (!hit) reverted = (await inPage<SetResult>(page, SET_STATE, { sets, within: '#dsa-mount', check: true }).catch(() => NONE_SET)).off.filter(Boolean);
       return hit ? { hit, after: what, tried: '' } : null;
     };
     // A few seconds per element: drawing every element left must not cost more than the live pass did.
@@ -1565,7 +1583,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     }
     const st = await byState();
     if (st) return st;
-    return { hit: null, after: '', tried: names.slice(0, 6).join(', ') + (names.length > 6 ? ', …' : '') };
+    return { hit: null, after: '', tried: names.slice(0, 6).join(', ') + (names.length > 6 ? ', …' : ''), ...(reverted.length ? { reverted } : {}) };
   }
 
   async function drawRest(d: DrawWith, at: string) {
@@ -1600,6 +1618,12 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       }
       return fillProps(shaped, out) as Record<string, unknown>;
     };
+    // The values context providers gave, by the context's tagged name ("file#Name"): a whole copy first.
+    const ctxValues = new Map<string, { value: unknown; cut: boolean }>();
+    for (const list of Object.values(ledgerNow)) for (const x of list) for (const c of x.contexts ?? []) {
+      const have = ctxValues.get(c.name);
+      if (!have || (have.cut && !c.cut)) ctxValues.set(c.name, { value: c.value, cut: c.cut });
+    }
     // A list prop's item, from any record of the component where that list had one.
     const itemOf = (name: string) => (prop: string) => {
       for (const x of byOwner.get(name) ?? []) { const v = (x.owner!.props as any)?.[prop]; if (Array.isArray(v) && v.length && v[0] != null) return v[0]; }
@@ -1647,7 +1671,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     }
     o.log(`  drawing ${remaining.length} not reached live: ${canMount ? "from the app's code where its component can be mounted, else as markup" : "as markup only (this build doesn't serve /@dsa/mount; add dsaTag to its Vite dev build to draw from the app's code)"}`);
     const tally = new Map<string, number>();
-    const causes = { threw: new Map<string, number>(), unmet: new Map<string, number>() };
+    const causes = { threw: new Map<string, number>(), unmet: new Map<string, number>(), at: new Map<string, Map<string, number>>() };
     // The same, for elements with a record of their own (a test or a person saw them render): why each that
     // was recorded still wasn't drawn from the app's code.
     const ownTally = new Map<string, number>();
@@ -1680,6 +1704,12 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       let forced: string[] = [];
       // A value filled after the component read a field off nothing (`rows = []`), said with the drawing.
       let filled = '';
+      // Where its component threw, for the causes table.
+      let threwAt = '';
+      // Contexts given the value the app gave them (recorded), said with the drawing.
+      const ctxFrom: string[] = [];
+      // State the component set back after the drawing set it.
+      let setBack: string[] = [];
       let exact = false;
       let unmounted = '';
       let providers = 0;
@@ -1732,8 +1762,20 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
             const p = parentComponent(code, r.e.within, r.e.line);
             if (p) parent = p;
             else {
-              const c = callerOf(d, r.e.within, abs);
-              if (c) { host = { files: filesOf(c.abs), file: tagOfFile(d, c.abs) ?? r.e.file, code: c.code, abs: c.abs }; parent = c.name; hostNote = `, which calls ${r.e.within}, in ${host.file}`; }
+              // Callers the ledger recorded first (their props are real), then the rest; the first that mounts.
+              const { found, read } = callersOfFn(d, r.e.within, abs);
+              const order = [...found.filter(c => byOwner.has(c.name)), ...found.filter(c => !byOwner.has(c.name))];
+              const failed: string[] = [];
+              for (const c of order.slice(0, 4)) {
+                host = { files: filesOf(c.abs), file: tagOfFile(d, c.abs) ?? r.e.file, code: c.code, abs: c.abs };
+                parent = c.name;
+                hostNote = `, which calls ${r.e.within}, in ${host.file}${byOwner.has(c.name) ? ', with its recorded props' : ''}`;
+                const probe = await mountAs(c.name);
+                if (probe.ok) break;
+                failed.push(`${c.name} (${host.file}): ${(probe.why ?? 'not mounted').slice(0, 80)}`);
+              }
+              if (!order.length) hostNote = `; no component calls ${r.e.within} (searched ${read} files of the app by its name and by names it's imported under)`;
+              else if (failed.length === Math.min(order.length, 4)) hostNote += `; callers tried: ${failed.join('; ')}`;
             }
           }
           const first = parent || r.e.within;
@@ -1759,9 +1801,25 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
             try { pcode = fs.readFileSync(pv.file, 'utf8'); } catch { break; }
             const hook = need.match(/what (use[A-Z][\w$]*) reads/)?.[1] ?? said.threw.message.match(/\b(use[A-Z][\w$]*)\b/)?.[1] ?? '';
             // A bare context: its value shaped by how the component reads what the hook returns.
-            const props = pv.context ? { value: hookValue(sourceOfThrow(d, said.threw, code, parent || r.e.within), said.threw.component || parent || r.e.within, hook) ?? {} } : mountProps({ ...r.e, within: pv.name, reach: undefined } as any, pcode);
+            // A bare context: the value a provider gave it in the app (the ledger), over one shaped by how the
+            // component reads what the hook returns.
+            const shapedCtx = pv.context ? hookValue(sourceOfThrow(d, said.threw, code, parent || r.e.within), said.threw.component || parent || r.e.within, hook) ?? {} : null;
+            const recCtx = pv.context ? ctxValues.get(`${tagOfFile(d, pv.file) ?? ''}#${pv.name}`) : undefined;
+            const props = pv.context ? { value: recCtx ? fillProps(shapedCtx, recCtx.value) : shapedCtx } : mountProps({ ...r.e, within: pv.name, reach: undefined } as any, pcode);
+            if (recCtx) ctxFrom.push(pv.name);
             wraps.push({ files: filesOf(pv.file), file: tagOfFile(d, pv.file) ?? path.relative(d.root, pv.file).split(path.sep).join('/'), name: pv.name, props, ...(pv.context ? { context: true } : {}) });
             said = await mountAs(parent || r.e.within);
+          }
+          // Still throwing, and its record lists the providers above it: each wrapped around it with the value
+          // the app gave it (contexts the tagger named), once.
+          if (!said.ok && said.threw && stateRec?.contexts?.length) {
+            const add = stateRec.contexts.filter(c => !wraps.some(w => w.context && `${w.file}#${w.name}` === c.name)).slice(0, 6);
+            for (const c of add) {
+              const [cf, cn] = [c.name.slice(0, c.name.lastIndexOf('#')), c.name.slice(c.name.lastIndexOf('#') + 1)];
+              const ca = absOfTag(d, cf);
+              if (ca && cn) { wraps.push({ files: filesOf(ca), file: cf, name: cn, props: { value: c.value }, context: true }); ctxFrom.push(cn); }
+            }
+            if (add.length) { const again = await mountAs(parent || r.e.within); if (again.ok || again.threw?.message !== said.threw.message) said = again; }
           }
           // A read off nothing in its own props: that value filled with the kind the read needs, and one more try.
           if (!said.ok && said.threw && !host.abs.includes('node_modules')) {
@@ -1774,7 +1832,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
             }
           }
           providers = said.providers ?? 0;
-          const label = parent ? `${r.e.within} (drawn by ${parent}, ${hostNote ? `the component${hostNote}` : 'the component around it'})` : r.e.within;
+          const label = parent ? `${r.e.within} (drawn by ${parent}, ${hostNote ? `the component${hostNote}` : 'the component around it'})` : `${r.e.within}${hostNote}`;
           if (said.ok) {
             let hit = early ?? await find();
             // The state recorded with it, set in the drawing, before its controls are tried.
@@ -1785,12 +1843,17 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
             }
             // Behind a state inside it: the clicks the scan traced, then the drawing's own toggles, tabs and menus.
             let tried = '';
-            if (!hit) { const rv = await revealInMount(r, find, () => mountAs(parent || r.e.within!)); hit = rv.hit; revealed = rv.after; tried = rv.tried; }
+            let back: string[] = [];
+            if (!hit) { const rv = await revealInMount(r, find, () => mountAs(parent || r.e.within!)); hit = rv.hit; revealed = rv.after; tried = rv.tried; back = rv.reverted ?? []; }
             if (hit) { how = 'mount'; exact = Boolean(hit.exact); drawnBy = parent; wrapped = wraps.map(w => w.name).join(', '); isolated = withRecorded && exact; }
-            else unmounted = `${label} mounted${providers ? ` with ${providers} of the app's providers` : ''}, but the element wasn't in what it drew (a condition inside it wasn't met${tried ? `; clicked ${tried} in it` : ''})`;
+            else {
+              unmounted = `${label} mounted${providers ? ` with ${providers} of the app's providers` : ''}, but the element wasn't in what it drew (a condition inside it wasn't met${tried ? `; clicked ${tried} in it` : ''})${back.length ? `; ${back.join(', ')} ${back.length === 1 ? 'was' : 'were'} set, then set back by the component: it opens and closes itself (its onOpenChange or an effect)` : ''}`;
+              setBack = back;
+            }
           } else {
             if (said.threw) need = whatItNeeded(sourceOfThrow(d, said.threw, code, parent || r.e.within), said.threw.component || parent || r.e.within, said.threw.message);
             // "X is not defined" where its own file never declares or imports X: the app's code, not a missing value.
+            threwAt = said.threw?.frame ?? '';
             const undef = (said.why ?? '').match(/\b([A-Za-z_$][\w$]*) is not defined\b/)?.[1];
             if (undef && !new RegExp(`\\bimport\\b[^;]*\\b${undef}\\b|\\b(?:const|let|var|function|class)\\s+${undef}\\b|[{,]\\s*${undef}\\s*[,}=]`).test(code)) said.why = `${said.why} (${r.e.file} uses ${undef} but never declares or imports it: a bug in the app's code, not a value dsa can give it)`;
             unmounted = `${label}: ${said.why ?? 'no reason given'}${need ? `; it needed ${need}` : ''}${wraps.length ? ` (wrapped in ${wraps.map(w => w.name).join(', ')} from the source)` : ''}${searched.length ? `; provider search: ${searched.join('; ')}` : ''}`;
@@ -1824,11 +1887,15 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
             note(r, `not mounted: ${unmounted}`);
             // Why, grouped: what its component threw, or the condition inside it the drawing didn't meet.
             const threw = unmounted.match(/failed to render: ([^;]*)/)?.[1];
-            if (threw) causes.threw.set(threw.replace(/\s+/g, ' ').slice(0, 120), (causes.threw.get(threw.replace(/\s+/g, ' ').slice(0, 120)) ?? 0) + 1);
+            if (threw) {
+              const k = threw.replace(/\s+/g, ' ').slice(0, 120);
+              causes.threw.set(k, (causes.threw.get(k) ?? 0) + 1);
+              if (threwAt) { const at = causes.at.get(k) ?? causes.at.set(k, new Map()).get(k)!; at.set(threwAt, (at.get(threwAt) ?? 0) + 1); }
+            }
             else if (/wasn't in what it drew/.test(unmounted)) {
               const own = (r.e.reach?.gates ?? []).filter((g: any) => !g.component || g.component === r.e.within);
               const g = own[own.length - 1] ?? (r.e.reach?.gates ?? []).slice(-1)[0];
-              const k = g ? `${g.negated ? 'not ' : ''}“${g.test.slice(0, 60)}”${(g as any).component ? ` in ${(g as any).component}` : ''}` : 'no condition traced';
+              const k = (g ? `${g.negated ? 'not ' : ''}“${g.test.slice(0, 60)}”${(g as any).component ? ` in ${(g as any).component}` : ''}` : 'no condition traced') + (setBack.length ? ` (set, then set back: it opens and closes itself)` : '');
               causes.unmet.set(k, (causes.unmet.get(k) ?? 0) + 1);
             }
           }
@@ -1862,7 +1929,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         remaining = remaining.filter(x => x.id !== r.id);
         n++;
         if (ownNow && isolated) ownIsolated++;
-        const msg = how === 'mount' ? `drawn from the app's code${filled ? ` (after filling ${filled}, which it read a field off)` : ''}${isolated ? ` with the props the app passed it (recorded): an isolated render${forced.length ? ` (recorded props, condition forced: ${forced.join(', ')})` : ''}` : forced.length ? ` (condition forced: ${forced.join(', ')})` : ''} (${drawnBy ? `${drawnBy}, the component around it` : 'its component'}, in the app's build${providers ? `, with ${providers} of its providers` : ''}${wrapped ? `, ${wrapped} found in the source` : ''}${revealed ? `, after ${revealed.startsWith('setting ') ? revealed : `clicking ${revealed}`} in it` : ''})` : `drawn as markup only; not mounted: ${unmounted}`;
+        const msg = how === 'mount' ? `drawn from the app's code${filled ? ` (after filling ${filled}, which it read a field off)` : ''}${ctxFrom.length ? ` (with the recorded value of ${[...new Set(ctxFrom)].join(', ')})` : ''}${isolated ? ` with the props the app passed it (recorded): an isolated render${forced.length ? ` (recorded props, condition forced: ${forced.join(', ')})` : ''}` : forced.length ? ` (condition forced: ${forced.join(', ')})` : ''} (${drawnBy ? `${drawnBy}, the component around it` : 'its component'}, in the app's build${providers ? `, with ${providers} of its providers` : ''}${wrapped ? `, ${wrapped} found in the source` : ''}${revealed ? `, after ${revealed.startsWith('setting ') ? revealed : `clicking ${revealed}`} in it` : ''})` : `drawn as markup only; not mounted: ${unmounted}`;
         count(placeholder ? `shown outlined (no size: ${short(placeholder)})` : how === 'mount' ? "drawn from the app's code" : `markup only (not mounted: ${short(unmounted)})`);
         o.log(`  ${where(r)} ${msg}${placeholder ? ` · shown outlined, it had no size: ${placeholder}` : ''}${cap.blank ? ' · blank' : ''}`);
       } catch (e: any) {
@@ -1873,9 +1940,11 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     }
     if (tally.size) o.log(`  drawings: ${[...tally].sort((a, b) => b[1] - a[1]).map(([w, k]) => `${k} ${w}`).join('; ')}`);
     const top = (m: Map<string, number>) => [...m].sort((a, b) => b[1] - a[1]).slice(0, 10);
-    if (causes.threw.size) o.log(`  drawings, its component failed to render (top ${Math.min(10, causes.threw.size)} of ${causes.threw.size} causes): ${top(causes.threw).map(([w, k]) => `${k} × ${w}`).join(' | ')}`);
+    // Each thrown cause with where it was thrown (the first frame in the app's code): a store, a context, a hook.
+    const atOf = (w: string) => [...(causes.at.get(w) ?? [])].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([f]) => f);
+    if (causes.threw.size) o.log(`  drawings, its component failed to render (top ${Math.min(10, causes.threw.size)} of ${causes.threw.size} causes): ${top(causes.threw).map(([w, k]) => `${k} × ${w}${atOf(w).length ? ` (thrown at ${atOf(w).join(', ')})` : ''}`).join(' | ')}`);
     if (causes.unmet.size) o.log(`  drawings, mounted but the element wasn't in what it drew (top ${Math.min(10, causes.unmet.size)} of ${causes.unmet.size} conditions): ${top(causes.unmet).map(([w, k]) => `${k} × ${w}`).join(' | ')}`);
-    drawCauses = { threw: top(causes.threw), unmet: top(causes.unmet) };
+    drawCauses = { threw: top(causes.threw).map(([w, k]) => [w, k, atOf(w)] as [string, number, string[]]), unmet: top(causes.unmet) };
     if (ownCount) o.log(`  ledger: of ${ownCount} with a record of their own, ${ownIsolated} drawn as isolated renders; all: ${[...ownTally].sort((a, b) => b[1] - a[1]).map(([w, k]) => `${k} ${w}`).join('; ')}`);
     // Known only from the app's tests: drawn from the code with what the tests gave them, never live (a test names no page).
     if (ledgerCover?.tests) o.log(`  ledger: ${ledgerCover.tests} known only from the app's tests: drawn isolated where they could be, not live (a test's record names no page to open)`);
@@ -2653,7 +2722,7 @@ const HIDE_COVER = `(sel) => {
 const RESTORE_COVER = `document.querySelectorAll('[data-dsa-hid]').forEach((x) => { const s = x.getAttribute('data-dsa-hid'); if (s) x.setAttribute('style', s); else x.removeAttribute('style'); x.removeAttribute('data-dsa-hid'); })`;
 
 /** What /@dsa/mount answers (tag/index.ts). */
-type Mounted = { ok: boolean; why?: string; providers?: number; threw?: { message: string; component: string; src?: string } };
+type Mounted = { ok: boolean; why?: string; providers?: number; threw?: { message: string; component: string; src?: string; /** The first stack frame in the app's own code, "/path:line" as served. */ frame?: string } };
 
 /**
  * Recorded values over shaped ones, never a null where the shape has a value: objects merged key by key, a

@@ -23,6 +23,8 @@ export interface LedgerRec {
   owner: { name: string; props: unknown; cut: boolean } | null;
   /** The components above it, outermost first, with their state hooks' values in React's order. */
   ancestors: { name: string; hooks: Copied[] }[];
+  /** The value each named context's provider above it gave, innermost first ("file#Name"). */
+  contexts?: { name: string; value: unknown; cut: boolean }[];
 }
 interface Stored { files: Record<string, { hash: string; recs: Record<string, LedgerRec[]> }> }
 

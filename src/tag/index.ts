@@ -194,7 +194,7 @@ function tagFile(code: string, file: string, o: TagOptions, lean: boolean): { co
   const tsOnly = /\.ts$/.test(clean) && !/\.d\.ts$/.test(clean);
   // No JSX: nothing to tag, unless it makes a context the mount may need to provide, or keeps state (kept below).
   if (!(SOURCE.test(clean) || tsOnly) || (!code.includes('<') && !/\bcreateContext\b|\buse(State|Reducer)\b/.test(code))) return null;
-  if (tsOnly && !/\buse(State|Reducer)\b/.test(code)) return null;
+  if (tsOnly && !/\buse(State|Reducer)\b|\bcreateContext\b/.test(code)) return null;
   const rel = tagFileOf(clean, o);
   if (!rel) return null;
   let ast: any;
@@ -241,12 +241,33 @@ function tagFile(code: string, file: string, o: TagOptions, lean: boolean): { co
   // The file's own components, exported or not, kept by its tag path so /@dsa/mount can draw one that
   // isn't exported (a row, a panel defined beside its parent). A global, not an export: Fast Refresh stays.
   const local = localComponents(ast);
-  if (!edits.length && !local.length) return null;
+  // Each context the file makes, named by its tag path (`__dsaName`), so the ledger can record the value a
+  // provider gave it and a drawing can give a component that value. A property dsa reads; nothing else changes.
+  const contexts = lean ? [] : contextsOf(ast);
+  if (!edits.length && !local.length && !contexts.length) return null;
   let out = code;
   for (const e of edits.sort((a, b) => b.at - a.at)) out = out.slice(0, e.at) + e.text + out.slice(e.at);
   // On the file's last line when it ends in a newline, so no line moves and the count stays.
   if (local.length) out += `${out.endsWith('\n') ? '' : '\n'};(globalThis.__dsaLocal ??= {})[${JSON.stringify(rel)}] = { ${local.join(', ')} };`;
+  if (contexts.length) out += `${out.endsWith('\n') && !local.length ? '' : local.length ? '' : '\n'};${contexts.map(c => `try { ${c}.__dsaName = ${JSON.stringify(`${rel}#${c}`)}; } catch {}`).join(' ')}`;
   return { code: out, tags };
+}
+
+/** Contexts the file makes at its top level (`const StoreCtx = createContext(…)`, React.createContext too). */
+function contextsOf(ast: any): string[] {
+  const out: string[] = [];
+  for (const s0 of ast.program.body) {
+    const s = s0.type === 'ExportNamedDeclaration' ? s0.declaration : s0;
+    if (s?.type !== 'VariableDeclaration') continue;
+    for (const d of s.declarations) {
+      let init = d.init;
+      while (init && /^TS(As|Satisfies|NonNull)Expression$/.test(init.type)) init = init.expression;
+      const callee = init?.type === 'CallExpression' ? init.callee : null;
+      const name = callee?.type === 'Identifier' ? callee.name : callee?.type === 'MemberExpression' ? callee.property?.name : '';
+      if (name === 'createContext' && d.id?.type === 'Identifier') out.push(d.id.name);
+    }
+  }
+  return out;
 }
 
 /** Top-level components declared in the file (a capitalised function, class or const), exported or not. */
@@ -304,7 +325,11 @@ class Guard extends Component {
   // The error's first line, and the component that threw: the first one its component stack names.
   componentDidCatch(err, info) {
     const at = String((info && info.componentStack) || '').match(/(?:\\bat|\\bin) ([A-Z][\\w$]*)(?: \\((\\S+?)(?::\\d+){1,2}\\))?/);
-    window.__dsaMountError = { message: String((err && err.message) || err).split('\\n')[0].slice(0, 200), component: at ? at[1] : '', src: at && at[2] ? at[2] : '' };
+    // Where it was thrown: the first stack frame in the app's own code (not a package, not Vite's or dsa's), as
+    // "/path:line" in the file as served (near its line in the source).
+    const frames = String((err && err.stack) || '').split('\\n').map((l) => l.match(/(https?:\\/\\/[^\\s)]+?):(\\d+):\\d+/)).filter(Boolean).map((m) => { let u = m[1]; try { u = decodeURIComponent(new URL(u).pathname); } catch {} return u + ':' + m[2]; });
+    const frame = frames.find((f) => !/node_modules|\\/@vite\\/|\\/@react-refresh|\\/@dsa\\/|\\/\\.vite\\//.test(f)) || frames[0] || '';
+    window.__dsaMountError = { message: String((err && err.message) || err).split('\\n')[0].slice(0, 200), component: at ? at[1] : '', src: at && at[2] ? at[2] : '', frame };
   }
   render() { return this.state.failed ? null : this.props.children; }
 }

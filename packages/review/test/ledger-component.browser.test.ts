@@ -35,7 +35,13 @@ const APP: Record<string, string> = {
   'src/Grid.jsx': `import { useRowTools } from './useRowTools.jsx';\nexport function Grid() {\n  const tools = useRowTools();\n  return <section>{tools.menu}</section>;\n}\n`,
   'src/Uploads.jsx': `export function Uploads({ uploads }) {\n  return <ul>{uploads.map((up) => <li key={up.name}>{up.name}{up.failed && <button className="btn">Retry {up.name}</button>}</li>)}</ul>;\n}\n`,
   'src/Stale.jsx': `export function Stale() {\n  const [n] = useState(0);\n  return <button className="btn">Stale {n}</button>;\n}\n`,
-  'src/Library.jsx': `import { useState } from 'react';\nimport { Shelf } from './Shelf.jsx';\nimport { Tray } from './Tray.jsx';\nimport { Drawer } from './Drawer.jsx';\nimport { Card } from './Card.jsx';\nimport { Grid } from './Grid.jsx';\nimport { Uploads } from './Uploads.jsx';\nimport { Stale } from './Stale.jsx';\nexport function Library() {\n  const [more] = useState(false);\n  return <main><h1>Library</h1><Shelf title="Ferns" items={[]} /><Tray label="Tools" /><Uploads uploads={[{ name: 'a.png', failed: false }]} />{more && <Drawer />}{more && <Card />}{more && <Grid />}{more && <Stale />}</main>;\n}\n`,
+  // Another caller of the hook, which throws: found first, tried, passed over for Grid.
+  'src/Board.jsx': `import { useRowTools } from './useRowTools.jsx';\nexport function Board() {\n  const tools = useRowTools();\n  throw new Error('Board needs its store');\n  return <section>{tools.menu}</section>;\n}\n`,
+  // A picker that closes itself whenever it's opened; an owner read from a context only the app provides.
+  'src/Picker.jsx': `import { useEffect, useState } from 'react';\nexport function Picker() {\n  const [open, setOpen] = useState(false);\n  useEffect(() => { if (open) setOpen(false); }, [open]);\n  return <div className="picker">{open && <button className="btn">Pick one</button>}</div>;\n}\n`,
+  'src/Store.jsx': `import { createContext } from 'react';\nexport const StoreCtx = createContext(null);\n`,
+  'src/Owner.jsx': `import { useContext } from 'react';\nimport { StoreCtx } from './Store.jsx';\nexport function Owner() {\n  const store = useContext(StoreCtx);\n  return <button className="btn">Owner {store.owner.n}</button>;\n}\n`,
+  'src/Library.jsx': `import { useState } from 'react';\nimport { Shelf } from './Shelf.jsx';\nimport { Tray } from './Tray.jsx';\nimport { Drawer } from './Drawer.jsx';\nimport { Card } from './Card.jsx';\nimport { Grid } from './Grid.jsx';\nimport { Board } from './Board.jsx';\nimport { Uploads } from './Uploads.jsx';\nimport { Stale } from './Stale.jsx';\nimport { Picker } from './Picker.jsx';\nimport { Owner } from './Owner.jsx';\nimport { StoreCtx } from './Store.jsx';\nexport function Library() {\n  const [more] = useState(false);\n  return <StoreCtx.Provider value={null}><main><h1>Library</h1><Shelf title="Ferns" items={[]} /><Tray label="Tools" /><Picker /><Uploads uploads={[{ name: 'a.png', failed: false }]} />{more && <Drawer />}{more && <Card />}{more && <Grid />}{more && <Board />}{more && <Stale />}{more && <Owner />}</main></StoreCtx.Provider>;\n}\n`,
 };
 
 test('the ledger: an element its component rendered without is drawn with the component\'s recorded props, its condition forced', { timeout: 300_000 }, async ({ skip }) => {
@@ -56,7 +62,10 @@ test('the ledger: an element its component rendered without is drawn with the co
   // One run: the crawler's own visit records Shelf's heading (and Shelf's props); the button never renders.
   const logs: string[] = [];
   const config = loadConfig(root).config as any;
-  config.shots = { ...(config.shots ?? {}), maxMinutes: 2, waitMs: 200, reveal: false };
+  // A person's record (dsa record), with the value StoreCtx's provider gave where they were.
+  const lines = path.join(root, 'person.jsonl');
+  fs.writeFileSync(lines, JSON.stringify({ src: 'apps/library/src/Library.jsx:1:1', url: 'http://localhost/', at: 1, w: 10, h: 10, owner: null, ancestors: [], contexts: [{ name: 'apps/library/src/Store.jsx#StoreCtx', value: { owner: { n: 'Ada' } }, cut: false }] }) + '\n');
+  config.shots = { ...(config.shots ?? {}), maxMinutes: 2, waitMs: 200, reveal: false, ledger: path.relative(root, lines) };
   await takeShots({ root, dataDir: data, config, target: 'library', perGroup: 20, log: m => logs.push(m) });
   const all = logs.join('\n');
   const idx = JSON.parse(fs.readFileSync(path.join(data, 'shots', 'index.json'), 'utf8'));
@@ -83,11 +92,23 @@ test('the ledger: an element its component rendered without is drawn with the co
   const of = (re: RegExp) => evals.find(e => e.file.endsWith('.jsx') && re.test(e.match.text ?? ''));
   const menu = idx.shots[of(/Row menu/)!.id];
   assert.deepEqual([menu?.drawn, menu?.exact], ['mount', true], all);
-  assert.match(all, /useRowTools \(drawn by Grid, the component, which calls useRowTools, in apps\/library\/src\/Grid\.jsx\)|drawn from the app's code .*Grid, the component around it/);
   const retry = idx.shots[of(/Retry/)!.id];
   assert.deepEqual([retry?.drawn, retry?.exact, retry?.source], ['mount', true, 'isolated'], all);
   assert.match(String(retry.content?.text ?? ''), /Retry a\.png/);
   assert.match(all, /Stale: its component failed to render: useState is not defined \(apps\/library\/src\/Stale\.jsx uses useState but never declares or imports it: a bug in the app's code/);
+
+  // The hook's first caller throws: it's passed over, and Grid draws it.
+  assert.match(all, new RegExp(`${of(/Row menu/)!.id} .*drawn from the app's code.*Grid`));
+  // Where a cause was thrown: the first frame in the app's own code.
+  assert.match(all, /1 × Card needs its store \(thrown at \/src\/Card\.jsx:\d+\)/);
+  // A state the component sets back: said so.
+  assert.match(all, /open was set, then set back by the component: it opens and closes itself/);
+  assert.match(all, /“open” in Picker \(set, then set back: it opens and closes itself\)/);
+  // A context the page provides empty, which a person's record holds filled: drawn with the recorded value.
+  const owner = idx.shots[of(/Owner/)!.id];
+  assert.deepEqual([owner?.drawn, owner?.exact], ['mount', true], all);
+  assert.match(String(owner.content?.text ?? ''), /Owner Ada/);
+  assert.match(all, /with the recorded value of StoreCtx/);
 
   // State inside the drawing, the drawing's own: a list one item, a flag true; and inside its portal.
   const by = (text: RegExp) => evals.find(e => e.file.endsWith('.jsx') && text.test(e.match.text ?? ''));

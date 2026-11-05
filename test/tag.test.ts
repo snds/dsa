@@ -191,3 +191,13 @@ test('the transform holds on a real code base: every file tagged, every output p
   assert.deepEqual(added, []);
   assert.ok(tagged > 50, `${tagged} tagged`);
 });
+
+test('each context a file makes is named by its tag path, on the last line, so the ledger can record its value', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-ctx-'));
+  const f = path.join(root, 'src', 'Store.ts');
+  const code = `import { createContext } from 'react';\nexport const StoreCtx = createContext<{ n: string } | null>(null);\nconst Other = React.createContext(0) as any;\n`;
+  const out = tagSource(code, f, { when: true, root })!;
+  assert.ok(out, 'a .ts file that makes a context is tagged');
+  assert.equal(out.code.split('\n').length, code.split('\n').length, 'no line moves');
+  assert.match(out.code, /try \{ StoreCtx\.__dsaName = "src\/Store\.ts#StoreCtx"; \} catch \{\} try \{ Other\.__dsaName = "src\/Store\.ts#Other"; \} catch \{\}$/);
+});
