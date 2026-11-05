@@ -87,6 +87,25 @@ export function tagPath(file: string, root: string, dir?: string): string | null
  * folder outside it. Null when neither exists. Real paths, so they compare with Vite's own.
  */
 export function fileOfTag(rel: string, root: string, dir?: string): string | null {
+  const found = originalOfTag(rel, root, dir);
+  return found ? asCopy(found) : null;
+}
+
+/** A file of the app, in the copy the server runs from when it runs from one (DSA_TAG_COPY): what it serves. */
+function asCopy(file: string): string {
+  const c = process.env.DSA_TAG_COPY;
+  if (!c) return file;
+  try {
+    const [from, to] = JSON.parse(c) as [string, string];
+    for (const t of new Set([to, fs.realpathSync(to)])) {
+      const rel = path.relative(t, file);
+      if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) { const f = path.join(from, rel); return fs.existsSync(f) ? fs.realpathSync(f) : file; }
+    }
+  } catch { /* not a copy */ }
+  return file;
+}
+
+function originalOfTag(rel: string, root: string, dir?: string): string | null {
   const real = (f: string) => { try { return fs.realpathSync(f); } catch { return null; } };
   const clean = rel.replace(/\\/g, '/');
   if (!clean || clean.split('/').includes('..') || path.isAbsolute(clean)) return null;
@@ -111,9 +130,9 @@ export function viteUrlOf(file: string, viteRoot: string, base = '/'): string {
 }
 
 /**
- * A file in a copy of the app, named as the original: DSA_TAG_COPY is ["<copy folder>", "<app folder>"]. dsa's
- * render tier runs the app's tests from a copy, so nothing they write lands in the app, with tags that still
- * match the scan's.
+ * A file in a copy of the app, named as the original: DSA_TAG_COPY is ["<copy folder>", "<app folder>"]. dsa
+ * runs an app's dev server and its tests from a copy, so nothing they write lands in the app, with tags that
+ * still match the scan's (and fileOfTag answers with the copy's file, the one the server serves).
  */
 function asOriginal(file: string): string {
   const c = process.env.DSA_TAG_COPY;

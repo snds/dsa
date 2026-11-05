@@ -64,7 +64,7 @@ export function tagPlan(plan: AppPlan, o: { root: string; dir: string; off?: boo
 }
 
 /**
- * Started by tagPlan, in the app's folder: Vite's own config file, loaded the way vite loads it, with the
+ * Started by tagPlan, in the app's folder (a copy of it, startApp): Vite's own config file, loaded the way vite loads it, with the
  * tagger first among its plugins (it also serves /@dsa/mount, which draws one component for the crawler), served on the port it's given. Fixed text; the paths come in the environment.
  */
 const VITE_TAGGED = `const vite = await import(process.env.DSA_TAG_VITE);
@@ -72,10 +72,13 @@ const { dsaTag } = await import(process.env.DSA_TAG_MODULE);
 const port = Number(process.argv[2]);
 const loaded = await vite.loadConfigFromFile({ command: 'serve', mode: 'development' }, undefined, process.cwd());
 const config = loaded?.config ?? {};
+// Run from a copy of the app (startApp): its cache in the temp folder, and files served wherever its links lead.
+const copied = Boolean(process.env.DSA_VITE_CACHE);
 const server = await vite.createServer({
   ...config, configFile: false, root: config.root ?? process.cwd(),
+  ...(copied ? { cacheDir: process.env.DSA_VITE_CACHE } : {}),
   plugins: [dsaTag({ when: true }), ...(config.plugins ?? [])],
-  server: { ...config.server, port, strictPort: true, host: '127.0.0.1' },
+  server: { ...config.server, port, strictPort: true, host: '127.0.0.1', ...(copied ? { fs: { ...config.server?.fs, strict: false } } : {}) },
 });
 await server.listen();
 console.log('dsa: vite with source tags on ' + port);
@@ -120,18 +123,83 @@ export function hasDeps(dir: string): boolean {
 
 export interface RunningApp { url: string; stop: () => void; logTail: () => string }
 
+/** Folders a copy of the app leaves out: installed packages (linked instead), history, builds and caches. */
+const SKIP = new Set(['node_modules', '.git', 'dist', 'build', 'coverage', '.vite', '.turbo', '.next', '.cache', '.dsa']);
+/** In node_modules, what's written rather than installed: caches and Vite's bundled config. */
+const WRITTEN = new Set(['.vite', '.vite-temp', '.cache']);
+
+/**
+ * A copy of the app to run it from (its dev server, its tests), so nothing they write lands in the app: its
+ * files copied, every link pointing where the original's does, and node_modules a folder of links to each
+ * installed package, so what tools write there (Vite's cache, its bundled config) stays in the copy.
+ */
+export function copyApp(from: string, to: string) {
+  const link = (src: string, dst: string) => { try { const t = fs.realpathSync(src); fs.symlinkSync(t, dst, fs.statSync(t).isDirectory() ? 'dir' : 'file'); } catch { /* a broken link */ } };
+  const walk = (a: string, b: string) => {
+    fs.mkdirSync(b, { recursive: true });
+    for (const d of fs.readdirSync(a, { withFileTypes: true })) {
+      const src = path.join(a, d.name), dst = path.join(b, d.name);
+      if (d.name === 'node_modules') {
+        fs.mkdirSync(dst, { recursive: true });
+        try { for (const n of fs.readdirSync(src)) if (!WRITTEN.has(n)) link(path.join(src, n), path.join(dst, n)); } catch { /* unreadable */ }
+        continue;
+      }
+      if (SKIP.has(d.name)) continue;
+      if (d.isSymbolicLink()) { link(src, dst); continue; }
+      if (d.isDirectory()) walk(src, dst);
+      else if (d.isFile()) fs.copyFileSync(src, dst);
+    }
+  };
+  walk(from, to);
+}
+
+/**
+ * A temp copy of the app (copyApp) at the same path inside a temp folder, with the folders around it linked up
+ * to its repository's root (the first folder up with .git or dsa.config.json, four at most): what the app
+ * reaches with ../ (a sibling package its config aliases, a shared file) is found where it is. Returns the
+ * copy and the temp folder to remove after.
+ */
+export function appCopy(dir: string): { copy: string; tmp: string } {
+  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-app-')));
+  const real = fs.realpathSync(dir);
+  const at = (p: string) => path.join(tmp, p);
+  copyApp(real, at(real));
+  let a = real;
+  for (let i = 0; i < 4; i++) {
+    const up = path.dirname(a);
+    if (up === a) break;
+    let names: string[] = [];
+    try { names = fs.readdirSync(up); } catch { break; }
+    for (const n of names) if (n !== path.basename(a) && !fs.existsSync(at(path.join(up, n)))) { try { fs.symlinkSync(fs.realpathSync(path.join(up, n)), at(path.join(up, n))); } catch { /* unreadable */ } }
+    a = up;
+    if (names.includes('.git') || names.includes('dsa.config.json')) break;
+  }
+  return { copy: at(real), tmp };
+}
+
 /** Start an app and wait until it serves. Throws with the app's own output if it doesn't come up. */
 export async function startApp(plan: AppPlan, timeoutMs = 90000): Promise<RunningApp> {
   if (!hasDeps(plan.cwd)) throw new Error(`${plan.target}: dependencies aren't installed in ${plan.cwd}. Run "dsa setup" (or npm install there).`);
   const port = await freePort();
   const args = plan.args.map(a => a.replace('{port}', String(port)));
   let out = '';
-  const child: ChildProcess = spawn(plan.command, args, { cwd: plan.cwd, env: { ...process.env, ...plan.env, BROWSER: 'none', CI: '1', FORCE_COLOR: '0' }, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+  // Run from a copy, so nothing the server writes (Vite's cache and bundled config, a plugin's own report) lands
+  // in the app. Only where its packages are installed in its own folder: a copy elsewhere can't see ones above it.
+  let copy: string | null = null, tmp = '';
+  const env: Record<string, string> = {};
+  if (fs.existsSync(path.join(plan.cwd, 'node_modules'))) {
+    try {
+      ({ copy, tmp } = appCopy(plan.cwd));
+      Object.assign(env, { DSA_TAG_COPY: JSON.stringify([copy, fs.realpathSync(plan.cwd)]), DSA_VITE_CACHE: path.join(tmp, 'vite-cache') });
+    } catch { copy = null; }
+  }
+  const forget = () => { if (tmp) try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* still in use */ } };
+  const child: ChildProcess = spawn(plan.command, args, { cwd: copy ?? plan.cwd, env: { ...process.env, ...plan.env, ...env, BROWSER: 'none', CI: '1', FORCE_COLOR: '0' }, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
   const keep = (b: Buffer) => { out = (out + b.toString()).slice(-4000); };
   child.stdout?.on('data', keep);
   child.stderr?.on('data', keep);
   let exited = false;
-  child.on('exit', () => { exited = true; });
+  child.on('exit', () => { exited = true; forget(); });
   const stop = () => {
     if (exited) return;
     try { process.platform !== 'win32' ? process.kill(-child.pid!, 'SIGTERM') : child.kill(); } catch { /* already gone */ }

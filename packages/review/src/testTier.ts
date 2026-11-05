@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { LEDGER_RUNTIME } from '@snds/dsa/tag';
-import { packageEntry } from './apps.js';
+import { appCopy, packageEntry } from './apps.js';
 
 /**
  * The app's own component tests as a render tier. Many states the crawler can't reach (a dialog a socket
@@ -46,9 +46,7 @@ export async function renderTests(o: { appDir: string; root: string; dir: string
   if (!vitest || !vitestMain || !vite) return done({ ran: false, why: "the app doesn't have Vitest installed", records: 0, files: 0 });
   const core = packageEntry(path.dirname(fileURLToPath(import.meta.url)), '@snds/dsa', './tag');
   if (!core) return done({ ran: false, why: "dsa's tagger wasn't found", records: 0, files: 0 });
-  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-tests-')));
-  const copy = path.join(tmp, path.basename(o.appDir));
-  copyApp(o.appDir, copy);
+  const { copy, tmp } = appCopy(o.appDir);
   const runner = path.join(tmp, 'run.mjs');
   const setup = path.join(tmp, 'ledger-setup.mjs');
   fs.writeFileSync(runner, VITEST_TAGGED);
@@ -84,25 +82,6 @@ export async function renderTests(o: { appDir: string; root: string; dir: string
   const tests = tail.match(/Test Files\s+([^\n]+)/)?.[1]?.replace(/\x1b\[[0-9;]*m/g, '').trim();
   if (!lines.length) return done({ ran: code !== 'timeout', why: code === 'timeout' ? `out of time (${o.maxMinutes ?? 10} min)` : `nothing recorded${tests ? ` (test files: ${tests})` : ''}; the run's last words: ${lastWords(tail)}`, records: 0, files: 0, ...(tests ? { tests } : {}) });
   return done({ ran: true, records: lines.length, files: files.size, ...(code === 'timeout' ? { why: `out of time (${o.maxMinutes ?? 10} min); what ran so far is kept` } : {}), ...(tests ? { tests } : {}) });
-}
-
-/** Folders a copy of the app leaves out: installed packages (linked instead), history, builds and caches. */
-const SKIP = new Set(['node_modules', '.git', 'dist', 'build', 'coverage', '.vite', '.turbo', '.next', '.cache', '.dsa']);
-
-/** A copy of the app to run its tests from: files copied, node_modules linked, links pointing where the original's do. */
-function copyApp(from: string, to: string) {
-  const walk = (a: string, b: string) => {
-    fs.mkdirSync(b, { recursive: true });
-    for (const d of fs.readdirSync(a, { withFileTypes: true })) {
-      const src = path.join(a, d.name), dst = path.join(b, d.name);
-      if (d.name === 'node_modules') { try { fs.symlinkSync(fs.realpathSync(src), dst, 'dir'); } catch { /* none */ } continue; }
-      if (SKIP.has(d.name)) continue;
-      if (d.isSymbolicLink()) { try { const t = fs.realpathSync(src); fs.symlinkSync(t, dst, fs.statSync(t).isDirectory() ? 'dir' : 'file'); } catch { /* a broken link */ } continue; }
-      if (d.isDirectory()) walk(src, dst);
-      else if (d.isFile()) fs.copyFileSync(src, dst);
-    }
-  };
-  walk(from, to);
 }
 
 /** The end of a run's output, plain: what a person needs to see why nothing was recorded. */

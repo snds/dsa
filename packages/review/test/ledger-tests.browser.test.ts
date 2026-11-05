@@ -20,7 +20,8 @@ afterAll(async () => { await browser?.close(); });
 const APP: Record<string, string> = {
   'index.html': '<!doctype html><link rel="stylesheet" href="/app.css"><div id="root"></div><script type="module" src="/src/main.jsx"></script>',
   'public/app.css': '.btn { background: rgb(29, 78, 216); color: #fff; padding: 8px 16px; border: 0; margin: 4px; }',
-  'vite.config.js': `export default { cacheDir: '../../.vite', esbuild: { jsx: 'automatic' }, test: { environment: 'happy-dom' } };\n`,
+  // A plugin that writes a report beside the config whenever a server starts, as some apps' do.
+  'vite.config.js': `import fs from 'node:fs';\nexport default { esbuild: { jsx: 'automatic' }, test: { environment: 'happy-dom' },\n  plugins: [{ name: 'report', configResolved() { fs.writeFileSync('server-report.md', 'written at start'); } }] };\n`,
   'src/main.jsx': `import { createRoot } from 'react-dom/client';\nimport { Library } from './Library.jsx';\ncreateRoot(document.getElementById('root')).render(<Library />);\n`,
   'src/Library.jsx': `import { useState } from 'react';\nimport { Swatches } from './Swatches.jsx';\nexport function Library() {\n  const [picking] = useState(false);\n  return <main><h1>Library</h1>{picking && <Swatches colours={[]} />}</main>;\n}\n`,
   // "Plenty" shows once the count passes 2: no literal says what to set it to, but the test's record does.
@@ -81,7 +82,8 @@ test("the app's own tests: what they render is recorded with its props and drawn
   assert.match(all, new RegExp(`${plenty!.id} .*after setting the state recorded with it`));
   assert.match(all, /ledger: of [1-9]\d* with a record of their own, [1-9]\d* drawn as isolated renders; all: /);
   assert.match(all, /known only from the app's tests: drawn isolated where they could be, not live/);
-  // Nothing in the app was written: not Vitest's cache, not the file the test wrote.
+  // Nothing in the app was written, by the dev server's start or the tests: no cache, no bundled config, no
+  // report from the app's own plugin, no file the test wrote.
   assert.deepEqual(snapshot(), before);
   // The test's address is never opened as a page.
   assert.doesNotMatch(all, /opened test:/);

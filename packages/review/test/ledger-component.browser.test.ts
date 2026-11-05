@@ -21,10 +21,15 @@ const APP: Record<string, string> = {
   'public/app.css': '.btn { background: rgb(29, 78, 216); color: #fff; padding: 8px 16px; border: 0; margin: 4px; }',
   'vite.config.js': `export default { cacheDir: '../../.vite' };\n`,
   'src/main.jsx': `import { createRoot } from 'react-dom/client';\nimport { Library } from './Library.jsx';\ncreateRoot(document.getElementById('root')).render(<Library />);\n`,
-  'src/Shelf.jsx': `import { useState } from 'react';\nexport function Shelf({ title, items }) {\n  const [picked, setPicked] = useState([]);\n  const [tip, setTip] = useState(false);\n  return <section><h2>{title}</h2>\n    {items.length > 0 && <button className="btn">Open {items.length} in {title}</button>}\n    {picked.length > 0 && <button className="btn">Clear {picked[0].name}</button>}\n    {tip && <button className="btn">Hide tip</button>}\n  </section>;\n}\n`,
+  'src/Shelf.jsx': `import { useState } from 'react';\nexport function Shelf({ title, items }) {\n  const [picked, setPicked] = useState([]);\n  const [tip, setTip] = useState(false);\n  return <section><h2>{title}</h2>\n    {items.length > 0 && <button className="btn">Open {items.length} in {title}</button>}\n    {picked.length > 0 && <button className="btn">Clear {picked[0].name}</button>}\n    {tip && <button className="btn">Hide tip</button>}\n    {Date.now() < 0 && <button className="btn">Never</button>}\n  </section>;\n}\n`,
   // A tray drawn in a portal, as a dialog's content is: its state is set where the portal put it.
   'src/Tray.jsx': `import { useState } from 'react';\nimport { createPortal } from 'react-dom';\nexport function Tray({ label }) {\n  const [open, setOpen] = useState(false);\n  return createPortal(<aside><span>{label}</span>{open && <button className="btn">Close tray</button>}</aside>, document.body);\n}\n`,
-  'src/Library.jsx': `import { Shelf } from './Shelf.jsx';\nimport { Tray } from './Tray.jsx';\nexport function Library() {\n  return <main><h1>Library</h1><Shelf title="Ferns" items={[]} /><Tray label="Tools" /></main>;\n}\n`,
+  // Never rendered by anything here: a drawer behind a state that stays off (with a test beside it, not run), a
+  // card that throws without its store, and, in Shelf, a button behind a condition no drawing can meet.
+  'src/Drawer.jsx': `export function Drawer() {\n  return <nav><button className="btn">Close drawer</button></nav>;\n}\n`,
+  'src/Drawer.test.jsx': `import { Drawer } from './Drawer.jsx';\n`,
+  'src/Card.jsx': `export function Card() {\n  throw new Error('Card needs its store');\n  return <button className="btn">Card action</button>;\n}\n`,
+  'src/Library.jsx': `import { useState } from 'react';\nimport { Shelf } from './Shelf.jsx';\nimport { Tray } from './Tray.jsx';\nimport { Drawer } from './Drawer.jsx';\nimport { Card } from './Card.jsx';\nexport function Library() {\n  const [more] = useState(false);\n  return <main><h1>Library</h1><Shelf title="Ferns" items={[]} /><Tray label="Tools" />{more && <Drawer />}{more && <Card />}</main>;\n}\n`,
 };
 
 test('the ledger: an element its component rendered without is drawn with the component\'s recorded props, its condition forced', { timeout: 300_000 }, async ({ skip }) => {
@@ -58,6 +63,14 @@ test('the ledger: an element its component rendered without is drawn with the co
   // Shelf's recorded title, with the one item forced in.
   assert.match(String(shot.content?.text ?? ''), /Open 1 in Ferns/);
   assert.match(all, /an isolated render \(recorded props, condition forced: items = \[/);
+
+  // What nothing ever rendered, by file, with the test near it; and why drawings failed, grouped.
+  assert.match(all, /ledger gaps: [1-9]\d* never rendered by the crawl, a person or a test, in [1-9]\d* files?/);
+  assert.match(all, /\n    apps\/library\/src\/Drawer\.jsx · 1 element · test: src\/Drawer\.test\.jsx \(rendered none of them\) · story: none · first condition: “more”/);
+  assert.ok(idx.ledgerGaps?.library?.some((g: any) => g.file.endsWith('Card.jsx') && g.test === null), JSON.stringify(idx.ledgerGaps));
+  assert.match(all, /drawings, its component failed to render \(top \d+ of \d+ causes\): 1 × Card needs its store/);
+  assert.match(all, /drawings, mounted but the element wasn't in what it drew \(top \d+ of \d+ conditions\): .*1 × “Date\.now\(\) < 0” in Shelf/);
+  assert.ok(idx.drawCauses?.library?.threw?.length, JSON.stringify(idx.drawCauses));
 
   // State inside the drawing, the drawing's own: a list one item, a flag true; and inside its portal.
   const by = (text: RegExp) => evals.find(e => e.file.endsWith('.jsx') && text.test(e.match.text ?? ''));

@@ -124,7 +124,7 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
   const dir = path.join(opts.dataDir, 'shots');
   fs.mkdirSync(dir, { recursive: true });
   const idxFile = path.join(dir, 'index.json');
-  const index: { shots: Record<string, any>; missing: string[]; pages: string[]; takenAt: string; misses?: Record<string, any>; run?: RunStamp; uses?: Record<string, any>; ledgerCoverage?: Record<string, { own: number; component: number; file: number; none: number; tests: number }> } = fs.existsSync(idxFile) ? JSON.parse(fs.readFileSync(idxFile, 'utf8')) : { shots: {}, missing: [], pages: [], takenAt: '' };
+  const index: { shots: Record<string, any>; missing: string[]; pages: string[]; takenAt: string; misses?: Record<string, any>; run?: RunStamp; uses?: Record<string, any>; ledgerCoverage?: Record<string, { own: number; component: number; file: number; none: number; tests: number }>; ledgerGaps?: Record<string, unknown[]>; drawCauses?: Record<string, unknown> } = fs.existsSync(idxFile) ? JSON.parse(fs.readFileSync(idxFile, 'utf8')) : { shots: {}, missing: [], pages: [], takenAt: '' };
   index.missing = []; index.pages = [];
   // This run: an id each new photo carries, the source it was taken from (its commit, or "worktree" when the
   // checkout has changes), and when. Cached photos keep their own stamp, so a report can tell an old one apart.
@@ -301,6 +301,8 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
       const at = new Date().toISOString();
       // Per app: of what wasn't reached live, how much the ledger knows (its element, its component, its file, nothing).
       if (r.ledgerCover) (index.ledgerCoverage ??= {})[s.target] = r.ledgerCover;
+      if (r.ledgerGaps) (index.ledgerGaps ??= {})[s.target] = r.ledgerGaps;
+      if (r.drawCauses) (index.drawCauses ??= {})[s.target] = r.drawCauses;
       if (Object.keys(r.uses ?? {}).length) { index.uses ??= {}; for (const [k, v] of Object.entries<any>(r.uses)) index.uses[k] = { ...v, run: index.run!.id, at }; log(`  ${Object.keys(r.uses).length} of the app's own uses of system components photographed as examples`); }
       if (r.ledger?.length) { const n = addToLedger(ledgerFile, r.ledger, ledgerHash); log(`  ledger: ${r.ledger.length} element${r.ledger.length === 1 ? '' : 's'} recorded rendering, ${n} new`); }
       const byId = new Map(s.need.map(e => [e.id, e]));
@@ -518,6 +520,39 @@ function importsNear(d: DrawWith, from: string, levels: number): string[] {
   return [...seen];
 }
 
+/** An app's tests and stories, read once: each file's path and what it imports, by name without its extension. */
+const checkIndex = new WeakMap<DrawWith, { file: string; story: boolean; imports: string[] }[]>();
+/**
+ * The test and the story nearest a file: one beside it with its name (Panel.test.tsx), else one that imports it
+ * (by its path, or by its name through an alias). Null when there's none.
+ */
+function nearestChecks(d: DrawWith, abs: string): { test: string | null; story: string | null } {
+  let idx = checkIndex.get(d);
+  if (!idx) {
+    idx = [];
+    for (const f of walk(d.dir ?? d.root, new Set(['.tsx', '.jsx', '.ts', '.js', '.mjs']), [], true)) {
+      if (!/\.(test|spec|stories)\.[cm]?[jt]sx?$/.test(f)) continue;
+      let src = '';
+      try { src = fs.readFileSync(f, 'utf8'); } catch { continue; }
+      idx.push({ file: f, story: /\.stories\./.test(f), imports: [...src.matchAll(/(?:from|import\()\s*['"]([^'"]+)['"]/g)].map(m => m[1]!.startsWith('.') ? path.resolve(path.dirname(f), m[1]!) : m[1]!) });
+      if (idx.length > 3000) break;
+    }
+    checkIndex.set(d, idx);
+  }
+  const bare = abs.replace(/\.[cm]?[jt]sx?$/, '');
+  const base = path.basename(bare);
+  const rel = (f: string) => path.relative(d.dir ?? d.root, f).split(path.sep).join('/');
+  const pick = (story: boolean) => {
+    const mine = idx!.filter(x => x.story === story);
+    const beside = mine.find(x => x.file.replace(/\.(test|spec|stories)\.[cm]?[jt]sx?$/, '') === bare);
+    if (beside) return rel(beside.file);
+    const imp = mine.filter(x => x.imports.some(i => i === bare || i === `${bare}/index` || (!path.isAbsolute(i) && (i.endsWith(`/${base}`) || i === base))));
+    imp.sort((a, b) => path.relative(path.dirname(abs), a.file).length - path.relative(path.dirname(abs), b.file).length);
+    return imp[0] ? rel(imp[0].file) : null;
+  };
+  return { test: pick(false), story: pick(true) };
+}
+
 /** The files that render `<Name …>`, its own first, read once per app: where a component's literal props come from. */
 const callerIndex = new WeakMap<DrawWith, Map<string, string[]>>();
 function callersOf(d: DrawWith, name: string, own: string): string[] {
@@ -596,6 +631,8 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   let watchPage: ((pg: any) => void) | null = null;
   const recorded: LedgerRec[] = [];
   let ledgerCover: { own: number; component: number; file: number; none: number; tests: number } | null = null;
+  let ledgerGaps: { file: string; elements: number; test: string | null; story: string | null; when?: string; unused?: boolean }[] | null = null;
+  let drawCauses: { threw: [string, number][]; unmet: [string, number][] } | null = null;
   // Photos of the app's own uses of system components (shots/index.json "uses"): up to 3 per component, 150 in all.
   const usesShot: Record<string, any> = {};
   const usesPer = new Map<string, number>();
@@ -1094,7 +1131,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   } finally {
     await browser.close().catch(() => {});
   }
-  return { ledger: recorded, ...(ledgerCover ? { ledgerCover } : {}), uses: usesShot, shots, pages, missing: [...remaining.map(r => r.id), ...setAside, ...drawnIds], drawn: drawnIds.length, why, fileOn: Object.fromEntries(Object.entries(fileOn).map(([k, u]) => [k, u && routeOf(u)])), tried: Object.fromEntries(everyone.filter(r => r.tried?.length).map(r => [r.id, r.tried!])), tagged: { pages: taggedPages, of: pages.length }, ...(signedOut() || auth.expired ? { signIn: wall.at || o.url } : {}), ...(auth.expired ? { expired: true } : {}), ...(isBroken() ? { broken: broken.first } : {}) };
+  return { ledger: recorded, ...(ledgerCover ? { ledgerCover } : {}), ...(ledgerGaps ? { ledgerGaps } : {}), ...(drawCauses ? { drawCauses } : {}), uses: usesShot, shots, pages, missing: [...remaining.map(r => r.id), ...setAside, ...drawnIds], drawn: drawnIds.length, why, fileOn: Object.fromEntries(Object.entries(fileOn).map(([k, u]) => [k, u && routeOf(u)])), tried: Object.fromEntries(everyone.filter(r => r.tried?.length).map(r => [r.id, r.tried!])), tagged: { pages: taggedPages, of: pages.length }, ...(signedOut() || auth.expired ? { signIn: wall.at || o.url } : {}), ...(auth.expired ? { expired: true } : {}), ...(isBroken() ? { broken: broken.first } : {}) };
 
   /**
    * The app's own reach manifest, when its dev build declares one (`window.__DSA__`, docs/reach-manifest.md):
@@ -1538,6 +1575,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     };
     // How much of what wasn't reached live the ledger knows: its element, its component, its file, or nothing.
     const cover = { own: 0, component: 0, file: 0, none: 0, tests: 0 };
+    const noneByFile = new Map<string, Target[]>();
     // What the crawl and people recorded, without the app's tests: what only the tests cover.
     const live = (x: LedgerRec) => !x.url.startsWith('test:');
     const liveFiles = new Set(Object.values(ledgerNow).flat().filter(live).map(x => fileOfSrc(x.src)));
@@ -1549,7 +1587,20 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       if (ledgerNow[r.src]?.length) cover.own++;
       else if (r.e.within && recordOf(r, r.e.within)) cover.component++;
       else if (recFiles.has(fileOfSrc(r.src))) cover.file++;
-      else cover.none++;
+      else { cover.none++; (noneByFile.get(r.e.file) ?? noneByFile.set(r.e.file, []).get(r.e.file)!).push(r); }
+    }
+    // The ones nothing ever rendered, by file, with the nearest test and story: dead code, a flow to add, or a test.
+    if (noneByFile.size) {
+      const rows = [...noneByFile].sort((a, b) => b[1].length - a[1].length).map(([file, rs]) => {
+        const near = d.root ? nearestChecks(d, absOfTag(d, file)) : { test: null, story: null };
+        const gate = rs.flatMap(x => x.e.reach?.gates ?? []).map(g => `${g.negated ? 'not ' : ''}“${g.test.slice(0, 40)}”`)[0];
+        const unused = rs.every(x => x.e.reach?.status === 'unused');
+        return { file, elements: rs.length, test: near.test, story: near.story, ...(gate ? { when: gate } : {}), ...(unused ? { unused: true } : {}) };
+      });
+      ledgerGaps = rows;
+      o.log(`  ledger gaps: ${cover.none} never rendered by the crawl, a person or a test, in ${rows.length} file${rows.length === 1 ? '' : 's'}${rows.filter(x => !x.test && !x.story).length ? ` (${rows.filter(x => !x.test && !x.story).length} with no test or story near them)` : ''}:`);
+      for (const x of rows.slice(0, 40)) o.log(`    ${x.file} · ${x.elements} element${x.elements === 1 ? '' : 's'} · test: ${x.test ? `${x.test} (rendered none of them)` : 'none'} · story: ${x.story ?? 'none'}${x.when ? ` · first condition: ${x.when}` : ''}${x.unused ? ' · the scan found nothing that imports it' : ''}`);
+      if (rows.length > 40) o.log(`    +${rows.length - 40} more files (all in index.json, ledgerGaps)`);
     }
     o.log(`  ledger coverage: of ${remaining.length} not reached live, ${cover.own} recorded themselves, ${cover.component} whose component is recorded, ${cover.file} whose file is recorded, ${cover.none} neither${cover.tests ? `; ${cover.tests} of these known only from the app's tests` : ''}`);
     ledgerCover = cover;
@@ -1564,6 +1615,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     }
     o.log(`  drawing ${remaining.length} not reached live: ${canMount ? "from the app's code where its component can be mounted, else as markup" : "as markup only (this build doesn't serve /@dsa/mount; add dsaTag to its Vite dev build to draw from the app's code)"}`);
     const tally = new Map<string, number>();
+    const causes = { threw: new Map<string, number>(), unmet: new Map<string, number>() };
     // The same, for elements with a record of their own (a test or a person saw them render): why each that
     // was recorded still wasn't drawn from the app's code.
     const ownTally = new Map<string, number>();
@@ -1704,7 +1756,18 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
               } else unmounted += `; ${anc}, the nearest component above it the ledger recorded: ${m.why ?? 'not mounted'}`;
             }
           }
-          if (!how) note(r, `not mounted: ${unmounted}`);
+          if (!how) {
+            note(r, `not mounted: ${unmounted}`);
+            // Why, grouped: what its component threw, or the condition inside it the drawing didn't meet.
+            const threw = unmounted.match(/failed to render: ([^;]*)/)?.[1];
+            if (threw) causes.threw.set(threw.replace(/\s+/g, ' ').slice(0, 120), (causes.threw.get(threw.replace(/\s+/g, ' ').slice(0, 120)) ?? 0) + 1);
+            else if (/wasn't in what it drew/.test(unmounted)) {
+              const own = (r.e.reach?.gates ?? []).filter((g: any) => !g.component || g.component === r.e.within);
+              const g = own[own.length - 1] ?? (r.e.reach?.gates ?? []).slice(-1)[0];
+              const k = g ? `${g.negated ? 'not ' : ''}“${g.test.slice(0, 60)}”${(g as any).component ? ` in ${(g as any).component}` : ''}` : 'no condition traced';
+              causes.unmet.set(k, (causes.unmet.get(k) ?? 0) + 1);
+            }
+          }
         }
         if (!how) {
           const html = markupOf(code, r.e, r.id);
@@ -1745,6 +1808,10 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       }
     }
     if (tally.size) o.log(`  drawings: ${[...tally].sort((a, b) => b[1] - a[1]).map(([w, k]) => `${k} ${w}`).join('; ')}`);
+    const top = (m: Map<string, number>) => [...m].sort((a, b) => b[1] - a[1]).slice(0, 10);
+    if (causes.threw.size) o.log(`  drawings, its component failed to render (top ${Math.min(10, causes.threw.size)} of ${causes.threw.size} causes): ${top(causes.threw).map(([w, k]) => `${k} × ${w}`).join(' | ')}`);
+    if (causes.unmet.size) o.log(`  drawings, mounted but the element wasn't in what it drew (top ${Math.min(10, causes.unmet.size)} of ${causes.unmet.size} conditions): ${top(causes.unmet).map(([w, k]) => `${k} × ${w}`).join(' | ')}`);
+    drawCauses = { threw: top(causes.threw), unmet: top(causes.unmet) };
     if (ownCount) o.log(`  ledger: of ${ownCount} with a record of their own, ${ownIsolated} drawn as isolated renders; all: ${[...ownTally].sort((a, b) => b[1] - a[1]).map(([w, k]) => `${k} ${w}`).join('; ')}`);
     // Known only from the app's tests: drawn from the code with what the tests gave them, never live (a test names no page).
     if (ledgerCover?.tests) o.log(`  ledger: ${ledgerCover.tests} known only from the app's tests: drawn isolated where they could be, not live (a test's record names no page to open)`);
