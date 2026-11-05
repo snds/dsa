@@ -69,6 +69,14 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 - Isolated renders count as seeing the element, labelled "Isolated render": an element mounted in the
   app's own build with the props it was recorded with (the shot index's `source: "isolated"`). A drawing
   with guessed props stays a separate source (`guessed`) in the trust rubric.
+- Drawing from the app's code works for components that can't render alone. The mount wraps the
+  component in every provider the live app has at that point (the store, theme, query client or router its
+  entry file sets up, and ones deeper in the tree), read off the running page with their live values. It
+  fills required props from the component's types, from how its body uses them, and from the literal values
+  a call site passes, before the gates the scan traced. Components a file declares without exporting can be
+  mounted too (the tagger keeps them).
+- Every element that isn't reached live gets its own line in the log: drawn from the app's code, drawn as
+  markup with the reason it wasn't mounted, or not drawn with the reason. A summary groups the reasons.
 
 - Proposals are drawn without depending on stories. The system's component is mounted straight from its
   source through its own Vite, on a page that loads its Storybook preview file (CSS, providers,
@@ -82,6 +90,36 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   signatures now record the classes each `cva` value adds (`axisClasses`).
 - `scripts/proposal-gaps.mjs` counts, on a published dashboard, why proposals aren't drawn exactly with
   their element's own content.
+
+### Added
+
+- For people reviewing a proposal: each live photo gets a wider photo of the page around it (`context`:
+  about 800 × 500, with where the element sits in it), and the app's own uses of design-system components
+  are photographed as examples (`uses` in shots/index.json, keyed "file:line", up to 3 per component). The
+  tagger marks each component use with `data-dsa-use` when dsa starts the app; it reaches the page when the
+  component passes its props on.
+- Exploring is guided by coverage (Chromium's JS coverage): each control is scored by the code it runs for
+  the first time in the files of what's still missing, and below the top level only a control that ran
+  some is followed further. The log says how much new code each page's exploring ran and which control ran
+  the most. `shots.coverage: false` turns it off.
+- An opt-in reach manifest (docs/reach-manifest.md). A dev build's `window.__DSA__ = { routes(), states(),
+  go(name), seed() }` puts its routes first and each named state on in turn (those whose `reveals` name a
+  missing element's file first); `dsa.reach.json` beside the app adds routes, and states that are a route
+  with storage seeded. Reaching an element becomes a lookup.
+- Exact state setters. In tagged files (a plain `.ts` hook included) the tagger names each state hook by its
+  setter as the app runs (`const [open, setOpen] = useState(…)` → "open"), with a statement after the
+  declaration on the same line: no hook added or moved, Fast Refresh unchanged. Setting state picks the
+  hook by that name, else by its place; a state past a hook whose own hooks can't be counted (one a factory
+  makes) can now be set by name. The ledger records each hook's name too.
+- The evidence ledger. The tagger's runtime (`LEDGER_RUNTIME`, first in every page it serves, and in every
+  page the crawler opens) records each tagged element as React commits it: its URL, its size, its owner
+  component's props and the state of each component above it, copied with limits (functions stubbed,
+  credential- and personal-looking keys redacted, a cut copy marked). Records are kept in
+  `shots/ledger.json` per file and its source hash, so an older version's drop. A dev server started with
+  `DSA_LEDGER=<file>` records what a person clicks through, and `shots.ledger` (or `DSA_LEDGER`) adds those.
+  A new pass before pass 1 opens each missing element where it rendered and sets the recorded state above
+  it, outermost first (only values copied whole); drawings mount with the recorded props, and such a
+  drawing is marked `source: "isolated"` in the shot index.
 
 ### Fixed
 
@@ -140,6 +178,151 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   only: the same classes can draw differently (other words, another parent, a state), and the card
   labels that photo with the other element's place. The rubric flags such cards (`siblingPhoto`).
 
+- The tagger put its marks between a component's name and its type arguments (`<Table data-dsa-use="…"<Row>`),
+  which isn't JSX: a file with such an element answered 500 and the app didn't render. Marks now go after
+  the type arguments. The transform is also fail safe: its output is parsed again, and a file it would break
+  gets its source tags alone, else is served as written, with one line naming the file.
+- An app whose page rewrites its own URL as it loads (a home that redirects, or sets a hash) aborts the
+  navigation that brought the crawler there, though the app loaded. That now counts as arrived (on the app's
+  origin, document loaded), in pass 1, profiles and drawings, and drawings go to the URL the home page
+  landed on, not back to the bare origin: every drawing on such an app had failed.
+- Drawings from the app's code get the app's own providers first: those above the element's file on the
+  page, else what the entry file wraps the app in. Every context the page provides (an open panel's, a
+  deep page's) is borrowed only when that fails or doesn't show the element: one of those can hide it.
+  Elements no route names are drawn on the home page, not the first page visited.
+- A root's nav values are also read from the files it imports: its state's type alias (or enum), and a
+  registry whose field it passes to its setter (`setView(n.id)`). The log lists the values found.
+- Pass 2 (exploring) stops after 8 pages in a row find nothing, and the log ends with the time each pass took.
+- Photos carry the run that took them: `shots/index.json` has `run: { id, ref, at }` (the source commit, or
+  "worktree" when a tracked file's content changed), and each new photo its `run` id beside its `at` time.
+  It reads git without writing: plumbing `diff-index` with each file checked by content, never `git status`
+  or `git diff`, which rewrite the index of a checkout dsa may only read. Cached
+  photos keep their own, so a report can treat older ones as stale.
+- Routes the source doesn't spell out are reached. `apps[name].routeSource` names a module of the app and
+  the export that lists every route (an array, or a function that returns one, such as the app's route
+  formatter over its registries); it's loaded through the running app's build and its routes go first.
+  URLs the app writes itself (pushState, replaceState, a new hash) join the queue, and a URL the page is
+  already on is reloaded rather than skipped. `apps[name].profiles` opens a route with local or session
+  storage seeded first, no clicking. With more routes known than `shots.maxPages` allows (and no cap
+  set), every one is visited.
+- One line that renders many nodes: a node that photographs blank, covered or under 2px gives way to the
+  next node from the same line (up to four more). An element under 2px on every node, twice, is set aside
+  with why instead of being measured on every look.
+- An app's own `dsa.config.json` is merged into the run: its `apps` entry (routes, extra routes, flows;
+  the host's values win, lists are joined) and the folders its `scan.exclude` names. An `apps` key may be
+  the app's folder name or its package name. Screenshots stop with an error naming any `apps` key that
+  matches no app, and the apps it found.
+- An app outside the scan root: every path compared with a source tag is now named as the tagger names it
+  (`<app folder>/<path>`), not relative to the root (`../…`). Openers were matched only by their words,
+  state was set on the wrong component, and providers were refused as outside the scan root.
+- State is read before it's set: a value that already holds (a default) isn't set again, so it costs no
+  reload or look. A value the app undoes (an effect that syncs state from the URL) is logged as reverted.
+  A boolean never goes into state that starts as an object, and a typed value nothing reads off is set to
+  an object, not `true`.
+- A miss behind conditions names the first one that doesn't hold with its state's initial values, not the
+  first one listed ("not setupTakeover" when it starts false).
+- Setting component state no longer crowds out the route crawl. It ran on every page in pass 1 and set
+  the root's state (a nav value, a setup flag) again on each one, though that shows the same thing on
+  every page; on a large app pass 1 ran out of time with most pages unvisited. It now runs after pass 1,
+  in its own share of the time left (half, taken from exploring), and tries each combination once per run, on the first page
+  where all its levels could be set. A combination set in full that finds nothing gets up to 3 more
+  pages, ranked by whether they show the missing elements' own files (or files near them): the outermost
+  component is often the root, on every page. One whose component isn't on any page tried is set after
+  the state that first showed that component's file (a nav value that renders the view it's in), in one
+  go, and the log says which. Each miss's line now says which page showed its own file, or that none did.
+  When no state set showed it, the root's nav state is set to each value its source names (compared with
+  it, passed to its setter, its `switch` cases, its literal type), by itself, to see which views each shows;
+  up to 60 values.
+- Live photos no longer depend on page order. Traced openers ("Edit Image", "Add") were replayed at most
+  40 times per app run, so in a large app the order of pages decided which got replayed. Any change to
+  what was still missing could push one past the limit. Now each page gets up to 12 replays,
+  openers that reveal the most go first, and an opener matched only by its words on one page is tried
+  again on the next page that has it.
+- A modal a custom hook renders (`useDetailImages` returning `<ImageEditorModal open={!!editor} />`):
+  - The scan follows the hook to the component that calls it, and keeps the conditions where that
+    component renders what the hook returned (`{openColour && <section>{modal}</section>}`). Before, it
+    kept none.
+  - The hook's own state (`editor`) is set where React keeps it: in the calling component, after that
+    component's earlier hooks.
+  - A condition given as a prop (`open={!!editor}`) is read as its value's condition.
+- Apps that navigate by state in their root component, not by routes (`activeNav`, `setupTakeover`): an
+  element's conditions are set level by level, outermost first. The root counts as on every page, and each
+  component below is set once the level above has drawn it, with a photo after each level. A custom hook's
+  own state hooks are counted from its source, so a component that calls one before its `useState` can
+  still be set. The page's line says which level didn't show.
+- Drawings set state only as a last try, on a fresh drawing, after the traced clicks and the drawing's own
+  controls. Setting it first could change a drawing so that clicks which used to reveal an element didn't.
+- A `live.apps[name]` entry with only settings (`readPaths`, `readApi`, `auth`, `signIn`) and no `url` or
+  `dir` no longer skips the app as "a live surface needs url or dir". Its settings apply to the app dsa
+  starts itself, and the log names the reads it allows.
+- The same app and setup reach the same elements run after run. After every load, click and state change,
+  the crawler waits until the page stops changing and the app's own data requests are back (a request seen
+  three times counts as a poll and isn't waited for), instead of a fixed wait. A page's time limit is now
+  a rarely reached safety cap (2 minutes, 4 on pages that render what's missing), so its interaction
+  budget ends it the same way each time. When a time limit does cut a pass short, the log says so,
+  because only then can two runs differ.
+- A provider search that finds nothing says what it looked at: the imports it followed from the
+  component, where each name was declared or that it wasn't among the app's files, and whether the file
+  was outside the scan root.
+- Elements behind a component's own state ("when openColour", "mode === 'current'", "not singleView")
+  are reached live. On a page that shows the component, the crawler sets that state through React, photographs
+  what shows ("after setting openColour = {…}"), then reloads. The value comes from the condition, or is
+  shaped by how the component reads it. A drawing does the same before clicking anything. Each page logs
+  what it set and what it found ("state on …").
+- The log ends with every element not reached live on its own line: why, its conditions and the component
+  each is in, and the routes that render its file.
+- A page also counts as rendering a missing element when it shows that element's file, or a file that
+  imports it within three steps, read off the page's source tags. This holds where the scan can't tie a
+  route to its files, and for a modal a child of the page opens. Such pages get twice the interactions and time.
+- A page whose route the scan says renders a missing element is explored first, and every control on it
+  is tried, whatever was tried on other pages. Each explored page gets a log line: how many interactions,
+  how many found, and whether its budget ran out. Opener lines show the page's own route, hash included.
+- A provider the page doesn't have is found by following the component's own imports (two levels) and
+  then the whole app, with tests and stories last. Before, only the first 6,000 files were read. When the
+  hook's file makes a context but no provider component, the mount provides that context itself, with a
+  value shaped by what the component reads off the hook. The tagger keeps a file's contexts even when the
+  file has no JSX.
+- Mounted props: a `Set` or `Map` prop (by its type, or because the body calls `.has(` or `.get(`) gets
+  an empty one. A value rendered anywhere (`{open ? lead : null}`, `icon={lead}`) is never an object. An item
+  handed to another component in the same file (`<Node node={n} />`) is shaped by how that component reads
+  it, and a tree that draws itself ends with an empty list.
+- Exploring skipped a control on a page if one with the same words had been tried on another page, so
+  the first page to show "Edit Image" decided for every page. Now only the same control (the same source
+  line, when tagged) is skipped. The log now has a line per page for the traced openers tried there and what each found.
+- Mounted components get better props. A prop typed as a node gets nothing, and a prop rendered as text
+  never gets an object. Required props, including ones typed elsewhere, get their shape from how the body reads them,
+  nested, and a list gets one item shaped by its row, so helpers called per row draw. A provider the page
+  doesn't have ("useX must be used inside XProvider") is found in the source and wrapped around the
+  component. Drawings import files the way the app does, so a provider and its hook share one context.
+- Drawing is quicker: at most 8 controls clicked per drawing, within 8 seconds, and a traced opener's reset
+  loads the page once.
+- Drawing from the app's code reaches more elements. An element behind its component's own state (a tab,
+  a toggle, a menu) is drawn after the mount clicks what the scan traced, then the drawing's own controls,
+  never one that saves, deletes or leaves. One made by a render helper (`cellFor`, `renderBody`) is drawn
+  by the component around it. The mount also borrows every provider the live page has, not only the ones
+  near the element.
+- A component that fails to render says which component threw, the error's first line, and what it needed
+  when its source shows it ("the prop invoice", "what useSession reads (a provider above it)").
+- A page that shows text but nothing to click, and logs an error, is swept like any other page; only a
+  page with no text and nothing to click, or one whose modules mostly failed, counts as not rendered.
+- Components didn't mount in an app whose Vite server sets a base path (or whose root is a folder below
+  the scan root): the mount asked for the file at a URL that server doesn't serve. The tagger now answers
+  `/@dsa/where`, the URL its own server serves a file at (its root and base applied), and the mount imports
+  that. When a file still can't load, its line says what the server answered for it, or which of its
+  imports failed, instead of "Failed to fetch dynamically imported module".
+- Fewer live photos after the sign-in change: every reload while exploring a page waited up to 8 seconds
+  for the network to go quiet, which an app that keeps polling never does. Only a route's first visit
+  waits now. A page that rendered something to use is swept even when some of its requests failed, and a
+  request the browser dropped because the page moved on isn't counted as a failed module.
+- An app's `vendor/` folders and what git ignores in its folder aren't treated as its usage, so a synced
+  copy of the design system's own tooling no longer makes recommendations. An app folder git ignores as
+  a whole is still scanned.
+- A drawing that came out with no size is no longer dropped: its line says why (its styles hide it, it's
+  empty in its markup, or its styles give it no size), and it's shown outlined at a small size, labelled
+  "Outline only" on its card. It doesn't count as seen.
+- Only 40 elements per app were drawn, and the rest were dropped with one total line. There's no count cap
+  now, only a time budget (10 minutes per app), and each element is drawn on the page of a route that
+  renders it without reloading the page for every one.
 - Cards showed a proposal with the story's sample content although the element had its own. The
   confidence cap changes which question an element is in, and so what its card proposes, and the last cap
   ran after the last drawing. Now dsa caps and draws until nothing new is wanted

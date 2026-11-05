@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { loadCatalog, withMetrics } from './catalog.js';
 import { appSettings, readExceptions, type Config } from './config.js';
-import { defaultExcludes, globMatch, targetRelative } from './paths.js';
+import { defaultExcludes, globMatch, targetRelative, usageExcludes } from './paths.js';
 import type { Store, StoreFactory } from './store.js';
 import { effectiveSettings } from './settings.js';
 import { resolveTargets, latestVersions } from './workspaces.js';
@@ -187,7 +187,7 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
     catch (e: any) { notes.push(`Model summary not written: ${String(e?.message ?? e).split("\n")[0]}`); }
   }
   for (const t of targets.filter(t => t.role !== 'core')) {
-    const tEx = [...excludes, ...(t.exclude ?? [])];
+    const tEx = [...excludes, ...(t.exclude ?? []), ...(t.role === 'core' ? [] : usageExcludes(t.dir))];
     const app = appSettings(config, t.name);
     const res = scanCode(opts.root, config, t, tEx);
     if (reading) res.instances = instancesFromReading(reading, opts.root, t, config.designSystem.core.name);
@@ -297,7 +297,7 @@ export async function reevaluateElements(opts: { root: string; dataDir: string; 
   try { sigs = buildSignatures(corePackages(targets)); } catch { /* the first pass noted it */ }
   const evals: ElementEval[] = [];
   for (const t of targets.filter(t => t.role !== 'core' && appSettings(config, t.name).lookalikes)) {
-    const tEx = [...excludes, ...(t.exclude ?? [])];
+    const tEx = [...excludes, ...(t.exclude ?? []), ...(t.role === 'core' ? [] : usageExcludes(t.dir))];
     const res = scanCode(opts.root, config, t, tEx);
     const { exceptionOf } = exceptLookalikes(opts.root, config, t, res.lookalikes, [], new Date());
     const reachOf = new Map<Lookalike, Reach>();

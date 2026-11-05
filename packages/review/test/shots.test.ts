@@ -63,3 +63,19 @@ test('a tie among identical elements still shows how the element looks; a contro
   // The page's route names a file: its words decide which line it is.
   assert.deepEqual(pathWords('apps/billing/src/orders/OrderRow.tsx'), ['billing', 'orders', 'order']);
 });
+
+test('recorded props are filled where a copy was cut or held null, at every depth, never mounted with a null', async () => {
+  const { fillProps } = await import('../src/shots.js');
+  const shaped = { colour: { n: { r: 0 }, name: '' }, rows: [{ id: '', tags: [] }], onPick: { __dsa: 'fn' } };
+  const rec = { colour: { n: null, name: 'Fern' }, rows: [{ id: 'r1', tags: null }], onPick: null, extra: 3 };
+  assert.deepEqual(fillProps(shaped, rec), { colour: { n: { r: 0 }, name: 'Fern' }, rows: [{ id: 'r1', tags: [] }], onPick: { __dsa: 'fn' }, extra: 3 });
+});
+
+test("recorded values mount with no null in any list; a cut copy's items are filled from their type, else the list is empty", async () => {
+  const { cleanRecorded } = await import('../src/shots.js');
+  // A whole copy: as recorded, null items dropped, a real null field kept.
+  assert.deepEqual(cleanRecorded({ rows: [null, { id: 'r1', note: null }] }, {}, false), { rows: [{ id: 'r1', note: null }] });
+  // A cut copy: an item's gaps filled from the shape's item; with no shape to fill them, the list is empty.
+  assert.deepEqual(cleanRecorded({ quotes: [{ id: 'q1', price: null }, null] }, { quotes: [{ id: '', price: { n: 0 } }] }, true), { quotes: [{ id: 'q1', price: { n: 0 } }] });
+  assert.deepEqual(cleanRecorded({ quotes: [{ id: 'q1', price: null }] }, {}, true), { quotes: [] });
+});

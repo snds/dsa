@@ -161,7 +161,7 @@ export async function renderReport(root: string, config: Config, dataDir: string
     const shotOf = (s: any) => ({ url: shotUrl(s.file), match: s.matchScore, page: s.page, box: s.box ?? null, revealedBy: s.revealedBy ?? null,
       ...(s.blank ? { blank: true } : {}), ...(s.covered ? { covered: true } : {}), ...(s.via ? { via: s.via } : {}), ...(s.ties > 1 ? { ties: s.ties, alike: s.alike ?? 1 } : {}), ...(s.shared ? { shared: s.shared } : {}), ...(s.tagged ? { tagged: true } : {}),
       // Drawn direct from code (mount, markup): shown, labelled, never a photo. Uncovered: covering layers hidden.
-      ...(s.drawn ? { drawn: s.drawn } : {}), ...(s.exact ? { exact: true } : {}), ...(s.uncovered ? { uncovered: s.uncovered } : {}),
+      ...(s.drawn ? { drawn: s.drawn } : {}), ...(s.exact ? { exact: true } : {}), ...(s.placeholder ? { placeholder: s.placeholder } : {}), ...(s.uncovered ? { uncovered: s.uncovered } : {}),
       // An isolated render: mounted in the app's build with the props it was recorded with. And the run that took it, and when.
       ...(s.source ? { source: s.source } : {}), ...(s.run ? { run: s.run } : {}), ...(s.at ? { at: s.at } : {}),
       // A wider crop of the page around it (about 800 × 500 CSS px), with the element's box inside it.

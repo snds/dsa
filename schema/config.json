@@ -609,7 +609,7 @@
       "additionalProperties": false
     },
     "apps": {
-      "description": "Per-app switches, keyed by app or workspace name. Anything not listed is fully measured.",
+      "description": "Per-app switches, keyed by app, workspace or package name (an app's own dsa.config.json adds its entry). Anything not listed is fully measured.",
       "type": "object",
       "propertyNames": {
         "type": "string"
@@ -856,6 +856,67 @@
               "additionalProperties": false
             }
           },
+          "routeSource": {
+            "description": "A module of the app (path from its folder) whose export lists every route: an array, or a function (it may be async) that returns one, e.g. the app's route formatter over its registries. Loaded through the running app's build; its routes are visited first.",
+            "type": "object",
+            "properties": {
+              "module": {
+                "type": "string"
+              },
+              "export": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "module",
+              "export"
+            ],
+            "additionalProperties": false
+          },
+          "profiles": {
+            "description": "Named starting states: a route opened with local (and session) storage seeded first, no clicking (a wizard step, a feature flag). null removes a key.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "route": {
+                  "type": "string"
+                },
+                "storage": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "session": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "name",
+                "route"
+              ],
+              "additionalProperties": false
+            }
+          },
           "screenshots": {
             "description": "false: never start this app for screenshots.",
             "type": "boolean"
@@ -939,6 +1000,30 @@
         "reveal": {
           "description": "Open menus, tabs and sheets to find hidden elements (default on).",
           "type": "boolean"
+        },
+        "renderTests": {
+          "description": "Before the crawl, run the app's own component tests (Vitest) with source tags and the evidence ledger on, so what they render is recorded for drawing. Off by default; DSA_RENDER_TESTS=1 turns it on.",
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "maxMinutes": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "include": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
         },
         "perGroup": {
           "type": "integer",

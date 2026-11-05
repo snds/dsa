@@ -75,7 +75,8 @@ export type Outcome = 'pass' | 'fail' | 'na' | 'untested';
  * when found by its exact tag). markup: markup only (doesn't count). none: no picture.
  */
 export type Source = 'live' | 'isolated' | 'guessed' | 'markup' | 'none';
-export const sourceOf = (s: any): Source => (!s ? 'none' : s.source === 'isolated' ? 'isolated' : s.drawn === 'mount' ? 'guessed' : s.drawn ? 'markup' : 'live');
+// A drawing shown outlined because it had no size is markup: it doesn't count as seeing the element.
+export const sourceOf = (s: any): Source => (!s ? 'none' : s.placeholder ? 'markup' : s.source === 'isolated' ? 'isolated' : s.drawn === 'mount' ? 'guessed' : s.drawn ? 'markup' : 'live');
 
 export interface TrustRow {
   id: string;

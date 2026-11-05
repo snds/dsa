@@ -7,10 +7,12 @@ import { applyRenderedEvidence, capByEvidence, logEvent, materializeRemotes, ope
 import { detectApp, ensureBrowser, installAppDeps, linkCoreForChild } from './apps.js';
 import { renderIfStale, renderProposals, renderSignatures, settleProposals } from './rendered.js';
 import { takeShots } from './shots.js';
+import { recordApp } from './record.js';
 
 export { detectApp, discoverRoutes, ensureBrowser, freePort, installAppDeps, linkCoreForChild, startApp, type AppPlan, type RunningApp } from './apps.js';
 export { takeShots, captureSession, type ShotResult } from './shots.js';
 export { onReviewPage } from './card-page.js';
+export { recordApp } from './record.js';
 export { flowProblems, guardNetwork, routeUrl, runFlow, describeStep, NEVER, type Flow, type Step } from './flows.js';
 export { HARNESS, startProxy } from './sbproxy.js';
 export { READ_STYLE, argsParam, renderProposals, renderSignatures, renderIfStale, settleProposals, startStorybook, wantedProposals } from './rendered.js';
@@ -195,6 +197,20 @@ export default defineAddon({
         await liveGate(api.cwd, ctx, o, api.out);
         const r = await shotsAndEvidence(ctx, { url: o.url, routes: o.routes?.split(','), target: o.target, fresh: o.fresh, retryMissing: o.retryMissing, perGroup: o.perGroup ? Number(o.perGroup) : undefined }, api.out);
         printShots(r, ctx.profile.label, api.out);
+      });
+
+    program
+      .command('record')
+      .description("start an app with source tags and the evidence ledger on, from a temp copy, for you to click through: what renders is recorded, and the next `dsa shots` reaches and draws it. Ctrl-C stops it")
+      .option('--target <name>', 'the app')
+      .option('--out <file>', 'where records go (default: <data>/shots/ledger-lines.jsonl, which dsa shots reads)')
+      .action(async (o: { target?: string; out?: string }, cmd: Command) => {
+        const ctx = await api.context(cmd);
+        const r = await recordApp({ root: ctx.root, dataDir: ctx.dataDir, config: ctx.config, target: o.target, out: o.out, log: api.out });
+        api.out(`Recording at ${r.url}`);
+        api.out(`Open it in a browser and go through the flows the crawler can't reach. Each element that renders is added to ${r.out}.`);
+        api.out('Press Ctrl-C to stop. Then run `dsa shots`: it reads that file.');
+        await new Promise<void>(() => {});
       });
 
     program
