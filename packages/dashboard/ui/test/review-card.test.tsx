@@ -41,18 +41,23 @@ beforeAll(async () => {
         // Photographed but nothing drawn in its box; a row from a list, one of three alike; one drawn with its own label.
         el("k1", "ledger", "ledger/src/Rows.tsx", { title: "Row actions", shot: { url: "shots/k1.png", match: 1, page: "/", box, blank: true } }),
         el("k2", "ledger", "ledger/src/Rows.tsx", { title: "Row actions", styleSig: "look-k2", ownHash: "own123", label: "Open", shot: { url: "shots/k2.png", match: 0.95, page: "/", box, ties: 3, alike: 3 } }),
+        // A split card: one part photographed, the other never seen.
+        el("p1", "ledger", "ledger/src/Split.tsx", { title: "Split control", label: "Close" }),
+        el("p2", "ledger", "ledger/src/Split.tsx", { title: "Split control", label: "Open", shot: null, review: { ready: false, current: null, missing: [{ why: "There is no photo of it in the app.", fix: "Take screenshots." }] } }),
         el("m1", "ledger", "ledger/src/Menu.tsx", { use: "MenuItem", props: {}, title: "Menu rows", home: "MenuItem", confidence: 0.89, evidenceCap: { from: 0.96, why: ["there is no photo of it in the app", "the proposal (MenuItem) isn't drawn exactly yet"] } }),
       ],
       questions: [
         { key: "q1", kind: "group", title: "Ghost buttons", ask: "Replace with Button (variant ghost)?", home: "Button", ids: ["b1", "b2"], options: [{ label: "Button · variant ghost", decision: ghost }], auto: ghost, fit: null, parts: null, context: null, note: null },
         { key: "q3", kind: "group", title: "Row actions", ask: "Replace with Button (variant ghost)?", home: "Button", ids: ["k1", "k2"], options: [{ label: "Button · variant ghost", decision: ghost }], auto: ghost, fit: null, parts: null, context: null, note: null },
+        { key: "q5", kind: "group", title: "Split control", ask: "Replace each part?", home: "Button", ids: ["p1", "p2"], options: [{ label: "Button · variant ghost", decision: ghost }], auto: ghost, fit: null, context: null, note: null,
+          parts: [{ key: "a", ask: "", ids: ["p1"], options: [{ label: "Button · variant ghost", decision: ghost }], auto: ghost }, { key: "b", ask: "", ids: ["p2"], options: [{ label: "Button · variant ghost", decision: ghost }], auto: ghost }] },
         { key: "q4", kind: "group", title: "Menu rows", ask: "Replace with MenuItem?", home: "MenuItem", ids: ["m1"], options: [{ label: "MenuItem", decision: { verdict: "replace", role: "button", use: "MenuItem", props: {} } }], auto: { verdict: "replace", role: "button", use: "MenuItem", props: {} }, fit: null, parts: null, context: null, note: null },
         { key: "q2", kind: "group", title: "Filter toggles", ask: "Replace with Toggle?", home: "Toggle", ids: ["t1"], options: [{ label: "Toggle", decision: { verdict: "replace", role: "button", use: "Toggle", props: {} } }], auto: { verdict: "replace", role: "button", use: "Toggle", props: {} }, fit: null, parts: null, context: null, note: null },
       ],
       proposals: {
         "Button|variant=ghost": { use: "Button", props: { variant: "ghost" }, check: "exact", url: "rendered/ghost.png", content: null },
         Toggle: { use: "Toggle", props: {}, check: "none", url: null, note: "No Toggle story." },
-        "Button|variant=ghost#own123": { use: "Button", props: { variant: "ghost" }, check: "exact", url: "rendered/own.png", content: null, own: true },
+        "Button|variant=ghost#own123": { use: "Button", props: { variant: "ghost" }, check: "exact", url: "rendered/own.png", content: null, own: true, text: "Open" },
         MenuItem: { use: "MenuItem", props: {}, check: "none", url: null, note: "MenuItem doesn't show in its stories: it may only appear inside something closed, like a menu or a dialog, and opening it didn't show it. Its story as written is shown instead.", fallback: "rendered/fallback-menu.png" },
       },
       sources: {},
@@ -218,4 +223,23 @@ test("a card that leaves out a label or the code opener fails those checks", asy
   pane.querySelector<HTMLButtonElement>('button[title="Open the code"]')!.disabled = true
   const b1 = (await m.probe.probeCards(document)).find(c => c.id === "b1")!
   expect([b1.photoLabel, b1.opensCode, b1.sameScale]).toEqual([false, false, true])
+})
+
+test("no decision without its evidence: every Approve sits beside the elements' own photos; a part with none says why", async () => {
+  await mount()
+  const approves = [...document.querySelectorAll("button")].filter(b => /^Approve/.test(b.textContent ?? ""))
+  expect(approves.length).toBeGreaterThan(0)
+  for (const b of approves) {
+    const row = b.closest('[data-slot="decision-row"]')
+    expect(row, b.textContent ?? "").not.toBeNull()
+    expect(row!.querySelector('[data-pane="now"] img'), "a Now photo in the same row").not.toBeNull()
+  }
+  // The part never photographed: no buttons, the reason and the fix.
+  const split = card("Split control")
+  const rows = [...split.querySelectorAll('[data-slot="decision-row"]')]
+  expect(rows).toHaveLength(1)
+  expect(split.querySelector('[data-slot="needs-evidence"]')?.textContent).toMatch(/no photo of it/)  // The counts agree: what can be decided, and apart, what needs evidence first.
+  const tiles = document.body.textContent ?? ""
+  expect(tiles).toMatch(/Needs evidence\s*\d+/)
+  expect(tiles).toMatch(/elements you can decide now/)
 })

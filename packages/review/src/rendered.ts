@@ -288,7 +288,8 @@ export async function renderProposals(opts: { root: string; config: Config; data
       let best: Proposal | null = null;
       if (await source()) best = await fromSource(hpage, s, p, k, dir, hashOf(p.use));
       // Done: exact, with the element's own content, or (with none of its own) without a stand-in label.
-      const done = (b: Proposal | null) => Boolean(b && b.check === 'exact' && b.shot && (p.own ? b.own : !b.content));
+      // Drawn with its own content and saying which words: one drawn before renders kept their text is drawn again.
+      const done = (b: Proposal | null) => Boolean(b && b.check === 'exact' && b.shot && (p.own ? b.own && typeof b.text === 'string' : !b.content));
       if (!done(best) && (await storybook())) best = pickBetter(best, await fromStories(sbs!, s, p, k, dir, hashOf(p.use), rendered === 0));
       items[k] = best ?? { ...noOwn(p), check: 'none', ...(sbWhy ? { noSource: true } : {}), note: `${p.use} couldn't be drawn${sbWhy ? `: there's no Storybook to draw it from (${sbWhy})` : ''}.`, hash: hashOf(p.use) };
       rendered++;
@@ -342,7 +343,7 @@ async function fromSource(page: any, s: any, p: Wanted, k: string, dir: string, 
   const file = `proposal-${sha(k).slice(0, 12)}.png`;
   const shot = await shoot(page, sel, path.join(dir, file));
   const content = own && !own.own && own.why ? own.why : undefined;
-  return { ...noOwn(p), check, via: 'source', shot: shot ? file : undefined, styles: top.styles, ...(own?.own ? { own: true } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
+  return { ...noOwn(p), check, via: 'source', shot: shot ? file : undefined, styles: top.styles, ...(own?.own ? { own: true, text: p.own?.text ?? '' } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
 }
 
 /** Runs in the page: did the element's own words and icon show, and set its accessible name. */
@@ -405,7 +406,7 @@ async function fromStories(sb: { url: string; stories: any[]; page: any }, s: an
     if (own?.own) await page.waitForTimeout(120);
     const shot = await shoot(page, sel, path.join(dir, file));
     const content = own?.own ? undefined : own?.why ? own.why : set ? (iconSize && icon ? `icon from ${icon.story}` : 'story default') : undefined;
-    best = { ...noOwn(p), check, via: 'story', shot: shot ? file : undefined, styles: top.styles, story: st.id, ...(own?.own ? { own: true } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
+    best = { ...noOwn(p), check, via: 'story', shot: shot ? file : undefined, styles: top.styles, story: st.id, ...(own?.own ? { own: true, text: p.own?.text ?? '' } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
     if (check === 'exact') break;
   }
   if (best) return best;

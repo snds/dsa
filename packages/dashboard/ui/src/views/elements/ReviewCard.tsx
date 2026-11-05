@@ -8,8 +8,8 @@ import { Code, Disclosure, Pre } from "@/components/bits"
 import { D, short, SYS } from "@/lib/dsa"
 import { stageKey, useStaged } from "@/lib/staged"
 import { AskAgent } from "@/agent/AskAgent"
-import { Conf, ElementRow, NoShot, Reasons, ReviewControls, contentText, desc, nameOf, pickText, proposalCheck, proposalFor, revealedText, sourceLabel, sourceTip, useEl, useReviewState } from "./shared"
-import { InContext, SameScale } from "./SameScale"
+import { Conf, ElementRow, NoShot, Reasons, ReviewControls, contentText, decidable, desc, nameOf, ownWords, pickText, proposalCheck, proposalFor, revealedText, sourceLabel, sourceTip, useEl, useReviewState } from "./shared"
+import { Crop, InContext, Natural, SameScale } from "./SameScale"
 import { useApp } from "@/lib/app"
 import { styleName } from "./units"
 
@@ -79,7 +79,7 @@ export function ReviewCard({ items, auto, pattern, options, fit, kind, title, as
   const tag = [...new Set(items.map(e => `<${e.element}>`))].join(" ")
   const ready = (context ?? []).map(id => byId.get(id)).filter(Boolean)
   // Only an element a person can see both halves of is offered for a decision (report.ts withReview).
-  const reviewable = items.filter(e => !e.review || e.review.ready)
+  const reviewable = items.filter(decidable)
 
   return (
     <Card className={cn("gap-0 py-0", kind === "question" && state === "open" && "border-warning-soft-border", anyStaged && "border-primary/50")}>
@@ -119,7 +119,12 @@ export function ReviewCard({ items, auto, pattern, options, fit, kind, title, as
               {shown.verdict === "gap" && shown.gap && <p className="text-sm text-muted-foreground">{shown.gap}</p>}
             </div>
             {/* 3. The decision. */}
-            {reviewable.length ? <ReviewControls items={reviewable} auto={auto} pattern={reviewable.length === items.length ? pattern : null} options={options} label={label} /> : <NeedsEvidence items={items} />}
+            {reviewable.length ? (
+              <div className="flex flex-col gap-2" data-slot="decision-row">
+                <NowStrip items={reviewable} pick={shown} />
+                <ReviewControls items={reviewable} auto={auto} pattern={reviewable.length === items.length ? pattern : null} options={options} label={label} />
+              </div>
+            ) : <NeedsEvidence items={items} />}
             {reviewable.length > 0 && reviewable.length < items.length && <NeedsEvidence items={items.filter(e => !reviewable.includes(e))} some />}
           </>
         )}
@@ -165,6 +170,8 @@ function PartRow({ p, title }: { p: Part; title: string }) {
   const lo = Math.min(...items.map(e => e.confidence)), hi = Math.max(...items.map(e => e.confidence))
   // What the parts say (their labels); a file name here would tell the reader nothing new.
   const names = [...new Set(items.filter(e => e.label).map(nameOf))]
+  // Asked only of the parts a person can see both halves of: their own photos beside the proposal.
+  const reviewable = items.filter(decidable)
   return (
     <div className={cn("flex flex-col gap-2 rounded-lg border p-3", state === "ignored" && "opacity-60")}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
@@ -175,7 +182,38 @@ function PartRow({ p, title }: { p: Part; title: string }) {
       {shown.parent && <ParentNote parent={shown.parent} small />}
       {shown.how && <p className="text-xs text-muted-foreground">{shown.how}</p>}
       {shown.verdict === "gap" && shown.gap && <p className="text-xs text-muted-foreground">{shown.gap}</p>}
-      <ReviewControls items={items} auto={p.auto} pattern={null} options={p.options} label={`${title} · ${pickText(p.auto)}`} />
+      {reviewable.length ? (
+        <div className="flex flex-col gap-2" data-slot="decision-row">
+          <NowStrip items={reviewable} pick={shown} />
+          <ReviewControls items={reviewable} auto={p.auto} pattern={null} options={p.options} label={`${title} · ${pickText(p.auto)}`} />
+        </div>
+      ) : <NeedsEvidence items={items} />}
+      {reviewable.length > 0 && reviewable.length < items.length && <NeedsEvidence items={items.filter(e => !reviewable.includes(e))} some />}
+    </div>
+  )
+}
+
+/**
+ * What a decision is about, beside it: each element as the app shows it (Now), and the proposal drawn with
+ * that element's own words and icon. Six at most here; every one is in the evidence below.
+ */
+function NowStrip({ items, pick }: { items: any[]; pick: any }) {
+  const shown = items.slice(0, 6)
+  return (
+    <div className="flex flex-wrap items-start gap-3" data-slot="now-strip">
+      {shown.map(e => {
+        const p = pick?.verdict === "replace" ? proposalFor(pick, e) : null
+        return (
+          <figure key={e.id} className="m-0 flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <span className="w-fit rounded-md border bg-background p-0.5" data-pane="now"><Crop url={e.shot.url} box={e.shot.box} alt={`Now: ${nameOf(e)}`} /></span>
+              {p?.url && <><ArrowRightIcon className="shrink-0 text-muted-foreground" aria-label="becomes" /><span className="w-fit rounded-md border bg-background p-0.5" data-pane="now-proposed"><Natural url={p.url} alt={`Proposed: ${SYS} ${pickText(pick)}${ownWords(p, e) ? ", with its own words" : ""}`} /></span></>}
+            </div>
+            <figcaption className="text-[11px] text-muted-foreground">Now{p?.url ? ` → ${ownWords(p, e) ? "with its own words" : "proposed"}` : ""}</figcaption>
+          </figure>
+        )
+      })}
+      {items.length > shown.length && <span className="self-center text-xs text-muted-foreground">+{items.length - shown.length} more, each in the evidence below</span>}
     </div>
   )
 }
@@ -358,7 +396,7 @@ function LookTile({ look, sameAs, group, target, proposal, compare, measure }: {
             {Object.entries(exact ? target.props ?? {} : closest ? keyProps(closest.key) : target.props ?? {}).filter(([k]) => k !== "render").map(([k, v]) => <Badge key={k} variant="secondary" className="font-mono text-[10px] font-normal">{k} {String(v)}</Badge>)}
             {exact && chk && <span className={cn(chk.warn && "text-warning-soft-foreground")}>{chk.text}</span>}
             {!exact && <span className="text-warning-soft-foreground">{proposal?.note ?? (closest ? "The exact props aren't rendered yet" : chk?.text ?? "Not rendered yet")}</span>}
-            {exact?.own && <span>with this element's own content</span>}
+            {ownWords(exact, e) && <span>with this element's own content</span>}
             {exact?.content && <span className="text-warning-soft-foreground" title={exact.content}>{/stand-in|^icon/.test(exact.content) ? "Stand-in icon: the app's own icon wasn't captured" : "The story's sample label, not this element's"}</span>}
           </>
         ) : undefined}

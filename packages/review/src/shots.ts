@@ -2625,7 +2625,8 @@ const OWN_CONTENT = `(id) => {
     s.setAttribute('stroke', cs.stroke === 'none' ? 'none' : 'currentColor');
     if (cs.stroke !== 'none') s.setAttribute('stroke-width', cs.strokeWidth);
     s.setAttribute('data-slot', 'icon');
-    icon = s.outerHTML.length <= 4000 ? s.outerHTML : null;
+    // Icon sets draw detailed paths: kept up to 20 KB, so the proposal is drawn with this icon, not a stand-in.
+    icon = s.outerHTML.length <= 20000 ? s.outerHTML : null;
   }
   return { text: text || null, ariaLabel: el.getAttribute('aria-label'), icon };
 }`;

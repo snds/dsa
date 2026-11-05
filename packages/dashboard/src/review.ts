@@ -30,11 +30,26 @@ export function picksOf(payload: any): Map<string, any> {
   return out;
 }
 
-/** The proposal render for an element and a pick: with its own content first, else the plain one. */
+/**
+ * The proposal render for an element and a pick: with its own content first, else the plain one. A plain
+ * render never counts as drawn with this element's words, whatever it was drawn with.
+ */
 export function proposalFor(E: any, e: any, pick: any): any | null {
   if (pick?.verdict !== 'replace' || !pick.use) return null;
   const key = proposalKey(pick.use, pick.props);
-  return (e.ownHash && E.proposals?.[`${key}#${e.ownHash}`]) || E.proposals?.[key] || null;
+  const mine = e.ownHash ? E.proposals?.[`${key}#${e.ownHash}`] : null;
+  if (mine) return mine;
+  const plain = E.proposals?.[key];
+  return plain ? { ...plain, own: false } : null;
+}
+
+/** The element's own words, as its photo recorded them (else its label), for comparing with a drawing's. */
+const wordsOf = (e: any): string => String(e.shot?.content?.text ?? e.label ?? '').replace(/\s+/g, ' ').trim();
+/** A drawing shows the element's own words: drawn with them, and the words it drew are the element's. */
+export function drawnWithOwnWords(p: any, e: any): boolean {
+  if (!p?.own) return false;
+  if (typeof p.text !== 'string') return !wordsOf(e);
+  return p.text.replace(/\s+/g, ' ').trim() === wordsOf(e);
 }
 
 /** Can a person review this element? */
@@ -60,7 +75,9 @@ export function evidenceOf(E: any, e: any, pick: any): Evidence {
     if (p && p.check === 'none' && !p.url && (p.noSource || NO_SOURCE.test(p.note ?? ''))) missing.push({ why: `The system has nothing to draw ${pick.use} from.`, fix: `Add a story or source for ${pick.use}, or propose another component.` });
     else if (!p?.url) missing.push({ why: `The proposal (${what}) isn't drawn yet.`, fix: 'Draw the proposals (dsa render).' });
     else if (p.check !== 'exact') missing.push({ why: `The proposal (${what}) is only drawn as a near match, not with these props.`, fix: 'Draw the proposals (dsa render).' });
-    else if (!container && e.ownHash && !p.own) missing.push({ why: "The proposal shows the system's sample words, not this element's own.", fix: 'Draw the proposal again once its own words are known (a photo records them).' });
+    // A stand-in icon reads as a different control; sample words as a different label: neither is decidable.
+    else if (!container && /stand-in|^icon|icon .*couldn't be loaded/.test(p.content ?? '')) missing.push({ why: "The proposal is drawn with a stand-in icon, not this element's own icon, so it may read as a different control.", fix: "Take the photo again so its icon is recorded, then draw the proposal again (dsa render)." });
+    else if (!container && (e.ownHash || p.content) && !drawnWithOwnWords(p, e)) missing.push({ why: p.own ? "The proposal's words aren't this element's own." : "The proposal shows the system's sample words, not this element's own.", fix: 'Draw the proposal again once its own words are known (a photo records them).' });
   }
   return { ready: !missing.length, current, missing };
 }
@@ -74,7 +91,19 @@ export function pageName(url: string | null | undefined): string {
   const all = route.split('?')[0]!.split('/').filter(Boolean).map((x) => decodeURIComponent(x));
   const parts = all.filter((x) => !/^(_r_\w*_|:r\w*:|_+)$/.test(x));
   if (!parts.length) return all.length ? 'an unnamed page' : 'the home page';
-  const words = parts.slice(-5).map((p) => (/\d/.test(p) ? p : p.replace(/[-_]+/g, ' ').replace(/^./, (c) => c.toUpperCase())));
+  const word = (p: string) => (/\d/.test(p) ? p : p.replace(/[-_]+/g, ' '));
+  // "colour/CB-401/from/list/colours" → "Colour CB-401, opened from the Colours list": a sentence where the
+  // route says where it was opened from.
+  const from = parts.findIndex((p) => p.toLowerCase() === 'from');
+  if (from > 0) {
+    const here = parts.slice(0, from).map(word).join(' ');
+    const there = parts.slice(from + 1).map(word);
+    const kind = there.find((w) => /^(list|table|board|grid|search|library)$/i.test(w));
+    const rest = there.filter((w) => w !== kind).join(' ');
+    const cap = (t: string) => t.replace(/^./, (c) => c.toUpperCase());
+    return `${cap(here)}, opened from ${there.length ? `the ${kind ? `${cap(rest)} ${kind.toLowerCase()}` : cap(there.join(' '))}`.replace(/\s+/g, ' ') : 'another page'}`;
+  }
+  const words = parts.slice(-5).map((p) => (/\d/.test(p) ? p : word(p).replace(/^./, (c) => c.toUpperCase())));
   return words.join(' › ');
 }
 

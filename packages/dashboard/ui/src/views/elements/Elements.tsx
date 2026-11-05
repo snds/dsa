@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Note, SectionTitle, Stat } from "@/components/bits"
 import { D, fmtDT, short, SYS } from "@/lib/dsa"
 import { unstage, useStaged } from "@/lib/staged"
-import { ElCtx, ElementRow, sameDecision } from "./shared"
+import { decidable, ElCtx, ElementRow, sameDecision } from "./shared"
 import { StagedBar } from "./StagedBar"
 import { Picker } from "./Picker"
 import { Lightbox } from "./Lightbox"
@@ -66,6 +66,11 @@ export function Elements() {
 
   const units = unitsFor(mine, qs, byId, stagedKeys)
   const count = (show: string) => units.filter(u => matches(u, show)).length
+  // A decision is one a person can make: a card with an element whose photo and proposal are both real.
+  // The rest wait for evidence, counted apart, so the two numbers add up to what's open.
+  const openUnits = units.filter(u => matches(u, "open"))
+  const decidableIn = openUnits.filter(u => u.items.some(decidable))
+  const waiting = openUnits.flatMap(u => u.items).filter((e: any) => !decidable(e)).length
   const elementsIn = (show: string) => units.filter(u => matches(u, show)).reduce((a, u) => a + u.items.length, 0)
   const [show, setShow] = React.useState(() => (count("open") ? "open" : "all"))
   // A card stays where it was when the filter was set, so answering one under "Needs you" doesn't
@@ -82,8 +87,9 @@ export function Elements() {
   return (
     <ElCtx.Provider value={ctx}>
       <div className="flex flex-col">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <Stat label="Need a decision" value={count("open")} detail={`${elementsIn("open")} elements`} active={show === "open"} onClick={() => pick(["open"])} />
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+          <Stat label="Need a decision" value={decidableIn.length} detail={`${decidableIn.reduce((a, u) => a + u.items.filter(decidable).length, 0)} elements you can decide now`} active={show === "open"} onClick={() => pick(["open"])} />
+          <Stat label="Needs evidence" value={waiting} detail="elements no one can decide yet: each card says what's missing" />
           <Stat label="Ready to migrate" value={elementsIn("ready")} detail={`At or above ${Math.round(th * 100)}%, seen and drawn, in ${count("ready")} groups`} active={show === "ready"} onClick={() => pick(["ready"])} />
           <Stat label="Decided" value={elementsIn("decided")} detail={staged.length && !D.serve ? `${staged.length} staged in this browser` : `${count("decided")} decisions`} active={show === "decided"} onClick={() => pick(["decided"])} />
           <Stat label={`No ${SYS} home yet`} value={gaps.reduce((a, u) => a + u.items.length, 0)} detail={`${gaps.length} pattern${gaps.length === 1 ? "" : "s"} to propose or map`} />

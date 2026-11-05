@@ -15,7 +15,10 @@ const shot = (o: object = {}) => ({ url: 'shots/a.png', match: 1, tagged: true, 
 const el = (id: string, o: object = {}) => ({ id, target: 'ledger', file: `ledger/src/${id}.tsx`, line: 3, element: 'button', role: 'button', verdict: 'replace', use: 'Button', props: { variant: 'outline' }, confidence: 0.95, needsHuman: false, label: 'Save', ownHash: 'own1', reasons: [], shot: shot(), alternatives: [{ use: 'Toggle', props: {} }], ...o });
 const proposals = {
   'Button|variant=outline': { use: 'Button', props: { variant: 'outline' }, check: 'exact', url: 'rendered/plain.png', own: false },
-  'Button|variant=outline#own1': { use: 'Button', props: { variant: 'outline' }, check: 'exact', url: 'rendered/own.png', own: true },
+  'Button|variant=outline#own1': { use: 'Button', props: { variant: 'outline' }, check: 'exact', url: 'rendered/own.png', own: true, text: 'Save' },
+  // Drawn with words that aren't this element's (another element's own render), and with a stand-in icon.
+  'Button|variant=outline#own2': { use: 'Button', props: { variant: 'outline' }, check: 'exact', url: 'rendered/own2.png', own: true, text: 'Schemas' },
+  'Button|variant=ghost#own3': { use: 'Button', props: { variant: 'ghost' }, check: 'exact', url: 'rendered/icon.png', content: "stand-in icon: the app's own icon wasn't captured" },
   Sheet: { use: 'Sheet', props: {}, check: 'none', url: null, noSource: true },
 };
 const payload = (evals: object[]) => ({ elements: { threshold: 0.9, questions: [], proposals, evals } });
@@ -36,6 +39,10 @@ test('a person is only asked when both halves are real; otherwise it says why an
     [{ ownHash: 'other' }, /sample words/],
     [{ props: { variant: 'ghost' } }, /isn't drawn yet/],
     [{ use: 'Sheet', props: {} }, /nothing to draw Sheet from/],
+    // "With its own words" only when the drawing's words are the element's: "Schemas" isn't "Save".
+    [{ ownHash: 'own2' }, /words aren't this element's own/],
+    // An icon button proposed with a "+" stand-in reads as another control: evidence, not a decision.
+    [{ ownHash: 'own3', label: null, props: { variant: 'ghost' } }, /stand-in icon/],
   ];
   for (const [o, re] of cases) {
     const r = why(o);
@@ -46,6 +53,7 @@ test('a person is only asked when both halves are real; otherwise it says why an
 });
 
 test('page names in plain words', () => {
+  assert.equal(pageName('http://127.0.0.1:5173/#/colour/CB-401/from/list/colours'), 'Colour CB-401, opened from the Colours list');
   assert.equal(pageName('http://127.0.0.1:5173/#/requests/table/sheet/add-request'), 'Requests › Table › Sheet › Add request');
   assert.equal(pageName('https://example.com/orders/ORD-1042?tab=2'), 'Orders › ORD-1042');
   assert.equal(pageName('https://example.com/'), 'the home page');

@@ -5,7 +5,8 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Note } from "@/components/bits"
 import { D, api, say, short, SYS } from "@/lib/dsa"
 import { relayWho } from "@/lib/useScan"
-import { ElCtx, pickText, sourceLabel } from "@/views/elements/shared"
+import { ElCtx, ownWords, pickText, sourceLabel } from "@/views/elements/shared"
+import { deltaOf } from "@/views/elements/ReviewCard"
 import { CodeViewer } from "@/views/elements/CodeViewer"
 import { Crop, InContext, Natural } from "@/views/elements/SameScale"
 
@@ -41,6 +42,62 @@ export function describe(e: any): string {
   const words = e.label ? ` labelled “${e.label}”` : ""
   const size = e.shot?.box ? `, ${Math.round(e.shot.box.w)} × ${Math.round(e.shot.box.h)} px` : ""
   return `${what.charAt(0).toUpperCase()}${what.slice(1)}${words}${size}, on ${e.review?.pageName ?? "its page"}.`
+}
+
+/** A colour in a word: "blue", "grey", "white", from rgb(), rgba() or #hex. Empty when it can't tell. */
+export function colourName(v: string): string {
+  let r = 0, g = 0, b = 0
+  const m = v.match(/rgba?\(([^)]+)\)/), h = v.match(/^#([0-9a-f]{3}|[0-9a-f]{6})\b/i)
+  if (m) { const [x, y, z, a] = m[1].split(",").map(s => Number(s.trim())); if (a === 0) return "transparent"; [r, g, b] = [x, y, z] }
+  else if (h) { const s = h[1].length === 3 ? h[1].split("").map(c => c + c).join("") : h[1]; [r, g, b] = [0, 2, 4].map(i => parseInt(s.slice(i, i + 2), 16)) }
+  else return ""
+  const max = Math.max(r, g, b) / 255, min = Math.min(r, g, b) / 255, l = (max + min) / 2
+  const sat = max === min ? 0 : (max - min) / (1 - Math.abs(2 * l - 1))
+  if (sat < 0.15) return l > 0.92 ? "white" : l < 0.12 ? "black" : "grey"
+  const hue = (() => { const R = r / 255, G = g / 255, B = b / 255, d = max - min; const x = max === R ? ((G - B) / d) % 6 : max === G ? (B - R) / d + 2 : (R - G) / d + 4; return (x * 60 + 360) % 360 })()
+  return hue < 15 || hue >= 345 ? "red" : hue < 40 ? "orange" : hue < 65 ? "yellow" : hue < 165 ? "green" : hue < 195 ? "teal" : hue < 255 ? "blue" : hue < 290 ? "purple" : "pink"
+}
+
+/**
+ * How the element differs from the proposal, in plain words: "4 px taller", "blue text instead of grey",
+ * "12 px text instead of 14 px". The element first, the proposal second.
+ */
+export function plainDifferences(e: any): string[] {
+  const d = deltaOf(e)
+  if (!d) return []
+  const px = (v: string) => { const n = v.match(/(-?\d+(?:\.\d+)?)px/); return n ? Number(n[1]) : null }
+  return d.changes.slice(0, 5).map(c => {
+    const l = c.label.toLowerCase(), a = px(c.from), b = px(c.to)
+    if (/height/.test(l) && a != null && b != null && a !== b) return `${Math.round(Math.abs(a - b))} px ${a > b ? "taller" : "shorter"}`
+    if (/width/.test(l) && a != null && b != null && a !== b) return `${Math.round(Math.abs(a - b))} px ${a > b ? "wider" : "narrower"}`
+    if (/font.?size|text size/.test(l) && a != null && b != null) return `${Math.round(a)} px text instead of ${Math.round(b)} px`
+    if (/padding|gap|margin/.test(l) && a != null && b != null) return `${Math.round(a)} px ${l.replace(/[-_]/g, " ")} instead of ${Math.round(b)} px`
+    if (/radius|corner/.test(l) && a != null && b != null) return a > b ? "rounder corners" : "squarer corners"
+    const ca = colourName(c.from), cb = colourName(c.to)
+    if (ca && cb && ca !== cb) return `${ca} ${/background|fill/.test(l) ? "background" : /border/.test(l) ? "border" : "text"} instead of ${cb}`
+    if (ca && cb) return `a slightly different ${/background|fill/.test(l) ? "background" : /border/.test(l) ? "border colour" : "text colour"} (both ${ca})`
+    return `${c.label.replace(/[-_]/g, " ")}: ${c.from || "none"} instead of ${c.to || "none"}`
+  })
+}
+
+/** A pick in a person's words: "a link-style button, inline size". The prop names stay beside it, small. */
+export function plainPick(r: any): string {
+  if (!r) return ""
+  if (r.verdict === "keep") return "keep it as it is"
+  if (r.verdict === "gap") return `nothing in ${SYS} fits`
+  if (r.verdict !== "replace" || !r.use) return pickText(r)
+  const name = String(r.use).replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase()
+  const props = Object.entries<any>(r.props ?? {}).filter(([k]) => k !== "render" && k !== "asChild")
+  const variant = props.find(([k]) => k === "variant")?.[1], size = props.find(([k]) => k === "size")?.[1]
+  const rest = props.filter(([k]) => k !== "variant" && k !== "size").map(([k, v]) => (v === true || v === "true" ? k : `${k} ${v}`))
+  const head = `${/^[aeiou]/i.test(variant ?? name) ? "an" : "a"} ${variant ? `${variant}-style ` : ""}${name}`
+  return [head, ...(size ? [`${size} size`] : []), ...rest].join(", ")
+}
+
+/** "a link-style button, inline size" with its props small beside it. */
+function PickName({ r }: { r: any }) {
+  const props = pickText(r)
+  return <><span>{plainPick(r)}</span>{r?.verdict === "replace" && <span className="ml-1 font-mono text-[10px] text-muted-foreground">({props})</span>}</>
 }
 
 /** The render stored for a component and props, if one was drawn (proposalKey's format). */
@@ -116,7 +173,12 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
   const [verdict, setVerdict] = React.useState<Verdict | null>(null)
   const [note, setNote] = React.useState("")
   const [choice, setChoice] = React.useState<any>(null)
-  const reasons = (e.reasons ?? []).map((r: any) => r.plain).filter(Boolean) as string[]
+  // In a designer's words: no scores or property counts on the face (they sit in Technical details), and the
+  // differences said as what you'd see.
+  const reasons = ((e.reasons ?? []).map((r: any) => r.plain).filter(Boolean) as string[])
+    .map(t => t.replace(/\s*\((?:its |the )?(?:handler|onClick|prop|props|code)\b[^)]*\)/i, ""))
+    .filter(t => !/\d+\s*%|\d+ of \d+ propert|\bmeasures\b/i.test(t))
+  const differs = plainDifferences(e)
   const alts = (e.alternatives ?? []).filter((a: any) => a?.use && a.use !== pick?.use).slice(0, 3)
 
   const label = (truth: any) => ({
@@ -145,7 +207,7 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
         </figure>
         <figure className="m-0 flex flex-col gap-1" data-pane="proposed">
           <div className="w-fit rounded-md border bg-background p-1">{proposal ? <Natural url={proposal.url} alt={`Proposed: ${SYS} ${pickText(pick)}, with its own words`} /> : <span className="text-xs">{pickText(pick)}: nothing to draw</span>}</div>
-          <figcaption className="text-xs"><b className="font-medium">Proposed</b> · {SYS} {pickText(pick)}{proposal?.own ? " · with its own words" : ""}</figcaption>
+          <figcaption className="text-xs"><b className="font-medium">Proposed</b> · {SYS} <PickName r={pick} />{ownWords(proposal, e) ? " · with its own words" : ""}</figcaption>
         </figure>
         <InContext url={e.shot.context?.url ?? e.shot.url} box={e.shot.context?.box ?? e.shot.box} alt={`Where it sits on ${e.review?.pageName}`} page={e.review?.pageName ?? "its page"} />
       </section>
@@ -153,7 +215,7 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
       <section aria-labelledby={`why-${e.id}`} className="flex flex-col gap-1">
         <h4 id={`why-${e.id}`} className="text-sm font-medium">Why dsa thinks so</h4>
         {reasons.length ? <ul className="list-disc pl-5 text-sm">{reasons.map((r, k) => <li key={k}>{r}</li>)}</ul> : <p className="text-sm text-muted-foreground">dsa gave no reason in plain words for this one.</p>}
-        <p className="text-xs text-muted-foreground">dsa is {Math.round((e.evidenceCap?.from ?? e.confidence) * 100)}% sure.</p>
+        {differs.length > 0 && <p className="text-sm" data-slot="differences"><span className="text-muted-foreground">How it differs from the proposal: </span>{differs.join("; ")}.</p>}
       </section>
 
       <section aria-labelledby={`ex-${e.id}`} className="flex flex-col gap-2" data-slot="examples">
@@ -172,7 +234,7 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
         <section aria-labelledby={`alt-${e.id}`} className="flex flex-col gap-2" data-slot="alternatives">
           <h4 id={`alt-${e.id}`} className="text-sm font-medium">What else dsa considered</h4>
           <div className="flex flex-wrap gap-4">{alts.map((a: any, k: number) => { const r = renderOf(a.use, a.props, e.ownHash); return (
-            <figure key={k} className="m-0 flex flex-col gap-1"><div className="w-fit rounded-md border bg-background p-1">{r ? <Natural url={r.url} alt={`${SYS} ${pickText(a)}`} /> : <span className="text-xs">Not drawn</span>}</div><figcaption className="text-xs">{pickText(a)}</figcaption></figure>
+            <figure key={k} className="m-0 flex flex-col gap-1"><div className="w-fit rounded-md border bg-background p-1">{r ? <Natural url={r.url} alt={`${SYS} ${pickText(a)}`} /> : <span className="text-xs">Not drawn</span>}</div><figcaption className="text-xs"><PickName r={a} /></figcaption></figure>
           ) })}</div>
         </section>
       )}
@@ -198,6 +260,7 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
             <div className="mt-2 flex flex-col gap-2">
               <Button variant="outline" size="sm" className="self-start" onClick={onCode}>Open the code at {short(e.file)}:{e.line}</Button>
               <ul className="list-disc pl-5 text-xs text-muted-foreground">{(e.reasons ?? []).map((r: any, k: number) => <li key={k}>{r.text}</li>)}</ul>
+              <p className="text-xs text-muted-foreground">The scanner's score: {Math.round((e.evidenceCap?.from ?? e.confidence) * 100)}% (not a checked track record).</p>
               {e.signature && <p className="text-xs text-muted-foreground">Measured: {[...(e.signature.matched ?? []), ...(e.signature.mismatched ?? [])].join(", ")}</p>}
             </div>
           </details>
@@ -254,7 +317,7 @@ function Choose({ e, pick, alts, value, onChange }: { e: any; pick: any; alts: a
             </div>
           </fieldset>
         ))}
-        <figure className="m-0 flex flex-col gap-1"><div className="w-fit rounded-md border bg-background p-1">{r ? <Natural url={r.url} alt={`${SYS} ${use}`} /> : <span className="text-xs">Not drawn with these props yet</span>}</div><figcaption className="text-xs">{pickText({ verdict: "replace", use, props })}</figcaption></figure>
+        <figure className="m-0 flex flex-col gap-1"><div className="w-fit rounded-md border bg-background p-1">{r ? <Natural url={r.url} alt={`${SYS} ${use}`} /> : <span className="text-xs">Not drawn with these props yet</span>}</div><figcaption className="text-xs"><PickName r={{ verdict: "replace", use, props }} /></figcaption></figure>
       </>}
     </fieldset>
   )

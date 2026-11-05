@@ -40,7 +40,7 @@ beforeAll(async () => {
         el("bare", { shot: null, shotMissing: true }),
       ],
       proposals: {
-        "Button|variant=outline#own1": { use: "Button", props: { variant: "outline" }, check: "exact", url: "rendered/own.png", own: true },
+        "Button|variant=outline#own1": { use: "Button", props: { variant: "outline" }, check: "exact", url: "rendered/own.png", own: true, text: "Export" },
         Toggle: { use: "Toggle", props: {}, check: "exact", url: "rendered/toggle.png" },
       },
     },
@@ -140,4 +140,29 @@ test("on a card, every element has its own tile; one without evidence says so in
   expect(host.querySelectorAll('[aria-label^="The other"]').length).toBe(0)
   expect(host.textContent).toContain("Needs evidence before review")
   expect(host.textContent).toContain("guessed props")
+})
+
+test("in a designer's words: no score on the face, differences said as what you'd see, alternatives named plainly", async () => {
+  const host = await mount(<m.LabelReview />)
+  // The scanner's score sits behind Technical details, never on the face.
+  expect(face(host)).not.toMatch(/\d+%/)
+  const L = await import("@/views/review/LabelReview")
+  expect(L.plainPick({ verdict: "replace", use: "Button", props: { variant: "link", size: "inline" } })).toBe("a link-style button, inline size")
+  expect(L.plainPick({ verdict: "replace", use: "MenuItem", props: { inset: "true" } })).toBe("a menu item, inset")
+  expect(L.colourName("rgb(37, 99, 235)")).toBe("blue")
+  expect(L.colourName("rgb(115, 115, 115)")).toBe("grey")
+  expect(L.plainDifferences({ rendered: { diff: { same: [], score: 0.58, diffs: [
+    { label: "height", element: "36px", system: "32px" },
+    { label: "text color", element: "rgb(37, 99, 235)", system: "rgb(115, 115, 115)" },
+    { label: "font size", element: "12px", system: "14px" },
+  ] } } })).toEqual(["4 px taller", "blue text instead of grey", "12 px text instead of 14 px"])
+})
+
+test("\"with its own words\" only when the drawing's words are the element's", async () => {
+  const S = await import("@/views/elements/shared")
+  const e = { label: "Library", shot: { content: { text: "Library" } } }
+  expect(S.ownWords({ own: true, text: "Library" }, e)).toBe(true)
+  expect(S.ownWords({ own: true, text: "Schemas" }, e)).toBe(false)
+  expect(S.ownWords({ own: true }, e), "a drawing that didn't record its words isn't taken on trust").toBe(false)
+  expect(S.ownWords({ own: false, text: "Library" }, e)).toBe(false)
 })
