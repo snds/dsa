@@ -1,6 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parse as babelParse } from '@babel/parser';
+import { LEDGER_RUNTIME } from './ledger.js';
+
+export { LEDGER_RUNTIME } from './ledger.js';
 
 /**
  * Source tags: each host JSX element (`button`, `input`, `a`…) gets `data-dsa-src="<file>:<line>:<col>"`, the
@@ -31,7 +34,15 @@ export interface TagOptions {
    * component that doesn't gets a prop it ignores (or warns about). True for all, or a list of names.
    */
   components?: boolean | string[] | undefined;
+  /**
+   * Mark where each component is used: `data-dsa-use="file:line:col"` on every component element, which
+   * reaches the page when the component passes unknown props to its element (shadcn-style components do),
+   * so the crawler can photograph the app's own uses of a design-system component. Default: DSA_TAG_USES=1.
+   */
+  uses?: boolean | undefined;
 }
+
+export const USE_ATTR = 'data-dsa-use';
 
 export const TAG_ATTR = 'data-dsa-src';
 
@@ -76,6 +87,25 @@ export function tagPath(file: string, root: string, dir?: string): string | null
  * folder outside it. Null when neither exists. Real paths, so they compare with Vite's own.
  */
 export function fileOfTag(rel: string, root: string, dir?: string): string | null {
+  const found = originalOfTag(rel, root, dir);
+  return found ? asCopy(found) : null;
+}
+
+/** A file of the app, in the copy the server runs from when it runs from one (DSA_TAG_COPY): what it serves. */
+function asCopy(file: string): string {
+  const c = process.env.DSA_TAG_COPY;
+  if (!c) return file;
+  try {
+    const [from, to] = JSON.parse(c) as [string, string];
+    for (const t of new Set([to, fs.realpathSync(to)])) {
+      const rel = path.relative(t, file);
+      if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) { const f = path.join(from, rel); return fs.existsSync(f) ? fs.realpathSync(f) : file; }
+    }
+  } catch { /* not a copy */ }
+  return file;
+}
+
+function originalOfTag(rel: string, root: string, dir?: string): string | null {
   const real = (f: string) => { try { return fs.realpathSync(f); } catch { return null; } };
   const clean = rel.replace(/\\/g, '/');
   if (!clean || clean.split('/').includes('..') || path.isAbsolute(clean)) return null;
@@ -99,8 +129,28 @@ export function viteUrlOf(file: string, viteRoot: string, base = '/'): string {
   return b + '@fs' + (abs.startsWith('/') ? '' : '/') + abs;
 }
 
+/**
+ * A file in a copy of the app, named as the original: DSA_TAG_COPY is ["<copy folder>", "<app folder>"]. dsa
+ * runs an app's dev server and its tests from a copy, so nothing they write lands in the app, with tags that
+ * still match the scan's (and fileOfTag answers with the copy's file, the one the server serves).
+ */
+function asOriginal(file: string): string {
+  const c = process.env.DSA_TAG_COPY;
+  if (!c) return file;
+  try {
+    const [from, to] = JSON.parse(c) as [string, string];
+    const abs = path.resolve(file);
+    for (const f of new Set([from, fs.realpathSync(from)])) {
+      const rel = path.relative(f, abs);
+      if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) return path.join(to, rel);
+    }
+  } catch { /* not a copy */ }
+  return file;
+}
+
 /** A file's tag path under these options (root and app folder from the options, the environment, or found). */
-export function tagFileOf(file: string, o: TagOptions = {}): string | null {
+export function tagFileOf(given: string, o: TagOptions = {}): string | null {
+  const file = asOriginal(given);
   const root = o.root ?? process.env.DSA_TAG_ROOT ?? findRoot(path.dirname(path.resolve(file)));
   return root ? tagPath(file, root, o.dir ?? process.env.DSA_TAG_DIR) : null;
 }
@@ -116,16 +166,42 @@ export interface Tag { element: string; value: string; line: number; col: number
  * no JSX, or it doesn't parse). Lines are kept: every tag is inserted on its element's own line.
  */
 export function tagSource(code: string, file: string, o: TagOptions = {}): { code: string; tags: Tag[] } | null {
+  // Fail safe: the output is parsed again before it's handed on. If it doesn't parse, the file gets its
+  // source tags alone (no use marks, no state names); if that doesn't either, it's served as written. Either
+  // way one line names the file: one file must never take the app down.
+  const clean = file.replace(/[?#].*$/, '');
+  const plugins: any[] = /\.ts$/.test(clean) ? ['typescript', 'decorators-legacy'] : ['jsx', 'typescript', 'decorators-legacy'];
+  const parses = (c: string) => { try { babelParse(c, { sourceType: 'unambiguous', plugins }); return true; } catch { return false; } };
+  const full = tagFile(code, file, o, false);
+  if (!full || parses(full.code)) return full;
+  const lean = tagFile(code, file, o, true);
+  if (lean && parses(lean.code)) { warnOnce(clean, 'its use marks and state names made code that does not parse, so it has source tags only'); return lean; }
+  warnOnce(clean, 'tagging it made code that does not parse, so it is served as written');
+  return null;
+}
+
+const warned = new Set<string>();
+function warnOnce(file: string, why: string) {
+  if (warned.has(file)) return;
+  warned.add(file);
+  console.warn(`dsa tag: ${file}: ${why}. Please report this file's shape.`);
+}
+
+function tagFile(code: string, file: string, o: TagOptions, lean: boolean): { code: string; tags: Tag[] } | null {
   if (!tagEnabled(o)) return null;
   const clean = file.replace(/[?#].*$/, '');
-  // No JSX: nothing to tag, unless it makes a context the mount may need to provide (kept below).
-  if (!SOURCE.test(clean) || (!code.includes('<') && !/\bcreateContext\b/.test(code))) return null;
+  // A plain .ts file (a custom hook) has no JSX: only its state hooks are named, parsed as TypeScript alone.
+  const tsOnly = /\.ts$/.test(clean) && !/\.d\.ts$/.test(clean);
+  // No JSX: nothing to tag, unless it makes a context the mount may need to provide, or keeps state (kept below).
+  if (!(SOURCE.test(clean) || tsOnly) || (!code.includes('<') && !/\bcreateContext\b|\buse(State|Reducer)\b/.test(code))) return null;
+  if (tsOnly && !/\buse(State|Reducer)\b|\bcreateContext\b/.test(code)) return null;
   const rel = tagFileOf(clean, o);
   if (!rel) return null;
   let ast: any;
   // The scanner's own parser options, so lines and columns are the ones it records.
-  try { ast = babelParse(code, { sourceType: 'unambiguous', errorRecovery: true, plugins: ['jsx', 'typescript', 'decorators-legacy'] }); } catch { return null; }
+  try { ast = babelParse(code, { sourceType: 'unambiguous', errorRecovery: true, plugins: tsOnly ? ['typescript', 'decorators-legacy'] : ['jsx', 'typescript', 'decorators-legacy'] }); } catch { return null; }
   const comps = o.components;
+  const uses = !lean && (o.uses ?? process.env.DSA_TAG_USES === '1');
   const edits: { at: number; text: string }[] = [];
   const tags: Tag[] = [];
   walk(ast.program, (n) => {
@@ -133,23 +209,65 @@ export function tagSource(code: string, file: string, o: TagOptions = {}): { cod
     const name = jsxName(n.name);
     if (!name) return;
     const host = n.name.type === 'JSXIdentifier' && /^[a-z]/.test(name) && !name.includes('-');
+    if (!host && uses && !FRAGMENT.test(name) && /^[A-Z]/.test(name.split('.').pop() ?? '') && !n.attributes.some((a: any) => a.type === 'JSXAttribute' && a.name?.name === USE_ATTR)) {
+      edits.push({ at: afterName(n), text: ` ${USE_ATTR}=${JSON.stringify(`${rel}:${n.loc.start.line}:${n.loc.start.column + 1}`)}` });
+    }
     if (!host && !(comps === true ? !FRAGMENT.test(name) : Array.isArray(comps) && comps.includes(name))) return;
     if (n.attributes.some((a: any) => a.type === 'JSXAttribute' && a.name?.name === TAG_ATTR)) return;
     const line = n.loc.start.line, col = n.loc.start.column + 1;
     const value = `${rel}:${line}:${col}`;
     // Straight after the name: before any spread, so a tag passed in from a caller still wins.
-    edits.push({ at: n.name.end, text: ` ${TAG_ATTR}=${JSON.stringify(value)}` });
+    edits.push({ at: afterName(n), text: ` ${TAG_ATTR}=${JSON.stringify(value)}` });
     tags.push({ element: name, value, line, col });
+  });
+  // Each state hook's name, kept by its setter (`const [open, setOpen] = useState(…)` → setOpen is "open"), so
+  // the crawler sets state by name instead of guessing the hook's place. A statement after the declaration,
+  // on its own line's end: no hook is added or moved, so Fast Refresh and the hooks' order stay as they were.
+  if (!lean) walk(ast.program, (n) => {
+    if (n.type !== 'BlockStatement') return;
+    for (const st of n.body) {
+      if (st.type !== 'VariableDeclaration') continue;
+      for (const d of st.declarations) {
+        const call = d.init?.type === 'CallExpression' ? d.init : null;
+        const callee = call?.callee;
+        const hook = callee?.type === 'Identifier' ? callee.name : callee?.type === 'MemberExpression' && callee.property?.type === 'Identifier' ? callee.property.name : '';
+        if (!/^use(State|Reducer)$/.test(hook) || d.id?.type !== 'ArrayPattern') continue;
+        const [v, set] = d.id.elements;
+        if (v?.type !== 'Identifier' || set?.type !== 'Identifier' || !d.loc) continue;
+        edits.push({ at: st.end, text: `;globalThis.__dsaStateName?.(${set.name}, ${JSON.stringify(v.name)}, ${JSON.stringify(`${rel}:${d.loc.start.line}`)});` });
+      }
+    }
   });
   // The file's own components, exported or not, kept by its tag path so /@dsa/mount can draw one that
   // isn't exported (a row, a panel defined beside its parent). A global, not an export: Fast Refresh stays.
   const local = localComponents(ast);
-  if (!edits.length && !local.length) return null;
+  // Each context the file makes, named by its tag path (`__dsaName`), so the ledger can record the value a
+  // provider gave it and a drawing can give a component that value. A property dsa reads; nothing else changes.
+  const contexts = lean ? [] : contextsOf(ast);
+  if (!edits.length && !local.length && !contexts.length) return null;
   let out = code;
   for (const e of edits.sort((a, b) => b.at - a.at)) out = out.slice(0, e.at) + e.text + out.slice(e.at);
   // On the file's last line when it ends in a newline, so no line moves and the count stays.
   if (local.length) out += `${out.endsWith('\n') ? '' : '\n'};(globalThis.__dsaLocal ??= {})[${JSON.stringify(rel)}] = { ${local.join(', ')} };`;
+  if (contexts.length) out += `${out.endsWith('\n') && !local.length ? '' : local.length ? '' : '\n'};${contexts.map(c => `try { ${c}.__dsaName = ${JSON.stringify(`${rel}#${c}`)}; } catch {}`).join(' ')}`;
   return { code: out, tags };
+}
+
+/** Contexts the file makes at its top level (`const StoreCtx = createContext(…)`, React.createContext too). */
+function contextsOf(ast: any): string[] {
+  const out: string[] = [];
+  for (const s0 of ast.program.body) {
+    const s = s0.type === 'ExportNamedDeclaration' ? s0.declaration : s0;
+    if (s?.type !== 'VariableDeclaration') continue;
+    for (const d of s.declarations) {
+      let init = d.init;
+      while (init && /^TS(As|Satisfies|NonNull)Expression$/.test(init.type)) init = init.expression;
+      const callee = init?.type === 'CallExpression' ? init.callee : null;
+      const name = callee?.type === 'Identifier' ? callee.name : callee?.type === 'MemberExpression' ? callee.property?.name : '';
+      if (name === 'createContext' && d.id?.type === 'Identifier') out.push(d.id.name);
+    }
+  }
+  return out;
 }
 
 /** Top-level components declared in the file (a capitalised function, class or const), exported or not. */
@@ -163,6 +281,10 @@ function localComponents(ast: any): string[] {
   }
   return [...out];
 }
+
+// Straight after the element's name and any type arguments (`<Table<Row> …>`): an attribute between the two
+// isn't JSX.
+const afterName = (n: any): number => (n.typeArguments ?? n.typeParameters)?.end ?? n.name.end;
 
 const jsxName = (n: any): string | null => n.type === 'JSXIdentifier' ? n.name : n.type === 'JSXMemberExpression' ? (jsxName(n.object) ? `${jsxName(n.object)}.${n.property.name}` : null) : null;
 
@@ -203,7 +325,12 @@ class Guard extends Component {
   // The error's first line, and the component that threw: the first one its component stack names.
   componentDidCatch(err, info) {
     const at = String((info && info.componentStack) || '').match(/(?:\\bat|\\bin) ([A-Z][\\w$]*)(?: \\((\\S+?)(?::\\d+){1,2}\\))?/);
-    window.__dsaMountError = { message: String((err && err.message) || err).split('\\n')[0].slice(0, 200), component: at ? at[1] : '', src: at && at[2] ? at[2] : '' };
+    // Where it was thrown: the first stack frame in the app's own code (not a package, not Vite's or dsa's), as
+    // "/path:line" in the file as served (a component's runs a few lines below its source: a refresh preamble).
+    const frames = String((err && err.stack) || '').split('\\n').map((l) => l.match(/(https?:\\/\\/[^\\s)]+?):(\\d+):\\d+/)).filter(Boolean).map((m) => { let u = m[1]; try { u = decodeURIComponent(new URL(u).pathname); } catch {} return u + ':' + m[2]; });
+    const frame = frames.find((f) => !/node_modules|\\/@vite\\/|\\/@react-refresh|\\/@dsa\\/|\\/\\.vite\\/|\\/deps\\/|vite-cache/.test(f)) || frames[0] || '';
+    const own = frames.filter((f) => !/node_modules|\\/@vite\\/|\\/@react-refresh|\\/@dsa\\/|\\/\\.vite\\/|\\/deps\\/|vite-cache/.test(f)).slice(0, 6);
+    window.__dsaMountError = { message: String((err && err.message) || err).split('\\n')[0].slice(0, 200), component: at ? at[1] : '', src: at && at[2] ? at[2] : '', frame, frames: own };
   }
   render() { return this.state.failed ? null : this.props.children; }
 }
@@ -315,7 +442,7 @@ window.__dsaMount = async (files, name, props, file, wraps, scope) => {
  * The Vite plugin (Vite, React Router v7, Remix on Vite). Runs before other plugins, on the source as
  * written, so its lines and columns are the scanner's. Does nothing unless tagging is on.
  */
-export function dsaTag(o: TagOptions = {}): { name: string; enforce: 'pre'; configResolved: (c: { root: string; base: string }) => void; configureServer: (server: any) => void; resolveId: (id: string) => string | null; load: (id: string) => string | null; transform: (code: string, id: string) => { code: string; map: null } | null } {
+export function dsaTag(o: TagOptions = {}): { name: string; enforce: 'pre'; configResolved: (c: { root: string; base: string }) => void; configureServer: (server: any) => void; transformIndexHtml: () => { tag: string; children: string; injectTo: 'head-prepend' }[]; resolveId: (id: string) => string | null; load: (id: string) => string | null; transform: (code: string, id: string) => { code: string; map: null } | null } {
   const on = tagEnabled(o);
   let viteRoot = process.cwd(), base = '/';
   return {
@@ -333,7 +460,24 @@ export function dsaTag(o: TagOptions = {}): { name: string; enforce: 'pre'; conf
         res.setHeader('content-type', 'application/json');
         res.end(JSON.stringify(file ? { url: viteUrlOf(file, viteRoot, base) } : { missing: root ? `no ${rel} under the scan root` : 'the tagger found no scan root' }));
       });
+      // POST /@dsa/ledger: the ledger runtime's records, one JSON line each, appended to DSA_LEDGER. Only
+      // when that names a file: a dev server someone runs by hand records what they click through.
+      server.middlewares.use('/@dsa/ledger', (req: any, res: any) => {
+        const file = process.env.DSA_LEDGER;
+        if (req.method !== 'POST' || !file) { res.statusCode = 204; res.end(); return; }
+        let body = '';
+        req.on('data', (c: Buffer) => { if (body.length < 4_000_000) body += c; });
+        req.on('end', () => {
+          try {
+            const recs = JSON.parse(body);
+            if (Array.isArray(recs) && recs.length) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.appendFileSync(file, recs.map((r) => JSON.stringify(r)).join('\n') + '\n'); }
+          } catch { /* not a batch of records */ }
+          res.statusCode = 204; res.end();
+        });
+      });
     },
+    // The ledger runtime, first in the page's head, so it sees React from its first commit.
+    transformIndexHtml: () => (on ? [{ tag: 'script', children: (process.env.DSA_LEDGER ? 'window.__dsaLedgerPost = true;\n' : '') + LEDGER_RUNTIME, injectTo: 'head-prepend' as const }] : []),
     // /@dsa/mount (MOUNT_MODULE): only while tagging is on, so a production build never has it.
     resolveId: (id) => (on && id === '/@dsa/mount' ? '\0dsa-mount.js' : null),
     load: (id) => (on && id === '\0dsa-mount.js' ? MOUNT_MODULE : null),

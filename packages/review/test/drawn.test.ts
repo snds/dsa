@@ -1,6 +1,6 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { gateProps, markupOf, FN, MAP, SET, mountProps, stateValues, holdsInitially, stateSets } from '../src/drawn.js';
+import { forceGates, itemAliases, nullRead, propsPassedAt, typedProp, gateProps, markupOf, FN, MAP, SET, mountProps, stateValues, holdsInitially, stateSets } from '../src/drawn.js';
 
 // What can't be photographed is drawn from the code: its own JSX as static markup (no app code runs), and
 // props that meet the gates the scan traced, for mounting its component in the app's build.
@@ -123,4 +123,81 @@ export function App() {
   const nav = `export type NavKey = 'home' | 'colours' | 'prints';\nexport const NAV = [{ id: 'home', label: 'Home' }, { id: 'colours', label: 'Colours' }, { id: 'labs', label: 'Labs' }];`;
   assert.deepEqual(stateValues(app, 'view').sort(), []);
   assert.deepEqual(stateValues(app, 'view', [nav]).sort(), ['colours', 'home', 'labs', 'prints']);
+});
+
+test('a list read for its length is set to one item: state, by how the component reads it', () => {
+  const app = `import { useState } from 'react';\nexport function Editor() {\n  const [palette, setPalette] = useState([]);\n  const [rows, setRows] = useState([]);\n  return <div>{palette.length > 0 ? <ul>{palette.map(p => <li key={p.id}>{p.hex}</li>)}</ul> : null}{rows.length === 0 && <p>None</p>}</div>;\n}\n`;
+  const gate = (test: string, negated = false) => [{ test, negated, component: 'Editor', file: 'e.tsx' }];
+  const [set] = stateSets(gate('palette.length > 0'), () => app);
+  assert.deepEqual(set!.slots, [{ index: 0, name: 'palette', value: [{ id: '', hex: '' }] }]);
+  assert.deepEqual(stateSets(gate('palette.length'), () => app)[0]!.slots[0]!.value, [{ id: '', hex: '' }]);
+  // Wanted empty: [] (rows.length === 0 holds as it starts, but it's set the same way).
+  assert.deepEqual(stateSets(gate('rows.length === 0'), () => app)[0]!.slots[0]!.value, []);
+  assert.deepEqual(stateSets(gate('palette.length > 0', true), () => app)[0]!.slots[0]!.value, []);
+});
+
+test('the conditions on the props of the component mounted are forced over its recorded props, and said', () => {
+  const g = (test: string, component = 'Panel', negated = false) => ({ test, negated, component, file: 'p.tsx', ids: [], kind: 'cond' });
+  const e = (gates: any[]) => ({ within: 'Panel', reach: { gates } }) as any;
+  // Recorded with an empty list and closed: one recorded item, and open.
+  const recorded = { items: [], open: false, mode: 'view', title: 'Shelf' };
+  const f = forceGates(e([g('items.length > 0'), g('open'), g("mode === 'edit'")]), 'Panel', recorded, {}, (p) => p === 'items' ? { name: 'Fern' } : undefined);
+  assert.deepEqual(f.props, { items: [{ name: 'Fern' }], open: true, mode: 'edit', title: 'Shelf' });
+  assert.deepEqual(f.forced, ['items = [{"name":"Fern"}]', 'open = true', 'mode = "edit"']);
+  // Already holding: nothing forced. No recorded item: the shaped one, else a word.
+  assert.deepEqual(forceGates(e([g('open')]), 'Panel', { open: true }).forced, []);
+  assert.deepEqual(forceGates(e([g('items?.length')]), 'Panel', { items: [] }).props, { items: ['a'] });
+  // A gate on another component's own condition is left alone; one a caller passes as this prop holds.
+  assert.deepEqual(forceGates(e([g('ready', 'Page')]), 'Panel', { ready: false }).forced, []);
+  assert.deepEqual(forceGates(e([g('open={!!editor}', 'Page')]), 'Panel', {}, { open: false }).props, { open: true });
+  // Wanted false, or set: `!busy`, `image != null` (a shaped object kept over true).
+  assert.deepEqual(forceGates(e([g('!busy'), g('image != null')]), 'Panel', { busy: true, image: null }, { image: { src: '' } }).props, { busy: false, image: { src: '' } });
+  // A name the component doesn't take isn't added.
+  assert.deepEqual(forceGates(e([g('loaded')]), 'Panel', { open: true }).props, { open: true });
+});
+
+test('a state set for a condition takes its declared type, from the file or one it imports', () => {
+  const types = `export type Swatch = { hex: string; name: string; n: number };\nexport type Draft = { id: string };\n`;
+  const app = `import { useState } from 'react';\nimport type { Swatch } from '../lib/types';\nexport function Editor() {\n  const [palette, setPalette] = useState<Swatch[]>([]);\n  const [picked, setPicked] = useState<string | null>(null);\n  const [draft, setDraft] = useState<Draft | null>(null);\n  return <div>{palette.length > 0 && <ul />}{picked && <b />}{draft && <i />}</div>;\n}\ntype Draft = { id: string; at: number };\n`;
+  const read = (f: string) => f === 'src/app/Editor.tsx' ? app : f === 'src/lib/types.ts' ? types : null;
+  const value = (test: string) => stateSets([{ test, negated: false, component: 'Editor', file: 'src/app/Editor.tsx' }], read)[0]!.slots[0]!.value;
+  assert.deepEqual(value('palette.length > 0'), [{ hex: '', name: '', n: 0 }]);
+  assert.equal(value('picked'), 'a');
+  assert.deepEqual(value('draft'), { id: '', at: 0 });
+});
+
+test('a condition on a list item\'s field is met by a list with one such item: props and state', () => {
+  const code = `export function Uploads({ uploads, rows }) {\n  const [docs, setDocs] = useState([]);\n  return <ul>{uploads.map((up) => up.failed && <li>{up.name}</li>)}{props.rows.filter(row => row.kind === 'document')}{docs.map(d => d.open && <b />)}</ul>;\n}\n`;
+  assert.deepEqual(itemAliases(code), { up: 'uploads', row: 'rows', d: 'docs' });
+  const e = (gates: any[]) => ({ within: 'Uploads', reach: { gates: gates.map(g => ({ component: 'Uploads', file: 'u.jsx', ids: [], kind: 'cond', negated: false, ...g })) } }) as any;
+  const f = forceGates(e([{ test: 'up.failed' }, { test: "row.kind === 'document'" }]), 'Uploads', { uploads: [{ name: 'a.png', failed: false }], rows: [] }, {}, undefined, itemAliases(code));
+  assert.deepEqual(f.props, { uploads: [{ name: 'a.png', failed: true }, { name: 'a.png', failed: false }], rows: [{ kind: 'document' }] });
+  assert.deepEqual(f.forced, ['uploads = [{"name":"a.png","failed":true', 'rows = [{"kind":"document"}]']);
+  const state = `import { useState } from 'react';\nexport function Uploads() {\n  const [docs, setDocs] = useState([]);\n  return <ul>{docs.map(d => d.open && <b />)}</ul>;\n}\n`;
+  assert.deepEqual(stateSets([{ test: 'd.open', negated: false, component: 'Uploads', file: 'u.jsx' }], () => state)[0]!.slots[0]!.value, [{ open: true }]);
+});
+
+test('a read off nothing in its props: the path from the prop, and a value of the kind the read needs', () => {
+  const code = `export function Chips({ alias, rows, props2 }) {\n  return <div>{alias.owner.name}{rows.find(r => r.on)}{alias.label.trim()}</div>;\n}\n`;
+  assert.deepEqual(nullRead(code, 'Chips', "Cannot read properties of null (reading 'name')"), { path: ['alias', 'owner'], value: { name: '' } });
+  assert.deepEqual(nullRead(code, 'Chips', "Cannot read properties of undefined (reading 'find')"), { path: ['rows'], value: [] });
+  assert.deepEqual(nullRead(code, 'Chips', "Cannot read properties of undefined (reading 'trim')"), { path: ['alias', 'label'], value: '' });
+  assert.equal(nullRead(code, 'Chips', 'Something else'), null);
+});
+
+test('the props a component hands a helper on a line, and a value of their declared type (a list with one typed item)', () => {
+  const types = `export type Quote = { id: string; price: { n: number } };\n`;
+  const code = `import type { Quote } from './quotes';\nexport function Compare({ quotes, label }: { quotes: Quote[]; label: string }) {\n  const best = cheapest(quotes, label);\n  return <b>{best.id}</b>;\n}\n`;
+  assert.deepEqual(propsPassedAt(code, 'Compare', 3), { helper: 'cheapest', props: ['quotes', 'label'] });
+  assert.equal(propsPassedAt(code, 'Compare', 4), null);
+  const read = (f: string) => f === '/app/src/quotes.ts' ? types : null;
+  assert.deepEqual(typedProp(code, 'Compare', 'quotes', '/app/src/Compare.tsx', read), [{ id: '', price: { n: 0 } }]);
+  assert.equal(typedProp(code, 'Compare', 'label', '/app/src/Compare.tsx', read), 'a');
+});
+
+test('a tag on a state holding one of several shapes sets it to that shape: the union member with the tag', () => {
+  const code = `import { useState } from 'react';\ntype Float = { t: 'ctx'; x: number; y: number } | { t: 'panelMenu'; panel: string };\nexport function Grid() {\n  const [float, setFloat] = useState<Float | null>(null);\n  return <div>{float?.t === 'panelMenu' && <b />}{float?.t === 'ctx' && <i />}</div>;\n}\n`;
+  const value = (test: string) => stateSets([{ test, negated: false, component: 'Grid', file: 'g.tsx' }], () => code)[0]!.slots[0]!.value;
+  assert.deepEqual(value("float?.t === 'panelMenu'"), { t: 'panelMenu', panel: '' });
+  assert.deepEqual(value("float?.t === 'ctx'"), { t: 'ctx', x: 0, y: 0 });
 });

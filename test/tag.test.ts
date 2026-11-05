@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { parse as babelParse } from '@babel/parser';
 import { latestEvals } from '../src/engine/index.js';
 import dsaTagBabel from '../src/tag/babel.js';
 import { dsaTag, tagPath, tagSource } from '../src/tag/index.js';
@@ -122,4 +123,81 @@ test('a tag path maps back to its file, and to the URL a Vite server with a base
   assert.equal(fileOfTag(`${path.basename(outside)}/src/Card.tsx`, root, outside), path.join(outside, 'src', 'Card.tsx'));
   assert.equal(fileOfTag('web/portal/src/Gone.tsx', root), null);
   assert.equal(fileOfTag('../etc/passwd', root), null);
+});
+
+test('state hooks are named by their setter, without moving a line or adding a hook; a plain .ts hook too', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-tag-names-'));
+  const tsx = `import { useState } from 'react';\nexport function Panel() {\n  const [open, setOpen] = useState(false);\n  const [rows] = useState([]);\n  return <div>{open ? 'x' : ''}</div>;\n}\n`;
+  const r = tagSource(tsx, path.join(root, 'src/Panel.tsx'), { when: true, root })!;
+  assert.match(r.code, /const \[open, setOpen\] = useState\(false\);;globalThis\.__dsaStateName\?\.\(setOpen, "open", "src\/Panel\.tsx:3"\);/);
+  // No setter, nothing to name; and no line moves.
+  assert.doesNotMatch(r.code, /"rows"/);
+  assert.equal(r.code.split('\n').length, tsx.split('\n').length);
+  // A custom hook in a .ts file (generics, no JSX): parsed as TypeScript alone, its state named.
+  const ts = `import { useReducer } from 'react';\nexport function useCount<T>(x: T) {\n  const [n, bump] = useReducer((a: number) => a + 1, 0);\n  return <T>(x as T) && n;\n}\n`;
+  const t = tagSource(ts, path.join(root, 'src/useCount.ts'), { when: true, root })!;
+  assert.match(t.code, /;globalThis\.__dsaStateName\?\.\(bump, "n", "src\/useCount\.ts:3"\);/);
+  assert.equal(tagSource(`export const x = <T,>(a: T) => a;\n`, path.join(root, 'src/x.ts'), { when: true, root }), null);
+});
+
+test('a component with type arguments gets its marks after them (<Table<Row> …>), and the output parses', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-tag-generic-'));
+  const code = `import { Table } from './Table';\nexport function List({ rows }: { rows: Row[] }) {\n  return <Table<Row> rows={rows} render={(r) => <span>{r.name}</span>} />;\n}\n`;
+  const r = tagSource(code, path.join(root, 'src/List.tsx'), { when: true, root, uses: true })!;
+  assert.match(r.code, /<Table<Row> data-dsa-use="src\/List\.tsx:3:10" rows=/);
+});
+
+test('fail safe: code tagging would break is served as written, with one line naming the file', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-tag-safe-'));
+  // Parses only with error recovery (a name declared twice): tagged, it wouldn't parse, so it's left alone.
+  const code = `export function Box() {\n  let a = 1; let a = 2;\n  return <div>{a}</div>;\n}\n`;
+  const warns: string[] = [];
+  const warn = console.warn;
+  console.warn = (m: string) => { warns.push(m); };
+  try { assert.equal(tagSource(code, path.join(root, 'src/Box.tsx'), { when: true, root }), null); } finally { console.warn = warn; }
+  assert.equal(warns.length, 1);
+  assert.match(warns[0]!, /src\/Box\.tsx: tagging it made code that does not parse, so it is served as written/);
+});
+
+// Every .ts/.tsx/.jsx file of the dashboard's own UI and the test fixtures, tagged with every mark on: each
+// output parses, and none falls back. A smoke check that the transform holds on real-world code shapes.
+test('the transform holds on a real code base: every file tagged, every output parses, no fallback', () => {
+  const repo = path.resolve(import.meta.dirname, '..');
+  const files: string[] = [];
+  const walkDir = (d: string) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { if (e.name === 'node_modules' || e.name.startsWith('.')) continue; const p = path.join(d, e.name); if (e.isDirectory()) walkDir(p); else if (/\.(tsx?|jsx)$/.test(e.name) && !e.name.endsWith('.d.ts')) files.push(p); } };
+  for (const d of ['packages/dashboard/ui/src', 'test/fixtures']) walkDir(path.join(repo, d));
+  assert.ok(files.length > 100, `${files.length} files`);
+  const warns: string[] = [];
+  const warn = console.warn;
+  console.warn = (m: string) => { warns.push(m); };
+  // Names a file uses without declaring or importing them, before and after: tagging adds none (a bare
+  // useState where the file wrote React.useState would be one), only globalThis for its own calls.
+  const req = createRequire(fs.realpathSync(path.join(repo, 'node_modules/@babel/core/package.json')));
+  const traverse = req('@babel/traverse').default;
+  const free = (code: string) => { let g = new Set<string>(); traverse(babelParse(code, { sourceType: 'unambiguous', errorRecovery: true, plugins: ['jsx', 'typescript', 'decorators-legacy'] }), { Program(p: any) { g = new Set(Object.keys(p.scope.globals)); p.stop(); } }); return g; };
+  let tagged = 0;
+  const added: string[] = [];
+  try {
+    for (const f of files) {
+      const code = fs.readFileSync(f, 'utf8');
+      const out = tagSource(code, f, { when: true, root: repo, uses: true });
+      if (!out) continue;
+      tagged++;
+      const before = free(code);
+      for (const n of free(out.code)) if (!before.has(n) && n !== 'globalThis') added.push(`${path.relative(repo, f)}: ${n}`);
+    }
+  } finally { console.warn = warn; }
+  assert.deepEqual(warns, []);
+  assert.deepEqual(added, []);
+  assert.ok(tagged > 50, `${tagged} tagged`);
+});
+
+test('each context a file makes is named by its tag path, on the last line, so the ledger can record its value', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-ctx-'));
+  const f = path.join(root, 'src', 'Store.ts');
+  const code = `import { createContext } from 'react';\nexport const StoreCtx = createContext<{ n: string } | null>(null);\nconst Other = React.createContext(0) as any;\n`;
+  const out = tagSource(code, f, { when: true, root })!;
+  assert.ok(out, 'a .ts file that makes a context is tagged');
+  assert.equal(out.code.split('\n').length, code.split('\n').length, 'no line moves');
+  assert.match(out.code, /try \{ StoreCtx\.__dsaName = "src\/Store\.ts#StoreCtx"; \} catch \{\} try \{ Other\.__dsaName = "src\/Store\.ts#Other"; \} catch \{\}$/);
 });

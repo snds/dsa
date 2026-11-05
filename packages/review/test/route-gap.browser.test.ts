@@ -53,5 +53,5 @@ test('a page that shows a file importing a missing element is explored first, ev
   const all = logs.join('\n');
   assert.ok(idx.shots[target!.id] && !idx.shots[target!.id].drawn, all);
   assert.match(idx.shots[target!.id].page, /\/samples$/);
-  assert.match(all, /explored \/samples: \d+ interactions?, [1-9]\d* found \(a page that renders what is missing: every control tried\)/);
+  assert.match(all, /explored \/samples: \d+ interactions?, [1-9]\d* found(, .*?)? \(a page that renders what is missing: every control tried\)/);
 });

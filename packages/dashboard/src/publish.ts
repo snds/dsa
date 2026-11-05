@@ -14,8 +14,8 @@ import type { PageActions, ResolvedProfile } from '@snds/dsa';
  */
 export const siteDir = (dataDir: string) => path.join(dataDir, 'site');
 
-export async function publish(root: string, config: Config, dataDir: string, profile: ResolvedProfile, outDir = siteDir(dataDir), actions: PageActions | null = null): Promise<{ dir: string; shots: number; rendered: number; bytes: number }> {
-  const html = await renderReport(root, config, dataDir, profile, { site: true, actions });
+export async function publish(root: string, config: Config, dataDir: string, profile: ResolvedProfile, outDir = siteDir(dataDir), actions: PageActions | null = null, opts: { runDir?: string | undefined } = {}): Promise<{ dir: string; shots: number; rendered: number; bytes: number }> {
+  const html = await renderReport(root, config, dataDir, profile, { site: true, actions, runDir: opts.runDir });
   // Start clean so images from an older scan don't linger in the commit.
   for (const sub of ['shots', 'rendered']) fs.rmSync(path.join(outDir, sub), { recursive: true, force: true });
   fs.mkdirSync(outDir, { recursive: true });
@@ -24,7 +24,8 @@ export async function publish(root: string, config: Config, dataDir: string, pro
   for (const sub of ['shots', 'rendered'] as const) {
     const names = new Set([...html.matchAll(new RegExp(`"${sub}/([\\w.-]+\\.png)"`, 'g'))].map(m => m[1]));
     for (const n of names) {
-      const from = path.join(dataDir, sub, path.basename(n));
+      // One run's folder (--run-dir) holds that run's images; the shared data folder the rest.
+      const from = [opts.runDir, dataDir].filter((d): d is string => Boolean(d)).map(d => path.join(d, sub, path.basename(n))).find(f => fs.existsSync(f)) ?? path.join(dataDir, sub, path.basename(n));
       if (!fs.existsSync(from)) continue;
       fs.mkdirSync(path.join(outDir, sub), { recursive: true });
       fs.copyFileSync(from, path.join(outDir, sub, n));

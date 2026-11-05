@@ -4,8 +4,18 @@
  * The card shows the plain line and keeps the original under Technical details.
  */
 
-/** Code on the face of a card: attribute names, role values, .map(), braces, tags, prop assignments. */
-export const CODE_TERMS = /\baria-[a-z]+|\brole\s*=|\.map\(|[{}]|<\/?[a-zA-Z][\w.-]*[\s>/]|\bclassName\b|\bdata-[a-z][\w-]*|\b[a-z][\w]*="[^"]*"/;
+/**
+ * Utility classes (Tailwind-style) on the face of a card: a known prefix and a value that only a class
+ * has (a number, a size word, an arbitrary [value], a palette step), with any state or breakpoint in
+ * front: px-2, size-5, text-sm, hover:bg-zinc-12, -mt-1, w-[3px]. Plain words with a hyphen
+ * (top-level, sign-in, x-axis, right-to-left) don't match, because their second half isn't a value.
+ */
+const UTILITY = String.raw`(?:\b[a-z][\w-]*:)*-?\b(?:p[xytrblse]?|m[xytrblse]?|gap(?:-[xy])?|space-[xy]|w|h|size|min-[wh]|max-[wh]|text|bg|border(?:-[xytrblse])?|rounded(?:-[a-z]{1,2})?|shadow|font|leading|tracking|z|inset(?:-[xy])?|top|left|right|bottom|grid-cols|grid-rows|col-span|row-span|ring(?:-offset)?|outline|opacity|translate-[xy]|scale|rotate|basis|line-clamp|fill|stroke|aspect|duration|delay|order|indent|underline-offset|decoration)-(?:\d+(?:\.\d+)?(?:\/\d+)?|\[[^\]\s]+\]|\([^)\s]+\)|xs|sm|md|lg|\d?xl|full|auto|px|screen|none|base|normal|medium|semibold|bold|thin|light|extrabold|tight|snug|relaxed|loose|wider|widest|transparent|current|white|black|inherit|(?:[a-z]+-)*(?:foreground|background|muted|primary|secondary|destructive|accent|popover)|[a-z]+-\d{1,3}(?:\/\d+)?)(?![\w-])`;
+/** A CSS custom property: --density-control-h, var(--radius-md). */
+const CSS_VAR = String.raw`(?<![\w-])--[a-zA-Z][\w-]*`;
+
+/** Code on the face of a card: attribute names, role values, .map(), braces, tags, prop assignments, utility classes and CSS variables. */
+export const CODE_TERMS = new RegExp(String.raw`\baria-[a-z]+|\brole\s*=|\.map\(|[{}]|<\/?[a-zA-Z][\w.-]*[\s>/]|\bclassName\b|\bdata-[a-z][\w-]*|\b[a-z][\w]*="[^"]*"|${UTILITY}|${CSS_VAR}`);
 
 // What an ARIA attribute says about the element, as a noun phrase.
 const ARIA: Record<string, string> = {

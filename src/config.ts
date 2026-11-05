@@ -342,6 +342,10 @@ export const ConfigSchema = z
         routes: z.array(z.string()).optional(),
         auto: z.boolean().optional().describe("Take screenshots on every run."),
         reveal: z.boolean().optional().describe("Open menus, tabs and sheets to find hidden elements (default on)."),
+        renderTests: z
+          .union([z.boolean(), z.object({ maxMinutes: z.number().min(0).optional(), include: z.array(z.string()).optional() })])
+          .optional()
+          .describe("Before the crawl, run the app's own component tests (Vitest) with source tags and the evidence ledger on, so what they render is recorded for drawing. Off by default; DSA_RENDER_TESTS=1 turns it on."),
         perGroup: z.number().int().min(0).optional(),
         perQuestion: z.number().int().min(0).optional(),
         maxPages: z.number().int().min(1).optional(),

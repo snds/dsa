@@ -241,9 +241,24 @@ export const proposalKey = (use: string, props?: Record<string, unknown> | null)
 export const proposalFor = (r: any, e?: any): any | null => {
   if (r?.verdict !== "replace" || !r.use) return null
   const all = D.elements?.proposals ?? {}, key = proposalKey(r.use, r.props)
-  // Drawn with this element's own words and icon, when it was; else the proposal with the story's content.
-  return (e?.ownHash && all[`${key}#${e.ownHash}`]) || all[key] || null
+  // Drawn with this element's own words and icon, when it was; else the proposal with the story's content,
+  // which never counts as this element's own.
+  const mine = e?.ownHash ? all[`${key}#${e.ownHash}`] : null
+  if (mine) return mine
+  return all[key] ? { ...all[key], own: false } : null
 }
+
+/** The element's words as its photo recorded them (else its label). */
+const wordsOf = (e: any) => String(e?.shot?.content?.text ?? e?.label ?? "").replace(/\s+/g, " ").trim()
+/** Said "with its own words" only when the drawing's words are the element's (report review.ts, the same rule). */
+export const ownWords = (p: any, e: any): boolean => Boolean(p?.own) && (typeof p.text === "string" ? p.text.replace(/\s+/g, " ").trim() === wordsOf(e) : !wordsOf(e))
+/** An element a person can decide: its own photo (or isolated render) and its proposal both real (review.ts). */
+export const decidable = (e: any): boolean => Boolean(e?.shot) && (!e.review || e.review.ready === true)
+/**
+ * A person can decide this element now: the rule Label Review uses to offer it (report review.ts
+ * canDecideNow, stamped as review.decideNow), less what was decided on this page since.
+ */
+export const decideNow = (e: any): boolean => !e?.decided && (e?.review?.decideNow ?? (decidable(e) && Boolean(e?.needsHuman)))
 
 /** How far a rendered proposal can be trusted, in words. */
 export const proposalCheck = (p: any): { text: string; warn: boolean } | null =>
@@ -392,5 +407,5 @@ export function ReviewControls({ items, auto, pattern, options, label }: { items
  * (its JSX written out: shown, doesn't count). Outline only: a drawing that had no size, shown outlined
  * (doesn't count either).
  */
-export const sourceLabel = (s: any) => (s?.placeholder ? "Outline only" : s?.drawn === "mount" ? "Drawn from the app's code" : s?.drawn ? "Markup only" : "Live app screenshot")
-export const sourceTip = (s: any) => (s?.placeholder ? `It drew with no size, so it's shown outlined at a small size: ${s.placeholder}.` : s?.drawn === "mount" ? "Rendered from this file's component with the app's styles; not seen on a live page." : s?.drawn ? "This element's code written out as plain markup with the app's styles; no component ran." : undefined)
+export const sourceLabel = (s: any) => (s?.placeholder ? "Outline only" : s?.source === "isolated" ? "Isolated render" : s?.drawn === "mount" ? "Drawn from the app's code" : s?.drawn ? "Markup only" : "Live app screenshot")
+export const sourceTip = (s: any) => (s?.placeholder ? `It drew with no size, so it's shown outlined at a small size: ${s.placeholder}.` : s?.source === "isolated" ? "Mounted in the app's own build with the props it was seen with, so it draws as the app draws it; not a photo of a live page." : s?.drawn === "mount" ? "Rendered from this file's component with the app's styles and guessed props; not seen on a live page." : s?.drawn ? "This element's code written out as plain markup with the app's styles; no component ran." : undefined)

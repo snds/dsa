@@ -8,6 +8,87 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- Label Review: dsa's "ready" answers checked by people, one element at a time, written for a designer
+  who never needs to read code. Each item shows the element as the app draws it beside the proposal drawn
+  with the element's own words, both at their real size; where it sits on the page, named in plain words;
+  why dsa thinks so, in plain words (the scanner's own words and the code sit behind "Technical details");
+  where the app already uses the proposed component and props, and the main alternative; and the
+  alternatives dsa considered, drawn. One click answers Right, Wrong (then the right answer from the
+  system's allowed components and props only, drawn when a render exists, or "keep it" / "nothing fits")
+  or Not sure, with an optional comment. Answers are labels.jsonl rows with method "human": `dsa serve`
+  saves them to `<data>/labels/human.jsonl` (`POST /api/labels`, schema-checked); a published page keeps
+  them in the browser to download. The reviewer is the scan relay sign-in when there is one, else a name
+  entered once. The queue is every element a person can decide now (one rule, `canDecideNow`, shared
+  with Element Review's "Need a decision" count, so the two agree), then `<data>/review-queue.jsonl`
+  (from `dsa labels queue`) when present, else a seeded 10% audit of the ready cards. Keyboard-operable, with screen-reader labels and no colour-only
+  meaning; checked with axe in light and dark.
+- Element Review: a "Needs evidence" filter beside "Needs you". "Needs you" now counts only cards a
+  person can decide now, so it matches "Need a decision". What each card is missing is said plainly and
+  grouped with a count ("12 aren't reached yet: they only show after steps in a flow, such as opening
+  …"); the code conditions sit behind "Technical details". A control's words read from the code show the
+  values the code fills in as "…" ("Message on …: Open request …"), not as stray punctuation.
+- Label Review: where the app already uses a proposal is read from the source (`findUses`), following
+  local re-exports and vendored packages, across lines, and matched on the system's axes (not
+  `type="button"`). With no exact use it shows the nearest, labelled ("Not at this size, but here's the same
+  variant at sm"), then the system's own example. "Doesn't use" is said only when every file was read.
+- Differences on Label Review are said as what you'd see: sizes, "uses a density setting", "a different
+  hover colour"; raw values sit in Technical details, with building instructions. On another surface than
+  white, background differences are left out (shots record each element's `surface`).
+- Proposals drawn from source find a Storybook beside the packages (`apps/*/.storybook`), load its
+  stylesheets and Vite setup (`viteFinal`, Tailwind), and still draw when a decorator only works inside
+  Storybook. A drawing the system's styles didn't reach is `unstyled`: tried from stories, and otherwise
+  it needs evidence.
+- CI fails when the committed report UI (`packages/dashboard/templates/ui`) isn't built from `ui/src`.
+- `dsa render` draws again a cached proposal drawn with the element's own content that doesn't record
+  which words it drew (made before drawings recorded them), or drew other words than the element has now.
+- Precedents: where the app already uses each proposed component, from the run's system-component uses
+  with their literal props read from the source (`propsAt`), or the engine's own `<data>/precedent.json`
+  when a run writes one. A use photographed by the crawler (`shots/index.json` `uses["<file>:<line>"]`)
+  shows its photo.
+- "In context" on review cards and in Label Review uses the crawler's wider crop of the page around the
+  element (a shot's `context: { file, box }`, about 800 × 500 CSS px) when it has one, else the shot.
+
+- `dsa bench --folds <n>` reports held-out precision at the ready bar, with its one-sided 95% lower bound:
+  labels split into n folds by a hash of their file, each fold scored apart. With `--fold-site` (one run
+  per fold, each calibrated without that fold) it also scores the calibrated side. `dsa labels split`
+  writes each fold's training and held-out label files.
+- `dsa bench` scores two numbers and never merges them. Presentation: the trust rubric, with the card
+  checks read from each published page in a headless browser (`--no-cards` leaves them untested).
+  Correctness: dsa's recommendations against `labels.jsonl` ground truth, with abstention (under the
+  ready bar) kept apart from error. It reports precision, recall, abstention and error rate; how much
+  dsa could claim at 99% precision and from what confidence; a reliability curve in 0.05 bins with its
+  expected calibration error (ECE); the one-sided 95% lower bound on precision at the ready bar
+  (Clopper-Pearson); and Wilson intervals per app and per picture source. With several `--site`
+  folders of the same build it reports repeatability: rubric passes that flip, recommendations that
+  flip, the confidence spread, and cards that cross the ready line as the page shows it (and, apart,
+  on the scanner's own score). Correctness is scored at the scanner's confidence before the evidence
+  cap: the cap is a presentation gate, and scoring correctness on it would merge the two numbers.
+- `labels.jsonl`: one label per line, `{id, app, file, line, sourceRef, elementHash, truth: {verdict,
+  use, props}, acceptableAlts, labeler, method, at, notes}`, with `method` one of human, migrated,
+  history, lint or consensus. `schema/label.json` and a zod validator (`LabelSchema`, `parseLabels`);
+  `dsa labels check <file>` validates a file.
+- `dsa labels` bootstraps ground truth from code that already answers. `migrated`: each app is copied to
+  a work folder with every system component stripped back to the markup it renders (its host tag and the
+  classes its variant and size add, its own classes kept, lines unchanged), and each is labelled with
+  what was there (components that add no classes of their own, and apps whose look-alikes aren't
+  measured, are skipped); scan the copy and bench it. Signatures now keep each variant and size's classes
+  (`classes`) for this. `history`: commits that turned a raw element into a system component label the
+  raw element at the commit before (a shallow clone says it has no history to read). `queue`: where dsa
+  and the labels, two labels, or a second judge's labels disagree, plus a seeded 10% random audit of the
+  rest, for people to check; human labels are never queued again. The apps are only read.
+
+- Only this run's screenshots count. The crawler stamps `shots/index.json` with its run
+  (`run: { id, ref, at }`, `ref` the source commit or "worktree") and each shot with the run that took
+  it and when (`run`, `at`). A shot from an older run taken before this run began, or one with no stamp
+  at all, is treated as missing by the confidence cap, the report and the trust rubric, and the card
+  says why (`staleShot`). The report carries `elements.freshness`: the run, how many photos were set
+  aside, and per app the oldest photo that counts and its age in hours before the run.
+- `dsa report --run-dir <dir>` and `dsa publish --run-dir <dir>` score and show one run's own folder
+  (its `shots/` and `rendered/`) instead of the shared data folder, so photos from different runs never
+  mix.
+- Isolated renders count as seeing the element, labelled "Isolated render": an element mounted in the
+  app's own build with the props it was recorded with (the shot index's `source: "isolated"`). A drawing
+  with guessed props stays a separate source (`guessed`) in the trust rubric.
 - Two scan kinds found by their own markup, not their tag (`src/engine/kinds.ts`): a Skeleton (a `<div>`
   or `<span>` with `animate-pulse`, a muted fill and no children, all three required) and a Label (a
   `<label>` with `htmlFor`, or wrapping a text field; never one holding a choice control or a button, which
@@ -87,6 +168,97 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 - `scripts/proposal-gaps.mjs` counts, on a published dashboard, why proposals aren't drawn exactly with
   their element's own content.
 
+### Added
+
+- For people reviewing a proposal: each live photo gets a wider photo of the page around it (`context`:
+  about 800 × 500, with where the element sits in it), and the app's own uses of design-system components
+  are photographed as examples (`uses` in shots/index.json, keyed "file:line", up to 3 per component). The
+  tagger marks each component use with `data-dsa-use` when dsa starts the app; it reaches the page when the
+  component passes its props on.
+- Exploring is guided by coverage (Chromium's JS coverage): each control is scored by the code it runs for
+  the first time in the files of what's still missing, and below the top level only a control that ran
+  some is followed further. The log says how much new code each page's exploring ran and which control ran
+  the most. `shots.coverage: false` turns it off.
+- An opt-in reach manifest (docs/reach-manifest.md). A dev build's `window.__DSA__ = { routes(), states(),
+  go(name), seed() }` puts its routes first and each named state on in turn (those whose `reveals` name a
+  missing element's file first); `dsa.reach.json` beside the app adds routes, and states that are a route
+  with storage seeded. Reaching an element becomes a lookup.
+- Exact state setters. In tagged files (a plain `.ts` hook included) the tagger names each state hook by its
+  setter as the app runs (`const [open, setOpen] = useState(…)` → "open"), with a statement after the
+  declaration on the same line: no hook added or moved, Fast Refresh unchanged. Setting state picks the
+  hook by that name, else by its place; a state past a hook whose own hooks can't be counted (one a factory
+  makes) can now be set by name. The ledger records each hook's name too.
+- The evidence ledger. The tagger's runtime (`LEDGER_RUNTIME`, first in every page it serves, and in every
+  page the crawler opens) records each tagged element as React commits it: its URL, its size, its owner
+  component's props and the state of each component above it, copied with limits (functions stubbed,
+  credential- and personal-looking keys redacted, a cut copy marked). Records are kept in
+  `shots/ledger.json` per file and its source hash, so an older version's drop. A dev server started with
+  `DSA_LEDGER=<file>` records what a person clicks through, and `shots.ledger` (or `DSA_LEDGER`) adds those.
+  A new pass before pass 1 opens each missing element where it rendered and sets the recorded state above
+  it, outermost first (only values copied whole); drawings mount with the recorded props, and such a
+  drawing is marked `source: "isolated"` in the shot index.
+
+### Fixed
+
+- A review card showed one photo per look, so an element with its own photo appeared only as a small
+  thumbnail of another element's (same classes, sometimes other words). Every element with a photo now
+  has its own labelled tile: its photo at card scale, where it sits, its source label, match and code
+  button. Elements that look and read the same sit together, marked as such, each with its own tile.
+- No near-empty review candidates. An element with no usable photo (none, blank, covered, a weak match,
+  markup only, or drawn with guessed props) or no exact proposal with its own words says "Needs evidence
+  before review", with the plain reason and what would fix it. Its card offers no decision for it, and it
+  is left out of `dsa labels queue` and of Label Review. An isolated render (recorded props) counts,
+  labelled as such. Code on an uncaptured card is behind a disclosure.
+
+- History labels paired a removed raw line with an added component line by their order in a hunk, so a
+  wrapper `<div>` could become a `Button` and a button whose icon changed could become an `Icon`. Pairs
+  are now read from both versions of the file (`historyPairsInFile`): a removed raw element pairs with an
+  added system component whose host tag matches, nearest first by position in the hunk, one to one.
+  Render slots don't count, an element still there afterwards (only a child changed) is not a label,
+  dynamic props make a pair unsure, and vendored and non-product files are skipped. A component imported
+  through the app's owned copy of the system (`~/components/ui/button`) counts when its name is one of the
+  system's components, since older code often imported it that way. A part whose host tag only comes from
+  its signature pairs with a raw `<button>` only when the button played that part: a Trigger needs an
+  opener (`aria-haspopup`, `aria-expanded`, or an onClick that sets or toggles an open state), an Item needs
+  an item role (menuitem, option, tab), and Content never pairs with a raw button.
+- Props compare by one rule on both sides (`canonicalProps`): each component's own defaults filled in,
+  from its cva defaultVariants. History labels store them filled; `dsa bench` reads them from the run's
+  `signatures.json` (`--signatures`, or the data folder's).
+- `dsa labels split --seal <share>` sets aside a sealed test set first (a salted hash of app and file,
+  reproducible), writing `<prefix>.sealed.jsonl` and `<prefix>.open.jsonl`, and folds only the open part.
+- A migrated label named only the size prop that was written, even when the element's className overrode
+  it (`size="icon" className="size-7"` renders 28px). The size whose own pixels match the render is now an
+  acceptable alternative, with the system's tokens followed to their values.
+- `dsa labels migrated` labelled components in another component's render slot (`render={<Button/>}`),
+  which the scanner never counts, so those labels could never match. They are skipped.
+- `dsa labels` ran `git status` on the apps it reads, which rewrites their `.git/index`. It now reads
+  them with plumbing only (`rev-parse`, `diff-index` with each listed file confirmed by `hash-object`
+  against HEAD, `log`, `show`), all with `GIT_OPTIONAL_LOCKS=0`.
+- `dsa labels migrated` labelled vendored copies of other code (`vendor/`) and non-product files (stories
+  folders, examples, demos, stubs, docs) that the scanner never reads, so those labels could never match.
+  It now skips them, keeping a local copy of the engine scanner's list.
+- `dsa bench` matched a label only on the first line of an element. A label may now name any line of a
+  multi-line opening tag (`openEndLine`, when the scan records it).
+- The trust rubric counted one problem several times and assumed what the card shows. It now has
+  eleven checks, each a pass, a fail or not applicable, and a check that needs another doesn't apply
+  when that one fails: "current element shown" replaces C1/C2/C3/C6, so a missing photo counts once.
+  The photo label, the proposal label, side by side at one scale and "the place opens the code" are read
+  from the rendered card (`card-dom.ts`'s `PROBE_CARDS`; `onReviewPage` in @snds/dsa-review opens a
+  published page and shows every card), never from constants; without a rendered card they are
+  "untested". "Proposal drawn exactly" and "own content where it can be carried" are separate checks,
+  containers are not applicable to the second, and "the system has something to draw" is its own class
+  (proposals record `noSource`). Unused, lab, excepted and ignored elements are reported as counts.
+- Reasons in plain words now catch utility classes (`px-2`, `size-5`, `hover:bg-zinc-12`) and CSS
+  variables (`--radius-md`), which passed before.
+- The confidence cap counted a photo of another element with the same classes as evidence; the trust
+  rubric didn't, so cards were "ready" on a look-alike's photo. Both now take the element's own photo
+  only: the same classes can draw differently (other words, another parent, a state), and the card
+  labels that photo with the other element's place. The rubric flags such cards (`siblingPhoto`).
+
+- The tagger put its marks between a component's name and its type arguments (`<Table data-dsa-use="…"<Row>`),
+  which isn't JSX: a file with such an element answered 500 and the app didn't render. Marks now go after
+  the type arguments. The transform is also fail safe: its output is parsed again, and a file it would break
+  gets its source tags alone, else is served as written, with one line naming the file.
 ### Changed
 
 - Screenshots confirm a pick; they never switch it. When the running app looks more like another variant

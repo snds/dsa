@@ -46,8 +46,14 @@ export interface Proposal {
   actual?: Record<string, string> | undefined;
   note?: string | undefined;
   hash?: string | undefined;
+  /** Nothing to draw it from: the component isn't in the system's source, or has no story or Storybook to draw from. */
+  noSource?: boolean | undefined;
   /** Drawn with the element's own content (its words, accessible name, icon), not the story's sample. */
   own?: boolean | undefined;
+  /** The words it was drawn with, when drawn with the element's own: compared with the element's before saying so. */
+  text?: string | undefined;
+  /** Drawn, but the system's stylesheet didn't reach it: a browser's default font or button. */
+  unstyled?: boolean | undefined;
   /** When it couldn't be drawn with these props: the component's story as its authors wrote it, to show instead. */
   fallback?: string | undefined;
   /** Drawn from the system's own source (harness.ts), or from one of its stories. */

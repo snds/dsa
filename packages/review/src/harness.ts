@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveTargets, type Config } from '@snds/dsa/engine';
@@ -35,8 +36,60 @@ export function previewFile(from: string, root: string): string | null {
       const f = path.join(d, '.storybook', n);
       if (fs.existsSync(f)) return f;
     }
+    if (d === path.resolve(root) || path.dirname(d) === d) break;
+  }
+  // A monorepo keeps Storybook beside the packages: apps/storybook/.storybook.
+  for (let d = path.resolve(from); ; d = path.dirname(d)) {
+    for (const group of ['apps', 'packages', 'tools', '.']) {
+      const at = path.join(d, group);
+      let names: string[] = [];
+      try { names = fs.readdirSync(at); } catch { continue; }
+      for (const name of names.sort()) {
+        if (name === 'node_modules' || name.startsWith('.')) continue;
+        for (const n of ['preview.tsx', 'preview.ts', 'preview.jsx', 'preview.js']) {
+          const f = path.join(at, name, '.storybook', n);
+          if (fs.existsSync(f)) return f;
+        }
+      }
+    }
     if (d === path.resolve(root) || path.dirname(d) === d) return null;
   }
+}
+
+/** The stylesheets a preview file imports, so they load even if the rest of the preview can't outside Storybook. */
+export function previewStyles(preview: string): string[] {
+  let src = '';
+  try { src = fs.readFileSync(preview, 'utf8'); } catch { return []; }
+  return [...src.matchAll(/^\s*import\s+['"]([^'"]+\.css)['"]/gm)].map(m => m[1]!.startsWith('.') ? fsUrl(path.resolve(path.dirname(preview), m[1]!)) : m[1]!);
+}
+
+/**
+ * What the system's Storybook adds to Vite (main.* `viteFinal`: Tailwind, aliases, what may be served), so
+ * a drawing gets the same CSS as a story. Loaded without writing beside the config where Vite allows it.
+ * Else, when a stylesheet needs Tailwind, its plugin from where the preview lives.
+ */
+export async function storybookVite(preview: string, vite: any): Promise<{ plugins: any[]; alias: any; allow: string[] }> {
+  const out = { plugins: [] as any[], alias: {} as any, allow: [] as string[] };
+  const dir = path.dirname(preview);
+  const main = ['main.ts', 'main.tsx', 'main.js', 'main.mjs', 'main.cjs'].map(f => path.join(dir, f)).find(f => fs.existsSync(f));
+  if (main) {
+    try {
+      const loaded = await vite.loadConfigFromFile({ command: 'serve', mode: 'development' }, main, dir, 'silent', undefined, 'runner');
+      const cfg: any = loaded?.config;
+      if (typeof cfg?.viteFinal === 'function') {
+        const made = await cfg.viteFinal({ plugins: [], resolve: {}, server: {} }, { configType: 'DEVELOPMENT' });
+        out.plugins = (made?.plugins ?? []).flat(Infinity).filter(Boolean);
+        out.alias = made?.resolve?.alias ?? {};
+        out.allow = made?.server?.fs?.allow ?? [];
+      }
+    } catch { /* its main file can't be loaded here: Tailwind below */ }
+  }
+  const css = previewStyles(preview).filter(f => f.startsWith('/@fs')).map(f => { try { return fs.readFileSync(f.slice('/@fs'.length), 'utf8'); } catch { return ''; } }).join('\n');
+  if (/@import\s+['"]tailwindcss|@tailwind\b/.test(css) && !out.plugins.some((p: any) => /tailwind/i.test(String(p?.name ?? '')))) {
+    const entry = packageEntry(dir, '@tailwindcss/vite');
+    if (entry) { try { const m = await import(pathToFileURL(entry).href); out.plugins.push(...[m.default()].flat(Infinity)); } catch { /* drawn without it, and said so */ } }
+  }
+  return out;
 }
 
 const fsUrl = (f: string) => '/@fs' + path.resolve(f).split(path.sep).join('/');
@@ -48,7 +101,9 @@ const fsUrl = (f: string) => '/@fs' + path.resolve(f).split(path.sep).join('/');
 function harnessModule(preview: string | null) {
   return `import { createElement as h, Component } from 'react';
 import { createRoot } from 'react-dom/client';
-${preview ? `import * as preview from ${JSON.stringify(fsUrl(preview))};` : 'const preview = {};'}
+${(preview ? previewStyles(preview) : []).map(f => `try { await import(/* @vite-ignore */ ${JSON.stringify(f)}); } catch (e) { window.__dsaCssErr = String((e && e.message) || e).slice(0, 200); }`).join('\n')}
+let preview = {};
+${preview ? `try { preview = await import(/* @vite-ignore */ ${JSON.stringify(fsUrl(preview))}); } catch (e) { window.__dsaPreviewErr = String((e && e.message) || e).slice(0, 200); }` : ''}
 class Guard extends Component {
   constructor(p) { super(p); this.state = { failed: false }; }
   static getDerivedStateFromError() { return { failed: true }; }
@@ -58,14 +113,14 @@ class Guard extends Component {
 const decorators = [...((preview.default && preview.default.decorators) || []), ...(preview.decorators || [])];
 const EMPTY = { data: [], rows: [], items: [], options: [], columns: [] };
 let root = null;
-const mount = async (tree) => {
+const mount = async (tree, bare) => {
   window.__dsaErr = null;
   if (root) root.unmount();
   const host = document.getElementById('root');
   host.replaceChildren();
   root = createRoot(host);
   let story = () => tree;
-  for (const d of decorators) { const inner = story; story = () => d(inner, { args: {}, parameters: {}, globals: {}, viewMode: 'story', id: 'dsa--harness' }); }
+  for (const d of bare ? [] : decorators) { const inner = story; story = () => d(inner, { args: {}, parameters: {}, globals: {}, viewMode: 'story', id: 'dsa--harness' }); }
   root.render(h(Guard, null, h(() => story())));
   await new Promise((r) => setTimeout(r, 350));
   return window.__dsaErr;
@@ -93,8 +148,9 @@ window.__dsaDraw = async ({ file, name, props, text, icon, slot, empty }) => {
   };
   const tries = [fam.length ? wrap(el(false)) : null, el(false), empty ? (fam.length ? wrap(el(true)) : el(true)) : null].filter(Boolean);
   let why = null;
-  for (const t of tries) {
-    why = await mount(t);
+  // A Storybook decorator may only work inside Storybook: then without them.
+  for (const bare of decorators.length ? [false, true] : [false]) for (const t of tries) {
+    why = await mount(t, bare);
     if (!why && document.querySelector('[data-slot="' + slot + '"]')) return { ok: true };
   }
   return { ok: false, why: why ? 'it failed to draw: ' + why : 'it drew, but nothing showed with its data-slot' };
@@ -123,10 +179,14 @@ export async function startHarness(root: string, config: Config, sigFiles: strin
     },
   };
   const own = ['vite.config.ts', 'vite.config.js', 'vite.config.mjs', 'vite.config.mts'].map(f => path.join(dir, f)).find(f => fs.existsSync(f));
+  const sb = preview ? await storybookVite(preview, vite) : { plugins: [] as any[], alias: {}, allow: [] as string[] };
   const server = await vite.createServer({
     root: dir, configFile: own ?? false, logLevel: 'silent', appType: 'custom', clearScreen: false,
-    plugins: [plugin],
-    server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, fs: { allow: [path.resolve(root)] } },
+    // Its bundled dependencies go in temp, not into the system's folder.
+    cacheDir: fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-harness-')),
+    plugins: [plugin, ...sb.plugins],
+    ...(Object.keys(sb.alias).length ? { resolve: { alias: sb.alias } } : {}),
+    server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, fs: { strict: false, allow: [path.resolve(root), ...sb.allow] } },
     optimizeDeps: { include: ['react', 'react-dom/client'] },
   });
   await server.listen();

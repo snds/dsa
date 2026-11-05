@@ -1,5 +1,6 @@
 import http from 'node:http';
 import fs from 'node:fs';
+import { LabelSchema, labelsJsonl } from '@snds/dsa';
 import path from 'node:path';
 import { discoverSources, NotLiveError, recordScanTime, runAfterHooks, type Deploy, type DsaAddon, type EngineContext, type ServeRequest } from '@snds/dsa';
 import { MEASURES, appSettings, expandSources, isGlob, clearEvents, clearMappingCache, computeFit, decideMany, effectiveSettings, figmaToken, githubToken, latestEvals, loadCatalog, logEvent, mapInstance, mask, materializeRemotes, openStore, parseFigmaUrl, readRendered, readSource, resolveTargets, runPipeline, setSetting, targetRelative, undecide, withMetrics, writeSecrets, type AppSettings, type Config } from '@snds/dsa/engine';
@@ -271,6 +272,12 @@ export async function startServer(opts: ServeOptions): Promise<{ url: string; cl
           const r = await decideMany(root, config, dataDir, { ids: body.ids, pattern: body.pattern }, body.decision, body.who, body.note);
           return send(200, { recorded: r.reduce((a: number, x: any) => a + (x.count ?? 1), 0), files: [...new Set(r.map((x: any) => x.file))], decided: { by: body.pattern ? 'policy' : 'human', decision: body.decision, note: body.note } });
         } catch (e: any) { return send(400, { error: errText(e) }); }
+      }
+      if (req.method === 'POST' && url.pathname === '/api/labels') {
+        // A reviewer's answers, as labels.jsonl rows (method "human"), checked against the schema.
+        const body = await readBody(req);
+        const r = appendHumanLabels(dataDir, Array.isArray(body?.labels) ? body.labels : []);
+        return send(r.errors.length ? 400 : 200, r);
       }
       if (req.method === 'POST' && url.pathname === '/api/settings') {
         const body = await readBody(req);
@@ -546,4 +553,26 @@ function appList(root: string, config: Config) {
   const internal = new Set(config.internalConsumers ?? []);
   return [...roles].sort((a, b) => (a[1] === b[1] ? a[0].localeCompare(b[0]) : a[1] === 'child' ? -1 : 1))
     .map(([name, role]) => { const s = appSettings(config, name); return { name, role, internal: internal.has(name), ...s, tokenSkip: s.tokenSkip.join(', ') }; });
+}
+
+/** Where dsa serve keeps the labels people give in Label Review. */
+export const humanLabelsFile = (dataDir: string) => path.join(dataDir, 'labels', 'human.jsonl');
+
+/** Append reviewers' labels (human only, schema-checked); a later answer for the same element replaces the earlier one. */
+export function appendHumanLabels(dataDir: string, rows: unknown[]): { saved: number; errors: string[]; file: string } {
+  const file = humanLabelsFile(dataDir);
+  const errors: string[] = [];
+  const ok = rows.flatMap((x, i) => {
+    const r = LabelSchema.safeParse(x);
+    if (!r.success) { errors.push(`label ${i + 1}: ${r.error.issues.map(e => `${e.path.join('.')}: ${e.message}`).join('; ')}`); return []; }
+    if (r.data.method !== 'human') { errors.push(`label ${i + 1}: method must be "human"`); return []; }
+    return [r.data];
+  });
+  if (errors.length) return { saved: 0, errors, file };
+  let old: any[] = [];
+  try { old = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)); } catch { /* first answer */ }
+  const ids = new Set(ok.map(l => `${l.id}\u0001${l.labeler}`));
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, labelsJsonl([...old.filter(l => !ids.has(`${l.id}\u0001${l.labeler}`)), ...ok]));
+  return { saved: ok.length, errors, file };
 }

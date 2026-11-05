@@ -34,6 +34,176 @@ export function gateProps(e: ElementEval): Record<string, string | boolean> {
   return out;
 }
 
+/**
+ * The member of a union type whose `tag` field is `value` (`{ t: 'ctx'; x: number } | { t: 'panelMenu' }`),
+ * shaped: through aliases and `| null`. Null when the type has no such member.
+ */
+function memberOf(t: any, types: Map<string, any>, tag: string, value: unknown, depth = 0): Record<string, Val> | null {
+  if (!t || depth > 3) return null;
+  if (t.type === 'TSTypeReference' && t.typeName?.type === 'Identifier' && types.has(t.typeName.name)) return memberOf(types.get(t.typeName.name), types, tag, value, depth + 1);
+  if (t.type === 'TSUnionType') { for (const x of t.types) { const m = memberOf(x, types, tag, value, depth + 1); if (m) return m; } return null; }
+  const l = literalOf(t, types);
+  const f = l?.members?.find((m: any) => m.type === 'TSPropertySignature' && m.key?.name === tag);
+  const ft = f?.typeAnnotation?.typeAnnotation;
+  if (ft?.type !== 'TSLiteralType' || ft.literal.value !== value) return null;
+  const v = objectOf(l, types, 0);
+  return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, Val> : null;
+}
+
+/** A value that passes a truthiness test: '' → 'a', 0 → 1, false → true, null → {}. */
+const truthy = (v: Val): Val => v === '' ? 'a' : v === 0 ? 1 : v === false ? true : v === null ? {} : v;
+
+/** A type written as text (`PaletteColour[]`, `string | null`), parsed. */
+function typeNode(text: string): any {
+  try { return (babelParse(`let __t: ${text};`, { sourceType: 'module', plugins: ['typescript'] }) as any).program.body[0].declarations[0].id.typeAnnotation.typeAnnotation; } catch { return null; }
+}
+
+/** Types declared in a file and in the local files it imports from (one step): what a state's type names. */
+function typesWithImports(ast: any, file: string, read: (file: string) => string | null): Map<string, any> {
+  const out = new Map<string, any>();
+  for (const s of ast?.program?.body ?? []) {
+    if (s.type !== 'ImportDeclaration' || !String(s.source.value).startsWith('.')) continue;
+    const base = path.posix.join(path.posix.dirname(file), s.source.value);
+    for (const f of [base, `${base}.ts`, `${base}.tsx`, `${base}/index.ts`, `${base}/index.tsx`]) {
+      const c = /\.(tsx?|jsx?)$/.test(f) ? read(f) : null;
+      const a = c ? parse(c) : null;
+      if (!a) continue;
+      for (const [k, v] of localTypes(a)) out.set(k, v);
+      break;
+    }
+  }
+  if (ast) for (const [k, v] of localTypes(ast)) out.set(k, v);
+  return out;
+}
+
+/**
+ * The lists a file walks, by the name it gives each item: `uploads.map((up) => …)` → { up: 'uploads' },
+ * `props.rows.filter(row => …)` → { row: 'rows' }. A condition on an item's field (`up.failed`) is met by a
+ * list with one item that has it.
+ */
+export function itemAliases(code: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const m of code.matchAll(/(?<![\w$.])((?:props\.)?[A-Za-z_$][\w$]*)\s*\??\.\s*(?:map|filter|forEach|some|every|find|flatMap)\(\s*(?:async\s*)?\(?\s*([A-Za-z_$][\w$]*)/g)) {
+    const list = m[1]!.replace(/^props\./, '');
+    if (!(m[2]! in out)) out[m[2]!] = list;
+  }
+  return out;
+}
+
+/** `up.failed`, `row?.kind`: an item's field, when `up` names a list's item. */
+const itemField = (m: any, aliases: Record<string, string>): { list: string; field: string } | null =>
+  /MemberExpression$/.test(m?.type ?? '') && !m.computed && m.object?.type === 'Identifier' && aliases[m.object.name] && m.property?.name ? { list: aliases[m.object.name]!, field: m.property.name } : null;
+
+/** `x.length`, `x?.length > 0`, `x.length === 0`, `props.x.length >= 1`: the list, and whether the test wants it non-empty. */
+function lengthTest(e: any): { name: string; nonEmpty: boolean } | null {
+  const list = (m: any): string | null => {
+    if (!/MemberExpression$/.test(m?.type ?? '') || m.computed || m.property?.name !== 'length') return null;
+    const o = m.object;
+    if (o?.type === 'Identifier') return o.name;
+    if (/MemberExpression$/.test(o?.type ?? '') && !o.computed && o.object?.type === 'Identifier' && o.object.name === 'props') return o.property?.name ?? null;
+    return null;
+  };
+  const own = list(e);
+  if (own) return { name: own, nonEmpty: true };
+  if (e?.type !== 'BinaryExpression') return null;
+  const left = list(e.left), right = list(e.right);
+  const name = left ?? right;
+  const n = left ? e.right : e.left;
+  if (!name || n?.type !== 'NumericLiteral') return null;
+  const op = left ? e.operator : ({ '<': '>', '>': '<', '<=': '>=', '>=': '<=' } as Record<string, string>)[e.operator] ?? e.operator;
+  const k = n.value as number;
+  // Whether a list of one passes, and an empty one.
+  const at = (x: number) => op === '>' ? x > k : op === '>=' ? x >= k : op === '<' ? x < k : op === '<=' ? x <= k : /^==/.test(op) ? x === k : /^!=/.test(op) ? x !== k : null;
+  const one = at(1), none = at(0);
+  if (one === null || one === none) return null;
+  return { name, nonEmpty: one };
+}
+
+/**
+ * The element's conditions on the props of the component mounted, made to hold over the props it's given
+ * (recorded, or shaped from the source): a flag (`open`, `!!editor`, and `open={!!editor}` where a caller
+ * passes it) true, a list read for its length (`palette.length > 0`) one item (`item` gives a recorded one,
+ * else one shaped from the source, else a word),
+ * a literal (`mode === 'edit'`) that literal. Gates on state are left to the state setter. Returns the props
+ * and what it set, in words (`open = true`), so a drawing can say a condition was forced.
+ */
+export function forceGates(e: ElementEval, name: string, given: Record<string, unknown>, shaped: Record<string, unknown> = {}, item?: (prop: string) => unknown, aliases: Record<string, string> = {}): { props: Record<string, unknown>; forced: string[] } {
+  const props: Record<string, unknown> = { ...given };
+  const forced: string[] = [];
+  const takes = (x: string) => x in props || x in shaped;
+  const set = (x: string, v: unknown) => { props[x] = v; forced.push(`${x} = ${(JSON.stringify(v) ?? String(v)).slice(0, 30)}`); };
+  const truthy = (x: string, truth: boolean) => {
+    if (Boolean(props[x]) === truth) return;
+    if (!truth) return set(x, props[x] && typeof props[x] === 'object' ? null : false);
+    const s = shaped[x];
+    set(x, s && typeof s === 'object' ? s : true);
+  };
+  const root = (m: any): string | null => m?.type === 'Identifier' ? m.name : /MemberExpression$/.test(m?.type ?? '') && !m.computed && m.object?.type === 'Identifier' && m.object.name === 'props' ? m.property?.name ?? null : null;
+  // A list prop with one item whose field holds `value` (true: any truthy value), the rest of the item as recorded or shaped.
+  const withItem = (f: { list: string; field: string }, value: unknown) => {
+    if (!takes(f.list)) return;
+    const cur = Array.isArray(props[f.list]) ? props[f.list] as unknown[] : [];
+    const ok = (x: any) => x && typeof x === 'object' && (value === true ? Boolean(x[f.field]) : value === false ? !x[f.field] : x[f.field] === value);
+    if (cur.some(ok)) return;
+    const s = shaped[f.list];
+    const base = [cur[0], item?.(f.list), Array.isArray(s) ? s[0] : undefined].find(x => x && typeof x === 'object') ?? {};
+    set(f.list, [{ ...(base as object), [f.field]: value }, ...cur.slice(0, 2)]);
+  };
+  const visit = (x: any, truth: boolean): void => {
+    if (!x) return;
+    const it = itemField(x, aliases);
+    if (it) return withItem(it, truth);
+    const r = root(x);
+    if (r) { if (takes(r)) truthy(r, truth); return; }
+    if (x.type === 'UnaryExpression' && x.operator === '!') return visit(x.argument, !truth);
+    if (x.type === 'CallExpression' && x.callee?.name === 'Boolean' && x.arguments.length === 1) return visit(x.arguments[0], truth);
+    if (x.type === 'LogicalExpression') {
+      if ((x.operator === '&&' && truth) || (x.operator === '||' && !truth)) { visit(x.left, truth); visit(x.right, truth); }
+      else visit(x.left, truth);
+      return;
+    }
+    const len = lengthTest(x);
+    if (len) {
+      if (!takes(len.name)) return;
+      const v = props[len.name];
+      const has = Array.isArray(v) && v.length > 0;
+      if (len.nonEmpty !== truth) { if (has) set(len.name, []); return; }
+      if (has) return;
+      const s = shaped[len.name];
+      // Nothing says what an item is: a word, which renders as text and reads as nothing (`{}` can't render).
+      const one = item?.(len.name) ?? (Array.isArray(s) && s.length ? s[0] : 'a');
+      set(len.name, [one]);
+      return;
+    }
+    if (x.type === 'BinaryExpression' && /^[!=]==?$/.test(x.operator)) {
+      const ft = itemField(x.left, aliases) ?? itemField(x.right, aliases);
+      const fl = itemField(x.left, aliases) ? x.right : x.left;
+      if (ft && /^(String|Numeric|Boolean)Literal$/.test(fl?.type ?? '') && x.operator.startsWith('=') === truth) return withItem(ft, fl.value);
+      const id = root(x.left) ? x.left : root(x.right) ? x.right : null;
+      const lit = id === x.left ? x.right : x.left;
+      const n = id && root(id);
+      if (!n || !takes(n)) return;
+      // `x != null`, `x !== undefined`: x set.
+      if (lit?.type === 'NullLiteral' || (lit?.type === 'Identifier' && lit.name === 'undefined')) return truthy(n, x.operator.startsWith('!') === truth);
+      if (!/^(String|Numeric|Boolean)Literal$/.test(lit?.type ?? '')) return;
+      const eq = x.operator.startsWith('=') === truth;
+      if (eq && props[n] !== lit.value) set(n, lit.value);
+      else if (!eq && props[n] === lit.value) set(n, typeof lit.value === 'boolean' ? !lit.value : typeof lit.value === 'number' ? lit.value + 1 : `${lit.value}-other`);
+    }
+  };
+  for (const g of e.reach?.gates ?? []) {
+    const gc = (g as any).component as string | undefined;
+    // A condition a caller passes as this component's prop (`<Editor open={!!editor}>`): that prop holds.
+    const asProp = g.test.match(/^([\w$]+)=\{[\s\S]*\}$/);
+    if (asProp) { if (gc !== name && takes(asProp[1]!)) truthy(asProp[1]!, !g.negated); continue; }
+    if (gc ? gc !== name : e.within !== name) continue;
+    let expr: any = null;
+    try { expr = babelParseExpression(g.test, { plugins: ['jsx', 'typescript'] }); } catch { continue; }
+    visit(expr, !g.negated);
+  }
+  return { props, forced: [...new Set(forced)] };
+}
+
 /** A prop value the page turns into a function that does nothing. */
 export const FN = { __dsa: 'fn' } as const;
 /** A prop value the page turns into an empty Set, or an empty Map: what `.has(`, `.get(` are called on. */
@@ -514,6 +684,84 @@ export function parentComponent(code: string, name: string, line: number): strin
 }
 
 /**
+ * A read off nothing in a component's own props ("reading 'find'" on `rows.find(…)`, "reading 'name'" on
+ * `alias.owner.name`): the path from the prop to what was missing, and a value of the kind that read needs
+ * there: a list for a list's methods and length, a string for a string's, else an object with the field.
+ */
+export function nullRead(code: string, component: string, message: string): { path: string[]; value: Val } | null {
+  const k = message.match(/reading '([\w$]+)'/)?.[1];
+  if (!k) return null;
+  const ast = parse(code);
+  const fn = ast ? componentFn(ast, component) : null;
+  if (!fn) return null;
+  const param = fn.params?.[0];
+  const params = new Set<string>();
+  if (param?.type === 'ObjectPattern') for (const p of param.properties) if (p.type === 'ObjectProperty' && p.key?.name) params.add(p.value?.type === 'Identifier' ? p.value.name : p.key.name);
+  const propsName = param?.type === 'Identifier' ? param.name : '';
+  let found: string[] | null = null;
+  walk(fn.body, (n) => {
+    if (found || !/MemberExpression$/.test(n.type) || n.computed || n.property?.name !== k) return;
+    const at: string[] = [];
+    let o = n.object;
+    while (/MemberExpression$/.test(o?.type ?? '') && !o.computed && o.property?.name) { at.unshift(o.property.name); o = o.object; }
+    if (o?.type !== 'Identifier') return;
+    if (o.name === propsName && at.length) found = at;
+    else if (params.has(o.name)) found = [o.name, ...at];
+  });
+  if (!found) return null;
+  const value: Val = /^(length|map|filter|find|findIndex|forEach|some|every|reduce|flatMap|slice|includes|indexOf|join|at|sort)$/.test(k) ? []
+    : /^(trim|toLowerCase|toUpperCase|split|startsWith|endsWith|replace|padStart|charAt)$/.test(k) ? '' : { [k]: '' };
+  return { path: found, value };
+}
+
+/**
+ * A value of a prop's declared type (the component's props type, here or in a file it imports), made to pass
+ * a truthiness test: a list holds one typed item. Undefined when the type isn't known. `file` is the path
+ * `read` takes.
+ */
+export function typedProp(code: string, component: string, prop: string, file: string, read: (file: string) => string | null): Val | undefined {
+  const ast = parse(code);
+  const fn = ast ? componentFn(ast, component) : null;
+  const param = fn?.params?.[0];
+  if (!param) return undefined;
+  const types = typesWithImports(ast, file, read);
+  let ann = param.typeAnnotation?.typeAnnotation;
+  if (!ann) walk(ast.program, (n) => { if (!ann && n.type === 'VariableDeclarator' && n.id?.name === component) ann = n.id.typeAnnotation?.typeAnnotation?.typeParameters?.params?.[0]; });
+  const m = (literalOf(ann, types)?.members ?? []).find((x: any) => x.type === 'TSPropertySignature' && x.key?.name === prop);
+  const t = m?.typeAnnotation?.typeAnnotation;
+  if (!t) return undefined;
+  const el = t.type === 'TSArrayType' ? t.elementType : t.type === 'TSTypeReference' && /^(Array|ReadonlyArray)$/.test(t.typeName?.name ?? '') ? t.typeParameters?.params?.[0] : null;
+  if (el) { const v = shapeOf(el, types, 0); return v === undefined ? undefined : [truthy(v)]; }
+  const v = shapeOf(t, types, 0);
+  return v === undefined ? undefined : truthy(v);
+}
+
+/**
+ * The call on a component's line that handed its props to a helper which then threw (`quotesFor(material.id)`,
+ * `pick(rows)`): the helper's name and the props whose values it was given, by their names.
+ */
+export function propsPassedAt(code: string, component: string, line: number): { helper: string; props: string[] } | null {
+  const ast = parse(code);
+  const fn = ast ? componentFn(ast, component) : null;
+  if (!fn) return null;
+  const param = fn.params?.[0];
+  const params = new Set<string>();
+  if (param?.type === 'ObjectPattern') for (const p of param.properties) if (p.type === 'ObjectProperty' && p.key?.name) params.add(p.value?.type === 'Identifier' ? p.value.name : p.key.name);
+  const propsName = param?.type === 'Identifier' ? param.name : '';
+  let out: { helper: string; props: string[] } | null = null;
+  walk(fn.body, (n) => {
+    if (out || !/CallExpression$/.test(n.type) || n.loc?.start.line !== line) return;
+    const props = new Set<string>();
+    for (const a of n.arguments ?? []) walk(a, (m) => {
+      if (m.type === 'Identifier' && params.has(m.name)) props.add(m.name);
+      if (/MemberExpression$/.test(m.type) && !m.computed && m.object?.type === 'Identifier' && m.object.name === propsName && m.property?.name) props.add(m.property.name);
+    });
+    if (props.size) out = { helper: n.callee?.type === 'Identifier' ? n.callee.name : n.callee?.property?.name ?? 'a helper', props: [...props] };
+  });
+  return out;
+}
+
+/**
  * What a component that threw while drawing was missing, read off its error and its source: "the prop
  * invoice", "a provider for StoreCtx", "what useStore reads (a provider above it)". Empty when it can't tell.
  */
@@ -675,7 +923,11 @@ export function stateSets(gates: { test: string; negated: boolean; component?: s
     const code = read(g.file);
     if (!code) continue;
     const order = stateOrder(code, g.component, hookCode ? (n) => hookCode(n, g.file!) : undefined);
-    if (!order.some(Boolean)) continue;
+    // Its own state hooks by name, counted or not: past a hook whose own hooks can't be counted, a state has no
+    // known place, but the tagger names each by its setter, so it can still be set by name (index -1).
+    const declared = new Set([...code.matchAll(/\[\s*([\w$]+)\s*,\s*[\w$]+\s*\]\s*=\s*(?:React\.)?use(?:State|Reducer)\b/g)].map(m => m[1]!));
+    const known = (x: string) => order.includes(x) || declared.has(x);
+    if (!order.some(Boolean) && !declared.size) continue;
     const ast = parse(code);
     const fn = ast ? componentFn(ast, g.component) : null;
     // A condition passed as a prop (`open={!!editor}`): the prop must hold, so its value's condition does.
@@ -695,29 +947,80 @@ export function stateSets(gates: { test: string; negated: boolean; component?: s
       offset = at;
     }
     const want = new Map<string, Val>();
+    const aliases = itemAliases(code);
     const initial = (x: string) => initialOf(code, x);
+    // A value of the state's declared type (`useState<PaletteColour[]>`, the type here or in a file it imports).
+    let types: Map<string, any> | null = null;
+    const typed = (x: string): any => {
+      const t = initial(x)?.type;
+      if (!t) return null;
+      types ??= typesWithImports(ast, g.file!, read);
+      return typeNode(t);
+    };
+    const itemOf = (x: string): Val | undefined => {
+      const t = typed(x);
+      const el = t?.type === 'TSArrayType' ? t.elementType : t?.type === 'TSTypeReference' && /^(Array|ReadonlyArray)$/.test(t.typeName?.name ?? '') ? t.typeParameters?.params?.[0] : null;
+      const v = el ? shapeOf(el, types!, 0) : undefined;
+      return v === undefined ? undefined : truthy(v);
+    };
     const shapeFor = (x: string, truth: boolean): Val | undefined => {
       const at = initial(x);
       const objecty = at ? /^(\{|\[|new\s)/.test(at.init) : false;
       if (!truth) return objecty ? undefined : false;
       if (objecty) return undefined;
       const v = fn ? usageOf(fn.body, (m) => m?.type === 'Identifier' && m.name === x, 0, ast) : undefined;
-      // Nothing read off it: true, unless its type says it's a value, not a flag (`useState<Colour | null>`).
-      if (v === undefined || v === '') return at?.type && !/\bboolean\b/.test(at.type) ? {} : true;
+      // Nothing read off it: a value of its type, or true unless its type says it's a value, not a flag.
+      if (v === undefined || v === '') {
+        const t = typed(x);
+        const tv = t ? shapeOf(t, types!, 0) : undefined;
+        if (tv !== undefined) return truthy(tv);
+        return at?.type && !/\bboolean\b/.test(at.type) ? {} : true;
+      }
       return v === 0 ? 1 : Array.isArray(v) && !v.length ? [''] : v;
     };
     const visit = (e: any, truth: boolean) => {
       if (!e) return;
-      if (e.type === 'Identifier') { if (order.includes(e.name)) { const v = shapeFor(e.name, truth); if (v !== undefined) want.set(e.name, v); } return; }
+      if (e.type === 'Identifier') { if (known(e.name)) { const v = shapeFor(e.name, truth); if (v !== undefined) want.set(e.name, v); } return; }
       if (e.type === 'UnaryExpression' && e.operator === '!') return visit(e.argument, !truth);
       if (e.type === 'LogicalExpression') {
         if ((e.operator === '&&' && truth) || (e.operator === '||' && !truth)) { visit(e.left, truth); visit(e.right, truth); }
         else visit(e.left, truth);
         return;
       }
+      // A condition on a list item's field (`up.failed`, `row.kind === 'document'`): the list with one such item.
+      const f = itemField(e, aliases) ?? (e.type === 'BinaryExpression' && /^[!=]==?$/.test(e.operator) && e.operator.startsWith('=') === truth ? itemField(e.left, aliases) ?? itemField(e.right, aliases) : null);
+      if (f && known(f.list)) {
+        const lit = e.type === 'BinaryExpression' ? (itemField(e.left, aliases) ? e.right : e.left) : null;
+        const v: Val = lit && /^(String|Numeric|Boolean)Literal$/.test(lit.type) ? lit.value : truth;
+        const it = itemOf(f.list);
+        want.set(f.list, [{ ...(it && typeof it === 'object' && !Array.isArray(it) ? it : {}), [f.field]: v }]);
+        return;
+      }
+      // A list read for its length (`palette.length > 0`, `items.length`, `rows.length === 0`): one item, or none.
+      const len = lengthTest(e);
+      if (len) {
+        if (!known(len.name)) return;
+        if (len.nonEmpty !== truth) { want.set(len.name, []); return; }
+        // One item of its declared type, else as the component reads it.
+        const it = itemOf(len.name);
+        const v = fn ? usageOf(fn.body, (m) => m?.type === 'Identifier' && m.name === len.name, 0, ast) : undefined;
+        want.set(len.name, it !== undefined ? [it] : Array.isArray(v) && v.length && v[0] !== '' ? v.slice(0, 1) : ['a']);
+        return;
+      }
+      // A tag on a state that holds one of several shapes (`float?.t === 'panelMenu'`): that shape, from the
+      // union member of its type whose tag is the literal, else just the tag.
+      if (e.type === 'BinaryExpression' && /^[!=]==?$/.test(e.operator) && e.operator.startsWith('=') === truth) {
+        const mem = [e.left, e.right].find((x: any) => /MemberExpression$/.test(x?.type ?? '') && !x.computed && x.object?.type === 'Identifier' && known(x.object.name) && x.property?.name);
+        const lit = mem === e.left ? e.right : e.left;
+        if (mem && /^(String|Numeric|Boolean)Literal$/.test(lit?.type ?? '')) {
+          const tag = mem.property.name as string;
+          want.set(mem.object.name, { ...(memberOf(typed(mem.object.name), types ?? new Map(), tag, lit.value) ?? {}), [tag]: lit.value });
+          return;
+        }
+      }
       if (e.type === 'BinaryExpression' && /^[!=]==?$/.test(e.operator)) {
         const [id, lit] = e.left.type === 'Identifier' ? [e.left, e.right] : [e.right, e.left];
-        if (id?.type !== 'Identifier' || !order.includes(id.name) || !/^(String|Numeric|Boolean)Literal$/.test(lit?.type)) return;
+        if (id?.type !== 'Identifier' || !known(id.name) || !/^(String|Numeric|Boolean)Literal$/.test(lit?.type)) return;
         const eq = e.operator.startsWith('=') === truth;
         if (eq) want.set(id.name, lit.value);
         else if (typeof lit.value === 'boolean') want.set(id.name, !lit.value);
@@ -730,6 +1033,7 @@ export function stateSets(gates: { test: string; negated: boolean; component?: s
     for (const [name, value] of want) {
       const index = order.indexOf(name);
       if (index >= 0 && !s.slots.some(x => x.index === offset + index)) s.slots.push({ index: offset + index, name, value });
+      else if (index < 0 && !s.slots.some(x => x.name === name)) s.slots.push({ index: -1, name, value });
     }
     if (s.slots.length) out.set(key, s);
   }

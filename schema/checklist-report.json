@@ -1013,6 +1013,30 @@
                   "description": "Open menus, tabs and sheets to find hidden elements (default on).",
                   "type": "boolean"
                 },
+                "renderTests": {
+                  "description": "Before the crawl, run the app's own component tests (Vitest) with source tags and the evidence ledger on, so what they render is recorded for drawing. Off by default; DSA_RENDER_TESTS=1 turns it on.",
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "maxMinutes": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "include": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  ]
+                },
                 "perGroup": {
                   "type": "integer",
                   "minimum": 0,

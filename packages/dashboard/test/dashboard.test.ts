@@ -93,7 +93,8 @@ test('publish: a static folder for Pages with site-relative images, only the one
   assert.ok(id, 'the fixture has evaluated elements');
   fs.writeFileSync(path.join(data, 'shots', 'kept.png'), 'png');
   fs.writeFileSync(path.join(data, 'shots', 'stale.png'), 'png');
-  if (id) fs.writeFileSync(path.join(data, 'shots', 'index.json'), JSON.stringify({ shots: { [id]: { file: 'kept.png', matchScore: 0.9, page: '/' } }, missing: [] }));
+  const run = { id: 'run-2', ref: 'abc1234', at: '2026-10-06T12:00:00.000Z' };
+  if (id) fs.writeFileSync(path.join(data, 'shots', 'index.json'), JSON.stringify({ run, shots: { [id]: { file: 'kept.png', matchScore: 0.9, page: '/', run: run.id, at: '2026-10-06T12:01:00.000Z' } }, missing: [] }));
   const out = path.join(tmp(), 'site');
   const r = await publish(ROOT, loadConfig(ROOT).config, data, ACME_PROFILE, out);
   const html = fs.readFileSync(path.join(out, 'index.html'), 'utf8');
@@ -119,4 +120,46 @@ test('report title: the system\'s name when no report.title is set, never the fo
   assert.ok(name && name !== path.basename(ROOT), 'the fixture names its system');
   const html = await renderReport(ROOT, config, data, ACME_PROFILE);
   assert.ok(html.includes(`<title>Design System Analytics · ${name}</title>`));
+});
+
+test("only this run's photos count: one carried from an older run, or with no stamp, is missing, and the oldest age shows per app", async () => {
+  const data = tmp();
+  await runPipeline({ root: ROOT, dataDir: data, git: false, now: NOW, readiness: false });
+  const store = await openStore(data);
+  const ids = (await store.all<any>('select id from element_evals order by id limit 3')).map((r: any) => r.id as string);
+  store.close();
+  assert.equal(ids.length, 3, 'the fixture has three elements to photograph');
+  const [fresh, older, legacy] = ids as [string, string, string];
+  const run = { id: 'run-2', ref: 'worktree', at: '2026-10-06T12:00:00.000Z' };
+  const index = { run, shots: {
+    [fresh]: { file: 'a.png', matchScore: 1, page: '/', run: 'run-1', at: '2026-10-06T09:00:00.000Z', context: { file: 'a.ctx.png', box: { x: 368, y: 234, w: 64, h: 32, cw: 800, ch: 500 } } },
+    [older]: { file: 'b.png', matchScore: 1, page: '/', run: 'run-1', at: '2026-10-05T12:00:00.000Z' },
+    [legacy]: { file: 'c.png', matchScore: 1, page: '/' },
+  }, missing: [] };
+  // A run's own folder, scored on its own (--run-dir), never the shared one.
+  const runDir = path.join(tmp(), 'run-2');
+  fs.mkdirSync(path.join(runDir, 'shots'), { recursive: true });
+  fs.writeFileSync(path.join(runDir, 'shots', 'index.json'), JSON.stringify(index));
+  for (const f of ['a.png', 'a.ctx.png', 'b.png', 'c.png']) fs.writeFileSync(path.join(runDir, 'shots', f), 'png');
+  // Carried forward but taken after this run began: it counts. (Made so by moving the run's start back.)
+  index.run = { ...run, at: '2026-10-06T08:00:00.000Z' };
+  fs.writeFileSync(path.join(runDir, 'shots', 'index.json'), JSON.stringify(index));
+  const out = path.join(tmp(), 'site');
+  const r = await publish(ROOT, loadConfig(ROOT).config, data, ACME_PROFILE, out, null, { runDir });
+  const payload = JSON.parse(fs.readFileSync(path.join(out, 'index.html'), 'utf8').match(/id="dsa-data" type="application\/json">(.*?)<\/script>/s)![1]);
+  const byId = new Map<string, any>(payload.elements.evals.map((e: any) => [e.id, e]));
+  assert.equal(byId.get(fresh).shot?.url, 'shots/a.png', 'from an older run, but taken after this one began');
+  assert.equal(byId.get(older).shot, null, 'from an older run, taken before it: missing');
+  assert.deepEqual(byId.get(older).staleShot, { why: 'older-run', at: '2026-10-05T12:00:00.000Z', run: 'run-1' });
+  assert.equal(byId.get(older).shotMissing, true);
+  assert.equal(byId.get(legacy).shot, null, 'no stamp: missing');
+  assert.equal(byId.get(legacy).staleShot.why, 'unstamped');
+  assert.deepEqual(byId.get(fresh).shot.context, { url: 'shots/a.ctx.png', box: { x: 368, y: 234, w: 64, h: 32, cw: 800, ch: 500 } }, 'its wider page crop, for the review');
+  assert.equal(r.shots, 2, 'only the photo that counts ships, with its context crop');
+  const app = byId.get(fresh).target;
+  const f = payload.elements.freshness;
+  assert.equal(f.run.id, 'run-2');
+  assert.equal(f.stale, 2);
+  assert.equal(f.byApp[app].oldestAt, '2026-10-06T09:00:00.000Z');
+  assert.equal(f.byApp[app].oldestHours, 0, 'taken after the run began');
 });

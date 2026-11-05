@@ -31,6 +31,8 @@ export interface Signature {
   childSlots: string[];
   iconOnly: boolean;
   props: Props;
+  /** The class names this variant and size put on the element, before normalizing (dsa labels strips a component back to them). */
+  classes?: string[] | undefined;
 }
 
 export interface ComponentSig {
@@ -431,7 +433,7 @@ export function buildSignatures(packages: { dir: string; name: string }[]): Sign
             if (l.cva.variants.size) tokens.push(...pick('size', s === 'toolbar-icon' && !l.cva.variants.size[s] ? 'icon' : s));
             for (const [axis, vals] of Object.entries(l.cva.variants)) if (axis !== 'variant' && axis !== 'size') tokens.push(...(vals[l.cva.defaults[axis]! ?? Object.keys(vals)[0]] ?? []));
           }
-          sigs.push({ component: c.name, from, variant: v, size: s, tag, role, childSlots, iconOnly: /icon/.test(s), props: normalize(tokens, aliases) });
+          sigs.push({ component: c.name, from, variant: v, size: s, tag, role, childSlots, iconOnly: /icon/.test(s), props: normalize(tokens, aliases), classes: [...new Set(tokens)] });
         }
         const deeper = path.dirname(file) !== src;
         const axisClasses: Record<string, Record<string, string[]>> = {};

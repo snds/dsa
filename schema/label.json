@@ -1,0 +1,137 @@
+{
+  "$id": "https://github.com/snds/dsa/schema/label.json",
+  "title": "dsa labels.jsonl (one line)",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The element's id (E-…) when known, else a stable id of the label's own."
+    },
+    "app": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The app (consumer) the element is in."
+    },
+    "file": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Its file, as the scan records it."
+    },
+    "line": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "sourceRef": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The source revision labelled: a git commit, or \"worktree\"."
+    },
+    "elementHash": {
+      "type": "string",
+      "minLength": 1,
+      "description": "A hash of the element's source text, to tell when the code changed under the label."
+    },
+    "truth": {
+      "type": "object",
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "replace",
+            "keep",
+            "gap"
+          ],
+          "description": "replace: a system component; keep: stays native; gap: the system has nothing for it yet."
+        },
+        "use": {
+          "description": "The component, for replace.",
+          "type": "string",
+          "minLength": 1
+        },
+        "props": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "verdict"
+      ],
+      "additionalProperties": false
+    },
+    "acceptableAlts": {
+      "default": [],
+      "description": "Other answers that are also right.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "use": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The system component."
+          },
+          "props": {
+            "description": "Props that matter (variant, size…), as strings.",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "use"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "labeler": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Who or what labelled it (a person's handle, or the tool and its version)."
+    },
+    "method": {
+      "type": "string",
+      "enum": [
+        "human",
+        "migrated",
+        "history",
+        "lint",
+        "consensus"
+      ]
+    },
+    "at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+      "description": "When it was labelled (ISO 8601)."
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "app",
+    "file",
+    "line",
+    "sourceRef",
+    "elementHash",
+    "truth",
+    "acceptableAlts",
+    "labeler",
+    "method",
+    "at"
+  ],
+  "additionalProperties": false
+}

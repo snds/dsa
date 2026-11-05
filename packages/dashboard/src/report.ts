@@ -2,17 +2,19 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { DEFAULT_THRESHOLD, autoPick, contentHash, ownOf, openStore, plainText, withPlain, withMetrics, appSettings, closestRendered, compareRendered, effectiveSettings, familyKey, figmaEnabled, homeOf, loadCatalog, patterns as stylePatterns, pushedThisWeek, questions, readEvents, readProposals, readRendered, renderIssue, renderedFor as composeRendered, resolveTargets, rowToFinding, sourceExcerpts, placeExcerpts, titleOf, type Config } from '@snds/dsa/engine';
+import { allDsPackages, defaultExcludes, displayPath, findUses, usageExcludes, DEFAULT_THRESHOLD, locate, freshShots, freshnessByApp, readShotIndex, autoPick, contentHash, ownOf, openStore, plainText, withPlain, withMetrics, appSettings, closestRendered, compareRendered, effectiveSettings, familyKey, figmaEnabled, homeOf, loadCatalog, patterns as stylePatterns, pushedThisWeek, questions, readEvents, readProposals, readRendered, renderIssue, renderedFor as composeRendered, resolveTargets, rowToFinding, sourceExcerpts, placeExcerpts, titleOf, type Config } from '@snds/dsa/engine';
 
 import { scanEstimate, type PageActions, type ResolvedProfile } from '@snds/dsa';
 import { buildQueue, PKG_DIR } from './queue.js';
+import { hashText, propsAt } from '@snds/dsa';
+import { pageName, withReview, type Precedent, type ReviewQueueEntry } from './review.js';
 
 /**
  * Builds a single self-contained HTML report from the store: no server, opens from disk,
  * safe to attach or host anywhere. Data is embedded as JSON; the page renders it.
  */
-export async function buildReport(root: string, config: Config, dataDir: string, profile: ResolvedProfile, outFile: string): Promise<string> {
-  const html = await renderReport(root, config, dataDir, profile);
+export async function buildReport(root: string, config: Config, dataDir: string, profile: ResolvedProfile, outFile: string, opts: { runDir?: string | undefined } = {}): Promise<string> {
+  const html = await renderReport(root, config, dataDir, profile, { runDir: opts.runDir });
   fs.mkdirSync(path.dirname(outFile), { recursive: true });
   fs.writeFileSync(outFile, html);
   return outFile;
@@ -32,6 +34,13 @@ export interface ReportOptions {
   actions?: PageActions | null;
   /** When scans run by themselves (cron lines, UTC); a published page takes it from `actions`. */
   schedule?: string[] | undefined;
+  /**
+   * One run's folder (it holds that run's `shots/`, and `rendered/` when it has one): score and show that
+   * run's evidence instead of the shared data folder's, so photos from different runs never mix.
+   */
+  runDir?: string | undefined;
+  /** The review queue (`dsa labels queue --out`); default <data>/review-queue.jsonl when it exists. */
+  reviewQueue?: string | undefined;
 }
 
 export async function renderReport(root: string, config: Config, dataDir: string, profile: ResolvedProfile, opts: ReportOptions = {}): Promise<string> {
@@ -137,18 +146,28 @@ export async function renderReport(root: string, config: Config, dataDir: string
     // Element review: every evaluation (trimmed), the questions for a human, shared styles, and example shots.
     const evalRows = await store.all<any>('select data from element_evals where run_id=$1 order by target, file, line', [runId]);
     const evals = evalRows.map(r => (typeof r.data === 'string' ? JSON.parse(r.data) : r.data));
-    const shotsFile = path.join(dataDir, 'shots', 'index.json');
-    const shotIdx = fs.existsSync(shotsFile) ? JSON.parse(fs.readFileSync(shotsFile, 'utf8')) : { shots: {} };
+    // This run's photos only (engine fresh.ts): one carried forward from an older run, or with no stamp,
+    // is treated as missing, and the page says how many and how old the oldest that counts is, per app.
+    const rawIdx = readShotIndex(dataDir, opts.runDir);
+    const fresh = freshShots(rawIdx);
+    const shotIdx = { ...rawIdx, shots: fresh.shots, missing: [...new Set([...(rawIdx.missing ?? []), ...Object.keys(fresh.stale)])] };
+    const appOfId = new Map<string, string>(evals.map((e: any) => [e.id, e.target]));
+    const evidenceDir = opts.runDir && fs.existsSync(path.join(opts.runDir, 'rendered')) ? opts.runDir : dataDir;
     const base = opts.base ?? '/';
-    const shotUrl = (f: string) => (opts.serve ? `${base}shots/${f}` : opts.site ? `shots/${f}` : `../shots/${f}`);
+    const shotUrl = (f: string) => (opts.serve ? `${base}shots/${f}` : opts.site ? `shots/${f}` : opts.runDir ? path.relative(path.dirname(path.join(dataDir, 'report', 'index.html')), path.join(opts.runDir, 'shots', f)).split(path.sep).join('/') : `../shots/${f}`);
     // A photo, and what the capture checked: blank (nothing painted in the box), covered (another layer on
     // top), how it was made to show (hover, focus), and ties (one of N alike; N source lines claim it).
     // Tagged: found by its source tag, so the place is exact (ties are then the nodes its one line made).
     const shotOf = (s: any) => ({ url: shotUrl(s.file), match: s.matchScore, page: s.page, box: s.box ?? null, revealedBy: s.revealedBy ?? null,
+      ...(s.styles?.surface ? { surface: s.styles.surface } : {}),
       ...(s.blank ? { blank: true } : {}), ...(s.covered ? { covered: true } : {}), ...(s.via ? { via: s.via } : {}), ...(s.ties > 1 ? { ties: s.ties, alike: s.alike ?? 1 } : {}), ...(s.shared ? { shared: s.shared } : {}), ...(s.tagged ? { tagged: true } : {}),
       // Drawn direct from code (mount, markup): shown, labelled, never a photo. Uncovered: covering layers hidden.
-      ...(s.drawn ? { drawn: s.drawn } : {}), ...(s.exact ? { exact: true } : {}), ...(s.placeholder ? { placeholder: s.placeholder } : {}), ...(s.uncovered ? { uncovered: s.uncovered } : {}) });
-    const renderedSet = readRendered(dataDir);
+      ...(s.drawn ? { drawn: s.drawn } : {}), ...(s.exact ? { exact: true } : {}), ...(s.placeholder ? { placeholder: s.placeholder } : {}), ...(s.uncovered ? { uncovered: s.uncovered } : {}),
+      // An isolated render: mounted in the app's build with the props it was recorded with. And the run that took it, and when.
+      ...(s.source ? { source: s.source } : {}), ...(s.run ? { run: s.run } : {}), ...(s.at ? { at: s.at } : {}),
+      // A wider crop of the page around it (about 800 × 500 CSS px), with the element's box inside it.
+      ...(s.context?.file && s.context.box ? { context: { url: shotUrl(s.context.file), box: s.context.box } } : {}) });
+    const renderedSet = readRendered(evidenceDir);
     const renderedUrl = (f: string) => (opts.serve ? `${base}rendered/${f}` : opts.site ? `rendered/${f}` : `../rendered/${f}`);
     // Element (as rendered in the app) vs the recommended system variant/size (as rendered in Storybook).
     const renderedFor = (e: any) => {
@@ -175,7 +194,7 @@ export async function renderReport(root: string, config: Config, dataDir: string
       threshold: config.review?.threshold ?? DEFAULT_THRESHOLD,
       evals: evals.map((e: any) => ({ id: e.id, target: e.target, file: e.file, line: e.line, element: e.element, verdict: e.verdict, role: e.role, use: e.use, from: e.from, props: e.props, gap: e.gap,
         confidence: e.confidence, needsHuman: e.needsHuman, evidenceCap: e.evidenceCap ?? null, decided: e.decided, exception: e.exception, ruleId: e.ruleId, reasons: withPlain(e.reasons ?? []), alternatives: e.alternatives, signature: e.signature,
-        snippet: e.snippet, a11y: e.a11y, styleKey: e.styleKey, styleSig: e.styleSig, regions: e.regions ?? null,
+        snippet: e.snippet, srcHash: typeof e.source === 'string' ? hashText(e.source) : undefined, a11y: e.a11y, styleKey: e.styleKey, styleSig: e.styleSig, regions: e.regions ?? null,
 how: e.how ?? null, parent: e.parent ?? null, recipe: e.recipe ?? null,
         // Design identity (identity.ts): the family it belongs to, its name in designer words, and where its answer lands.
         family: familyKey(e), title: titleOf(e), home: homeOf(e.decided?.decision ?? e),
@@ -185,6 +204,7 @@ how: e.how ?? null, parent: e.parent ?? null, recipe: e.recipe ?? null,
         // Its own content's key: its proposal drawn with its words and icon is stored under proposalKey#ownHash.
         ownHash: contentHash(ownOf(e, shotIdx.shots[e.id])),
         shotMissing: !shotIdx.shots[e.id] && (shotIdx.missing ?? []).includes(e.id),
+        ...(fresh.stale[e.id] ? { staleShot: fresh.stale[e.id] } : {}),
         rendered: renderedFor(e),
         // What it takes to see the element (reach.ts), and the system's replacement as rendered, for cards without a screenshot.
         reach: e.reach ? { status: e.reach.status, why: e.reach.why, via: e.reach.via, steps: e.reach.steps.map((x: any) => x.label), gates: e.reach.gates.map((g: any) => ({ kind: g.kind, test: g.test, negated: g.negated, overlay: g.overlay, component: g.component })) } : null,
@@ -207,9 +227,20 @@ how: e.how ?? null, parent: e.parent ?? null, recipe: e.recipe ?? null,
       // The code viewer's text. dsa serve reads whole files on request (/api/source); a static page carries excerpts.
       sources: opts.serve ? null : sourceExcerpts(root, config, evals.map((e: any) => ({ target: e.target, file: e.file, line: e.line, span: typeof e.source === 'string' ? e.source.split('\n').length : 1 }))),
       shotsTaken: shotIdx.takenAt ?? null,
+      // Which run the photos are from, how many were set aside as older or unstamped, and the oldest that counts, per app.
+      freshness: { run: fresh.run, stale: Object.keys(fresh.stale).length, byApp: freshnessByApp(fresh, id => appOfId.get(id)) },
       rendered: renderedSet ? { takenAt: renderedSet.takenAt, source: renderedSet.source, combos: Object.values(renderedSet.components).reduce((a, c) => a + Object.keys(c).length, 0) } : null,
       // Each proposed replacement rendered with its exact props (dsa render), keyed like proposalKey: the review shows the options as they would look.
-      proposals: Object.fromEntries(Object.entries(readProposals(dataDir)).map(([k, p]) => [k, { use: p.use, props: p.props, check: p.check, url: p.shot ? renderedUrl(p.shot) : null, story: p.story ?? null, content: p.content ?? null, actual: p.actual ?? null, note: p.note ?? null, own: p.own ?? false, fallback: p.fallback ? renderedUrl(p.fallback) : null }])),
+      proposals: Object.fromEntries(Object.entries(readProposals(evidenceDir)).map(([k, p]) => [k, { use: p.use, props: p.props, check: p.check, url: p.shot ? renderedUrl(p.shot) : null, story: p.story ?? null, content: p.content ?? null, actual: p.actual ?? null, note: p.note ?? null, own: p.own ?? false, fallback: p.fallback ? renderedUrl(p.fallback) : null, ...(p.noSource ? { noSource: true } : {}), ...(p.unstyled ? { unstyled: true } : {}) }])),
+    });
+    // Review for people: what each element can show, the queue, the system's allowed props, and where
+    // the app already uses each proposal (its precedents).
+    withReview(payload0(elements), {
+      queue: readQueue(opts.reviewQueue ?? path.join(dataDir, 'review-queue.jsonl')),
+      system: (readJson(path.join(dataDir, 'signatures.json')) ?? []).map((c: any) => ({ component: c.component, axes: c.axes ?? {}, defaults: c.defaults ?? {} })),
+      // The engine's own index of existing uses (<data>/precedent.json, when a run writes one), else the scan's uses.
+      ...(() => { const f = precedentFile(dataDir, shotIdx, shotUrl); if (f) return { precedents: f }; const r = precedentsOf(root, config, elements, shotIdx, shotUrl); return { precedents: r.uses, searched: r.searched }; })(),
+      sourceRef: (e: any) => elements.sources?.[e.file]?.ref ?? 'worktree',
     });
     // Agent readiness: this run per repo (audit checks, the profile's usage checker by kind, reconciled with look-alikes), the trend, and bench runs.
     const provider = profile.readiness;
@@ -355,4 +386,64 @@ const mostCommon = (xs: string[]) => { const n = new Map<string, number>(); for 
 
 function readJson(file: string): any {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+}
+
+/** withReview takes a payload; the elements block is all it reads. */
+const payload0 = (elements: any) => ({ elements });
+
+function readQueue(file: string): ReviewQueueEntry[] | null {
+  try {
+    return fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)).filter((q: any) => typeof q.id === 'string').map((q: any) => ({ id: q.id, why: q.why === 'disagree' ? 'disagree' : 'audit' }));
+  } catch { return null; }
+}
+
+/**
+ * Where the app already uses each proposed component: the scan's system-component uses, with their
+ * literal props read from the source, and a photo when the crawler took one (shots/index.json `uses`,
+ * keyed by "<file>:<line>"). Only components some card proposes are read.
+ */
+function precedentsOf(root: string, config: Config, elements: any, shotIdx: any, shotUrl: (f: string) => string): { uses: Precedent[]; searched: Record<string, { files: number; unread: number }> } {
+  const wanted = new Set<string>();
+  for (const e of elements.evals ?? []) { if (e.use) wanted.add(e.use); for (const a of e.alternatives ?? []) if (a?.use) wanted.add(a.use); }
+  for (const q of elements.questions ?? []) if (q.auto?.use) wanted.add(q.auto.use);
+  if (!wanted.size) return { uses: [], searched: {} };
+  let targets: any[] = [];
+  try { targets = resolveTargets(root, config); } catch { return { uses: [], searched: {} }; }
+  // Read from each app's source, following its imports: the scan's count of system uses doesn't follow a
+  // local file that re-exports a package, and only its own lines are known to be elements of that name.
+  const packages = allDsPackages(config);
+  const excludes = [...defaultExcludes(root), ...(config.exclude ?? []).map((e: string) => path.resolve(root, e))];
+  const out: Precedent[] = [];
+  const searched: Record<string, { files: number; unread: number }> = {};
+  const perComponent = new Map<string, number>();
+  for (const t of targets) {
+    if (t.role === 'core') continue;
+    let found: ReturnType<typeof findUses>;
+    try { found = findUses({ dir: t.dir, packages, wanted, exclude: [...excludes, ...(t.exclude ?? []), ...usageExcludes(t.dir)], aliases: t.aliases }); }
+    catch { continue; }
+    searched[t.name] = { files: found.files, unread: found.unread };
+    for (const u of found.uses) {
+      // Up to 20 per app, component and props: enough examples for every answer, not a whole index.
+      const k = `${t.name}\u0001${u.component}\u0001${JSON.stringify(Object.entries(u.props).sort())}\u0001${u.dynamic.join()}`;
+      const seen = perComponent.get(k) ?? 0;
+      perComponent.set(k, seen + 1);
+      if (seen >= 20) continue;
+      const file = displayPath(root, u.file, t.dir);
+      const s = shotIdx.uses?.[`${file}:${u.line}`];
+      out.push({ app: t.name, file, line: u.line, component: u.component, props: u.props, ...(u.dynamic.length ? { dynamic: u.dynamic } : {}),
+        shot: s && !s.blank && !s.covered ? { url: shotUrl(s.file), box: s.box ?? null, page: s.page, pageName: pageName(s.page), ...(s.context?.file && s.context.box ? { context: { url: shotUrl(s.context.file), box: s.context.box } } : {}) } : null });
+    }
+  }
+  return { uses: out, searched };
+}
+
+/** `<data>/precedent.json` ({ uses: [{ component, file, line, props }] }), as precedents, when a run wrote one. */
+function precedentFile(dataDir: string, shotIdx: any, shotUrl: (f: string) => string): Precedent[] | null {
+  const j = readJson(path.join(dataDir, 'precedent.json'));
+  if (!Array.isArray(j?.uses)) return null;
+  return j.uses.filter((u: any) => u?.component && u.file && u.line).map((u: any) => {
+    const s = shotIdx.uses?.[`${u.file}:${u.line}`];
+    return { app: u.app ?? u.file.split('/')[0], file: u.file, line: Number(u.line), component: u.component, props: u.props ?? {},
+      shot: s && !s.blank && !s.covered ? { url: shotUrl(s.file), box: s.box ?? null, page: s.page, pageName: pageName(s.page) } : null };
+  });
 }
