@@ -699,6 +699,53 @@ export function nullRead(code: string, component: string, message: string): { pa
 }
 
 /**
+ * A value of a prop's declared type (the component's props type, here or in a file it imports), made to pass
+ * a truthiness test: a list holds one typed item. Undefined when the type isn't known. `file` is the path
+ * `read` takes.
+ */
+export function typedProp(code: string, component: string, prop: string, file: string, read: (file: string) => string | null): Val | undefined {
+  const ast = parse(code);
+  const fn = ast ? componentFn(ast, component) : null;
+  const param = fn?.params?.[0];
+  if (!param) return undefined;
+  const types = typesWithImports(ast, file, read);
+  let ann = param.typeAnnotation?.typeAnnotation;
+  if (!ann) walk(ast.program, (n) => { if (!ann && n.type === 'VariableDeclarator' && n.id?.name === component) ann = n.id.typeAnnotation?.typeAnnotation?.typeParameters?.params?.[0]; });
+  const m = (literalOf(ann, types)?.members ?? []).find((x: any) => x.type === 'TSPropertySignature' && x.key?.name === prop);
+  const t = m?.typeAnnotation?.typeAnnotation;
+  if (!t) return undefined;
+  const el = t.type === 'TSArrayType' ? t.elementType : t.type === 'TSTypeReference' && /^(Array|ReadonlyArray)$/.test(t.typeName?.name ?? '') ? t.typeParameters?.params?.[0] : null;
+  if (el) { const v = shapeOf(el, types, 0); return v === undefined ? undefined : [truthy(v)]; }
+  const v = shapeOf(t, types, 0);
+  return v === undefined ? undefined : truthy(v);
+}
+
+/**
+ * The call on a component's line that handed its props to a helper which then threw (`quotesFor(material.id)`,
+ * `pick(rows)`): the helper's name and the props whose values it was given, by their names.
+ */
+export function propsPassedAt(code: string, component: string, line: number): { helper: string; props: string[] } | null {
+  const ast = parse(code);
+  const fn = ast ? componentFn(ast, component) : null;
+  if (!fn) return null;
+  const param = fn.params?.[0];
+  const params = new Set<string>();
+  if (param?.type === 'ObjectPattern') for (const p of param.properties) if (p.type === 'ObjectProperty' && p.key?.name) params.add(p.value?.type === 'Identifier' ? p.value.name : p.key.name);
+  const propsName = param?.type === 'Identifier' ? param.name : '';
+  let out: { helper: string; props: string[] } | null = null;
+  walk(fn.body, (n) => {
+    if (out || !/CallExpression$/.test(n.type) || n.loc?.start.line !== line) return;
+    const props = new Set<string>();
+    for (const a of n.arguments ?? []) walk(a, (m) => {
+      if (m.type === 'Identifier' && params.has(m.name)) props.add(m.name);
+      if (/MemberExpression$/.test(m.type) && !m.computed && m.object?.type === 'Identifier' && m.object.name === propsName && m.property?.name) props.add(m.property.name);
+    });
+    if (props.size) out = { helper: n.callee?.type === 'Identifier' ? n.callee.name : n.callee?.property?.name ?? 'a helper', props: [...props] };
+  });
+  return out;
+}
+
+/**
  * What a component that threw while drawing was missing, read off its error and its source: "the prop
  * invoice", "a provider for StoreCtx", "what useStore reads (a provider above it)". Empty when it can't tell.
  */

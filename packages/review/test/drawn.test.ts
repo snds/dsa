@@ -1,6 +1,6 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { forceGates, itemAliases, nullRead, gateProps, markupOf, FN, MAP, SET, mountProps, stateValues, holdsInitially, stateSets } from '../src/drawn.js';
+import { forceGates, itemAliases, nullRead, propsPassedAt, typedProp, gateProps, markupOf, FN, MAP, SET, mountProps, stateValues, holdsInitially, stateSets } from '../src/drawn.js';
 
 // What can't be photographed is drawn from the code: its own JSX as static markup (no app code runs), and
 // props that meet the gates the scan traced, for mounting its component in the app's build.
@@ -183,4 +183,14 @@ test('a read off nothing in its props: the path from the prop, and a value of th
   assert.deepEqual(nullRead(code, 'Chips', "Cannot read properties of undefined (reading 'find')"), { path: ['rows'], value: [] });
   assert.deepEqual(nullRead(code, 'Chips', "Cannot read properties of undefined (reading 'trim')"), { path: ['alias', 'label'], value: '' });
   assert.equal(nullRead(code, 'Chips', 'Something else'), null);
+});
+
+test('the props a component hands a helper on a line, and a value of their declared type (a list with one typed item)', () => {
+  const types = `export type Quote = { id: string; price: { n: number } };\n`;
+  const code = `import type { Quote } from './quotes';\nexport function Compare({ quotes, label }: { quotes: Quote[]; label: string }) {\n  const best = cheapest(quotes, label);\n  return <b>{best.id}</b>;\n}\n`;
+  assert.deepEqual(propsPassedAt(code, 'Compare', 3), { helper: 'cheapest', props: ['quotes', 'label'] });
+  assert.equal(propsPassedAt(code, 'Compare', 4), null);
+  const read = (f: string) => f === '/app/src/quotes.ts' ? types : null;
+  assert.deepEqual(typedProp(code, 'Compare', 'quotes', '/app/src/Compare.tsx', read), [{ id: '', price: { n: 0 } }]);
+  assert.equal(typedProp(code, 'Compare', 'label', '/app/src/Compare.tsx', read), 'a');
 });

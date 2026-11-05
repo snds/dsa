@@ -326,10 +326,11 @@ class Guard extends Component {
   componentDidCatch(err, info) {
     const at = String((info && info.componentStack) || '').match(/(?:\\bat|\\bin) ([A-Z][\\w$]*)(?: \\((\\S+?)(?::\\d+){1,2}\\))?/);
     // Where it was thrown: the first stack frame in the app's own code (not a package, not Vite's or dsa's), as
-    // "/path:line" in the file as served (near its line in the source).
+    // "/path:line" in the file as served (a component's runs a few lines below its source: a refresh preamble).
     const frames = String((err && err.stack) || '').split('\\n').map((l) => l.match(/(https?:\\/\\/[^\\s)]+?):(\\d+):\\d+/)).filter(Boolean).map((m) => { let u = m[1]; try { u = decodeURIComponent(new URL(u).pathname); } catch {} return u + ':' + m[2]; });
-    const frame = frames.find((f) => !/node_modules|\\/@vite\\/|\\/@react-refresh|\\/@dsa\\/|\\/\\.vite\\//.test(f)) || frames[0] || '';
-    window.__dsaMountError = { message: String((err && err.message) || err).split('\\n')[0].slice(0, 200), component: at ? at[1] : '', src: at && at[2] ? at[2] : '', frame };
+    const frame = frames.find((f) => !/node_modules|\\/@vite\\/|\\/@react-refresh|\\/@dsa\\/|\\/\\.vite\\/|\\/deps\\/|vite-cache/.test(f)) || frames[0] || '';
+    const own = frames.filter((f) => !/node_modules|\\/@vite\\/|\\/@react-refresh|\\/@dsa\\/|\\/\\.vite\\/|\\/deps\\/|vite-cache/.test(f)).slice(0, 6);
+    window.__dsaMountError = { message: String((err && err.message) || err).split('\\n')[0].slice(0, 200), component: at ? at[1] : '', src: at && at[2] ? at[2] : '', frame, frames: own };
   }
   render() { return this.state.failed ? null : this.props.children; }
 }

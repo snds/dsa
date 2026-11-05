@@ -39,9 +39,12 @@ const APP: Record<string, string> = {
   'src/Board.jsx': `import { useRowTools } from './useRowTools.jsx';\nexport function Board() {\n  const tools = useRowTools();\n  throw new Error('Board needs its store');\n  return <section>{tools.menu}</section>;\n}\n`,
   // A picker that closes itself whenever it's opened; an owner read from a context only the app provides.
   'src/Picker.jsx': `import { useEffect, useState } from 'react';\nexport function Picker() {\n  const [open, setOpen] = useState(false);\n  useEffect(() => { if (open) setOpen(false); }, [open]);\n  return <div className="picker">{open && <button className="btn">Pick one</button>}</div>;\n}\n`,
+  // A comparison whose data helper throws on an empty list (reduce, no start): the component hands it its prop.
+  'src/data/quotes.ts': `export type Quote = { id: string; price: { n: number } };\nexport function cheapest(qs: Quote[]): Quote {\n  return qs.reduce((a, b) => (a.price.n <= b.price.n ? a : b));\n}\n`,
+  'src/Compare.tsx': `import { cheapest, type Quote } from './data/quotes';\nexport function Compare({ quotes }: { quotes: Quote[] }) {\n  const best = cheapest(quotes);\n  return <button className="btn">Cheapest {best.price.n}</button>;\n}\n`,
   'src/Store.jsx': `import { createContext } from 'react';\nexport const StoreCtx = createContext(null);\n`,
   'src/Owner.jsx': `import { useContext } from 'react';\nimport { StoreCtx } from './Store.jsx';\nexport function Owner() {\n  const store = useContext(StoreCtx);\n  return <button className="btn">Owner {store.owner.n}</button>;\n}\n`,
-  'src/Library.jsx': `import { useState } from 'react';\nimport { Shelf } from './Shelf.jsx';\nimport { Tray } from './Tray.jsx';\nimport { Drawer } from './Drawer.jsx';\nimport { Card } from './Card.jsx';\nimport { Grid } from './Grid.jsx';\nimport { Board } from './Board.jsx';\nimport { Uploads } from './Uploads.jsx';\nimport { Stale } from './Stale.jsx';\nimport { Picker } from './Picker.jsx';\nimport { Owner } from './Owner.jsx';\nimport { StoreCtx } from './Store.jsx';\nexport function Library() {\n  const [more] = useState(false);\n  return <StoreCtx.Provider value={null}><main><h1>Library</h1><Shelf title="Ferns" items={[]} /><Tray label="Tools" /><Picker /><Uploads uploads={[{ name: 'a.png', failed: false }]} />{more && <Drawer />}{more && <Card />}{more && <Grid />}{more && <Board />}{more && <Stale />}{more && <Owner />}</main></StoreCtx.Provider>;\n}\n`,
+  'src/Library.jsx': `import { useState } from 'react';\nimport { Shelf } from './Shelf.jsx';\nimport { Tray } from './Tray.jsx';\nimport { Drawer } from './Drawer.jsx';\nimport { Card } from './Card.jsx';\nimport { Grid } from './Grid.jsx';\nimport { Board } from './Board.jsx';\nimport { Uploads } from './Uploads.jsx';\nimport { Stale } from './Stale.jsx';\nimport { Picker } from './Picker.jsx';\nimport { Owner } from './Owner.jsx';\nimport { StoreCtx } from './Store.jsx';\nimport { Compare } from './Compare.tsx';\nexport function Library() {\n  const [more] = useState(false);\n  return <StoreCtx.Provider value={null}><main><h1>Library</h1><Shelf title="Ferns" items={[]} /><Tray label="Tools" /><Picker /><Uploads uploads={[{ name: 'a.png', failed: false }]} />{more && <Drawer />}{more && <Card />}{more && <Grid />}{more && <Board />}{more && <Stale />}{more && <Owner />}{more && <Compare quotes={[]} />}</main></StoreCtx.Provider>;\n}\n`,
 };
 
 test('the ledger: an element its component rendered without is drawn with the component\'s recorded props, its condition forced', { timeout: 300_000 }, async ({ skip }) => {
@@ -89,7 +92,7 @@ test('the ledger: an element its component rendered without is drawn with the co
 
   // A hook's JSX, drawn by the component that calls it; a failed upload's retry, its item's field forced on;
   // and the app's own missing import, said as such.
-  const of = (re: RegExp) => evals.find(e => e.file.endsWith('.jsx') && re.test(e.match.text ?? ''));
+  const of = (re: RegExp) => evals.find(e => /\.[jt]sx$/.test(e.file) && re.test(e.match.text ?? ''));
   const menu = idx.shots[of(/Row menu/)!.id];
   assert.deepEqual([menu?.drawn, menu?.exact], ['mount', true], all);
   const retry = idx.shots[of(/Retry/)!.id];
@@ -109,6 +112,14 @@ test('the ledger: an element its component rendered without is drawn with the co
   assert.deepEqual([owner?.drawn, owner?.exact], ['mount', true], all);
   assert.match(String(owner.content?.text ?? ''), /Owner Ada/);
   assert.match(all, /with the recorded value of StoreCtx/);
+
+  // A data helper that threw on what the component handed it: that prop filled from its type, one more try.
+  const cheap = idx.shots[of(/Cheapest/)!.id];
+  assert.deepEqual([cheap?.drawn, cheap?.exact], ['mount', true], all);
+  assert.match(all, /after filling quotes, which it passes to cheapest/);
+  // What changed since the last run (none before this one): every drawing is new.
+  assert.match(all, /drawings changed since the last run: \+[1-9]\d* now drawn from the app's code/);
+  assert.ok(idx.drawChanges?.library?.gained?.includes(of(/Cheapest/)!.id), JSON.stringify(idx.drawChanges));
 
   // State inside the drawing, the drawing's own: a list one item, a flag true; and inside its portal.
   const by = (text: RegExp) => evals.find(e => e.file.endsWith('.jsx') && text.test(e.match.text ?? ''));

@@ -12,7 +12,7 @@ import { appSurface, openSurface } from '@snds/dsa';
 import { detectApp, discoverRoutes, ensureBrowser, linkCoreForChild, routeConfig, startApp, tagPlan } from './apps.js';
 
 import { READ_STYLE } from './rendered.js';
-import { NO_SIZE, SHOW_MARKUP, forceGates, hookValue, itemAliases, nullRead, markupOf, mountProps, parentComponent, holdsInitially, readSource, stateSets, stateValues, whatItNeeded, type StateSet } from './drawn.js';
+import { NO_SIZE, SHOW_MARKUP, forceGates, hookValue, itemAliases, nullRead, propsPassedAt, typedProp, markupOf, mountProps, parentComponent, holdsInitially, readSource, stateSets, stateValues, whatItNeeded, type StateSet } from './drawn.js';
 import { needsValue, patternTest, routeFiles, routesReaching } from './routes.js';
 import { describeNetwork, flowProblems, guardNetwork, routeUrl, runFlow, type Flow, type GuardStats } from './flows.js';
 
@@ -124,7 +124,7 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
   const dir = path.join(opts.dataDir, 'shots');
   fs.mkdirSync(dir, { recursive: true });
   const idxFile = path.join(dir, 'index.json');
-  const index: { shots: Record<string, any>; missing: string[]; pages: string[]; takenAt: string; misses?: Record<string, any>; run?: RunStamp; uses?: Record<string, any>; ledgerCoverage?: Record<string, { own: number; component: number; file: number; none: number; tests: number }>; ledgerGaps?: Record<string, unknown[]>; drawCauses?: Record<string, unknown> } = fs.existsSync(idxFile) ? JSON.parse(fs.readFileSync(idxFile, 'utf8')) : { shots: {}, missing: [], pages: [], takenAt: '' };
+  const index: { shots: Record<string, any>; missing: string[]; pages: string[]; takenAt: string; misses?: Record<string, any>; run?: RunStamp; uses?: Record<string, any>; ledgerCoverage?: Record<string, { own: number; component: number; file: number; none: number; tests: number }>; ledgerGaps?: Record<string, unknown[]>; drawCauses?: Record<string, unknown>; drawChanges?: Record<string, { gained: string[]; live: string[]; lost: string[]; lostLive: string[] }> } = fs.existsSync(idxFile) ? JSON.parse(fs.readFileSync(idxFile, 'utf8')) : { shots: {}, missing: [], pages: [], takenAt: '' };
   index.missing = []; index.pages = [];
   // This run: an id each new photo carries, the source it was taken from (its commit, or "worktree" when the
   // checkout has changes), and when. Cached photos keep their own stamp, so a report can tell an old one apart.
@@ -321,6 +321,22 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
         log(`  The app didn't render: ${r.broken}. Fix the app's install, then run again.`);
         result.apps.push({ target: s.target, url: s.url, how: s.how, routes: s.routes.length, captured: 0, broken: r.broken, ...needs(s.target) });
         continue;
+      }
+      // What changed since the last run, element by element: one fix can move many drawings at once, so a
+      // regression shows straight away (drawn from the code then, not now).
+      {
+        const was = (id: string) => index.shots[id]?.drawn === 'mount' ? 'mount' : index.shots[id] && !index.shots[id].drawn ? 'live' : 'other';
+        const now = (id: string) => r.shots[id]?.drawn === 'mount' ? 'mount' : r.shots[id] && !r.shots[id].drawn ? 'live' : 'other';
+        const ids = s.need.map(e => e.id).filter(id => index.shots[id] || r.shots[id]);
+        const gained = ids.filter(id => now(id) === 'mount' && was(id) === 'other');
+        const live = ids.filter(id => now(id) === 'live' && was(id) !== 'live');
+        const lost = ids.filter(id => was(id) === 'mount' && now(id) === 'other');
+        const lostLive = ids.filter(id => was(id) === 'live' && now(id) !== 'live');
+        if (gained.length || live.length || lost.length || lostLive.length) {
+          const list = (x: string[]) => x.length ? ` (${x.slice(0, 12).join(', ')}${x.length > 12 ? `, +${x.length - 12}` : ''})` : '';
+          log(`  drawings changed since the last run: +${gained.length} now drawn from the app's code${list(gained)}, +${live.length} now found live${list(live)}, −${lost.length} no longer drawn from the code${list(lost)}, −${lostLive.length} no longer found live${list(lostLive)}`);
+        } else log('  drawings changed since the last run: none');
+        (index.drawChanges ??= {})[s.target] = { gained, live, lost, lostLive };
       }
       // Drawn from the code: kept beside the element's "not found", which still stands.
       for (const [id, v] of Object.entries<any>(r.shots)) { index.shots[id] = { ...v, at, run: index.run!.id, fileHash: hashOf(byId.get(id)!) }; if (!v.drawn) delete misses[id]; }
@@ -533,7 +549,7 @@ function setPath(o: Record<string, unknown>, at: string[], v: unknown) {
   let cur: any = o;
   for (const k of at.slice(0, -1)) { if (!cur[k] || typeof cur[k] !== 'object') cur[k] = {}; cur = cur[k]; }
   const last = at[at.length - 1]!;
-  if (cur[last] == null) cur[last] = v;
+  if (cur[last] == null || (Array.isArray(cur[last]) && !cur[last].length)) cur[last] = v;
   else if (v && typeof v === 'object' && !Array.isArray(v) && typeof cur[last] === 'object') Object.assign(cur[last], v);
 }
 
@@ -1270,7 +1286,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       return j.length < 2000 && !j.includes('"__dsa":"fn"');
     };
     return rec.ancestors
-      .map(a => ({ file: '', component: a.name, slots: a.hooks.map((h, i) => ({ index: i, name: h.name ?? `#${i}`, value: h.value as any, ok: !h.cut && safe(h.value) })).filter(x => x.ok).map(({ ok: _, ...x }) => x) }))
+      .map(a => ({ file: '', component: a.name, slots: a.hooks.map((h, i) => ({ index: i, name: h.name ?? `#${i}`, value: cleanRecorded(h.value, undefined, false) as any, ok: !h.cut && safe(h.value) })).filter(x => x.ok).map(({ ok: _, ...x }) => x) }))
       .filter(x => x.slots.length);
   }
 
@@ -1612,11 +1628,12 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     // that was cut, or held a node, leaves null), then, at every depth, from the props shaped from its source.
     const recordedProps = (name: string, first: LedgerRec, shaped: Record<string, unknown>): Record<string, unknown> => {
       const out: Record<string, unknown> = {};
+      let cut = false;
       for (const x of [first, ...(byOwner.get(name) ?? [])]) {
         const p = x.owner?.props as Record<string, unknown> | null;
-        if (p && typeof p === 'object') for (const [k, v] of Object.entries(p)) if (out[k] == null && v != null) out[k] = v;
+        if (p && typeof p === 'object') for (const [k, v] of Object.entries(p)) if (out[k] == null && v != null) { out[k] = v; cut ||= Boolean(x.owner?.cut); }
       }
-      return fillProps(shaped, out) as Record<string, unknown>;
+      return cleanRecorded(fillProps(shaped, out), shaped, cut) as Record<string, unknown>;
     };
     // The values context providers gave, by the context's tagged name ("file#Name"): a whole copy first.
     const ctxValues = new Map<string, { value: unknown; cut: boolean }>();
@@ -1626,7 +1643,8 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     }
     // A list prop's item, from any record of the component where that list had one.
     const itemOf = (name: string) => (prop: string) => {
-      for (const x of byOwner.get(name) ?? []) { const v = (x.owner!.props as any)?.[prop]; if (Array.isArray(v) && v.length && v[0] != null) return v[0]; }
+      // A whole one: from a copy that was cut, only an item with no null in it.
+      for (const x of byOwner.get(name) ?? []) { const v = (x.owner!.props as any)?.[prop]; const it = Array.isArray(v) ? v.find(y => y != null && !(x.owner!.cut && hasNull(y))) : undefined; if (it !== undefined) return cleanRecorded(it, undefined, false); }
       return undefined;
     };
     // How much of what wasn't reached live the ledger knows: its element, its component, its file, or nothing.
@@ -1805,7 +1823,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
             // component reads what the hook returns.
             const shapedCtx = pv.context ? hookValue(sourceOfThrow(d, said.threw, code, parent || r.e.within), said.threw.component || parent || r.e.within, hook) ?? {} : null;
             const recCtx = pv.context ? ctxValues.get(`${tagOfFile(d, pv.file) ?? ''}#${pv.name}`) : undefined;
-            const props = pv.context ? { value: recCtx ? fillProps(shapedCtx, recCtx.value) : shapedCtx } : mountProps({ ...r.e, within: pv.name, reach: undefined } as any, pcode);
+            const props = pv.context ? { value: recCtx ? cleanRecorded(fillProps(shapedCtx, recCtx.value), shapedCtx, recCtx.cut) : shapedCtx } : mountProps({ ...r.e, within: pv.name, reach: undefined } as any, pcode);
             if (recCtx) ctxFrom.push(pv.name);
             wraps.push({ files: filesOf(pv.file), file: tagOfFile(d, pv.file) ?? path.relative(d.root, pv.file).split(path.sep).join('/'), name: pv.name, props, ...(pv.context ? { context: true } : {}) });
             said = await mountAs(parent || r.e.within);
@@ -1817,7 +1835,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
             for (const c of add) {
               const [cf, cn] = [c.name.slice(0, c.name.lastIndexOf('#')), c.name.slice(c.name.lastIndexOf('#') + 1)];
               const ca = absOfTag(d, cf);
-              if (ca && cn) { wraps.push({ files: filesOf(ca), file: cf, name: cn, props: { value: c.value }, context: true }); ctxFrom.push(cn); }
+              if (ca && cn) { wraps.push({ files: filesOf(ca), file: cf, name: cn, props: { value: cleanRecorded(c.value, undefined, c.cut) }, context: true }); ctxFrom.push(cn); }
             }
             if (add.length) { const again = await mountAs(parent || r.e.within); if (again.ok || again.threw?.message !== said.threw.message) said = again; }
           }
@@ -1829,6 +1847,28 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
               patches.push(nr);
               const again = await mountAs(parent || r.e.within);
               if (again.ok) { said = again; filled = `${nr.path.join('.')} = ${JSON.stringify(nr.value)}`; }
+            }
+            // Thrown in a helper of the app's (a data function) the component handed its props to: the
+            // component's own line in the stack names the call; those props, empty or missing, filled from
+            // their type (a list with one typed item), and one more try.
+            else if (!said.ok && said.threw) {
+              const own = (said.threw.frames ?? []).map(f => f.match(/^(.*):(\d+)$/)).find(m => m && host.files.includes(m[1]!));
+              // Lines as served run a few below the source's (a refresh preamble): the nearest call above it.
+              let pp: ReturnType<typeof propsPassedAt> = null;
+              for (let k = 0; own && !pp && k <= 8; k++) pp = propsPassedAt(host.code, who, Number(own[2]) - k);
+              if (pp && who === (parent || r.e.within)) {
+                const shaped = mountProps({ ...r.e, within: who }, host.code, callersOf(d, who, host.abs)) as Record<string, unknown>;
+                const cur = propsFor(who);
+                const empty = (v: unknown) => v == null || (Array.isArray(v) && !v.length);
+                const readAbs = (f: string) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
+                const typed = (p: string) => typedProp(host.code, who, p, host.abs, readAbs) ?? shaped[p];
+                const fill = pp.props.filter(p => empty(cur[p]) && !empty(typed(p)));
+                for (const p of fill) patches.push({ path: [p], value: typed(p) });
+                if (fill.length) {
+                  const again = await mountAs(parent || r.e.within);
+                  if (again.ok) { said = again; filled = `${fill.join(', ')}, which it passes to ${pp.helper}`; }
+                }
+              }
             }
           }
           providers = said.providers ?? 0;
@@ -2722,7 +2762,7 @@ const HIDE_COVER = `(sel) => {
 const RESTORE_COVER = `document.querySelectorAll('[data-dsa-hid]').forEach((x) => { const s = x.getAttribute('data-dsa-hid'); if (s) x.setAttribute('style', s); else x.removeAttribute('style'); x.removeAttribute('data-dsa-hid'); })`;
 
 /** What /@dsa/mount answers (tag/index.ts). */
-type Mounted = { ok: boolean; why?: string; providers?: number; threw?: { message: string; component: string; src?: string; /** The first stack frame in the app's own code, "/path:line" as served. */ frame?: string } };
+type Mounted = { ok: boolean; why?: string; providers?: number; threw?: { message: string; component: string; src?: string; /** The first stack frame in the app's own code, "/path:line" as served. */ frame?: string; /** Its first frames in the app's own code. */ frames?: string[] } };
 
 /**
  * Recorded values over shaped ones, never a null where the shape has a value: objects merged key by key, a
@@ -2734,6 +2774,27 @@ export function fillProps(shaped: unknown, rec: unknown): unknown {
   if (Array.isArray(rec)) { const item = Array.isArray(shaped) ? shaped[0] : undefined; return item === undefined ? rec : rec.map(x => fillProps(item, x)); }
   if (plain(rec) && plain(shaped)) { const out: Record<string, unknown> = { ...shaped }; for (const [k, v] of Object.entries(rec)) out[k] = fillProps(shaped[k], v); return out; }
   return rec;
+}
+
+const hasNull = (x: unknown): boolean => x === null || (Array.isArray(x) ? x.some(hasNull) : Boolean(x) && typeof x === 'object' && !('__dsa' in (x as object)) && Object.values(x as object).some(hasNull));
+/**
+ * A recorded value made safe to mount: no null item in any list, ever. Where the copy was cut (a limit left
+ * nulls in it), each list item's gaps are filled from the shape's item (its type), and a list whose items
+ * still hold a null is left empty: no item at all beats one a helper reads a field off nothing in. A whole
+ * copy is used as recorded. Exported for tests.
+ */
+export function cleanRecorded(v: unknown, shaped: unknown, cut: boolean): unknown {
+  if (Array.isArray(v)) {
+    const item = Array.isArray(shaped) ? shaped[0] : undefined;
+    const items = v.filter(x => x != null).map(x => cleanRecorded(item !== undefined && cut ? fillProps(item, x) : x, item, cut));
+    return cut && items.some(hasNull) ? [] : items;
+  }
+  if (v && typeof v === 'object' && !('__dsa' in (v as object))) {
+    const out: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v)) out[k] = cleanRecorded(x, shaped && typeof shaped === 'object' ? (shaped as any)[k] : undefined, cut);
+    return out;
+  }
+  return v;
 }
 
 /** The file of the component that threw: its own when the stack names one inside the scan root, else the element's. */
