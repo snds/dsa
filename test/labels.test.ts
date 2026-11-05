@@ -115,10 +115,10 @@ describe("migrated: size overrides and render slots", () => {
 
 describe("history: a commit that swapped a raw element for a system component", () => {
   const kit = (tag: string): StripTarget => ({ tag, axes: { variant: ["default", "ghost"], size: ["default", "sm"] }, defaults: { variant: "default", size: "default" }, classes: () => ["x"] });
-  const targets = new Map([["Button", kit("button")], ["Icon", kit("svg")], ["Badge", kit("span")]]);
+  const targets = new Map([["Button", kit("button")], ["Icon", kit("svg")], ["Badge", kit("span")], ["MenuTrigger", kit("button")], ["MenuItem", kit("button")], ["MenuContent", kit("button")]]);
   const pkgs = ["@acme/ui"];
   const pairs = (before: string, after: string, hunks: { oldStart: number; oldLines: number; newStart: number; newLines: number }[]) => historyPairsInFile({ file: "src/A.tsx", before, after, hunks, packages: pkgs, targets });
-  const imp = 'import { Button, Icon, Badge } from "@acme/ui";';
+  const imp = 'import { Button, Icon, Badge, MenuTrigger, MenuItem, MenuContent } from "@acme/ui";';
 
   it("reads hunks from a -U0 diff", () => {
     expect([...parseHunks("diff --git a/src/A.tsx b/src/A.tsx\n--- a/src/A.tsx\n+++ b/src/A.tsx\n@@ -3,2 +3,4 @@\n-x\n+y\n@@ -9 +11 @@\n-z\n+w").entries()]).toEqual([["src/A.tsx", [{ oldStart: 3, oldLines: 2, newStart: 3, newLines: 4 }, { oldStart: 9, oldLines: 1, newStart: 11, newLines: 1 }]]]);
@@ -135,6 +135,12 @@ describe("history: a commit that swapped a raw element for a system component", 
     const before = `export const A = () => (\n  <button className="h-8">Save</button>\n);\n`;
     const after = `import { Button } from "~/components/ui/button";\nimport { Fancy } from "~/components/ui/fancy";\nexport const A = () => (\n  <Button size="sm">Save</Button>\n);\n`;
     expect(pairs(before, after, [{ oldStart: 2, oldLines: 1, newStart: 1, newLines: 4 }]).map((p) => [p.component, p.props])).toEqual([["Button", { size: "sm", variant: "default" }]]);
+  });
+
+  it("a raw button becomes a Trigger only if it opens something, an Item only if it was an item, Content never", () => {
+    const before = `${imp}\nexport const A = () => (\n  <div>\n    <button onClick={save}>Save</button>\n    <button aria-expanded={open} onClick={() => setOpen(!open)}>More</button>\n    <button onClick={() => setMenuOpen(true)}>Menu</button>\n    <button role="menuitem" onClick={pick}>Pick</button>\n    <button onClick={pick}>Other</button>\n  </div>\n);\n`;
+    const after = `${imp}\nexport const A = () => (\n  <div>\n    <MenuTrigger>Save</MenuTrigger>\n    <MenuTrigger>More</MenuTrigger>\n    <MenuTrigger>Menu</MenuTrigger>\n    <MenuItem>Pick</MenuItem>\n    <MenuContent>Other</MenuContent>\n  </div>\n);\n`;
+    expect(pairs(before, after, [{ oldStart: 4, oldLines: 5, newStart: 4, newLines: 5 }]).map((p) => [p.line, p.component])).toEqual([[5, "MenuTrigger"], [6, "MenuTrigger"], [7, "MenuItem"]]);
   });
 
   it("an element whose child changed (an icon swap) is not a label", () => {

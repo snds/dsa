@@ -248,6 +248,27 @@ function elementsOf(src: string): { node: any; line: number; openEnd: number; na
 }
 
 /**
+ * A part (a *Trigger, *Content or *Item) gets its host tag from its signature, which says little: a raw
+ * <button> becomes one only when it already played that part.
+ * - Trigger: the button opens something: aria-haspopup or aria-expanded on it, or an onClick that sets or
+ *   toggles an open/expanded state (setOpen(…), setMenuOpen(!…), toggle…()).
+ * - Item: the button is an item already: role menuitem, menuitemcheckbox, menuitemradio, option or tab.
+ * - Content: never from a raw button (content is the panel, not its opener).
+ */
+function partFits(component: string, r: { name: string; node: any; text: string }): boolean {
+  const part = /(Trigger|Content|Item)$/.exec(component)?.[1];
+  if (!part || r.name !== "button") return true;
+  if (part === "Content") return false;
+  const attrs = new Map<string, any>();
+  for (const a of r.node.openingElement.attributes) if (a.type === "JSXAttribute" && a.name.type === "JSXIdentifier") attrs.set(a.name.name, a.value);
+  if (part === "Item") { const role = literal(attrs.get("role")); return Boolean(role && /^(menuitem|menuitemcheckbox|menuitemradio|option|tab)$/.test(role)); }
+  if (attrs.has("aria-haspopup") || attrs.has("aria-expanded")) return true;
+  const click = attrs.get("onClick");
+  const code = click ? r.text.slice(click.start - r.node.start, click.end - r.node.start) : "";
+  return /\bset\w*(Open|Expanded|Shown|Visible)\s*\(|\btoggle\w*\s*\(/.test(code);
+}
+
+/**
  * Raw-to-component swaps in one file of one commit, read from both versions of the file, never from diff
  * text alone:
  *
@@ -293,7 +314,7 @@ export function historyPairsInFile(o: { file: string; before: string; after: str
     // Still there afterwards: a raw element of the same tag at the same place in the hunk.
     const kept = (r: (typeof rs)[number]) => rawAfter.some((x) => x.name === r.name && Math.abs((x.line - h.newStart) - (r.line - h.oldStart)) <= 1);
     const cands: { r: (typeof rs)[number]; a: (typeof as)[number]; d: number }[] = [];
-    for (const r of rs) if (!kept(r)) for (const a of as) if (a.tag === r.name) cands.push({ r, a, d: Math.abs((r.line - h.oldStart) - (a.line - h.newStart)) });
+    for (const r of rs) if (!kept(r)) for (const a of as) if (a.tag === r.name && partFits(a.component, r)) cands.push({ r, a, d: Math.abs((r.line - h.oldStart) - (a.line - h.newStart)) });
     cands.sort((x, y) => x.d - y.d || x.r.line - y.r.line);
     const usedR = new Set<any>(), usedA = new Set<any>();
     for (const c of cands) {

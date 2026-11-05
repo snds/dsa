@@ -72,7 +72,10 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   Render slots don't count, an element still there afterwards (only a child changed) is not a label,
   dynamic props make a pair unsure, and vendored and non-product files are skipped. A component imported
   through the app's owned copy of the system (`~/components/ui/button`) counts when its name is one of the
-  system's components, since older code often imported it that way.
+  system's components, since older code often imported it that way. A part whose host tag only comes from
+  its signature pairs with a raw `<button>` only when the button played that part: a Trigger needs an
+  opener (`aria-haspopup`, `aria-expanded`, or an onClick that sets or toggles an open state), an Item needs
+  an item role (menuitem, option, tab), and Content never pairs with a raw button.
 - Props compare by one rule on both sides (`canonicalProps`): each component's own defaults filled in,
   from its cva defaultVariants. History labels store them filled; `dsa bench` reads them from the run's
   `signatures.json` (`--signatures`, or the data folder's).
