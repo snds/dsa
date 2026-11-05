@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Command } from 'commander';
 import { labelsJsonl, readLabels, type AddonApi, type Label } from '@snds/dsa';
-import { resolveTargets } from '@snds/dsa/engine';
-import { bench, benchText, repeatability, splitLabels } from './bench.js';
+import { allDsPackages, resolveTargets } from '@snds/dsa/engine';
+import { bench, benchText, defaultsFrom, repeatability, sealedOf, splitLabels, type Defaults } from './bench.js';
 import { PROBE_CARDS, type CardFacts } from './card-dom.js';
 import { historyLabels, migratedLabels, reviewQueue, stripTargets } from './labels.js';
 import { renderReport } from './report.js';
@@ -40,12 +40,14 @@ export function benchCommands(program: Command, api: AddonApi) {
     .option('--ready <n>', 'the ready bar (default: the report threshold)')
     .option('--folds <n>', 'also report held-out precision at the ready bar, labels split into n folds by file')
     .option('--fold-site <path...>', 'per fold, a published page or report file of a run calibrated without that fold (dsa labels split)')
-    .action(async (o: { labels?: string; site?: string[]; cards: boolean; ready?: string; folds?: string; foldSite?: string[] }, cmd: Command) => {
+    .option('--signatures <file>', "the run's signatures.json, for each component's defaults (default: the data folder's, when not scoring --site)")
+    .action(async (o: { labels?: string; site?: string[]; cards: boolean; ready?: string; folds?: string; foldSite?: string[]; signatures?: string }, cmd: Command) => {
       // --json is the CLI's own option (dsa --json bench, or dsa bench --json).
       const json = Boolean((cmd.optsWithGlobals() as { json?: boolean }).json);
       const labels = o.labels ? loadLabels(path.resolve(api.cwd, o.labels), api.out) : null;
       const threshold = o.ready ? Number(o.ready) : undefined;
       let payloads: any[], dirs: (string | undefined)[], cards: (CardFacts[] | null)[];
+      let sigFile = o.signatures ? path.resolve(api.cwd, o.signatures) : undefined;
       if (o.site?.length) {
         dirs = o.site.map((s) => path.resolve(api.cwd, s));
         payloads = dirs.map((d) => payloadOf(d!));
@@ -55,11 +57,14 @@ export function benchCommands(program: Command, api: AddonApi) {
         const ctx = await api.context(cmd);
         await api.requireStore('bench');
         payloads = [payloadOf(await writeTemp(await renderReport(ctx.root, ctx.config, ctx.dataDir, ctx.profile)))];
+        sigFile ??= path.join(ctx.dataDir, 'signatures.json');
         dirs = [undefined]; cards = [null];
       }
       const folds = o.folds ? Number(o.folds) : undefined;
       const foldPayloads = o.foldSite?.length ? o.foldSite.map((f) => payloadOf(path.resolve(api.cwd, f))) : null;
-      const b = bench(payloads[0], labels, { cards: cards[0] ?? null, ...(dirs[0] ? { dir: dirs[0] } : {}), ...(threshold != null ? { threshold } : {}), ...(folds ? { folds, foldPayloads } : {}) });
+      let defaults: Defaults | undefined;
+      try { if (sigFile) defaults = defaultsFrom(JSON.parse(fs.readFileSync(sigFile, 'utf8'))); } catch { /* no signatures: "default" values count as unset */ }
+      const b = bench(payloads[0], labels, { cards: cards[0] ?? null, ...(dirs[0] ? { dir: dirs[0] } : {}), ...(threshold != null ? { threshold } : {}), ...(folds ? { folds, foldPayloads } : {}), ...(defaults ? { defaults } : {}) });
       const rep = payloads.length > 1 ? repeatability(payloads, { cards, dirs, ...(threshold != null ? { threshold } : {}) }) : null;
       api.out(json ? JSON.stringify({ ...b, repeatability: rep }, null, 1) : benchText(b, rep));
     });
@@ -79,8 +84,18 @@ export function benchCommands(program: Command, api: AddonApi) {
     .description('write training and held-out label files for k-fold cross-validation by file: calibrate a run on each training file, then dsa bench --folds k --fold-site <runs>')
     .requiredOption('--out <prefix>', 'writes <prefix>.train-<k>.jsonl and <prefix>.test-<k>.jsonl')
     .option('--folds <n>', 'how many folds', '2')
-    .action((file: string, o: { out: string; folds: string }) => {
-      const parts = splitLabels(loadLabels(path.resolve(api.cwd, file), api.out), Number(o.folds));
+    .option('--seal <share>', 'first set aside a sealed test set (this share of files, by a salted hash of app and file): writes <prefix>.sealed.jsonl and <prefix>.open.jsonl, and folds only the open part')
+    .action((file: string, o: { out: string; folds: string; seal?: string }) => {
+      let all = loadLabels(path.resolve(api.cwd, file), api.out);
+      if (o.seal) {
+        const share = Number(o.seal);
+        const sealed = all.filter((l) => sealedOf(l, share));
+        all = all.filter((l) => !sealedOf(l, share));
+        writeLabels(path.resolve(api.cwd, `${o.out}.sealed.jsonl`), sealed);
+        writeLabels(path.resolve(api.cwd, `${o.out}.open.jsonl`), all);
+        api.out(`sealed ${sealed.length}, open ${all.length} (share ${share} of files by hash).`);
+      }
+      const parts = splitLabels(all, Number(o.folds));
       parts.forEach((p, k) => {
         writeLabels(path.resolve(api.cwd, `${o.out}.train-${k}.jsonl`), p.train);
         writeLabels(path.resolve(api.cwd, `${o.out}.test-${k}.jsonl`), p.test);
@@ -110,10 +125,11 @@ export function benchCommands(program: Command, api: AddonApi) {
     .option('--max <n>', 'commits to read per app', '2000')
     .action(async (o: { out: string; app?: string[]; max: string }, cmd: Command) => {
       const ctx = await api.context(cmd);
-      const components = new Set(stripTargets(ctx.root, ctx.config).keys());
+      const targets = stripTargets(ctx.root, ctx.config);
+      const packages = allDsPackages(ctx.config);
       const all: Label[] = [];
       for (const t of resolveTargets(ctx.root, ctx.config).filter((x) => x.role === 'consumer' && ctx.config.apps?.[x.name]?.lookalikes !== false && (!o.app || o.app.includes(x.name)))) {
-        const r = historyLabels({ app: t, components, maxCommits: Number(o.max) });
+        const r = historyLabels({ app: t, targets, packages, maxCommits: Number(o.max) });
         api.out(`${t.name}: ${r.labels.length} labels from ${r.commits} commits${r.shallow ? ' (a shallow clone: its history is cut off)' : ''}.`);
         all.push(...r.labels);
       }

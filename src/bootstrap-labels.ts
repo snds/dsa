@@ -190,67 +190,102 @@ export interface HistoryPair {
 const RAW_TAGS = new Set(["button", "input", "select", "textarea", "a", "label", "table", "dialog", "div", "span"]);
 
 /**
- * Raw-to-component swaps in one commit's diff (`git show -U0`): in a hunk, a removed raw element's opening
- * tag and an added opening tag of one of `components` with literal props. Opening tags may span lines (the
- * props, or the className, on lines after the tag name); each side is read to the end of its tag. Paired
- * in order, one to one.
+ * Props as compared, on both sides of every comparison (labels and the bench): the component's own
+ * defaults filled in (its cva defaultVariants, or the signature's defaults), then routing-only props and
+ * empty values dropped. One rule, so `size` left out and `size="default"` compare equal.
  */
-export function historyPairs(diff: string, components: Set<string>): HistoryPair[] {
-  const out: HistoryPair[] = [];
+export function canonicalProps(props: Record<string, unknown> | null | undefined, defaults: Record<string, string> = {}): Record<string, string> {
+  const filled: Record<string, unknown> = { ...defaults, ...(props ?? {}) };
+  return Object.fromEntries(Object.entries(filled)
+    .filter(([k, v]) => !["render", "asChild", "children"].includes(k) && v != null && v !== "")
+    .map(([k, v]): [string, string] => [k, String(v)])
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1)));
+}
+
+/** A diff hunk's line ranges (`git show -U0`): old [oldStart, oldStart+oldLines), new likewise. */
+export interface Hunk { oldStart: number; oldLines: number; newStart: number; newLines: number }
+
+/** The hunks of each file in a `git show -U0` diff. */
+export function parseHunks(diff: string): Map<string, Hunk[]> {
+  const out = new Map<string, Hunk[]>();
   let file: string | null = null;
-  let removed: { line: number; tag: string; text: string }[] = [], added: { component: string; props: Record<string, string> }[] = [];
-  // An opening tag still being read, on either side.
-  let openRemoved: { line: number; tag: string; text: string } | null = null;
-  let openAdded: { component: string; text: string } | null = null;
-  let oldLine = 0;
-  const closes = (t: string) => { let depth = 0; for (const ch of t) { if (ch === "{") depth++; else if (ch === "}") depth--; else if (ch === ">" && depth <= 0) return true; } return false; };
-  const finishAdded = (o: { component: string; text: string }) => {
-    const props: Record<string, string> = {};
-    for (const p of o.text.matchAll(/\b([a-z][\w]*)=(?:"([^"]*)"|\{["'`]([^"'`]*)["'`]\})/g)) if (p[1] !== "className") props[p[1]!] = p[2] ?? p[3] ?? "";
-    added.push({ component: o.component, props });
-  };
-  const flush = () => {
-    if (openRemoved) { removed.push(openRemoved); openRemoved = null; }
-    if (openAdded) { finishAdded(openAdded); openAdded = null; }
-    for (let i = 0; i < Math.min(removed.length, added.length); i++) {
-      const r = removed[i]!, a = added[i]!;
-      if (file) out.push({ file, line: r.line, rawTag: r.tag, component: a.component, props: a.props, elementHash: hashText(r.text.trim()) });
-    }
-    removed = []; added = [];
-  };
   for (const l of diff.split("\n")) {
-    if (l.startsWith("diff --git")) { flush(); file = null; continue; }
-    if (l.startsWith("--- ")) continue;
+    if (l.startsWith("diff --git")) { file = null; continue; }
     if (l.startsWith("+++ ")) { file = l.startsWith("+++ b/") ? l.slice(6) : null; continue; }
-    const h = l.match(/^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@/);
-    if (h) { flush(); oldLine = Number(h[1]); continue; }
-    if (l.startsWith("-")) {
-      const body = l.slice(1);
-      if (openRemoved) {
-        openRemoved.text += ` ${body.trim()}`;
-        if (closes(body)) { removed.push(openRemoved); openRemoved = null; }
-      } else {
-        const m = body.match(/<([a-z][a-z0-9]*)\b(.*)$/);
-        if (m && RAW_TAGS.has(m[1]!)) {
-          const o = { line: oldLine, tag: m[1]!, text: body };
-          if (closes(m[2]!)) removed.push(o); else openRemoved = o;
-        }
-      }
-      oldLine++;
-    } else if (l.startsWith("+")) {
-      const body = l.slice(1);
-      if (openAdded) {
-        openAdded.text += ` ${body}`;
-        if (closes(body)) { finishAdded(openAdded); openAdded = null; }
-      } else {
-        const m = body.match(/<([A-Z][\w]*)\b(.*)$/);
-        if (m && components.has(m[1]!)) {
-          const o = { component: m[1]!, text: m[2]! };
-          if (closes(m[2]!)) finishAdded(o); else openAdded = o;
-        }
-      }
-    } else if (l.startsWith(" ")) oldLine++;
+    const h = l.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+    if (h && file) out.set(file, [...(out.get(file) ?? []), { oldStart: Number(h[1]), oldLines: h[2] === undefined ? 1 : Number(h[2]), newStart: Number(h[3]), newLines: h[4] === undefined ? 1 : Number(h[4]) }]);
   }
-  flush();
   return out;
+}
+
+/** JSX elements of a file with their opening line, closing line of the opening tag, and name; render slots left out. */
+function elementsOf(src: string): { node: any; line: number; openEnd: number; name: string }[] {
+  let ast: any;
+  try { ast = parseTsx(src); } catch { return []; }
+  const slots = new Set<any>();
+  walk(ast.program, (n) => {
+    if (n.type === "JSXAttribute" && n.name?.name === "render" && n.value?.type === "JSXExpressionContainer" && n.value.expression?.type === "JSXElement") slots.add(n.value.expression);
+  });
+  const out: { node: any; line: number; openEnd: number; name: string }[] = [];
+  walk(ast.program, (n) => {
+    if (n.type !== "JSXElement" || slots.has(n) || n.openingElement.name.type !== "JSXIdentifier") return;
+    out.push({ node: n, line: n.loc.start.line, openEnd: n.openingElement.loc.end.line, name: n.openingElement.name.name });
+  });
+  return out;
+}
+
+/**
+ * Raw-to-component swaps in one file of one commit, read from both versions of the file, never from diff
+ * text alone:
+ *
+ * - A raw element counts as removed when its opening tag starts on a removed line; a system component as
+ *   added when its opening tag starts on an added line. Render slots (render={<X/>}) never count.
+ * - In each hunk, a removed raw element pairs with an added component whose host tag is the same (the
+ *   component renders a <button>, the element was one), nearest first by position in the hunk, one to one.
+ * - A raw element that is still there afterwards (a raw element of its tag at its place in the new
+ *   version: only a child changed, e.g. an icon swap) is not a label.
+ * - Props are literal or the pair is skipped, with the component's defaults filled in (canonicalProps).
+ */
+export function historyPairsInFile(o: { file: string; before: string; after: string; hunks: Hunk[]; packages: string[]; targets: Map<string, StripTarget> }): HistoryPair[] {
+  const imports = systemImports(o.after, o.packages);
+  const inOld = (line: number) => o.hunks.find((h) => h.oldLines > 0 && line >= h.oldStart && line < h.oldStart + h.oldLines);
+  const inNew = (line: number) => o.hunks.find((h) => h.newLines > 0 && line >= h.newStart && line < h.newStart + h.newLines);
+  const before = elementsOf(o.before), after = elementsOf(o.after);
+  const removed = before.filter((e) => RAW_TAGS.has(e.name) && inOld(e.line)).map((e) => ({ ...e, hunk: inOld(e.line)!, text: o.before.slice(e.node.start, e.node.end) }));
+  const rawAfter = after.filter((e) => RAW_TAGS.has(e.name));
+  const added: { line: number; hunk: Hunk; component: string; tag: string; props: Record<string, string> }[] = [];
+  for (const e of after) {
+    const component = imports.get(e.name);
+    const t = component ? o.targets.get(component) : undefined;
+    const h = inNew(e.line);
+    if (!component || !t || !h) continue;
+    const props: Record<string, string> = {};
+    let sure = true;
+    for (const a of e.node.openingElement.attributes) {
+      if (a.type !== "JSXAttribute") continue;
+      const k = a.name.type === "JSXIdentifier" ? a.name.name : null;
+      if (k === "asChild") { sure = false; break; }
+      if (!k || !(k in t.axes)) continue;
+      const v = literal(a.value);
+      if (v === undefined) { sure = false; break; }
+      props[k] = v;
+    }
+    if (sure) added.push({ line: e.line, hunk: h, component, tag: t.tag, props: canonicalProps(props, t.defaults) });
+  }
+  const out: HistoryPair[] = [];
+  for (const h of new Set([...removed.map((r) => r.hunk), ...added.map((a) => a.hunk)])) {
+    const rs = removed.filter((r) => r.hunk === h), as = added.filter((a) => a.hunk === h);
+    // Still there afterwards: a raw element of the same tag at the same place in the hunk.
+    const kept = (r: (typeof rs)[number]) => rawAfter.some((x) => x.name === r.name && Math.abs((x.line - h.newStart) - (r.line - h.oldStart)) <= 1);
+    const cands: { r: (typeof rs)[number]; a: (typeof as)[number]; d: number }[] = [];
+    for (const r of rs) if (!kept(r)) for (const a of as) if (a.tag === r.name) cands.push({ r, a, d: Math.abs((r.line - h.oldStart) - (a.line - h.newStart)) });
+    cands.sort((x, y) => x.d - y.d || x.r.line - y.r.line);
+    const usedR = new Set<any>(), usedA = new Set<any>();
+    for (const c of cands) {
+      if (usedR.has(c.r) || usedA.has(c.a)) continue;
+      usedR.add(c.r); usedA.add(c.a);
+      out.push({ file: o.file, line: c.r.line, rawTag: c.r.name, component: c.a.component, props: c.a.props, elementHash: hashText(c.r.text.trim()) });
+    }
+  }
+  return out.sort((a, b) => a.line - b.line);
 }

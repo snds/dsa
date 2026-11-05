@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { hashText, historyPairs, stripSystemComponents, systemImports, type Label, type StripTarget } from '@snds/dsa';
+import { hashText, historyPairsInFile, parseHunks, stripSystemComponents, systemImports, type Label, type StripTarget } from '@snds/dsa';
 import { allDsPackages, buildSignatures, normalize, resolveTargets, type Config, type Target } from '@snds/dsa/engine';
 import { isCorrect, matchLabels, predictionsOf } from './bench.js';
 
@@ -178,11 +178,14 @@ const safe = (n: string) => n.replace(/[^\w.-]+/g, '_');
  * and label the raw element, at the parent commit, with what it became. A shallow clone has no history
  * to read; the result says so.
  */
-export function historyLabels(o: { app: Target; components: Set<string>; maxCommits?: number; labeler?: string; now?: Date }): { labels: Label[]; commits: number; shallow: boolean } {
+export function historyLabels(o: { app: Target; targets: Map<string, StripTarget>; packages: string[]; maxCommits?: number; labeler?: string; now?: Date }): { labels: Label[]; commits: number; shallow: boolean } {
   const now = (o.now ?? new Date()).toISOString();
   const git = (...a: string[]) => gitRead(o.app.dir, a, 256 * 1024 * 1024);
+  const at = (ref: string, file: string) => { try { return git('show', `${ref}:${file}`); } catch { return null; } };
   let shallow = false;
   try { shallow = git('rev-parse', '--is-shallow-repository').trim() === 'true'; } catch { return { labels: [], commits: 0, shallow: false }; }
+  // Paths in the diff are the repo's; the app may be a folder inside it.
+  const prefix = git('rev-parse', '--show-prefix').trim();
   const shas = git('log', '--format=%H %P', `-n${o.maxCommits ?? 2000}`, '--', '.').trim().split('\n').filter(Boolean).map((l) => l.split(' '));
   const labels: Label[] = [];
   let commits = 0;
@@ -190,14 +193,20 @@ export function historyLabels(o: { app: Target; components: Set<string>; maxComm
     if (!sha || !parent) continue;
     commits++;
     const diff = git('show', '-U0', '--no-color', '--format=', sha, '--', '*.tsx', '*.jsx');
-    for (const p of historyPairs(diff, o.components)) {
+    for (const [repoFile, hunks] of parseHunks(diff)) {
+      if (prefix && !repoFile.startsWith(prefix)) continue;
+      const file = repoFile.slice(prefix.length);
       // Vendored copies and non-product files: the scanner never reads them, so no label can match.
-      if (!isLabelSource(p.file)) continue;
-      labels.push({
-        id: labelId(o.app.name, p.file, p.line, parent, p.elementHash), app: o.app.name, file: p.file, line: p.line, sourceRef: parent, elementHash: p.elementHash,
-        truth: { verdict: 'replace', use: p.component, ...(Object.keys(p.props).length ? { props: p.props } : {}) }, acceptableAlts: [],
-        labeler: o.labeler ?? 'dsa labels history', method: 'history', at: now, notes: `<${p.rawTag}> became ${p.component} in ${sha.slice(0, 12)}.`,
-      });
+      if (!isLabelSource(file)) continue;
+      const before = at(parent, repoFile), after = at(sha, repoFile);
+      if (before === null || after === null) continue;
+      for (const p of historyPairsInFile({ file, before, after, hunks, packages: o.packages, targets: o.targets })) {
+        labels.push({
+          id: labelId(o.app.name, p.file, p.line, parent, p.elementHash), app: o.app.name, file: p.file, line: p.line, sourceRef: parent, elementHash: p.elementHash,
+          truth: { verdict: 'replace', use: p.component, props: p.props }, acceptableAlts: [],
+          labeler: o.labeler ?? 'dsa labels history', method: 'history', at: now, notes: `<${p.rawTag}> became ${p.component} in ${sha.slice(0, 12)}.`,
+        });
+      }
     }
   }
   return { labels, commits, shallow };

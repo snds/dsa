@@ -65,9 +65,17 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
-- History labels only read an opening tag on one line, so a component whose props sat on later lines
-  was labelled without them. Both sides now read to the end of the tag. Raw tags pair only when the
-  scanner reads that tag, and history labels skip vendored and non-product files, as migrated ones do.
+- History labels paired a removed raw line with an added component line by their order in a hunk, so a
+  wrapper `<div>` could become a `Button` and a button whose icon changed could become an `Icon`. Pairs
+  are now read from both versions of the file (`historyPairsInFile`): a removed raw element pairs with an
+  added system component whose host tag matches, nearest first by position in the hunk, one to one.
+  Render slots don't count, an element still there afterwards (only a child changed) is not a label,
+  dynamic props make a pair unsure, and vendored and non-product files are skipped.
+- Props compare by one rule on both sides (`canonicalProps`): each component's own defaults filled in,
+  from its cva defaultVariants. History labels store them filled; `dsa bench` reads them from the run's
+  `signatures.json` (`--signatures`, or the data folder's).
+- `dsa labels split --seal <share>` sets aside a sealed test set first (a salted hash of app and file,
+  reproducible), writing `<prefix>.sealed.jsonl` and `<prefix>.open.jsonl`, and folds only the open part.
 - A migrated label named only the size prop that was written, even when the element's className overrode
   it (`size="icon" className="size-7"` renders 28px). The size whose own pixels match the render is now an
   acceptable alternative, with the system's tokens followed to their values.

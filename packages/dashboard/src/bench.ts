@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import type { Label } from '@snds/dsa';
+import { canonicalProps, type Label } from '@snds/dsa';
 import { lowerBound, r4, wilson } from './stats.js';
 import { sourceOf, trustRubric, type Source, type TrustScore } from './trust.js';
 import type { CardFacts } from './card-dom.js';
@@ -39,10 +39,23 @@ export interface Prediction {
   source: Source;
 }
 
-/** Props as compared: strings, without the ones that only route rendering, without defaults. */
+/** Each component's own defaults (its cva defaultVariants, from the run's signatures.json). */
+export type Defaults = Map<string, Record<string, string>>;
+
+/** Props as stored on a prediction: strings, without routing-only props or "default" values. */
 const norm = (props: Record<string, unknown> | null | undefined) =>
   Object.fromEntries(Object.entries(props ?? {}).filter(([k, v]) => !['render', 'asChild', 'children'].includes(k) && v != null && v !== '' && v !== 'default').map(([k, v]) => [k, String(v)]).sort((a, b) => (a[0] < b[0] ? -1 : 1)));
-const sameProps = (a: Record<string, unknown> | undefined | null, b: Record<string, unknown> | undefined | null) => JSON.stringify(norm(a)) === JSON.stringify(norm(b));
+/**
+ * The one comparison rule (canonicalProps, shared with the label maker): the component's defaults filled
+ * in on both sides, then compared. Without known defaults, "default" values count as unset.
+ */
+const sameProps = (a: Record<string, unknown> | undefined | null, b: Record<string, unknown> | undefined | null, defaults?: Record<string, string>) =>
+  JSON.stringify(canonicalProps(norm(a), defaults)) === JSON.stringify(canonicalProps(norm(b), defaults));
+
+/** Defaults per component from a signatures.json (dsa run writes it into the data folder). */
+export function defaultsFrom(signatures: { component: string; defaults?: Record<string, string> }[]): Defaults {
+  return new Map(signatures.map((c) => [c.component, c.defaults ?? {}]));
+}
 
 /**
  * What each card recommends, as a prediction: the question's (or part's) pick, else the element's own, at
@@ -64,11 +77,12 @@ export function predictionsOf(payload: any): Prediction[] {
 }
 
 /** Is the prediction one of the label's right answers? */
-export function isCorrect(l: Label, p: Prediction): boolean {
+export function isCorrect(l: Label, p: Prediction, defaults?: Defaults): boolean {
   if (p.verdict !== l.truth.verdict) return false;
   if (l.truth.verdict !== 'replace') return true;
-  if (p.use === l.truth.use && sameProps(p.props, l.truth.props)) return true;
-  return l.acceptableAlts.some((a) => a.use === p.use && (a.props === undefined || sameProps(p.props, a.props)));
+  const d = (use?: string | null) => (use ? defaults?.get(use) : undefined);
+  if (p.use === l.truth.use && sameProps(p.props, l.truth.props, d(p.use))) return true;
+  return l.acceptableAlts.some((a) => a.use === p.use && (a.props === undefined || sameProps(p.props, a.props, d(p.use))));
 }
 
 /** The prediction a label is about: by id, else by app, file and line (either path may carry a leading folder the other doesn't), or any line of a multi-line opening tag. */
@@ -113,10 +127,10 @@ export interface Correctness {
 }
 
 /** Score predictions against labels. */
-export function correctness(labels: Label[], preds: Prediction[], threshold = 0.9): Correctness {
+export function correctness(labels: Label[], preds: Prediction[], threshold = 0.9, defaults?: Defaults): Correctness {
   const pairs = matchLabels(labels, preds);
   const seen = pairs.filter((x): x is { label: Label; pred: Prediction } => Boolean(x.pred));
-  const rows = seen.map(({ label, pred }) => ({ label, pred, right: isCorrect(label, pred), claim: pred.confidence >= threshold }));
+  const rows = seen.map(({ label, pred }) => ({ label, pred, right: isCorrect(label, pred, defaults), claim: pred.confidence >= threshold }));
   const claimed = rows.filter((r) => r.claim);
   const right = claimed.filter((r) => r.right).length;
   const N = labels.length;
@@ -190,11 +204,11 @@ export interface HeldOut {
  * `foldPayloads[k]`, a run calibrated without fold k (dsa labels split writes the training files). Without
  * fold payloads only the uncalibrated side is scored.
  */
-export function heldOut(labels: Label[], payload: any, opts: { folds: number; threshold: number; foldPayloads?: any[] | null }): HeldOut {
+export function heldOut(labels: Label[], payload: any, opts: { folds: number; threshold: number; foldPayloads?: any[] | null; defaults?: Defaults }): HeldOut {
   const score = (pick: (k: number) => any): HeldOutScore => {
     let claimed = 0, right = 0, matched = 0;
     for (let k = 0; k < opts.folds; k++) {
-      const c = correctness(labels.filter((l) => foldOf(l, opts.folds) === k), predictionsOf(pick(k)), opts.threshold);
+      const c = correctness(labels.filter((l) => foldOf(l, opts.folds) === k), predictionsOf(pick(k)), opts.threshold, opts.defaults);
       claimed += c.claimed; right += c.right; matched += c.matched;
     }
     return { claimed, right, precision: claimed ? r4(right / claimed) : null, lowerBound: r4(lowerBound(right, claimed)), matched, labels: labels.length };
@@ -204,17 +218,24 @@ export function heldOut(labels: Label[], payload: any, opts: { folds: number; th
   return { folds: opts.folds, threshold: opts.threshold, uncalibrated: score(() => payload), calibrated: fp ? score((k) => fp[k]) : null };
 }
 
+/**
+ * The sealed test set: a label is sealed when a salted hash of its app and file falls under `share`. A pure
+ * function of the hash (salt "dsa-seal", the first 4 bytes of SHA-256 over 2^32), so the split reproduces
+ * anywhere and never depends on results. Independent of foldOf, which hashes without the salt.
+ */
+export const sealedOf = (l: Pick<Label, 'app' | 'file'>, share: number) => crypto.createHash('sha256').update(`dsa-seal\u0001${l.app}/${l.file}`).digest().readUInt32BE(0) / 2 ** 32 < share;
+
 /** Training and held-out label files for k-fold cross-validation by file. */
 export function splitLabels(labels: Label[], folds: number): { train: Label[]; test: Label[] }[] {
   return Array.from({ length: folds }, (_, k) => ({ train: labels.filter((l) => foldOf(l, folds) !== k), test: labels.filter((l) => foldOf(l, folds) === k) }));
 }
 
 /** Both numbers for one published page (or report payload). */
-export function bench(payload: any, labels: Label[] | null, opts: { cards?: CardFacts[] | null; dir?: string; threshold?: number; folds?: number; foldPayloads?: any[] | null } = {}): BenchResult {
+export function bench(payload: any, labels: Label[] | null, opts: { cards?: CardFacts[] | null; dir?: string; threshold?: number; folds?: number; foldPayloads?: any[] | null; defaults?: Defaults } = {}): BenchResult {
   const th = opts.threshold ?? payload.elements?.threshold ?? 0.9;
   const t = trustRubric(payload, { ...(opts.dir ? { dir: opts.dir } : {}), cards: opts.cards ?? null });
-  const held = labels && opts.folds && opts.folds > 1 ? heldOut(labels, payload, { folds: opts.folds, threshold: th, foldPayloads: opts.foldPayloads ?? null }) : undefined;
-  return { presentation: presentation(t), correctness: labels ? correctness(labels, predictionsOf(payload), th) : null, ...(held ? { heldOut: held } : {}) };
+  const held = labels && opts.folds && opts.folds > 1 ? heldOut(labels, payload, { folds: opts.folds, threshold: th, foldPayloads: opts.foldPayloads ?? null, ...(opts.defaults ? { defaults: opts.defaults } : {}) }) : undefined;
+  return { presentation: presentation(t), correctness: labels ? correctness(labels, predictionsOf(payload), th, opts.defaults) : null, ...(held ? { heldOut: held } : {}) };
 }
 
 /**

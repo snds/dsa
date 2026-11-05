@@ -7,7 +7,7 @@ import type { Label } from '@snds/dsa';
 import { ACME_PROFILE, NOW, fixtureCopy, runPipeline, tmp } from '../../../test/engine/fixture.js';
 import { loadConfig as loadDsaConfig } from '../../../src/config.js';
 import { engineConfig } from '../../../src/engine/from-dsa.js';
-import { bench, benchText, correctness, foldOf, heldOut, predictionsOf, repeatability, splitLabels, type Prediction } from '../src/bench.js';
+import { bench, benchText, correctness, foldOf, heldOut, isCorrect, predictionsOf, repeatability, sealedOf, splitLabels, type Prediction } from '../src/bench.js';
 import { historyLabels, isLabelSource, migratedLabels, reviewQueue, sourceFiles, sourceRef } from '../src/labels.js';
 import { lowerBound, wilson } from '../src/stats.js';
 import { payloadOf } from '../src/bench-cli.js';
@@ -208,7 +208,7 @@ test('history labels: a commit that swapped a raw element for a component labels
   const parent = git('rev-parse', 'HEAD').trim();
   fs.writeFileSync(path.join(dir, 'src/Bar.tsx'), "import { Button } from '@acme/ui';\nexport const Bar = () => (\n  <div>\n    <Button variant=\"ghost\" size=\"sm\">Save</Button>\n  </div>\n);\n");
   git('add', '.'); git('commit', '-qm', 'use the system');
-  const r = historyLabels({ app: { name: 'ledger', dir, role: 'consumer' } as any, components: new Set(['Button']), now: NOW });
+  const r = historyLabels({ app: { name: 'ledger', dir, role: 'consumer' } as any, targets: new Map([['Button', { tag: 'button', axes: { variant: ['default', 'ghost'], size: ['default', 'sm'] }, defaults: { variant: 'default', size: 'default' }, classes: () => ['x'] }]]), packages: ['@acme/ui'], now: NOW });
   assert.equal(r.shallow, false);
   assert.deepEqual(r.labels.map((l) => [l.file, l.line, l.sourceRef, l.truth.use, l.truth.props, l.method]), [['src/Bar.tsx', 3, parent, 'Button', { variant: 'ghost', size: 'sm' }, 'history']]);
 });
@@ -228,4 +228,17 @@ test('held-out precision at the bar: each fold scored against the run calibrated
   const b = bench(plain, labels, { folds: 2, foldPayloads: [fold, fold] });
   assert.ok(/Held out \(2-fold by file\)/.test(benchText(b)), benchText(b));
   assert.throws(() => heldOut(labels, plain, { folds: 2, threshold: 0.9, foldPayloads: [fold] }), /one run per fold/);
+});
+
+test('props compare with each component\'s own defaults filled in; the sealed split is a pure function of the file', () => {
+  const l = label('x', 'Badge', { variant: 'secondary', shape: 'pill' });
+  const defaults = new Map([['Badge', { variant: 'secondary', shape: 'pill', size: 'default' }]]);
+  assert.equal(isCorrect(l, pred('E-1', 'Badge', 0.95, {}), defaults), true, 'every prop at its default');
+  assert.equal(isCorrect(l, pred('E-1', 'Badge', 0.95, {})), false, 'without the defaults, a non-"default" default differs');
+  assert.equal(isCorrect(l, pred('E-1', 'Badge', 0.95, { variant: 'outline' }), defaults), false);
+  const labels = Array.from({ length: 400 }, (_, i) => label(`s${i}`, 'Button'));
+  const sealed = labels.filter((x) => sealedOf(x, 0.3));
+  assert.ok(sealed.length > 80 && sealed.length < 160, String(sealed.length));
+  assert.deepEqual(labels.filter((x) => sealedOf(x, 0.3)).map((x) => x.id), sealed.map((x) => x.id), 'reproducible');
+  assert.ok(labels.filter((x) => x.file === 'src/s1.tsx').every((x) => sealedOf(x, 0.3) === sealedOf(labels[1]!, 0.3)), 'a file is sealed whole');
 });

@@ -27,7 +27,7 @@ export { createProgram, type CliIo } from "./cli.js";
 export { dsaVersion } from "./version.js";
 export { buildSystemModel, discoverSources, type SystemModel, type SourceCandidate, type SourceDiscovery } from "./model/index.js";
 export * as schemas from "./schema/index.js";
-export { stripSystemComponents, systemImports, historyPairs, hashText, type StripTarget, type Stripped, type HistoryPair } from "./bootstrap-labels.js";
+export { stripSystemComponents, systemImports, historyPairsInFile, parseHunks, canonicalProps, hashText, type StripTarget, type Stripped, type HistoryPair, type Hunk } from "./bootstrap-labels.js";
 export { LabelSchema, LABEL_METHODS, parseLabels, readLabels, labelsJsonl, type Label, type LabelMethod } from "./labels.js";
 export { defineAddon, findAddons, loadAddons, runAfterHooks, type DsaAddon, type AddonApi, type FoundAddon, type AfterRunHook, type AfterRunContext, type ServeRequest, type ServeRoute } from "./addons.js";
 export { engineContext, useAddons, deployOf, liveGate, type EngineGlobals } from "./cli-engine.js";

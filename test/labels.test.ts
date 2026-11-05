@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { historyPairs, parseLabels, stripSystemComponents, systemImports, type StripTarget } from "../src/index.js";
+import { canonicalProps, historyPairsInFile, parseHunks, parseLabels, stripSystemComponents, systemImports, type StripTarget } from "../src/index.js";
 
 // Ground truth for dsa bench: a schema every label line must meet, and two ways to get labels from
 // code that already answers (a component stripped back to its markup; a commit that swapped one in).
@@ -114,45 +114,38 @@ describe("migrated: size overrides and render slots", () => {
 });
 
 describe("history: a commit that swapped a raw element for a system component", () => {
-  it("pairs the removed raw element with the component added in its place, at the old line", () => {
-    const diff = [
-      "diff --git a/src/Bar.tsx b/src/Bar.tsx",
-      "--- a/src/Bar.tsx",
-      "+++ b/src/Bar.tsx",
-      "@@ -12,2 +12,2 @@ export function Bar() {",
-      '-    <button className="px-2 h-7 rounded">Save</button>',
-      '-    <span className="x">note</span>',
-      '+    <Button variant="ghost" size={"sm"}>Save</Button>',
-      "@@ -30 +30 @@",
-      "-    <a href='/x'>Go</a>",
-      "+    <Link href='/x'>Go</Link>",
-    ].join("\n");
-    const pairs = historyPairs(diff, new Set(["Button"]));
-    expect(pairs).toEqual([{ file: "src/Bar.tsx", line: 12, rawTag: "button", component: "Button", props: { variant: "ghost", size: "sm" }, elementHash: expect.any(String) }]);
+  const kit = (tag: string): StripTarget => ({ tag, axes: { variant: ["default", "ghost"], size: ["default", "sm"] }, defaults: { variant: "default", size: "default" }, classes: () => ["x"] });
+  const targets = new Map([["Button", kit("button")], ["Icon", kit("svg")], ["Badge", kit("span")]]);
+  const pkgs = ["@acme/ui"];
+  const pairs = (before: string, after: string, hunks: { oldStart: number; oldLines: number; newStart: number; newLines: number }[]) => historyPairsInFile({ file: "src/A.tsx", before, after, hunks, packages: pkgs, targets });
+  const imp = 'import { Button, Icon, Badge } from "@acme/ui";';
+
+  it("reads hunks from a -U0 diff", () => {
+    expect([...parseHunks("diff --git a/src/A.tsx b/src/A.tsx\n--- a/src/A.tsx\n+++ b/src/A.tsx\n@@ -3,2 +3,4 @@\n-x\n+y\n@@ -9 +11 @@\n-z\n+w").entries()]).toEqual([["src/A.tsx", [{ oldStart: 3, oldLines: 2, newStart: 3, newLines: 4 }, { oldStart: 9, oldLines: 1, newStart: 11, newLines: 1 }]]]);
   });
-  it("reads opening tags that span lines on either side, props and className on later lines", () => {
-    const diff = [
-      "diff --git a/src/Pane.tsx b/src/Pane.tsx",
-      "--- a/src/Pane.tsx",
-      "+++ b/src/Pane.tsx",
-      "@@ -20,5 +20,6 @@",
-      "-      <button",
-      "-        type=\"button\"",
-      "-        className=\"h-8 px-3 rounded border\"",
-      "-        onClick={() => close({ now: true })}",
-      "-      >",
-      "+      <Button",
-      "+        type=\"button\"",
-      "+        variant=\"outline\"",
-      "+        size=\"sm\"",
-      "+        onClick={() => close({ now: true })}",
-      "+      >",
-      "@@ -40,1 +41,1 @@",
-      "-      <div className=\"grid gap-2\">",
-      "+      <Button variant=\"ghost\">",
-    ].join("\n");
-    const pairs = historyPairs(diff, new Set(["Button"]));
-    expect(pairs.map((p) => [p.line, p.rawTag, p.props])).toEqual([[20, "button", { type: "button", variant: "outline", size: "sm" }], [40, "div", { variant: "ghost" }]]);
-    expect(pairs[0]!.elementHash).not.toBe(pairs[1]!.elementHash);
+
+  it("pairs by host tag and position, not order: a removed wrapper <div> never becomes the Button", () => {
+    const before = `${imp}\nexport const A = () => (\n  <div className="row">\n    <span className="pill">New</span>\n    <button className="h-8 px-3">Save</button>\n  </div>\n);\n`;
+    const after = `${imp}\nexport const A = () => (\n  <>\n    <Button variant="ghost">Save</Button>\n    <Badge>New</Badge>\n  </>\n);\n`;
+    const r = pairs(before, after, [{ oldStart: 3, oldLines: 4, newStart: 3, newLines: 4 }]);
+    expect(r.map((p) => [p.line, p.rawTag, p.component, p.props])).toEqual([[4, "span", "Badge", { size: "default", variant: "default" }], [5, "button", "Button", { size: "default", variant: "ghost" }]]);
+  });
+
+  it("an element whose child changed (an icon swap) is not a label", () => {
+    const before = `${imp}\nexport const A = () => (\n  <button onClick={go}>\n    <Icon name="edit" />\n  </button>\n);\n`;
+    const after = `${imp}\nexport const A = () => (\n  <button onClick={go}>\n    <Icon name="pencil" size="sm" />\n  </button>\n);\n`;
+    expect(pairs(before, after, [{ oldStart: 3, oldLines: 3, newStart: 3, newLines: 3 }])).toEqual([]);
+  });
+
+  it("a component in a render slot is not a label, and dynamic props make it unsure", () => {
+    const before = `${imp}\nexport const A = () => (\n  <div>\n    <button className="h-8">Open</button>\n    <button className="h-8">Go</button>\n  </div>\n);\n`;
+    const after = `${imp}\nexport const A = () => (\n  <div>\n    <Trigger render={<Button variant="ghost" />}>Open</Trigger>\n    <Button variant={v}>Go</Button>\n  </div>\n);\n`;
+    expect(pairs(before, after, [{ oldStart: 4, oldLines: 2, newStart: 4, newLines: 2 }])).toEqual([]);
+  });
+
+  it("props compare with the component's defaults filled in, one rule for both sides", () => {
+    const d = { variant: "default", size: "default" };
+    expect(canonicalProps({ variant: "ghost" }, d)).toEqual(canonicalProps({ variant: "ghost", size: "default" }, d));
+    expect(canonicalProps({ variant: "ghost", render: "<a/>" }, d)).toEqual({ size: "default", variant: "ghost" });
   });
 });
