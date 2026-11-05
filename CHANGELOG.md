@@ -32,6 +32,10 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- An app whose page rewrites its own URL as it loads (a home that redirects, or sets a hash) aborts the
+  navigation that brought the crawler there, though the app loaded. That now counts as arrived (on the app's
+  origin, document loaded), in pass 1, profiles and drawings, and drawings go to the URL the home page
+  landed on, not back to the bare origin: every drawing on such an app had failed.
 - Drawings from the app's code get the app's own providers first: those above the element's file on the
   page, else what the entry file wraps the app in. Every context the page provides (an open panel's, a
   deep page's) is borrowed only when that fails or doesn't show the element: one of those can hide it.

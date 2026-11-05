@@ -696,13 +696,27 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
    * Open a route. Signed in with signIn, move inside the app (a reload would drop tokens kept in
    * memory); landed on the sign-in page, sign in once and go on to the route wanted.
    */
+  // An app whose page rewrites its own URL as it loads (a home that sets a hash, a redirect by pushState)
+  // aborts the navigation that brought it there; it still loaded. Aborted, but on this app's origin with
+  // its document past loading, counts as arrived.
+  const gotoApp = async (u: string, timeout = 30000) => {
+    try { await page.goto(u, { waitUntil: 'domcontentloaded', timeout }); }
+    catch (e: any) {
+      if (!/ERR_ABORTED|interrupted by another navigation/i.test(String(e?.message))) throw e;
+      await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
+      const there = (() => { try { return new URL(page.url()).origin === base.origin; } catch { return false; } })();
+      if (!there) throw e;
+    }
+  };
+  // Where each page visited ended up (an app can rewrite its URL as it loads): drawings go to the real one.
+  const landed = new Map<string, string>();
   const open = async (u: string, timeout = 60000, firstVisit = false) => {
     const inApp = (() => { try { return new URL(page.url()).origin === base.origin; } catch { return false; } })();
     if (o.signIn && auth.done && inApp) await within(u);
     else {
       // Already there (the app wrote this URL itself): going there again wouldn't load it, so reload.
       const here = page.url() === u;
-      await page.goto(u, { waitUntil: 'domcontentloaded', timeout });
+      await gotoApp(u, timeout);
       if (here) await page.reload({ waitUntil: 'domcontentloaded', timeout });
       // Only a route's first visit waits for the network to go quiet (up to 8s): reloads while exploring
       // don't, so an app that keeps polling doesn't spend the explore budget waiting.
@@ -806,7 +820,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       await page.goto(base.toString(), { waitUntil: 'domcontentloaded', timeout: 30000 });
       await inPage(page, SEED_STORAGE, { local: pf.storage ?? {}, session: pf.session ?? {} });
       const same = page.url().split('#')[0] === u.split('#')[0];
-      await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await gotoApp(u);
       if (same) await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
       await page.waitForTimeout(o.waitMs); await settle();
       const before = remaining.length;
@@ -875,6 +889,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         continue;
       }
       pages.push(u);
+      landed.set(u, page.url());
       shown.set(u, new Set<string>(await page.evaluate(SHOWN_FILES).catch(() => [])));
       if (await page.evaluate(`Boolean(document.querySelector('[data-dsa-src]'))`).catch(() => false)) taggedPages++;
       const links: string[] = await page.evaluate(`Array.from(document.querySelectorAll('a[href]')).map(a => a.href)`).catch(() => []);
@@ -892,7 +907,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
           try {
             await page.locator(`[data-dsa-row="${i}"]`).first().click({ timeout: 2000 });
             await page.waitForTimeout(500);
-            if (page.url() !== u) { harvest([page.url()]); await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 }); await page.waitForTimeout(o.waitMs); await settle(); await page.evaluate(ROW_MARK).catch(() => 0); }
+            if (page.url() !== u) { harvest([page.url()]); await gotoApp(u); await page.waitForTimeout(o.waitMs); await settle(); await page.evaluate(ROW_MARK).catch(() => 0); }
           } catch { /* not clickable */ }
         }
       }
@@ -1025,7 +1040,8 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   }
   /** The app's home page when it was visited, else the first page: a plain page to draw on, not a deep one with a dialog open. */
   function home(): string {
-    return pages.find(u => { const x = new URL(u); return x.pathname === base.pathname && (x.hash === '' || x.hash === '#' || x.hash === '#/') && !x.search; }) ?? pages[0]!;
+    const h = pages.find(u => { const x = new URL(u); return x.pathname === base.pathname && (x.hash === '' || x.hash === '#' || x.hash === '#/') && !x.search; }) ?? pages[0]!;
+    return (h && landed.get(h)) || h;
   }
 
   /**
