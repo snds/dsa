@@ -1,6 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parse as babelParse } from '@babel/parser';
+import { LEDGER_RUNTIME } from './ledger.js';
+
+export { LEDGER_RUNTIME } from './ledger.js';
 
 /**
  * Source tags: each host JSX element (`button`, `input`, `a`…) gets `data-dsa-src="<file>:<line>:<col>"`, the
@@ -315,7 +318,7 @@ window.__dsaMount = async (files, name, props, file, wraps, scope) => {
  * The Vite plugin (Vite, React Router v7, Remix on Vite). Runs before other plugins, on the source as
  * written, so its lines and columns are the scanner's. Does nothing unless tagging is on.
  */
-export function dsaTag(o: TagOptions = {}): { name: string; enforce: 'pre'; configResolved: (c: { root: string; base: string }) => void; configureServer: (server: any) => void; resolveId: (id: string) => string | null; load: (id: string) => string | null; transform: (code: string, id: string) => { code: string; map: null } | null } {
+export function dsaTag(o: TagOptions = {}): { name: string; enforce: 'pre'; configResolved: (c: { root: string; base: string }) => void; configureServer: (server: any) => void; transformIndexHtml: () => { tag: string; children: string; injectTo: 'head-prepend' }[]; resolveId: (id: string) => string | null; load: (id: string) => string | null; transform: (code: string, id: string) => { code: string; map: null } | null } {
   const on = tagEnabled(o);
   let viteRoot = process.cwd(), base = '/';
   return {
@@ -333,7 +336,24 @@ export function dsaTag(o: TagOptions = {}): { name: string; enforce: 'pre'; conf
         res.setHeader('content-type', 'application/json');
         res.end(JSON.stringify(file ? { url: viteUrlOf(file, viteRoot, base) } : { missing: root ? `no ${rel} under the scan root` : 'the tagger found no scan root' }));
       });
+      // POST /@dsa/ledger: the ledger runtime's records, one JSON line each, appended to DSA_LEDGER. Only
+      // when that names a file: a dev server someone runs by hand records what they click through.
+      server.middlewares.use('/@dsa/ledger', (req: any, res: any) => {
+        const file = process.env.DSA_LEDGER;
+        if (req.method !== 'POST' || !file) { res.statusCode = 204; res.end(); return; }
+        let body = '';
+        req.on('data', (c: Buffer) => { if (body.length < 4_000_000) body += c; });
+        req.on('end', () => {
+          try {
+            const recs = JSON.parse(body);
+            if (Array.isArray(recs) && recs.length) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.appendFileSync(file, recs.map((r) => JSON.stringify(r)).join('\n') + '\n'); }
+          } catch { /* not a batch of records */ }
+          res.statusCode = 204; res.end();
+        });
+      });
     },
+    // The ledger runtime, first in the page's head, so it sees React from its first commit.
+    transformIndexHtml: () => (on ? [{ tag: 'script', children: (process.env.DSA_LEDGER ? 'window.__dsaLedgerPost = true;\n' : '') + LEDGER_RUNTIME, injectTo: 'head-prepend' as const }] : []),
     // /@dsa/mount (MOUNT_MODULE): only while tagging is on, so a production build never has it.
     resolveId: (id) => (on && id === '/@dsa/mount' ? '\0dsa-mount.js' : null),
     load: (id) => (on && id === '\0dsa-mount.js' ? MOUNT_MODULE : null),

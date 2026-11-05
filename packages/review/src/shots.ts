@@ -3,7 +3,8 @@ import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileOfTag, tagPath } from '@snds/dsa/tag';
+import { LEDGER_RUNTIME, fileOfTag, tagPath } from '@snds/dsa/tag';
+import { addToLedger, contentHash, readLedger, readLedgerLines, recordsFor, type LedgerRec } from './ledger.js';
 import { BLANK_INSET, buildGraph, federate, decodePng, groupKey, isBlank, latestEvals, materializeRemotes, resolveTargets, targetRelative, walk, type Config, type ElementEval } from '@snds/dsa/engine';
 import { appSurface, openSurface } from '@snds/dsa';
 
@@ -268,8 +269,16 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
       if (!s.need.length) { log('Nothing new to capture.'); continue; }
       log(`${s.target === '*' ? '' : s.target + ': '}${s.need.length} examples to find across ${new Set(s.need.map(e => groupKey(e))).size} groups.`);
       const sh = opts.config.shots ?? {};
-      const r: Awaited<ReturnType<typeof session>> & { signIn?: string; expired?: boolean; broken?: string } = await session(pw, { reach: s.reach, draw: s.draw, url: s.url, routes: s.routes, first: s.first, flows: s.flows, crawl: s.crawl, examples: s.need, dir, storageState: s.storageState, readApi: s.readApi, readPaths: s.readPaths, signIn: s.signIn, maxPages: sh.maxPages ?? 90, pagesSet: sh.maxPages !== undefined, waitMs: sh.waitMs ?? 600, log, reveal: sh.reveal, maxActions: sh.maxActions ?? sh.maxTriggers, maxDepth: sh.maxDepth, maxMinutes: sh.maxMinutes, routeSource: s.routeSource, profiles: s.profiles, appDir: s.appDir });
+      // The evidence ledger: what earlier runs (and a dev server with DSA_LEDGER) saw each element render with.
+      const ledgerFile = path.join(dir, 'ledger.json');
+      const at0 = { root: opts.root, dir: s.appDir ?? s.draw?.dir };
+      const ledgerHash = (f: string) => contentHash(absOfTag(at0, f));
+      const lines = (sh as any).ledger ?? process.env.DSA_LEDGER;
+      if (lines) { const n = addToLedger(ledgerFile, readLedgerLines(path.resolve(opts.root, lines)), ledgerHash); if (n) log(`  ledger: ${n} record${n === 1 ? '' : 's'} added from ${lines}`); }
+      const ledger = readLedger(ledgerFile, ledgerHash);
+      const r: Awaited<ReturnType<typeof session>> & { signIn?: string; expired?: boolean; broken?: string } = await session(pw, { ledger, reach: s.reach, draw: s.draw, url: s.url, routes: s.routes, first: s.first, flows: s.flows, crawl: s.crawl, examples: s.need, dir, storageState: s.storageState, readApi: s.readApi, readPaths: s.readPaths, signIn: s.signIn, maxPages: sh.maxPages ?? 90, pagesSet: sh.maxPages !== undefined, waitMs: sh.waitMs ?? 600, log, reveal: sh.reveal, maxActions: sh.maxActions ?? sh.maxTriggers, maxDepth: sh.maxDepth, maxMinutes: sh.maxMinutes, routeSource: s.routeSource, profiles: s.profiles, appDir: s.appDir });
       const at = new Date().toISOString();
+      if (r.ledger?.length) { const n = addToLedger(ledgerFile, r.ledger, ledgerHash); log(`  ledger: ${r.ledger.length} element${r.ledger.length === 1 ? '' : 's'} recorded rendering, ${n} new`); }
       const byId = new Map(s.need.map(e => [e.id, e]));
       if (r.signIn && !Object.keys(r.shots).length) {
         // A sign-in wall isn't "not found": nothing was looked at. Say so, and remember no misses.
@@ -504,7 +513,7 @@ function callersOf(d: DrawWith, name: string, own: string): string[] {
 /** What the scan knows about reaching each element (routes.ts): the routes that render its file, and the patterns that need a value. */
 interface ReachPlan { byId: Record<string, string[]>; patterns: string[]; /** Per element: its file and its importers three steps up, as tag paths. */ near?: Record<string, string[]> }
 
-async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawWith | undefined; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; examples: ElementEval[]; dir: string; storageState?: string | undefined; readApi?: boolean | undefined; readPaths?: string[] | undefined; signIn?: SignIn | undefined; maxPages: number; waitMs: number; log: (m: string) => void; reveal?: boolean; maxActions?: number; maxDepth?: number; maxMinutes?: number; maxReplays?: number; routeSource?: RouteSource | undefined; appDir?: string | undefined; profiles?: Profile[] | undefined; pagesSet?: boolean | undefined }) {
+async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawWith | undefined; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; examples: ElementEval[]; dir: string; storageState?: string | undefined; readApi?: boolean | undefined; readPaths?: string[] | undefined; signIn?: SignIn | undefined; maxPages: number; waitMs: number; log: (m: string) => void; reveal?: boolean; maxActions?: number; maxDepth?: number; maxMinutes?: number; maxReplays?: number; routeSource?: RouteSource | undefined; appDir?: string | undefined; profiles?: Profile[] | undefined; pagesSet?: boolean | undefined; ledger?: Record<string, LedgerRec[]> | undefined }) {
   const shots: Record<string, any> = {};
   const pages: string[] = [];
   let taggedPages = 0;
@@ -550,6 +559,10 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     page.on('dialog', (d: any) => d.dismiss().catch(() => {}));
     // URLs the app writes itself (pushState, replaceState, a new hash): real routes, kept for the queue.
     await page.addInitScript({ content: WRITTEN_URLS });
+    // The ledger runtime: every tagged element the app renders, with its URL, its owner's props and the state
+    // above it, handed here as it commits (kept across page loads, unlike anything in the page).
+    await page.exposeBinding('__dsaLedgerPut', (_: unknown, batch: LedgerRec[]) => { if (Array.isArray(batch) && recorded.length < 50_000) recorded.push(...batch); }).catch(() => {});
+    await page.addInitScript({ content: LEDGER_RUNTIME });
     // Reads only: no writes, nothing under /api/ (or readPaths), nothing to another host but images, fonts,
     // and styles, and the identity provider while signing in (flows.ts).
     net = await guardNetwork(page, base.origin, { readApi: Boolean(o.readApi), readPaths: o.readPaths, idp: o.signIn?.idp, signingIn: () => auth.signing });
@@ -557,6 +570,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     watchPage?.(page);
   };
   let watchPage: ((pg: any) => void) | null = null;
+  const recorded: LedgerRec[] = [];
   await launch();
   // A page can crash or close under the crawler (a heavy view, a control that closes the window):
   // start a fresh browser and carry on with the next page instead of losing the whole pass.
@@ -797,6 +811,9 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       o.log(`  ${got.length} route${got.length === 1 ? '' : 's'} from ${o.routeSource.module} (${o.routeSource.export}), ${fresh.length} new`);
     } else o.log(`  apps.routeSource: ${got}`);
   }
+  // The ledger first: elements an earlier run, a test or a person saw render, opened where they rendered,
+  // with the state recorded above them set back.
+  if (o.ledger && Object.keys(o.ledger).length && remaining.length && o.reveal !== false && !(o.signIn && auth.done)) await replayLedger();
   if (!o.pagesSet && queue.length > o.maxPages) { o.log(`  ${queue.length} routes known: visiting up to all of them (shots.maxPages sets a cap)`); o.maxPages = queue.length + 20; }
   // Profiles (apps[name].profiles): a route opened with storage seeded first, no clicking (a wizard step, a flag).
   for (const pf of o.profiles ?? []) {
@@ -1013,7 +1030,71 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   } finally {
     await browser.close().catch(() => {});
   }
-  return { shots, pages, missing: [...remaining.map(r => r.id), ...setAside, ...drawnIds], drawn: drawnIds.length, why, fileOn: Object.fromEntries(Object.entries(fileOn).map(([k, u]) => [k, u && routeOf(u)])), tried: Object.fromEntries(everyone.filter(r => r.tried?.length).map(r => [r.id, r.tried!])), tagged: { pages: taggedPages, of: pages.length }, ...(signedOut() || auth.expired ? { signIn: wall.at || o.url } : {}), ...(auth.expired ? { expired: true } : {}), ...(isBroken() ? { broken: broken.first } : {}) };
+  return { ledger: recorded, shots, pages, missing: [...remaining.map(r => r.id), ...setAside, ...drawnIds], drawn: drawnIds.length, why, fileOn: Object.fromEntries(Object.entries(fileOn).map(([k, u]) => [k, u && routeOf(u)])), tried: Object.fromEntries(everyone.filter(r => r.tried?.length).map(r => [r.id, r.tried!])), tagged: { pages: taggedPages, of: pages.length }, ...(signedOut() || auth.expired ? { signIn: wall.at || o.url } : {}), ...(auth.expired ? { expired: true } : {}), ...(isBroken() ? { broken: broken.first } : {}) };
+
+  /** Open a page; reload when only its hash differs (going there wouldn't load it). */
+  async function go(u: string) {
+    const same = page.url().split('#')[0] === u.split('#')[0];
+    await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+    if (same) await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+    await page.waitForTimeout(o.waitMs); await settle();
+  }
+
+  /**
+   * Elements the ledger saw render: each recorded URL opened (on this server, if it was another), looked at;
+   * then the state recorded in each component above it set back, outermost first, and looked at again. Only
+   * values copied whole and holding no functions are set: a cut copy set back would be a guess, not a record.
+   * Up to 60 tries, in a fifth of the time.
+   */
+  async function replayLedger() {
+    const stop = Date.now() + (deadline - Date.now()) * 0.2;
+    const groups = new Map<string, { u: string; sets: StateSet[]; mine: Target[] }>();
+    for (const r of remaining) {
+      for (const rec of recordsFor(o.ledger!, r.src).slice(0, 2)) {
+        let u = '';
+        try { const x = new URL(rec.url); u = x.origin === base.origin ? rec.url : new URL(x.pathname + x.search + x.hash, base).toString(); } catch { continue; }
+        const sets = statesOf(rec);
+        const k = u + ' ' + JSON.stringify(sets);
+        const g = groups.get(k) ?? { u, sets, mine: [] };
+        g.mine.push(r);
+        groups.set(k, g);
+      }
+    }
+    if (!groups.size) return;
+    let tries = 0;
+    const before = remaining.length;
+    for (const g of [...groups.values()].sort((a, b) => b.mine.length - a.mine.length)) {
+      if (!remaining.length || Date.now() >= stop || tries >= 60) break;
+      if (!g.mine.some(r => remaining.includes(r))) continue;
+      tries++;
+      await go(g.u);
+      const sweep = sweeper(g.u);
+      await sweep('opening it where the ledger saw it');
+      const done: string[] = [];
+      for (const one of g.sets) {
+        if (!g.mine.some(r => remaining.includes(r))) break;
+        const r = await inPage<SetResult>(page, SET_STATE, { sets: [one] }).catch(() => NONE_SET);
+        if (!r.set) continue;
+        done.push(one.component);
+        await page.waitForTimeout(o.waitMs); await settle();
+        await sweep(`setting the state the ledger recorded in ${done.join(' › ')}`);
+      }
+      for (const r of g.mine) if (remaining.includes(r)) note(r, `opened ${routeOf(g.u)} as the ledger recorded it${done.length ? `, with ${done.join(' › ')}'s recorded state` : ''}: still not shown`);
+    }
+    o.log(`  ledger: ${tries} recorded place${tries === 1 ? '' : 's'} opened, ${before - remaining.length} found`);
+  }
+
+  /** A record's state, as sets SET_STATE takes: each component above the element, outermost first, with the hooks safe to set back. */
+  function statesOf(rec: LedgerRec): StateSet[] {
+    const safe = (v: unknown): boolean => {
+      if (v === null || ['string', 'number', 'boolean'].includes(typeof v)) return true;
+      const j = JSON.stringify(v);
+      return j.length < 2000 && !j.includes('"__dsa":"fn"');
+    };
+    return rec.ancestors
+      .map(a => ({ file: '', component: a.name, slots: a.hooks.map((h, i) => ({ index: i, name: `#${i}`, value: h.value as any, ok: !h.cut && safe(h.value) })).filter(x => x.ok).map(({ ok: _, ...x }) => x) }))
+      .filter(x => x.slots.length);
+  }
 
   /** A page that renders this element: a route the scan says renders its file (one with a value found, if it needs one), else the first page. */
   function pageFor(r: Target): string | undefined {
@@ -1324,6 +1405,9 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
   }
 
   async function drawRest(d: DrawWith, at: string) {
+    // Earlier runs' records, and this run's: an element can render and still not be photographed.
+    const ledgerNow: Record<string, LedgerRec[]> = { ...(o.ledger ?? {}) };
+    for (const rec of recorded) (ledgerNow[rec.src] ??= []).push(rec);
     const stop = Date.now() + (d.maxMinutes ?? 10) * 60_000;
     const max = d.max ?? Infinity;
     let n = 0;
@@ -1356,6 +1440,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       const code = readSource(d.root, r.e.file, d.dir);
       if (!code) { out(`not drawn: its source file wasn't found (${r.e.file})`); continue; }
       let how: 'mount' | 'markup' | null = null;
+      let isolated = false;
       let exact = false;
       let unmounted = '';
       let providers = 0;
@@ -1376,7 +1461,12 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
           const wraps: { files: string[]; file: string; name: string; props: unknown; context?: boolean }[] = [];
           // The app's own providers first; every context the page provides only when that fails or doesn't show it.
           let scope: 'app' | 'all' = 'app';
-          const mountAs = (name: string) => inPage<Mounted>(page, MOUNT_IN_PAGE, [files, name, mountProps({ ...r.e, within: name }, code, callersOf(d, name, abs)), r.e.file, wraps, scope])
+          // The props the app really passed it, from the ledger, when its owner is the component mounted: an
+          // isolated render of the element as it was, instead of props guessed from the source.
+          const rec = recordsFor(ledgerNow, r.src).find(x => x.owner?.props && typeof x.owner.props === 'object');
+          let withRecorded = false;
+          const propsFor = (name: string) => { withRecorded = Boolean(rec && rec.owner!.name === name); return withRecorded ? rec!.owner!.props : mountProps({ ...r.e, within: name }, code, callersOf(d, name, abs)); };
+          const mountAs = (name: string) => inPage<Mounted>(page, MOUNT_IN_PAGE, [files, name, propsFor(name), r.e.file, wraps, scope])
             .catch((e: any): Mounted => ({ ok: false, why: `the page failed while mounting (${String(e?.message ?? e).split('\n')[0]!.slice(0, 80)})` }));
           const find = async () => ((await inPage<any[]>(page, FIND_IN_PAGE, [{ ...r, e: undefined }]).catch(() => [])) ?? [])[0] ?? null;
           let said = await mountAs(r.e.within);
@@ -1413,7 +1503,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
             // Behind a state inside it: the clicks the scan traced, then the drawing's own toggles, tabs and menus.
             let tried = '';
             if (!hit) { const rv = await revealInMount(r, find, () => mountAs(parent || r.e.within!)); hit = rv.hit; revealed = rv.after; tried = rv.tried; }
-            if (hit) { how = 'mount'; exact = Boolean(hit.exact); drawnBy = parent; wrapped = wraps.map(w => w.name).join(', '); }
+            if (hit) { how = 'mount'; exact = Boolean(hit.exact); drawnBy = parent; wrapped = wraps.map(w => w.name).join(', '); isolated = withRecorded && exact; }
             else unmounted = `${label} mounted${providers ? ` with ${providers} of the app's providers` : ''}, but the element wasn't in what it drew (a condition inside it wasn't met${tried ? `; clicked ${tried} in it` : ''})`;
           } else {
             if (said.threw) need = whatItNeeded(sourceOfThrow(d, said.threw, code, parent || r.e.within), said.threw.component || parent || r.e.within, said.threw.message);
@@ -1445,11 +1535,11 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         }
         if (!cap) { out(`not drawn: the drawing had no size to photograph (${placeholder || "it wasn't on the page"})${unmounted ? `; not mounted: ${unmounted}` : ''}`); continue; }
         // A mount found by its exact source tag, and not blank, counts as seeing the element (seenInApp).
-        shots[r.id] = { file, page: u, matchScore: 1, drawn: how, ...(how === 'mount' && exact ? { exact: true } : {}), box: cap.box, content, ...(cap.blank ? { blank: true } : {}), ...(placeholder ? { placeholder } : {}) };
+        shots[r.id] = { file, page: u, matchScore: 1, drawn: how, ...(how === 'mount' && exact ? { exact: true } : {}), box: cap.box, content, ...(cap.blank ? { blank: true } : {}), ...(placeholder ? { placeholder } : {}), ...(isolated ? { source: 'isolated' } : {}) };
         drawnIds.push(r.id);
         remaining = remaining.filter(x => x.id !== r.id);
         n++;
-        const msg = how === 'mount' ? `drawn from the app's code (${drawnBy ? `${drawnBy}, the component around it` : 'its component'}, in the app's build${providers ? `, with ${providers} of its providers` : ''}${wrapped ? `, ${wrapped} found in the source` : ''}${revealed ? `, after ${revealed.startsWith('setting ') ? revealed : `clicking ${revealed}`} in it` : ''})` : `drawn as markup only; not mounted: ${unmounted}`;
+        const msg = how === 'mount' ? `drawn from the app's code${isolated ? ' with the props the app passed it (recorded): an isolated render' : ''} (${drawnBy ? `${drawnBy}, the component around it` : 'its component'}, in the app's build${providers ? `, with ${providers} of its providers` : ''}${wrapped ? `, ${wrapped} found in the source` : ''}${revealed ? `, after ${revealed.startsWith('setting ') ? revealed : `clicking ${revealed}`} in it` : ''})` : `drawn as markup only; not mounted: ${unmounted}`;
         count(placeholder ? `shown outlined (no size: ${short(placeholder)})` : how === 'mount' ? "drawn from the app's code" : `markup only (not mounted: ${short(unmounted)})`);
         o.log(`  ${where(r)} ${msg}${placeholder ? ` · shown outlined, it had no size: ${placeholder}` : ''}${cap.blank ? ' · blank' : ''}`);
       } catch (e: any) {

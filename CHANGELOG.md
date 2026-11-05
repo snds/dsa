@@ -30,6 +30,18 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 - `scripts/proposal-gaps.mjs` counts, on a published dashboard, why proposals aren't drawn exactly with
   their element's own content.
 
+### Added
+
+- The evidence ledger. The tagger's runtime (`LEDGER_RUNTIME`, first in every page it serves, and in every
+  page the crawler opens) records each tagged element as React commits it: its URL, its size, its owner
+  component's props and the state of each component above it, copied with limits (functions stubbed,
+  credential- and personal-looking keys redacted, a cut copy marked). Records are kept in
+  `shots/ledger.json` per file and its source hash, so an older version's drop. A dev server started with
+  `DSA_LEDGER=<file>` records what a person clicks through, and `shots.ledger` (or `DSA_LEDGER`) adds those.
+  A new pass before pass 1 opens each missing element where it rendered and sets the recorded state above
+  it, outermost first (only values copied whole); drawings mount with the recorded props, and such a
+  drawing is marked `source: "isolated"` in the shot index.
+
 ### Fixed
 
 - Drawings from the app's code get the app's own providers first: those above the element's file on the
