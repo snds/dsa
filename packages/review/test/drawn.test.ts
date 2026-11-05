@@ -113,3 +113,14 @@ test("a condition that holds with its initial state isn't the one to blame, and 
   // A typed value with nothing read off it: an object, not true. State that starts as an object: left alone.
   assert.deepEqual(set!.slots.map(x => [x.name, x.value]), [['colour', {}]]);
 });
+
+test("nav values from the files the root imports: its type alias, and a registry passed to its setter", () => {
+  const app = `import { NAV, type NavKey } from './nav';
+export function App() {
+  const [view, setView] = useState<NavKey>('home');
+  return <nav>{NAV.map(n => <button key={n.id} onClick={() => setView(n.id)}>{n.label}</button>)}</nav>;
+}`;
+  const nav = `export type NavKey = 'home' | 'colours' | 'prints';\nexport const NAV = [{ id: 'home', label: 'Home' }, { id: 'colours', label: 'Colours' }, { id: 'labs', label: 'Labs' }];`;
+  assert.deepEqual(stateValues(app, 'view').sort(), []);
+  assert.deepEqual(stateValues(app, 'view', [nav]).sort(), ['colours', 'home', 'labs', 'prints']);
+});

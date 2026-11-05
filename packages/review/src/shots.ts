@@ -835,6 +835,10 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     }
   }
   const phase1End = Date.now() + (deadline - Date.now()) * 0.45;
+  // How long each pass took, for the log at the end: where the run's time went.
+  const took: [string, number][] = [];
+  let lap = Date.now();
+  const mark = (name: string) => { took.push([name, Date.now() - lap]); lap = Date.now(); };
   const promising: { u: string; score: number }[] = [];
   try {
     while (queue.length && seen.size < o.maxPages && remaining.length && Date.now() < phase1End) {
@@ -963,35 +967,47 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       }
     }
     if (queue.some(q => !seen.has(q)) && Date.now() >= phase1End && seen.size < o.maxPages && remaining.length) o.log(`  pass 1 stopped by its time share with ${queue.filter(q => !seen.has(q)).length} pages not yet visited: results can differ between runs; raise shots.maxMinutes to visit them all`);
+    mark('pass 1 (routes, openers)');
     // State the source says hides what's still missing, set through React: after the route crawl had its share,
     // each combination once (not when signed in by memory: a reload would sign out).
     if (remaining.length && o.reveal !== false && !(o.signIn && auth.done) && !signedOut() && !isBroken()) await stateReveal();
-    // Pass 2: explore pages, most promising first (re-scored as elements are found), until time runs out.
+    mark('state');
+    // Pass 2: explore pages, most promising first (re-scored as elements are found), until time runs out, or
+    // until 8 pages in a row found nothing: by then the controls left aren't what shows the rest.
     const done2 = new Set<string>();
-    while (remaining.length && Date.now() < deadline && o.reveal !== false && !signedOut() && !auth.expired && !isBroken()) {
+    let dry = 0;
+    while (dry < 8 && remaining.length && Date.now() < deadline && o.reveal !== false && !signedOut() && !auth.expired && !isBroken()) {
       const words = [...hints(), ...traced().map(t => t.toLowerCase())];
       // Pages that render what's still missing first (by how much), then by the words they mention.
       const next = promising.filter(p => !done2.has(p.u)).map(p => ({ ...p, own: owns(p.u) })).sort((a, b) => b.own - a.own || b.score - a.score)[0];
       if (!next || !words.length && done2.size >= 20) break;
       done2.add(next.u);
+      const before2 = remaining.length;
       try {
         await open(next.u);
         const sweep = sweeper(next.u);
         await sweep();
         if (remaining.length) await explore(next.u, sweep);
+        dry = remaining.length < before2 ? 0 : dry + 1;
       } catch (e: any) {
         // One page that won't load (an aborted navigation, a timeout) costs that page, not the run's screenshots.
         if (!/closed|crash|Target/i.test(String(e?.message))) { o.log(`  skip ${next.u}: ${String(e?.message).split('\n')[0]}`); continue; }
         await relaunch();
       }
     }
+    if (dry >= 8) o.log(`  pass 2 stopped after ${dry} pages in a row found nothing (${done2.size} explored)`);
+    mark('pass 2 (explore)');
     // Saved state and URL search state the source reads: a first visit, or a search with something in it.
     if (remaining.length && !signedOut() && !isBroken()) await stateAndSearch();
+    mark('saved and search state');
     // Why each one still missing wasn't photographed, in plain words, before any is drawn.
     for (const r of remaining) why[r.id] = reasonOf(r);
     // Whether its own file showed on a page visited: a miss on a page reached, or one on a page never reached.
     for (const r of remaining) fileOn[r.id] = pages.find(u => shown.get(u)?.has(r.e.file)) ?? '';
-    if (remaining.length && o.draw && pages.length && !signedOut() && !isBroken()) await drawRest(o.draw, pages[0]!);
+    if (remaining.length && o.draw && pages.length && !signedOut() && !isBroken()) await drawRest(o.draw, home());
+    mark('drawings');
+    const mins = (ms: number) => ms >= 60_000 ? `${Math.round(ms / 6000) / 10}m` : `${Math.round(ms / 1000)}s`;
+    o.log(`  time: ${took.filter(([, ms]) => ms >= 1000).map(([n, ms]) => `${n} ${mins(ms)}`).join(', ')}`);
     if ((net.blocked || Object.keys(net.allowed).length) && !signedOut() && !isBroken()) o.log(`  network: ${describeNetwork(net, base.origin)}`);
     if (remaining.length && Date.now() >= deadline) o.log(`  time budget (shots.maxMinutes) used up with ${remaining.length} still to find: results can differ between runs; raise shots.maxMinutes for the same result each time.`);
   } finally {
@@ -1005,7 +1021,11 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       if (needsValue(p)) { const v = [...(filled.get(p) ?? [])][0]; if (v) return routeUrl(hashed ? '#' + v : v, base); }
       else return routeUrl(hashed ? '#' + p : p, base);
     }
-    return pages[0];
+    return home();
+  }
+  /** The app's home page when it was visited, else the first page: a plain page to draw on, not a deep one with a dialog open. */
+  function home(): string {
+    return pages.find(u => { const x = new URL(u); return x.pathname === base.pathname && (x.hash === '' || x.hash === '#' || x.hash === '#/') && !x.search; }) ?? pages[0]!;
   }
 
   /**
@@ -1188,9 +1208,13 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         const code = readSource(o.draw.root, b.file, o.draw.dir);
         const u = pages.find(p => shown.get(p)?.has(b.file)) ?? pages[0]!;
         if (!code) continue;
+        // The files it imports (two levels: its route module, its registries) can hold the values too.
+        const near = importsNear(o.draw, absOfTag(o.draw, b.file), 2).slice(0, 40).map(f => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } });
         for (const sl of b.slots) {
           if (typeof sl.value !== 'string') continue;
-          for (const v of stateValues(code, sl.name)) {
+          const values = stateValues(code, sl.name, near);
+          o.log(`  state: ${b.component}.${sl.name} can be ${values.length} value${values.length === 1 ? '' : 's'} by its source${values.length ? ` (${values.slice(0, 8).map(x => JSON.stringify(x)).join(', ')}${values.length > 8 ? ', …' : ''})` : ''}`);
+          for (const v of values) {
             if (Date.now() >= stop || swept >= 60 || !unseen()) break;
             const one: StateSet = { ...b, slots: b.slots.map(x => (x === sl ? { ...x, value: v } : x)) };
             await visit(u);
@@ -1350,10 +1374,15 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
           // Mount one of the file's components and look for the element in what it drew.
           const filesOf = (f: string) => [...(d.dir && !path.relative(d.dir, f).startsWith('..') ? ['/' + path.relative(d.dir, f).split(path.sep).join('/')] : []), '/@fs' + f.split(path.sep).join('/')];
           const wraps: { files: string[]; file: string; name: string; props: unknown; context?: boolean }[] = [];
-          const mountAs = (name: string) => inPage<Mounted>(page, MOUNT_IN_PAGE, [files, name, mountProps({ ...r.e, within: name }, code, callersOf(d, name, abs)), r.e.file, wraps])
+          // The app's own providers first; every context the page provides only when that fails or doesn't show it.
+          let scope: 'app' | 'all' = 'app';
+          const mountAs = (name: string) => inPage<Mounted>(page, MOUNT_IN_PAGE, [files, name, mountProps({ ...r.e, within: name }, code, callersOf(d, name, abs)), r.e.file, wraps, scope])
             .catch((e: any): Mounted => ({ ok: false, why: `the page failed while mounting (${String(e?.message ?? e).split('\n')[0]!.slice(0, 80)})` }));
           const find = async () => ((await inPage<any[]>(page, FIND_IN_PAGE, [{ ...r, e: undefined }]).catch(() => [])) ?? [])[0] ?? null;
           let said = await mountAs(r.e.within);
+          // Found with the app's own providers: kept (a look marks what it finds, so it isn't looked for twice).
+          let early: any = said.ok ? await find() : null;
+          if (!early) { scope = 'all'; said = await mountAs(r.e.within); }
           // A render helper (cellFor, renderBody) or a function inside a component: the component around it draws it.
           let parent = '';
           if (!said.ok && /is not in its file as built/.test(said.why ?? '')) {
@@ -1380,7 +1409,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
           providers = said.providers ?? 0;
           const label = parent ? `${r.e.within} (drawn by ${parent}, the component around it)` : r.e.within;
           if (said.ok) {
-            let hit = await find();
+            let hit = early ?? await find();
             // Behind a state inside it: the clicks the scan traced, then the drawing's own toggles, tabs and menus.
             let tried = '';
             if (!hit) { const rv = await revealInMount(r, find, () => mountAs(parent || r.e.within!)); hit = rv.hit; revealed = rv.after; tried = rv.tried; }
@@ -2164,7 +2193,7 @@ const MARK_DRAWN = `(id) => { const el = document.querySelector('[data-dsa-drawn
 /** The dev server's base ("/", or the config's base): where it serves /@vite/client from. */
 const VITE_BASE = `(() => { const s = Array.from(document.scripts).map((x) => x.src).find((u) => /\\/@vite\\/client$/.test(u)); return s ? new URL(s).pathname.replace(/@vite\\/client$/, '') : '/'; })()`;
 /** Runs in the page: load /@dsa/mount from the app's own Vite server and mount one component (drawn.ts), trying each file URL. */
-const MOUNT_IN_PAGE = `async ([files, name, props, file, wraps]) => { await import(${VITE_BASE} + '@dsa/mount'); return window.__dsaMount(files, name, props, file, wraps); }`;
+const MOUNT_IN_PAGE = `async ([files, name, props, file, wraps, scope]) => { await import(${VITE_BASE} + '@dsa/mount'); return window.__dsaMount(files, name, props, file, wraps, scope); }`;
 /** Runs in the page: does this build serve /@dsa/mount (dsa's runner, or dsaTag on)? */
 const MOUNT_PROBE = `async () => { try { await import(${VITE_BASE} + '@dsa/mount'); return typeof window.__dsaMount === 'function'; } catch { return false; } }`;
 /** Runs in the page: forget these saved-state keys, as on a first visit. */

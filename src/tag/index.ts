@@ -183,7 +183,8 @@ function walk(node: any, fn: (n: any) => void) {
  * what it mounts comes in as arguments from the crawler.
  *
  * - The component: exported from its file, or one the file declares without exporting (kept by the tagger).
- * - Its providers: every context the live app provides at the deepest point near the element (the same
+ * - Its providers: with scope "app", only the app's own (those above the element's file on the page, else
+ *   above its shallowest tagged element); otherwise every context the live app provides at the deepest point near the element (the same
  *   file's elements if the page shows any, else the deepest tagged element), with the live values. That
  *   covers the providers the app's entry file wraps it in (a query client, a theme, a router, a store) and
  *   ones deeper in the tree; then any other the page provides elsewhere, so a component drawn on another
@@ -229,6 +230,16 @@ function contextsAll(file) {
   for (let i = 0; i < all.length; i += step) for (const c of contextsAt(all[i])) if (!seen.has(c.ctx)) { seen.add(c.ctx); out.push(c); }
   return out;
 }
+// The app's own providers only: those above the element's own file on the page, else those above the
+// shallowest tagged element (what the entry file wraps the app in), not the ones a deep page adds (an open
+// dialog's, a panel's), which can put a drawn component in a state that hides the element.
+function contextsApp(file) {
+  const all = Array.from(document.querySelectorAll('[data-dsa-src]')).filter((el) => !el.closest('#dsa-mount, #dsa-markup'));
+  const same = file ? all.filter((el) => el.getAttribute('data-dsa-src').startsWith(file + ':')) : [];
+  if (same.length) return contextsAt(nearest(file));
+  const depth = (el) => { let d = 0; for (let x = el; x; x = x.parentElement) d++; return d; };
+  return contextsAt(all.reduce((a, b) => (!a || depth(b) < depth(a) ? b : a), null));
+}
 function nearest(file) {
   const all = Array.from(document.querySelectorAll('[data-dsa-src]')).filter((el) => !el.closest('#dsa-mount, #dsa-markup'));
   const same = file ? all.filter((el) => el.getAttribute('data-dsa-src').startsWith(file + ':')) : [];
@@ -265,7 +276,7 @@ async function load(files, name, file) {
   const C = mod[name] || (mod.default && (name === 'default' || mod.default.name === name) ? mod.default : undefined) || local[name];
   return C ? { C } : { why: 'its component ' + name + ' is not in its file as built' };
 }
-window.__dsaMount = async (files, name, props, file, wraps) => {
+window.__dsaMount = async (files, name, props, file, wraps, scope) => {
   window.__dsaMountError = null;
   const got = await load(files, name, file);
   if (!got.C) return { ok: false, why: got.why };
@@ -278,7 +289,7 @@ window.__dsaMount = async (files, name, props, file, wraps) => {
     // A bare context (no provider component in its file): its Provider, with the value the crawler shaped.
     extra.push(w.context ? { P: p.C.Provider || p.C, props: w.props || {} } : { P: p.C, props: w.props || {} });
   }
-  const ctxs = contextsAll(file);
+  const ctxs = scope === 'app' ? contextsApp(file) : contextsAll(file);
   if (root) { try { root.unmount(); } catch {} root = null; }
   document.getElementById('dsa-mount')?.remove();
   document.getElementById('dsa-markup')?.remove();

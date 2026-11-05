@@ -76,6 +76,43 @@ test('components that need providers, props, or aren\'t exported are drawn from 
     assert.equal(r.shots['E-gone'], undefined);
     assert.match(all, /E-gone \(apps\/shop\/src\/Badge\.jsx:40\) not drawn: no element at 40:3 in its file as it is now; not mounted: Badge mounted with 2 of the app's providers, but the element wasn't in what it drew/);
     assert.ok(r.tried['E-gone']?.some((t: string) => /not drawn: no element/.test(t)), JSON.stringify(r.tried));
-    assert.match(all, /drawings: 3 drawn from the app's code; 1 not drawn \(no element at its line in its file as it is now\)$/);
+    assert.match(all, /drawings: 3 drawn from the app's code; 1 not drawn \(no element at its line in its file as it is now\)$/m);
+  } finally { app.stop(); }
+});
+
+// A deep page adds a context the app's entry doesn't (an open panel's "hidden" flag): borrowed into a drawing,
+// it hides the element. The app's own providers are tried first; every context on the page only if that fails.
+const DEEP: Record<string, string> = {
+  'index.html': FILES['index.html']!,
+  'public/app.css': FILES['public/app.css']!,
+  'vite.config.js': FILES['vite.config.js']!,
+  'src/hide.js': `import { createContext } from 'react';\nexport const HideCtx = createContext(false);\n`,
+  'src/main.jsx': `import { createRoot } from 'react-dom/client';\nimport { useEffect, useState } from 'react';\nimport { HideCtx } from './hide.js';\nfunction App() {\n  const [h, setH] = useState(location.hash);\n  useEffect(() => { const f = () => setH(location.hash); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f); }, []);\n  const deep = h === '#/deep';\n  return <main className="app">\n    {deep ? <HideCtx.Provider value={true}><section><h1>Deep</h1></section></HideCtx.Provider> : <p>Home</p>}\n  </main>;\n}\ncreateRoot(document.getElementById('root')).render(<App />);\n`,
+  'src/Tile.jsx': `import { useContext } from 'react';\nimport { HideCtx } from './hide.js';\nexport function Tile() {\n  const hidden = useContext(HideCtx);\n  if (hidden) return null;\n  return <button className="btn">Tile action</button>;\n}\n`,
+};
+
+test("a drawing on a deep page gets the app's own providers first, not a context that hides it", { timeout: 180_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  const kit = path.resolve(import.meta.dirname, '../../dashboard/ui/node_modules');
+  if (!fs.existsSync(path.join(kit, 'vite')) || !fs.existsSync(path.join(kit, 'react'))) skip('no Vite installed');
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-mount-deep-')));
+  const dir = path.join(root, 'apps', 'deep');
+  for (const [f, c] of Object.entries(DEEP)) { fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }); fs.writeFileSync(path.join(dir, f), c); }
+  fs.writeFileSync(path.join(root, 'dsa.config.json'), '{}');
+  fs.symlinkSync(kit, path.join(dir, 'node_modules'), 'dir');
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'deep', private: true, type: 'module', scripts: { dev: 'vite' } }));
+  const lines = DEEP['src/Tile.jsx']!.split('\n');
+  const l = lines.findIndex(x => x.includes('<button'));
+  const examples = [{ id: 'E-tile', target: 'deep', file: 'apps/deep/src/Tile.jsx', line: l + 1, col: lines[l]!.indexOf('<button') + 1, element: 'button', within: 'Tile', match: { tag: 'button', classes: ['btn'], text: 'Tile action' }, classTokens: ['btn'], reach: { status: 'gated', gates: [], steps: [], why: '' } }] as any;
+  const app = await startApp(tagPlan(detectApp({ name: 'deep', dir } as any, { apps: {} } as any) as any, { root, dir }));
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-mount-deep-shots-'));
+  const logs: string[] = [];
+  try {
+    const { captureSession } = await import('../src/shots.js');
+    const pw = await import('playwright');
+    // The scan says the deep page renders it, so it's drawn there.
+    const r: any = await captureSession(pw, { url: app.url, routes: ['', '#/deep'], crawl: false, examples, dir: out, maxPages: 3, waitMs: 300, log: (m: string) => logs.push(m), reveal: false, maxMinutes: 1, draw: { root, dir, mount: true }, reach: { byId: { 'E-tile': ['/deep'] }, near: {}, patterns: [] } });
+    const all = logs.join('\n');
+    assert.deepEqual([r.shots['E-tile']?.drawn, r.shots['E-tile']?.exact], ['mount', true], all);
   } finally { app.stop(); }
 });

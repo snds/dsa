@@ -32,6 +32,13 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- Drawings from the app's code get the app's own providers first: those above the element's file on the
+  page, else what the entry file wraps the app in. Every context the page provides (an open panel's, a
+  deep page's) is borrowed only when that fails or doesn't show the element: one of those can hide it.
+  Elements no route names are drawn on the home page, not the first page visited.
+- A root's nav values are also read from the files it imports: its state's type alias (or enum), and a
+  registry whose field it passes to its setter (`setView(n.id)`). The log lists the values found.
+- Pass 2 (exploring) stops after 8 pages in a row find nothing, and the log ends with the time each pass took.
 - Photos carry the run that took them: `shots/index.json` has `run: { id, ref, at }` (the source commit, or
   "worktree" when a tracked file's content changed), and each new photo its `run` id beside its `at` time.
   It reads git without writing: plumbing `diff-index` with each file checked by content, never `git status`

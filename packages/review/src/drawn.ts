@@ -741,20 +741,36 @@ export function stateSets(gates: { test: string; negated: boolean; component?: s
  * a `switch (nav)`'s cases), passed to its setter (`setNav('Prints')`), and in its type (`useState<'a' | 'b'>`, or
  * a type alias of literals it names). Used to set a root's nav state to each value by itself, to see what it shows.
  */
-export function stateValues(code: string, name: string): string[] {
+export function stateValues(code: string, name: string, more: string[] = []): string[] {
   const out = new Set<string>();
   const esc = name.replace(/[$]/g, '\\$');
   const lit = `(['"\`])([^'"\`\\n]{1,60})\\1`;
-  const add = (re: RegExp, at = 2) => { for (const m of code.matchAll(re)) out.add(m[at]!); };
+  const add = (re: RegExp, from = code) => { for (const m of from.matchAll(re)) out.add(m[2]!); };
   add(new RegExp(`\\b${esc}\\s*[!=]==?\\s*${lit}`, 'g'));
   add(new RegExp(`${lit}\\s*[!=]==?\\s*${esc}\\b`, 'g'));
   const decl = code.match(new RegExp(`\\[\\s*${esc}\\s*,\\s*([\\w$]+)\\s*\\]\\s*=\\s*(?:React\\.)?useState\\s*(?:<([^>]+)>)?`));
+  const all = [code, ...more];
   if (decl) {
-    add(new RegExp(`\\b${decl[1]!.replace(/[$]/g, '\\$')}\\s*\\(\\s*${lit}`, 'g'));
+    const setter = decl[1]!.replace(/[$]/g, '\\$');
+    add(new RegExp(`\\b${setter}\\s*\\(\\s*${lit}`, 'g'));
     let type = decl[2] ?? '';
+    // A type alias of literals, here or in a file it imports (`type NavKey = 'home' | 'colours'`), or an enum of strings.
     const alias = /^\s*([\w$]+)\s*$/.exec(type)?.[1];
-    if (alias) type = code.match(new RegExp(`\\btype\\s+${alias}\\s*=\\s*([^;]+)`))?.[1] ?? '';
+    if (alias) {
+      type = '';
+      for (const c of all) {
+        const t = c.match(new RegExp(`\\btype\\s+${alias}\\s*=\\s*([^;]+)`))?.[1];
+        if (t) { type = t; break; }
+        const en = c.match(new RegExp(`\\benum\\s+${alias}\\s*\\{([^}]*)\\}`))?.[1];
+        if (en) { type = en; break; }
+      }
+    }
     for (const m of type.matchAll(new RegExp(lit, 'g'))) out.add(m[2]!);
+    // Set from a registry (`items.map(n => <button onClick={() => setNav(n.id)}>`): that field's string values,
+    // in this file and the files it imports.
+    for (const m of code.matchAll(new RegExp(`\\b${setter}\\s*\\(\\s*[\\w$]+\\.([\\w$]+)\\s*\\)`, 'g'))) {
+      for (const c of all) add(new RegExp(`\\b${m[1]}\\s*:\\s*${lit}`, 'g'), c);
+    }
   }
   const sw = code.match(new RegExp(`switch\\s*\\(\\s*${esc}\\s*\\)\\s*\\{`));
   if (sw) {
@@ -762,5 +778,5 @@ export function stateValues(code: string, name: string): string[] {
     for (; i < code.length; i++) { if (code[i] === '{') depth++; else if (code[i] === '}' && --depth === 0) { end = i; break; } }
     for (const m of code.slice(sw.index!, end).matchAll(new RegExp(`case\\s+${lit}`, 'g'))) out.add(m[2]!);
   }
-  return [...out].slice(0, 40);
+  return [...out].slice(0, 60);
 }
