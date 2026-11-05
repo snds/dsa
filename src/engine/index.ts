@@ -50,6 +50,7 @@ export * from './system.js';
 export * from './tailwind.js';
 export * from './types.js';
 export * from './workspaces.js';
+export * from './federate.js';
 export * from './scanners/ast.js';
 export * from './scanners/children.js';
 export * from './scanners/code.js';

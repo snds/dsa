@@ -4,6 +4,7 @@ import { discoverSources } from '../model/discover.js';
 import { loadConfig, parseConfig, type DsaConfig, type LoadedConfig } from '../config.js';
 import { loadProfile, NEUTRAL_PROFILE, type ResolvedProfile } from '../profile.js';
 import type { Config } from './config.js';
+import { federate } from './federate.js';
 import type { ConsumerDef, LibraryDef } from './types.js';
 
 /**
@@ -108,7 +109,9 @@ export async function loadEngineContext(o: EngineContextOptions): Promise<Engine
       if (names.length) { loaded.config.system.packages = names; (loaded.config.system as { discovered?: boolean }).discovered = true; }
     } catch { /* leave it to requirePackages */ }
   }
-  return { loaded, root, dataDir, configDir: loaded.configPath ? path.dirname(loaded.configPath) : root, profile, profileSpec, config: engineConfig(loaded.config, profile) };
+  // Each app's own dsa.config.json merged in, and `apps` keyed by package name filed under the app's name.
+  const config = federate(root, engineConfig(loaded.config, profile)).config;
+  return { loaded, root, dataDir, configDir: loaded.configPath ? path.dirname(loaded.configPath) : root, profile, profileSpec, config };
 }
 
 /** Throw the suite's error when the config doesn't name the system's packages. */

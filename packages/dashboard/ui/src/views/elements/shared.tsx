@@ -389,7 +389,8 @@ export function ReviewControls({ items, auto, pattern, options, label }: { items
 /**
  * What the element's picture is, in three labels: a photo of the live app; drawn from the app's code (its
  * component, mounted with the app's styles, found by its exact tag: counts as seeing it); or markup only
- * (its JSX written out: shown, doesn't count).
+ * (its JSX written out: shown, doesn't count). Outline only: a drawing that had no size, shown outlined
+ * (doesn't count either).
  */
-export const sourceLabel = (s: any) => (s?.drawn === "mount" ? "Drawn from the app's code" : s?.drawn ? "Markup only" : "Live app screenshot")
-export const sourceTip = (s: any) => (s?.drawn === "mount" ? "Rendered from this file's component with the app's styles; not seen on a live page." : s?.drawn ? "This element's code written out as plain markup with the app's styles; no component ran." : undefined)
+export const sourceLabel = (s: any) => (s?.placeholder ? "Outline only" : s?.drawn === "mount" ? "Drawn from the app's code" : s?.drawn ? "Markup only" : "Live app screenshot")
+export const sourceTip = (s: any) => (s?.placeholder ? `It drew with no size, so it's shown outlined at a small size: ${s.placeholder}.` : s?.drawn === "mount" ? "Rendered from this file's component with the app's styles; not seen on a live page." : s?.drawn ? "This element's code written out as plain markup with the app's styles; no component ran." : undefined)
