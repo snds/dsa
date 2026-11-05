@@ -163,7 +163,9 @@ export async function renderReport(root: string, config: Config, dataDir: string
       // Drawn direct from code (mount, markup): shown, labelled, never a photo. Uncovered: covering layers hidden.
       ...(s.drawn ? { drawn: s.drawn } : {}), ...(s.exact ? { exact: true } : {}), ...(s.uncovered ? { uncovered: s.uncovered } : {}),
       // An isolated render: mounted in the app's build with the props it was recorded with. And the run that took it, and when.
-      ...(s.source ? { source: s.source } : {}), ...(s.run ? { run: s.run } : {}), ...(s.at ? { at: s.at } : {}) });
+      ...(s.source ? { source: s.source } : {}), ...(s.run ? { run: s.run } : {}), ...(s.at ? { at: s.at } : {}),
+      // A wider crop of the page around it (about 800 × 500 CSS px), with the element's box inside it.
+      ...(s.context?.file && s.context.box ? { context: { url: shotUrl(s.context.file), box: s.context.box } } : {}) });
     const renderedSet = readRendered(evidenceDir);
     const renderedUrl = (f: string) => (opts.serve ? `${base}rendered/${f}` : opts.site ? `rendered/${f}` : `../rendered/${f}`);
     // Element (as rendered in the app) vs the recommended system variant/size (as rendered in Storybook).
@@ -422,7 +424,7 @@ async function precedentsOf(store: any, runId: string, root: string, config: Con
     perComponent.set(k, (perComponent.get(k) ?? 0) + 1);
     const s = shotIdx.uses?.[`${r.file}:${r.line}`];
     out.push({ app: r.target, file: r.file, line: Number(r.line), component: r.component, props,
-      shot: s && !s.blank && !s.covered ? { url: shotUrl(s.file), box: s.box ?? null, page: s.page, pageName: pageName(s.page) } : null });
+      shot: s && !s.blank && !s.covered ? { url: shotUrl(s.file), box: s.box ?? null, page: s.page, pageName: pageName(s.page), ...(s.context?.file && s.context.box ? { context: { url: shotUrl(s.context.file), box: s.context.box } } : {}) } : null });
   }
   return out;
 }

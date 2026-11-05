@@ -132,7 +132,7 @@ test("only this run's photos count: one carried from an older run, or with no st
   const [fresh, older, legacy] = ids as [string, string, string];
   const run = { id: 'run-2', ref: 'worktree', at: '2026-10-06T12:00:00.000Z' };
   const index = { run, shots: {
-    [fresh]: { file: 'a.png', matchScore: 1, page: '/', run: 'run-1', at: '2026-10-06T09:00:00.000Z' },
+    [fresh]: { file: 'a.png', matchScore: 1, page: '/', run: 'run-1', at: '2026-10-06T09:00:00.000Z', context: { file: 'a.ctx.png', box: { x: 368, y: 234, w: 64, h: 32, cw: 800, ch: 500 } } },
     [older]: { file: 'b.png', matchScore: 1, page: '/', run: 'run-1', at: '2026-10-05T12:00:00.000Z' },
     [legacy]: { file: 'c.png', matchScore: 1, page: '/' },
   }, missing: [] };
@@ -140,7 +140,7 @@ test("only this run's photos count: one carried from an older run, or with no st
   const runDir = path.join(tmp(), 'run-2');
   fs.mkdirSync(path.join(runDir, 'shots'), { recursive: true });
   fs.writeFileSync(path.join(runDir, 'shots', 'index.json'), JSON.stringify(index));
-  for (const f of ['a.png', 'b.png', 'c.png']) fs.writeFileSync(path.join(runDir, 'shots', f), 'png');
+  for (const f of ['a.png', 'a.ctx.png', 'b.png', 'c.png']) fs.writeFileSync(path.join(runDir, 'shots', f), 'png');
   // Carried forward but taken after this run began: it counts. (Made so by moving the run's start back.)
   index.run = { ...run, at: '2026-10-06T08:00:00.000Z' };
   fs.writeFileSync(path.join(runDir, 'shots', 'index.json'), JSON.stringify(index));
@@ -154,7 +154,8 @@ test("only this run's photos count: one carried from an older run, or with no st
   assert.equal(byId.get(older).shotMissing, true);
   assert.equal(byId.get(legacy).shot, null, 'no stamp: missing');
   assert.equal(byId.get(legacy).staleShot.why, 'unstamped');
-  assert.equal(r.shots, 1, 'only the photo that counts ships');
+  assert.deepEqual(byId.get(fresh).shot.context, { url: 'shots/a.ctx.png', box: { x: 368, y: 234, w: 64, h: 32, cw: 800, ch: 500 } }, 'its wider page crop, for the review');
+  assert.equal(r.shots, 2, 'only the photo that counts ships, with its context crop');
   const app = byId.get(fresh).target;
   const f = payload.elements.freshness;
   assert.equal(f.run.id, 'run-2');

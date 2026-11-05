@@ -147,7 +147,7 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
           <div className="w-fit rounded-md border bg-background p-1">{proposal ? <Natural url={proposal.url} alt={`Proposed: ${SYS} ${pickText(pick)}, with its own words`} /> : <span className="text-xs">{pickText(pick)}: nothing to draw</span>}</div>
           <figcaption className="text-xs"><b className="font-medium">Proposed</b> · {SYS} {pickText(pick)}{proposal?.own ? " · with its own words" : ""}</figcaption>
         </figure>
-        <InContext url={e.shot.url} box={e.shot.box} alt={`Where it sits on ${e.review?.pageName}`} page={e.review?.pageName ?? "its page"} />
+        <InContext url={e.shot.context?.url ?? e.shot.url} box={e.shot.context?.box ?? e.shot.box} alt={`Where it sits on ${e.review?.pageName}`} page={e.review?.pageName ?? "its page"} />
       </section>
 
       <section aria-labelledby={`why-${e.id}`} className="flex flex-col gap-1">

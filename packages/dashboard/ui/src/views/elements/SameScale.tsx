@@ -68,13 +68,13 @@ export function Natural({ url, alt }: { url: string; alt: string }) {
 }
 
 /**
- * The element where it sits: the whole capture around it at its real size, the element ringed, with the
- * page it was on in plain words. A capture is a margin around the element, not the full page.
+ * The element where it sits, at its real size and ringed, with the page it was on in plain words: the
+ * shot's wider context crop (about 800 × 500 CSS px) when the crawler saved one, else the shot itself.
  */
 export function InContext({ url, box, alt, page }: { url: string; box?: Box | null; alt: string; page: string }) {
   return (
     <figure className="m-0 flex min-w-0 flex-col gap-1" data-slot="in-context">
-      <div className="w-fit max-w-full overflow-x-auto rounded-md border bg-background p-1">
+      <div className="w-fit max-w-full overflow-auto rounded-md border bg-background p-1" style={{ maxHeight: 520 }}>
         <span className="relative block" style={box ? { width: box.cw, height: box.ch } : undefined} data-scale="1">
           <img src={url} alt={alt} loading="lazy" className={cn("block max-w-none", box && "absolute inset-0")} style={box ? { width: box.cw, height: box.ch } : undefined} />
           {box && <span className="pointer-events-none absolute rounded-[3px] outline-2 outline-offset-2 outline-primary" style={{ left: box.x, top: box.y, width: box.w, height: box.h }} />}

@@ -363,7 +363,7 @@ function LookTile({ look, sameAs, group, target, proposal, compare, measure }: {
           </>
         ) : undefined}
       />
-      <InContext url={e.shot.url} box={e.shot.box} alt={`Where it sits: ${e.snippet.slice(0, 40)}`} page={e.review?.pageName ?? "its page"} />
+      <InContext url={e.shot.context?.url ?? e.shot.url} box={e.shot.context?.box ?? e.shot.box} alt={`Where it sits: ${e.snippet.slice(0, 40)}`} page={e.review?.pageName ?? "its page"} />
       {e.review && !e.review.ready && <EvidenceNote e={e} />}
       <figcaption className="flex flex-col gap-1.5 px-0.5">
         <span className="flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground">

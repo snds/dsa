@@ -35,7 +35,7 @@ beforeAll(async () => {
     elements: {
       threshold: 0.9, patterns: [], questions: [], shotsTaken: null, rendered: null, sources: {},
       evals: [
-        el("ok"),
+        el("ok", { shot: shot("ok", { context: { url: "shots/ok.ctx.png", box: { x: 368, y: 234, w: 64, h: 32, cw: 800, ch: 500 } } }) }),
         el("guess", { shot: shot("guess", { drawn: "mount", exact: true }) }),
         el("bare", { shot: null, shotMissing: true }),
       ],
@@ -88,6 +88,9 @@ test("one item: no code on its face; both images at real size; where it sits; an
   expect(pair.querySelector('[data-pane="app"] [data-scale="1"] img')?.getAttribute("src")).toBe("shots/ok.png")
   expect(pair.querySelector('[data-pane="proposed"] img[data-scale="1"]')?.getAttribute("src")).toBe("rendered/own.png")
   expect(item.querySelector('[data-slot="in-context"]')?.textContent).toContain("In context, on Orders › Table")
+  // The crawler's wider crop of the page, the element ringed where its box says.
+  expect(item.querySelector('[data-slot="in-context"] img')?.getAttribute("src")).toBe("shots/ok.ctx.png")
+  expect((item.querySelector('[data-slot="in-context"] [data-scale="1"]') as HTMLElement).style.width).toBe("800px")
   const ex = item.querySelectorAll('[data-slot="examples"] [data-slot="example"]')
   expect(ex.length).toBeGreaterThanOrEqual(1)
   expect(ex[0]!.querySelector("img")?.getAttribute("src")).toBe("shots/use.png")

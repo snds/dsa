@@ -25,6 +25,8 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   with their literal props read from the source (`propsAt`), or the engine's own `<data>/precedent.json`
   when a run writes one. A use photographed by the crawler (`shots/index.json` `uses["<file>:<line>"]`)
   shows its photo.
+- "In context" on review cards and in Label Review uses the crawler's wider crop of the page around the
+  element (a shot's `context: { file, box }`, about 800 × 500 CSS px) when it has one, else the shot.
 
 - `dsa bench --folds <n>` reports held-out precision at the ready bar, with its one-sided 95% lower bound:
   labels split into n folds by a hash of their file, each fold scored apart. With `--fold-site` (one run
