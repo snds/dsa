@@ -127,6 +127,28 @@ export interface Tag { element: string; value: string; line: number; col: number
  * no JSX, or it doesn't parse). Lines are kept: every tag is inserted on its element's own line.
  */
 export function tagSource(code: string, file: string, o: TagOptions = {}): { code: string; tags: Tag[] } | null {
+  // Fail safe: the output is parsed again before it's handed on. If it doesn't parse, the file gets its
+  // source tags alone (no use marks, no state names); if that doesn't either, it's served as written. Either
+  // way one line names the file: one file must never take the app down.
+  const clean = file.replace(/[?#].*$/, '');
+  const plugins: any[] = /\.ts$/.test(clean) ? ['typescript', 'decorators-legacy'] : ['jsx', 'typescript', 'decorators-legacy'];
+  const parses = (c: string) => { try { babelParse(c, { sourceType: 'unambiguous', plugins }); return true; } catch { return false; } };
+  const full = tagFile(code, file, o, false);
+  if (!full || parses(full.code)) return full;
+  const lean = tagFile(code, file, o, true);
+  if (lean && parses(lean.code)) { warnOnce(clean, 'its use marks and state names made code that does not parse, so it has source tags only'); return lean; }
+  warnOnce(clean, 'tagging it made code that does not parse, so it is served as written');
+  return null;
+}
+
+const warned = new Set<string>();
+function warnOnce(file: string, why: string) {
+  if (warned.has(file)) return;
+  warned.add(file);
+  console.warn(`dsa tag: ${file}: ${why}. Please report this file's shape.`);
+}
+
+function tagFile(code: string, file: string, o: TagOptions, lean: boolean): { code: string; tags: Tag[] } | null {
   if (!tagEnabled(o)) return null;
   const clean = file.replace(/[?#].*$/, '');
   // A plain .ts file (a custom hook) has no JSX: only its state hooks are named, parsed as TypeScript alone.
@@ -140,7 +162,7 @@ export function tagSource(code: string, file: string, o: TagOptions = {}): { cod
   // The scanner's own parser options, so lines and columns are the ones it records.
   try { ast = babelParse(code, { sourceType: 'unambiguous', errorRecovery: true, plugins: tsOnly ? ['typescript', 'decorators-legacy'] : ['jsx', 'typescript', 'decorators-legacy'] }); } catch { return null; }
   const comps = o.components;
-  const uses = o.uses ?? process.env.DSA_TAG_USES === '1';
+  const uses = !lean && (o.uses ?? process.env.DSA_TAG_USES === '1');
   const edits: { at: number; text: string }[] = [];
   const tags: Tag[] = [];
   walk(ast.program, (n) => {
@@ -149,20 +171,20 @@ export function tagSource(code: string, file: string, o: TagOptions = {}): { cod
     if (!name) return;
     const host = n.name.type === 'JSXIdentifier' && /^[a-z]/.test(name) && !name.includes('-');
     if (!host && uses && !FRAGMENT.test(name) && /^[A-Z]/.test(name.split('.').pop() ?? '') && !n.attributes.some((a: any) => a.type === 'JSXAttribute' && a.name?.name === USE_ATTR)) {
-      edits.push({ at: n.name.end, text: ` ${USE_ATTR}=${JSON.stringify(`${rel}:${n.loc.start.line}:${n.loc.start.column + 1}`)}` });
+      edits.push({ at: afterName(n), text: ` ${USE_ATTR}=${JSON.stringify(`${rel}:${n.loc.start.line}:${n.loc.start.column + 1}`)}` });
     }
     if (!host && !(comps === true ? !FRAGMENT.test(name) : Array.isArray(comps) && comps.includes(name))) return;
     if (n.attributes.some((a: any) => a.type === 'JSXAttribute' && a.name?.name === TAG_ATTR)) return;
     const line = n.loc.start.line, col = n.loc.start.column + 1;
     const value = `${rel}:${line}:${col}`;
     // Straight after the name: before any spread, so a tag passed in from a caller still wins.
-    edits.push({ at: n.name.end, text: ` ${TAG_ATTR}=${JSON.stringify(value)}` });
+    edits.push({ at: afterName(n), text: ` ${TAG_ATTR}=${JSON.stringify(value)}` });
     tags.push({ element: name, value, line, col });
   });
   // Each state hook's name, kept by its setter (`const [open, setOpen] = useState(…)` → setOpen is "open"), so
   // the crawler sets state by name instead of guessing the hook's place. A statement after the declaration,
   // on its own line's end: no hook is added or moved, so Fast Refresh and the hooks' order stay as they were.
-  walk(ast.program, (n) => {
+  if (!lean) walk(ast.program, (n) => {
     if (n.type !== 'BlockStatement') return;
     for (const st of n.body) {
       if (st.type !== 'VariableDeclaration') continue;
@@ -199,6 +221,10 @@ function localComponents(ast: any): string[] {
   }
   return [...out];
 }
+
+// Straight after the element's name and any type arguments (`<Table<Row> …>`): an attribute between the two
+// isn't JSX.
+const afterName = (n: any): number => (n.typeArguments ?? n.typeParameters)?.end ?? n.name.end;
 
 const jsxName = (n: any): string | null => n.type === 'JSXIdentifier' ? n.name : n.type === 'JSXMemberExpression' ? (jsxName(n.object) ? `${jsxName(n.object)}.${n.property.name}` : null) : null;
 

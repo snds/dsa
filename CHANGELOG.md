@@ -62,6 +62,10 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- The tagger put its marks between a component's name and its type arguments (`<Table data-dsa-use="…"<Row>`),
+  which isn't JSX: a file with such an element answered 500 and the app didn't render. Marks now go after
+  the type arguments. The transform is also fail safe: its output is parsed again, and a file it would break
+  gets its source tags alone, else is served as written, with one line naming the file.
 - An app whose page rewrites its own URL as it loads (a home that redirects, or sets a hash) aborts the
   navigation that brought the crawler there, though the app loaded. That now counts as arrived (on the app's
   origin, document loaded), in pass 1, profiles and drawings, and drawings go to the URL the home page
