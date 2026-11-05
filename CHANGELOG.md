@@ -96,6 +96,8 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   coverage. It now keeps its measured precision, squeezed into [0, threshold) in order (`squeeze`).
 - Isotonic calibration left equal neighbouring scores in separate one-label blocks, so a clean top band
   never had enough labels for its lower bound. Equal neighbours now pool into one block.
+- A square button with no side padding whose content is passed in (`size-7`, `{children}`) took a text
+  size of the same height (xs). A square, unpadded box now takes an icon size (icon-sm).
 - A filled icon button (`bg-secondary` at rest) was always proposed as ghost. Its fill now picks the
   variant; only an unfilled icon button is ghost.
 - Elements a render function returns (`render={({ field }) => <input …/>}`, as form libraries use) were

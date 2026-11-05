@@ -256,7 +256,12 @@ function refineWithSignature(c: Candidate, f: ElementFeatures, sigs: SignatureSe
   const elProps = normalize(f.classes.tokens, sigs.aliases);
   const elHasSize = ['height', 'width'].some(k => elProps.has(k));
   const ruleSize = !elHasSize && c.props?.size && comp.axes.size?.includes(c.props.size) ? c.props.size : undefined;
-  let matches = bestMatches(f, comp, sigs, s => plausible(s.variant) && (!hasIconSizes || (iconRole ? s.iconOnly : !s.iconOnly)) && (!ruleSize || s.size === ruleSize));
+  // A square box with no side padding (size-7, or h-7 w-7) is an icon-sized control even when its content is
+  // passed in ({children}): it takes an icon size, never a text size of the same height.
+  const squareBox = elProps.has('height') && elProps.get('height') === elProps.get('width') && (!elProps.has('px') || /^0(rem|px)?$/.test(elProps.get('px')!));
+  const iconSized = iconRole || (squareBox && !f.children.text && c.role !== 'link-button');
+  if (squareBox && !iconRole && iconSized && hasIconSizes) c.reasons.push({ text: 'A square box with no side padding: an icon-sized control, so an icon size.', delta: 0 });
+  let matches = bestMatches(f, comp, sigs, s => plausible(s.variant) && (!hasIconSizes || (iconSized ? s.iconOnly : !s.iconOnly)) && (!ruleSize || s.size === ruleSize));
   if (!matches.length) matches = bestMatches(f, comp, sigs);
   if (!matches.length) return;
   // Size by distance in resolved pixels, height then width as hard limits: a 20px button is never given

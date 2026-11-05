@@ -199,3 +199,11 @@ test('scanner: an element in render={<button/>} is the component\'s own; one a r
   assert.equal(at(`const A = () => <Field control={c} name="x" render={({ field }) => <input {...field} className="h-8 border" />} />;`), false);
   assert.equal(at(`const A = () => <Card action={<button onClick={go}>Go</button>} />;`), false);
 });
+
+test('icon sizes: a square box with no side padding takes an icon size even when its content is passed in', () => {
+  const e = classify(features(`export const P = ({ label, onClick, children }) => <button type="button" aria-label={label} onClick={onClick} className="inline-flex size-7 items-center justify-center rounded border border-transparent hover:bg-accent">{children}</button>;`), systemRoleMap(), 0.9, acmeSigs());
+  assert.equal(e.use, 'Button');
+  assert.equal(e.props?.size, 'icon-sm', JSON.stringify(e.signature));
+  const text = classify(features(`export const T = () => <button type="button" onClick={go} className="inline-flex h-7 px-3 items-center rounded hover:bg-accent">Next page</button>;`), systemRoleMap(), 0.9, acmeSigs());
+  assert.notEqual(text.props?.size, 'icon-sm', 'a padded text button keeps a text size');
+});
