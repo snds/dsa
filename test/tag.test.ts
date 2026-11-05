@@ -123,3 +123,18 @@ test('a tag path maps back to its file, and to the URL a Vite server with a base
   assert.equal(fileOfTag('web/portal/src/Gone.tsx', root), null);
   assert.equal(fileOfTag('../etc/passwd', root), null);
 });
+
+test('state hooks are named by their setter, without moving a line or adding a hook; a plain .ts hook too', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-tag-names-'));
+  const tsx = `import { useState } from 'react';\nexport function Panel() {\n  const [open, setOpen] = useState(false);\n  const [rows] = useState([]);\n  return <div>{open ? 'x' : ''}</div>;\n}\n`;
+  const r = tagSource(tsx, path.join(root, 'src/Panel.tsx'), { when: true, root })!;
+  assert.match(r.code, /const \[open, setOpen\] = useState\(false\);;globalThis\.__dsaStateName\?\.\(setOpen, "open", "src\/Panel\.tsx:3"\);/);
+  // No setter, nothing to name; and no line moves.
+  assert.doesNotMatch(r.code, /"rows"/);
+  assert.equal(r.code.split('\n').length, tsx.split('\n').length);
+  // A custom hook in a .ts file (generics, no JSX): parsed as TypeScript alone, its state named.
+  const ts = `import { useReducer } from 'react';\nexport function useCount<T>(x: T) {\n  const [n, bump] = useReducer((a: number) => a + 1, 0);\n  return <T>(x as T) && n;\n}\n`;
+  const t = tagSource(ts, path.join(root, 'src/useCount.ts'), { when: true, root })!;
+  assert.match(t.code, /;globalThis\.__dsaStateName\?\.\(bump, "n", "src\/useCount\.ts:3"\);/);
+  assert.equal(tagSource(`export const x = <T,>(a: T) => a;\n`, path.join(root, 'src/x.ts'), { when: true, root }), null);
+});

@@ -7,7 +7,8 @@
  * - the tag ("file:line:col") and the URL;
  * - its size on the page;
  * - its owner component: the nearest component above it, by name, and that component's props;
- * - each component above it, outermost first, with the values of its state hooks, in React's order.
+ * - each component above it, outermost first, with the values of its state hooks, in React's order, each
+ *   with its name when the tagger named it (`__dsaStateName`, below).
  *
  * Values are copied with limits: functions become {"__dsa":"fn"}, a Set or Map {"__dsa":"set"|"map"},
  * React elements and DOM nodes null; depth 4, five items per list, 30 keys per object, 200 characters
@@ -21,6 +22,9 @@
 export const LEDGER_RUNTIME = `(() => {
   if (window.__dsaLedger) return;
   const L = (window.__dsaLedger = { all: [], seen: new Set() });
+  // State hooks by their setter: the tagger names each (setOpen → "open") as the component runs.
+  const names = (window.__dsaStateNames = new WeakMap());
+  window.__dsaStateName = (set, name, src) => { try { if (typeof set === 'function' && !names.has(set)) names.set(set, { name, src }); } catch {} };
   const MAX = 4000;
   const SECRET = /pass(word|code)?|secret|token|auth|session|cookie|credential|api.?key|email|phone|ssn|card.?(no|num)|cvv|iban|address/i;
   const cut = { on: false };
@@ -48,7 +52,7 @@ export const LEDGER_RUNTIME = `(() => {
   const take = (v) => { cut.on = false; const value = copy(v, 0, new WeakSet()); return { value, cut: cut.on }; };
   const nameOf = (t) => !t ? '' : typeof t === 'function' ? (t.displayName || t.name || '') : typeof t === 'object' ? (t.displayName || nameOf(t.render) || nameOf(t.type)) : '';
   const isComp = (f) => f.tag === 0 || f.tag === 1 || f.tag === 11 || f.tag === 14 || f.tag === 15;
-  const hooksOf = (f) => { const out = []; for (let h = f.memoizedState; h && typeof h === 'object' && 'next' in h; h = h.next) if (h.queue && typeof h.queue.dispatch === 'function') out.push(h.memoizedState); return out; };
+  const hooksOf = (f) => { const out = []; for (let h = f.memoizedState; h && typeof h === 'object' && 'next' in h; h = h.next) if (h.queue && typeof h.queue.dispatch === 'function') out.push(h); return out; };
   const out = [];
   const record = (f) => {
     const el = f.stateNode;
@@ -65,7 +69,7 @@ export const LEDGER_RUNTIME = `(() => {
     const rec = {
       src, url: location.href, at: Date.now(), w: Math.round(box.width), h: Math.round(box.height),
       owner: owner ? { name: nameOf(owner.type), props: props.value, cut: props.cut } : null,
-      ancestors: chain.slice().reverse().map((a) => ({ name: nameOf(a.type), hooks: a.tag === 1 ? [] : hooksOf(a).map((v) => take(v)) })),
+      ancestors: chain.slice().reverse().map((a) => ({ name: nameOf(a.type), hooks: a.tag === 1 ? [] : hooksOf(a).map((h) => { const t = take(h.memoizedState); const nm = names.get(h.queue.dispatch); return nm ? { ...t, name: nm.name } : t; }) })),
     };
     if (JSON.stringify(rec).length > 24000) { rec.ancestors = rec.ancestors.map((a) => ({ name: a.name, hooks: [] })); if (rec.owner) { rec.owner.props = null; rec.owner.cut = true; } }
     out.push(rec);

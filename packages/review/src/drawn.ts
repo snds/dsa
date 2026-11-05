@@ -675,7 +675,11 @@ export function stateSets(gates: { test: string; negated: boolean; component?: s
     const code = read(g.file);
     if (!code) continue;
     const order = stateOrder(code, g.component, hookCode ? (n) => hookCode(n, g.file!) : undefined);
-    if (!order.some(Boolean)) continue;
+    // Its own state hooks by name, counted or not: past a hook whose own hooks can't be counted, a state has no
+    // known place, but the tagger names each by its setter, so it can still be set by name (index -1).
+    const declared = new Set([...code.matchAll(/\[\s*([\w$]+)\s*,\s*[\w$]+\s*\]\s*=\s*(?:React\.)?use(?:State|Reducer)\b/g)].map(m => m[1]!));
+    const known = (x: string) => order.includes(x) || declared.has(x);
+    if (!order.some(Boolean) && !declared.size) continue;
     const ast = parse(code);
     const fn = ast ? componentFn(ast, g.component) : null;
     // A condition passed as a prop (`open={!!editor}`): the prop must hold, so its value's condition does.
@@ -708,7 +712,7 @@ export function stateSets(gates: { test: string; negated: boolean; component?: s
     };
     const visit = (e: any, truth: boolean) => {
       if (!e) return;
-      if (e.type === 'Identifier') { if (order.includes(e.name)) { const v = shapeFor(e.name, truth); if (v !== undefined) want.set(e.name, v); } return; }
+      if (e.type === 'Identifier') { if (known(e.name)) { const v = shapeFor(e.name, truth); if (v !== undefined) want.set(e.name, v); } return; }
       if (e.type === 'UnaryExpression' && e.operator === '!') return visit(e.argument, !truth);
       if (e.type === 'LogicalExpression') {
         if ((e.operator === '&&' && truth) || (e.operator === '||' && !truth)) { visit(e.left, truth); visit(e.right, truth); }
@@ -717,7 +721,7 @@ export function stateSets(gates: { test: string; negated: boolean; component?: s
       }
       if (e.type === 'BinaryExpression' && /^[!=]==?$/.test(e.operator)) {
         const [id, lit] = e.left.type === 'Identifier' ? [e.left, e.right] : [e.right, e.left];
-        if (id?.type !== 'Identifier' || !order.includes(id.name) || !/^(String|Numeric|Boolean)Literal$/.test(lit?.type)) return;
+        if (id?.type !== 'Identifier' || !known(id.name) || !/^(String|Numeric|Boolean)Literal$/.test(lit?.type)) return;
         const eq = e.operator.startsWith('=') === truth;
         if (eq) want.set(id.name, lit.value);
         else if (typeof lit.value === 'boolean') want.set(id.name, !lit.value);
@@ -730,6 +734,7 @@ export function stateSets(gates: { test: string; negated: boolean; component?: s
     for (const [name, value] of want) {
       const index = order.indexOf(name);
       if (index >= 0 && !s.slots.some(x => x.index === offset + index)) s.slots.push({ index: offset + index, name, value });
+      else if (index < 0 && !s.slots.some(x => x.name === name)) s.slots.push({ index: -1, name, value });
     }
     if (s.slots.length) out.set(key, s);
   }

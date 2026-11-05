@@ -32,6 +32,11 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- Exact state setters. In tagged files (a plain `.ts` hook included) the tagger names each state hook by its
+  setter as the app runs (`const [open, setOpen] = useState(…)` → "open"), with a statement after the
+  declaration on the same line: no hook added or moved, Fast Refresh unchanged. Setting state picks the
+  hook by that name, else by its place; a state past a hook whose own hooks can't be counted (one a factory
+  makes) can now be set by name. The ledger records each hook's name too.
 - The evidence ledger. The tagger's runtime (`LEDGER_RUNTIME`, first in every page it serves, and in every
   page the crawler opens) records each tagged element as React commits it: its URL, its size, its owner
   component's props and the state of each component above it, copied with limits (functions stubbed,

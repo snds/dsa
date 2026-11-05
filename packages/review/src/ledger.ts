@@ -12,7 +12,7 @@ import path from 'node:path';
  * Stored by file, beside the hash of that file's source when it was recorded: a record from an older
  * version of its file is dropped, since its lines and state may have moved.
  */
-export interface Copied { value: unknown; cut: boolean }
+export interface Copied { value: unknown; cut: boolean; /** The hook's name, when the tagger named it. */ name?: string }
 export interface LedgerRec {
   /** The source tag: "file:line:col", as the tagger names the file. */
   src: string;

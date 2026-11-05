@@ -121,13 +121,16 @@ export interface Tag { element: string; value: string; line: number; col: number
 export function tagSource(code: string, file: string, o: TagOptions = {}): { code: string; tags: Tag[] } | null {
   if (!tagEnabled(o)) return null;
   const clean = file.replace(/[?#].*$/, '');
-  // No JSX: nothing to tag, unless it makes a context the mount may need to provide (kept below).
-  if (!SOURCE.test(clean) || (!code.includes('<') && !/\bcreateContext\b/.test(code))) return null;
+  // A plain .ts file (a custom hook) has no JSX: only its state hooks are named, parsed as TypeScript alone.
+  const tsOnly = /\.ts$/.test(clean) && !/\.d\.ts$/.test(clean);
+  // No JSX: nothing to tag, unless it makes a context the mount may need to provide, or keeps state (kept below).
+  if (!(SOURCE.test(clean) || tsOnly) || (!code.includes('<') && !/\bcreateContext\b|\buse(State|Reducer)\b/.test(code))) return null;
+  if (tsOnly && !/\buse(State|Reducer)\b/.test(code)) return null;
   const rel = tagFileOf(clean, o);
   if (!rel) return null;
   let ast: any;
   // The scanner's own parser options, so lines and columns are the ones it records.
-  try { ast = babelParse(code, { sourceType: 'unambiguous', errorRecovery: true, plugins: ['jsx', 'typescript', 'decorators-legacy'] }); } catch { return null; }
+  try { ast = babelParse(code, { sourceType: 'unambiguous', errorRecovery: true, plugins: tsOnly ? ['typescript', 'decorators-legacy'] : ['jsx', 'typescript', 'decorators-legacy'] }); } catch { return null; }
   const comps = o.components;
   const edits: { at: number; text: string }[] = [];
   const tags: Tag[] = [];
@@ -143,6 +146,24 @@ export function tagSource(code: string, file: string, o: TagOptions = {}): { cod
     // Straight after the name: before any spread, so a tag passed in from a caller still wins.
     edits.push({ at: n.name.end, text: ` ${TAG_ATTR}=${JSON.stringify(value)}` });
     tags.push({ element: name, value, line, col });
+  });
+  // Each state hook's name, kept by its setter (`const [open, setOpen] = useState(…)` → setOpen is "open"), so
+  // the crawler sets state by name instead of guessing the hook's place. A statement after the declaration,
+  // on its own line's end: no hook is added or moved, so Fast Refresh and the hooks' order stay as they were.
+  walk(ast.program, (n) => {
+    if (n.type !== 'BlockStatement') return;
+    for (const st of n.body) {
+      if (st.type !== 'VariableDeclaration') continue;
+      for (const d of st.declarations) {
+        const call = d.init?.type === 'CallExpression' ? d.init : null;
+        const callee = call?.callee;
+        const hook = callee?.type === 'Identifier' ? callee.name : callee?.type === 'MemberExpression' && callee.property?.type === 'Identifier' ? callee.property.name : '';
+        if (!/^use(State|Reducer)$/.test(hook) || d.id?.type !== 'ArrayPattern') continue;
+        const [v, set] = d.id.elements;
+        if (v?.type !== 'Identifier' || set?.type !== 'Identifier' || !d.loc) continue;
+        edits.push({ at: st.end, text: `;globalThis.__dsaStateName?.(${set.name}, ${JSON.stringify(v.name)}, ${JSON.stringify(`${rel}:${d.loc.start.line}`)});` });
+      }
+    }
   });
   // The file's own components, exported or not, kept by its tag path so /@dsa/mount can draw one that
   // isn't exported (a row, a panel defined beside its parent). A global, not an export: Fast Refresh stays.

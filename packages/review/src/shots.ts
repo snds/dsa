@@ -1092,7 +1092,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       return j.length < 2000 && !j.includes('"__dsa":"fn"');
     };
     return rec.ancestors
-      .map(a => ({ file: '', component: a.name, slots: a.hooks.map((h, i) => ({ index: i, name: `#${i}`, value: h.value as any, ok: !h.cut && safe(h.value) })).filter(x => x.ok).map(({ ok: _, ...x }) => x) }))
+      .map(a => ({ file: '', component: a.name, slots: a.hooks.map((h, i) => ({ index: i, name: h.name ?? `#${i}`, value: h.value as any, ok: !h.cut && safe(h.value) })).filter(x => x.ok).map(({ ok: _, ...x }) => x) }))
       .filter(x => x.slots.length);
   }
 
@@ -1638,7 +1638,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
 /**
  * Runs in the page: set component state through React, so an element its conditions hide shows. For each
  * set, the component's fibers are found from elements its file draws (or any tagged element, walking up),
- * and each named state hook (by its place among the hooks that keep state) is read first: one that already
+ * and each named state hook (by the name the tagger gave its setter, else by its place among the hooks that keep state) is read first: one that already
  * holds the value (or, for true, any truthy value; for false, any falsy one) is left alone, so a default
  * isn't set again. Inside the mounted drawing only when `within` is given. With `check`, nothing is set:
  * it only reads. Returns the slots found, how many it set, and the names of those not holding their value.
@@ -1648,7 +1648,7 @@ const SET_STATE = `({ sets, within, check }) => {
   const nameOf = (t) => !t ? '' : typeof t === 'function' ? (t.displayName || t.name || '') : (t.displayName || nameOf(t.render) || nameOf(t.type));
   const revive = (v) => Array.isArray(v) ? v.map(revive) : v && typeof v === 'object' ? (v.__dsa === 'fn' ? () => {} : v.__dsa === 'set' ? new Set() : v.__dsa === 'map' ? new Map() : Object.fromEntries(Object.entries(v).map(([k, x]) => [k, revive(x)]))) : v;
   const holds = (cur, want) => want === true ? Boolean(cur) : want === false ? !cur : (() => { try { return JSON.stringify(cur) === JSON.stringify(want); } catch { return false; } })();
-  const out = { found: 0, set: 0, off: [] };
+  const out = { found: 0, set: 0, named: 0, off: [] };
   const scope = within ? document.querySelector(within) : document;
   if (!scope) return out;
   const tagged = Array.from(scope.querySelectorAll('[data-dsa-src]')).filter((el) => within || !el.closest('#dsa-mount, #dsa-markup'));
@@ -1663,9 +1663,13 @@ const SET_STATE = `({ sets, within, check }) => {
       seen.add(f);
       const hooks = [];
       for (let h = f.memoizedState; h && typeof h === 'object' && 'next' in h; h = h.next) if (h.queue && typeof h.queue.dispatch === 'function') hooks.push(h);
+      // By name when the tagger named its hooks (exact), else by its place among them.
+      const names = window.__dsaStateNames;
       for (const sl of s.slots) {
-        const h = hooks[sl.index];
+        const byName = names && sl.name && sl.name[0] !== '#' ? hooks.find((x) => (names.get(x.queue.dispatch) || {}).name === sl.name) : null;
+        const h = byName || hooks[sl.index];
         if (!h) continue;
+        if (byName) out.named++;
         out.found++;
         if (holds(h.memoizedState, sl.value)) continue;
         if (check) { out.off.push(sl.name); continue; }
@@ -1713,7 +1717,7 @@ const SEED_STORAGE = `({ local, session }) => {
   for (const [k, v] of Object.entries(session)) { try { v === null ? sessionStorage.removeItem(k) : sessionStorage.setItem(k, v); } catch {} }
 }`;
 
-interface SetResult { found: number; set: number; off: string[] }
+interface SetResult { found: number; set: number; named?: number; off: string[] }
 const NONE_SET: SetResult = { found: 0, set: 0, off: [] };
 
 const SETTLE = `(max) => new Promise((done) => {
