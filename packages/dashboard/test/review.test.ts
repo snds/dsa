@@ -143,3 +143,35 @@ test("a control's words from the code show the values it fills in as gaps", () =
   assert.equal(stepWords({ label: 'Save' }), 'Save');
   assert.equal(stepWords(''), '');
 });
+
+test('a use matches on the system axes, not type="button"; no exact use shows the nearest, labelled; a claim of none needs the whole app read', () => {
+  const system = [{ component: 'Button', axes: { variant: ['default', 'outline'], size: ['default', 'sm', 'xs'] }, defaults: { variant: 'default', size: 'default' } }];
+  const use = (line: number, props: object, o: object = {}) => ({ app: 'ledger', file: `ledger/src/U${line}.tsx`, line, component: 'Button', props, ...o });
+  const pick = { use: 'Button', props: { variant: 'outline', size: 'xs' } };
+  const withDrawing = (uses: any[], searched?: any) => {
+    const p: any = payload([el('a', { ...pick, needsHuman: true })]);
+    p.elements.proposals['Button|size=xs;variant=outline#own1'] = { use: 'Button', props: pick.props, check: 'exact', url: 'r/o.png', own: true, text: 'Save' };
+    return withReview(p, { audit: 0, system, precedents: uses, searched }).elements.review.items[0];
+  };
+  const exact = withDrawing([use(1, { variant: 'outline', size: 'xs', type: 'button' })]);
+  assert.equal(exact.usesCount, 1, 'type="button" does not make it another look');
+  assert.equal(exact.nearest, null);
+  // An axis set from the code might be anything: not exact, not nearest.
+  assert.equal(withDrawing([use(2, { variant: 'outline' }, { dynamic: ['size'] })]).usesCount, 0);
+  const near = withDrawing([use(3, { variant: 'outline', size: 'sm', type: 'button' }), use(4, { variant: 'default', size: 'default' })]);
+  assert.equal(near.usesCount, 0);
+  assert.equal(near.nearest.label, "Not at this size, but here's the same variant at sm.");
+  assert.deepEqual(near.nearest.examples.map((x: any) => x.line), [3]);
+  assert.equal(withDrawing([], { ledger: { files: 40, unread: 0 } }).searched.whole, true);
+  assert.equal(withDrawing([], { ledger: { files: 40, unread: 2 } }).searched.whole, false);
+  assert.equal(withDrawing([]).searched, null, 'no search of its own: no claim');
+});
+
+test("a proposal drawn without the system's styles needs evidence, not a decision", () => {
+  const E: any = payload([]).elements;
+  const p = { ...E.proposals, 'Button|variant=outline#own1': { ...E.proposals['Button|variant=outline#own1'], unstyled: true } };
+  const r = evidenceOf({ ...E, proposals: p }, el('x'), { verdict: 'replace', use: 'Button', props: { variant: 'outline' } });
+  assert.equal(r.ready, false);
+  assert.equal(r.missing[0]!.kind, 'unstyled');
+  assert.match(r.missing[0]!.why, /couldn't be drawn with the system's styles/);
+});

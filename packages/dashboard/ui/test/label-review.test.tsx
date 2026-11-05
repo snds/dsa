@@ -166,3 +166,21 @@ test("\"with its own words\" only when the drawing's words are the element's", a
   expect(S.ownWords({ own: true }, e), "a drawing that didn't record its words isn't taken on trust").toBe(false)
   expect(S.ownWords({ own: false, text: "Library" }, e)).toBe(false)
 })
+
+test("differences are said as what you'd see, never as classes or tokens", async () => {
+  const L = await import("@/views/review/LabelReview")
+  const sig = (mismatched: string[], o: object = {}) => ({ signature: { score: 0.1, matched: [], mismatched }, ...o })
+  const said = L.plainDifferences(sig(["px ✗ 0.75rem vs 0.375rem", "py ✗ 0.375rem vs --density-menu-item-py", "hover:bg ✗ zinc-4 vs unset", "active:bg ✗ zinc-4 vs unset", "radius ✗ unset vs --radius-md"]))
+  expect(said).toEqual(["12 px side padding instead of 6 px", "6 px top and bottom padding, where the system uses a density setting", "a different hover colour", "a different pressed colour", "squarer corners"])
+  expect(said.join(" ")).not.toMatch(/--|zinc|rem\b|unset|:/)
+  // On a dark surface the proposal's white page isn't a difference; on white, it can be.
+  const bg = { rendered: { diff: { same: [], score: 0.5, diffs: [{ label: "background", element: "rgb(0, 0, 0)", system: "rgb(255, 255, 255)" }, { label: "height", element: "40", system: "36" }] } } }
+  expect(L.plainDifferences({ ...bg, shot: { surface: "rgb(20, 20, 20)" } })).toEqual(["4 px taller"])
+  expect(L.plainDifferences({ ...bg, shot: { surface: "rgb(255, 255, 255)" } })).toEqual(["black background instead of white", "4 px taller"])
+})
+
+test("building instructions aren't reasons to judge by", async () => {
+  const L = await import("@/views/review/LabelReview")
+  expect(L.reasonToJudge("It only works inside a menu. Build the right-click menu with ContextMenu: ContextMenuTrigger wraps the target.")).toBe("It only works inside a menu.")
+  expect(L.reasonToJudge("Migrate ContextMenu with its parts.")).toBe("")
+})

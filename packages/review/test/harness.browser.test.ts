@@ -7,7 +7,7 @@ import { parseConfig } from '@snds/dsa';
 import { readProposals } from '@snds/dsa/engine';
 import { fixtureCopy, loadConfig, NOW, runPipeline } from '../../../test/engine/fixture.js';
 import { openHarness, startHarness } from '../src/harness.js';
-import { __test as r, renderProposals } from '../src/rendered.js';
+import { READ_STYLE, __test as r, renderProposals, unstyledLook } from '../src/rendered.js';
 
 // Proposals drawn without stories: the system's component mounted from its own source with the proposal's
 // props and the element's own words, inside what its Storybook preview adds (its CSS). Props confirmed from
@@ -98,4 +98,38 @@ test('props are confirmed from cva\'s classes when the element shows no data att
     const blind: any[] = await r.run(page, r.SCAN, { slot: 'toggle', want: { variant: 'outline' }, classes: null });
     assert.equal(blind[0].unknown, 1);
   } finally { await page.close(); }
+});
+
+test("Storybook beside the packages: its stylesheet, Tailwind and all, reaches the drawing, even when its decorators can't run outside it", { timeout: 120_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  if (!hasKit || !fs.existsSync(path.join(KIT, '@tailwindcss/vite'))) skip('no Vite, React and Tailwind installed');
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-harness-')));
+  fs.symlinkSync(KIT, path.join(root, 'node_modules'), 'dir');
+  const sb = path.join(root, 'apps/storybook/.storybook'), ds = path.join(root, 'packages/kit/src');
+  fs.mkdirSync(sb, { recursive: true });
+  fs.mkdirSync(ds, { recursive: true });
+  fs.writeFileSync(path.join(root, 'packages/kit/package.json'), '{"name":"@acme/kit"}');
+  fs.writeFileSync(path.join(sb, 'main.js'), "import tailwindcss from '@tailwindcss/vite';\nexport default { viteFinal(c) { c.plugins = [...(c.plugins ?? []), tailwindcss()]; return c; } };\n");
+  fs.writeFileSync(path.join(sb, 'preview.css'), '@import "tailwindcss";\n@source "../../../packages";\nhtml { font-family: Verdana, sans-serif; }\n');
+  // The preview's decorator works only inside Storybook: it throws here.
+  fs.writeFileSync(path.join(sb, 'preview.js'), "import './preview.css';\nexport const decorators = [() => { throw new Error('only inside Storybook'); }];\n");
+  const file = path.join(ds, 'Menu.jsx');
+  fs.writeFileSync(file, `import { createElement as h } from 'react';
+export function MenuItem({ children }) { return h('div', { 'data-slot': 'menu-item', className: 'px-3 py-1 rounded-md' }, children); }
+`);
+  const logs: string[] = [];
+  const h = await startHarness(root, {} as any, [file], m => logs.push(m));
+  assert.ok(h);
+  assert.ok(logs.some(l => l.includes(path.join('apps', 'storybook', '.storybook', 'preview.js'))), logs.join('\n'));
+  const page = await browser!.newPage();
+  try {
+    assert.equal(await openHarness(page, h!), true);
+    const done = await page.evaluate((x) => (window as any).__dsaDraw(x), { file: `/@fs${file}`, name: 'MenuItem', props: {}, text: 'Comment', slot: 'menu-item' } as any);
+    assert.deepEqual(done, { ok: true });
+    await page.waitForTimeout(300);
+    const look: any = await page.evaluate(`(${READ_STYLE})(document.querySelector('[data-slot="menu-item"]'))`);
+    assert.equal(look.paddingLeft, '12px', 'the utility classes were generated');
+    assert.match(look.fontFamily, /Verdana/);
+    assert.equal(unstyledLook(look), false);
+  } finally { await page.close(); await h!.stop(); }
 });

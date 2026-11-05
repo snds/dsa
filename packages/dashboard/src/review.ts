@@ -108,6 +108,8 @@ export function evidenceOf(E: any, e: any, pick: any): Evidence {
     if (p && p.check === 'none' && !p.url && (p.noSource || NO_SOURCE.test(p.note ?? ''))) missing.push({ kind: 'no-source', group: 'propose a component the system has nothing to draw from', why: `The system has nothing to draw ${pick.use} from.`, fix: `Add a story or source for ${pick.use}, or propose another component.` });
     else if (!p?.url) missing.push({ kind: 'not-drawn', group: "have a proposal that isn't drawn yet", why: `The proposal (${what}) isn't drawn yet.`, fix: 'Draw the proposals (dsa render).' });
     else if (p.check !== 'exact') missing.push({ kind: 'near-match', group: 'have a proposal drawn only as a near match', why: `The proposal (${what}) is only drawn as a near match, not with these props.`, fix: 'Draw the proposals (dsa render).' });
+    // Drawn without the system's stylesheet it looks broken, and would be judged for that, not for the fit.
+    else if (p.unstyled) missing.push({ kind: 'unstyled', group: "have a proposal that couldn't be drawn with the system's styles", why: "The proposal couldn't be drawn with the system's styles, so it wouldn't look like the real component.", fix: "Check the system's Storybook preview loads its stylesheet, then draw the proposals again (dsa render)." });
     // A stand-in icon reads as a different control; sample words as a different label: neither is decidable.
     else if (!container && /stand-in|^icon|icon .*couldn't be loaded/.test(p.content ?? '')) missing.push({ kind: 'stand-in-icon', group: "have a proposal drawn with a stand-in icon, not their own", why: "The proposal is drawn with a stand-in icon, not this element's own icon, so it may read as a different control.", fix: "Take the photo again so its icon is recorded, then draw the proposal again (dsa render)." });
     else if (!container && (e.ownHash || p.content) && !drawnWithOwnWords(p, e)) missing.push({ kind: 'not-own-words', group: "have a proposal drawn with other words than their own", why: p.own ? "The proposal's words aren't this element's own." : "The proposal shows the system's sample words, not this element's own.", fix: 'Draw the proposal again once its own words are known (a photo records them).' });
@@ -140,6 +142,22 @@ export function pageName(url: string | null | undefined): string {
   return words.join(' › ');
 }
 
+/** Props that don't change how a system component looks, when the system doesn't list its axes. */
+const NOT_LOOK = /^(type|form|name|value|disabled|tabIndex|role|href|to|target|rel|htmlFor|placeholder|autoFocus|asChild|render|open|defaultOpen|checked|defaultChecked)$/;
+
+/** "Not at this size, but here's the same variant at sm." The element's pick first, then the nearest use. */
+export function nearestLabel(use: string, want: Record<string, string>, have: Record<string, string>): string {
+  const keys = [...new Set([...Object.keys(want), ...Object.keys(have)])];
+  const differ = keys.filter((k) => want[k] !== have[k]), alike = keys.filter((k) => want[k] === have[k]);
+  const at = (k: string) => (k === 'size' ? 'at' : 'in');
+  const value = (k: string) => have[k] ?? 'its default';
+  if (!differ.length) return `The app uses ${use} like this.`;
+  const first = differ[0]!;
+  const not = `Not ${at(first)} this ${differ.length > 1 ? 'combination' : first}`;
+  const there = differ.map((k) => `${at(k)} ${value(k)}`).join(', ');
+  return alike.length ? `${not}, but here's the same ${alike.join(' and ')} ${there}.` : `${not}, but here's ${use} ${there}.`;
+}
+
 export interface ReviewQueueEntry { id: string; why: 'decide' | 'disagree' | 'audit'; note?: string | undefined }
 
 /**
@@ -152,7 +170,7 @@ export function canDecideNow(e: any): boolean {
 }
 
 /** One place the app already uses a system component, with its props and, when the crawler has one, its photo. */
-export interface Precedent { app: string; file: string; line: number; component: string; props: Record<string, string>; shot?: { url: string; box: any; page?: string | undefined; pageName: string } | null }
+export interface Precedent { app: string; file: string; line: number; component: string; props: Record<string, string>; /** Props set from the code, so their value isn't known. */ dynamic?: string[] | undefined; shot?: { url: string; box: any; page?: string | undefined; pageName: string } | null }
 
 /**
  * Add what the review needs to a report payload (in place): each element's evidence (`review`), the
@@ -164,6 +182,8 @@ export function withReview(payload: any, o: {
   audit?: number; seed?: string;
   system?: { component: string; axes?: Record<string, string[]>; defaults?: Record<string, string> }[];
   precedents?: Precedent[];
+  /** How much of each app the search for precedents read; absent when it didn't search itself. */
+  searched?: Record<string, { files: number; unread: number }> | undefined;
   sourceRef?: (e: any) => string;
 } = {}): any {
   const E = payload.elements;
@@ -191,21 +211,50 @@ export function withReview(payload: any, o: {
   const queued = new Set(open.map((q) => q.id));
   const entries = [...open, ...more.filter((q) => !queued.has(q.id) && (queued.add(q.id), true))];
   const defaults = new Map((o.system ?? []).map((c) => [c.component, c.defaults ?? {}]));
-  const key = (use: string, props: Record<string, unknown> | undefined) => `${use}|${JSON.stringify(canonicalProps(props, defaults.get(use) ?? {}))}`;
+  // A use matches on what the system's look depends on (its axes), not on type="button" and the like.
+  const axesOf = new Map((o.system ?? []).map((c) => [c.component, Object.keys({ ...(c.axes ?? {}), ...(c.defaults ?? {}) })]));
+  const look = (use: string, props: Record<string, unknown> | undefined) => {
+    const axes = axesOf.get(use);
+    const kept = Object.fromEntries(Object.entries(props ?? {}).filter(([k]) => (axes?.length ? axes.includes(k) : !NOT_LOOK.test(k))));
+    return canonicalProps(kept, defaults.get(use) ?? {});
+  };
+  const key = (use: string, props: Record<string, unknown> | undefined) => `${use}|${JSON.stringify(look(use, props))}`;
+  // A use with an axis set from the code might be anything: not an exact match, nor said to be.
+  const unknownLook = (u: Precedent) => (u.dynamic ?? []).some((k) => k === '...' || (axesOf.get(u.component)?.length ? axesOf.get(u.component)!.includes(k) : !NOT_LOOK.test(k)));
   const precedents: Record<string, Precedent[]> = {};
-  for (const u of o.precedents ?? []) (precedents[key(u.component, u.props)] ??= []).push(u);
+  const byUse: Record<string, Precedent[]> = {};
+  for (const u of o.precedents ?? []) { (byUse[u.component] ??= []).push(u); if (!unknownLook(u)) (precedents[key(u.component, u.props)] ??= []).push(u); }
+  const photoFirst = (l: Precedent[]) => [...l.filter((u) => u.shot), ...l.filter((u) => !u.shot)];
+  /** The nearest uses when none is exact: the most axes alike, labelled by what differs. */
+  const nearestFor = (use: string, props: Record<string, unknown> | undefined) => {
+    const want = look(use, props);
+    const rank = (byUse[use] ?? []).filter((u) => !unknownLook(u)).map((u) => {
+      const have = look(use, u.props);
+      return { u, have, alike: Object.keys(want).filter((k) => want[k] === have[k]).length };
+    }).sort((a, b) => b.alike - a.alike);
+    const top = rank[0];
+    if (!top) return null;
+    const same = rank.filter((r) => JSON.stringify(r.have) === JSON.stringify(top.have)).map((r) => r.u);
+    return { label: nearestLabel(use, want, top.have), examples: photoFirst(same).slice(0, 3), count: same.length };
+  };
   // Each queued element's label fields, so the page can write a labels.jsonl row as it is.
   const items = entries.map((q) => {
     const e = byId.get(q.id);
     const pick = picks.get(q.id) ?? e;
     const alts = (e.alternatives ?? []).filter((a: any) => a?.use && a.use !== pick?.use).slice(0, 3);
     const mine = pick?.use ? precedents[key(pick.use, pick.props)] ?? [] : [];
-    const examples = [...mine.filter((u) => u.shot), ...mine.filter((u) => !u.shot)].slice(0, 3);
+    const examples = photoFirst(mine).slice(0, 3);
+    const nearest = pick?.use && !mine.length ? nearestFor(pick.use, pick.props) : null;
+    const own = pick?.use ? E.proposals?.[proposalKey(pick.use, pick.props)] : null;
+    const scope = o.searched?.[e.target];
     const altEx = alts[0] ? (precedents[key(alts[0].use, alts[0].props)] ?? []).slice(0, 1) : [];
     return {
       ...q, pick,
       label: { app: e.target, file: e.file, line: e.line, sourceRef: o.sourceRef?.(e) ?? 'worktree', elementHash: e.srcHash ?? hashText(String(e.snippet ?? e.id)) },
       examples, altExamples: altEx, usesCount: mine.length,
+      nearest, systemExample: !mine.length && own?.url && own.check === 'exact' && !own.unstyled ? { url: own.url } : null,
+      // Said as "doesn't use it" only when the search read the whole app.
+      searched: scope ? { files: scope.files, unread: scope.unread, whole: scope.files > 0 && scope.unread === 0 } : null,
     };
   });
   const setAside = live.filter((e: any) => !e.review.ready).length;

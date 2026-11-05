@@ -2,7 +2,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { DEFAULT_THRESHOLD, locate, freshShots, freshnessByApp, readShotIndex, autoPick, contentHash, ownOf, openStore, plainText, withPlain, withMetrics, appSettings, closestRendered, compareRendered, effectiveSettings, familyKey, figmaEnabled, homeOf, loadCatalog, patterns as stylePatterns, pushedThisWeek, questions, readEvents, readProposals, readRendered, renderIssue, renderedFor as composeRendered, resolveTargets, rowToFinding, sourceExcerpts, placeExcerpts, titleOf, type Config } from '@snds/dsa/engine';
+import { allDsPackages, defaultExcludes, displayPath, findUses, usageExcludes, DEFAULT_THRESHOLD, locate, freshShots, freshnessByApp, readShotIndex, autoPick, contentHash, ownOf, openStore, plainText, withPlain, withMetrics, appSettings, closestRendered, compareRendered, effectiveSettings, familyKey, figmaEnabled, homeOf, loadCatalog, patterns as stylePatterns, pushedThisWeek, questions, readEvents, readProposals, readRendered, renderIssue, renderedFor as composeRendered, resolveTargets, rowToFinding, sourceExcerpts, placeExcerpts, titleOf, type Config } from '@snds/dsa/engine';
 
 import { scanEstimate, type PageActions, type ResolvedProfile } from '@snds/dsa';
 import { buildQueue, PKG_DIR } from './queue.js';
@@ -159,6 +159,7 @@ export async function renderReport(root: string, config: Config, dataDir: string
     // top), how it was made to show (hover, focus), and ties (one of N alike; N source lines claim it).
     // Tagged: found by its source tag, so the place is exact (ties are then the nodes its one line made).
     const shotOf = (s: any) => ({ url: shotUrl(s.file), match: s.matchScore, page: s.page, box: s.box ?? null, revealedBy: s.revealedBy ?? null,
+      ...(s.styles?.surface ? { surface: s.styles.surface } : {}),
       ...(s.blank ? { blank: true } : {}), ...(s.covered ? { covered: true } : {}), ...(s.via ? { via: s.via } : {}), ...(s.ties > 1 ? { ties: s.ties, alike: s.alike ?? 1 } : {}), ...(s.shared ? { shared: s.shared } : {}), ...(s.tagged ? { tagged: true } : {}),
       // Drawn direct from code (mount, markup): shown, labelled, never a photo. Uncovered: covering layers hidden.
       ...(s.drawn ? { drawn: s.drawn } : {}), ...(s.exact ? { exact: true } : {}), ...(s.placeholder ? { placeholder: s.placeholder } : {}), ...(s.uncovered ? { uncovered: s.uncovered } : {}),
@@ -230,7 +231,7 @@ how: e.how ?? null, parent: e.parent ?? null, recipe: e.recipe ?? null,
       freshness: { run: fresh.run, stale: Object.keys(fresh.stale).length, byApp: freshnessByApp(fresh, id => appOfId.get(id)) },
       rendered: renderedSet ? { takenAt: renderedSet.takenAt, source: renderedSet.source, combos: Object.values(renderedSet.components).reduce((a, c) => a + Object.keys(c).length, 0) } : null,
       // Each proposed replacement rendered with its exact props (dsa render), keyed like proposalKey: the review shows the options as they would look.
-      proposals: Object.fromEntries(Object.entries(readProposals(evidenceDir)).map(([k, p]) => [k, { use: p.use, props: p.props, check: p.check, url: p.shot ? renderedUrl(p.shot) : null, story: p.story ?? null, content: p.content ?? null, actual: p.actual ?? null, note: p.note ?? null, own: p.own ?? false, fallback: p.fallback ? renderedUrl(p.fallback) : null, ...(p.noSource ? { noSource: true } : {}) }])),
+      proposals: Object.fromEntries(Object.entries(readProposals(evidenceDir)).map(([k, p]) => [k, { use: p.use, props: p.props, check: p.check, url: p.shot ? renderedUrl(p.shot) : null, story: p.story ?? null, content: p.content ?? null, actual: p.actual ?? null, note: p.note ?? null, own: p.own ?? false, fallback: p.fallback ? renderedUrl(p.fallback) : null, ...(p.noSource ? { noSource: true } : {}), ...(p.unstyled ? { unstyled: true } : {}) }])),
     });
     // Review for people: what each element can show, the queue, the system's allowed props, and where
     // the app already uses each proposal (its precedents).
@@ -238,7 +239,7 @@ how: e.how ?? null, parent: e.parent ?? null, recipe: e.recipe ?? null,
       queue: readQueue(opts.reviewQueue ?? path.join(dataDir, 'review-queue.jsonl')),
       system: (readJson(path.join(dataDir, 'signatures.json')) ?? []).map((c: any) => ({ component: c.component, axes: c.axes ?? {}, defaults: c.defaults ?? {} })),
       // The engine's own index of existing uses (<data>/precedent.json, when a run writes one), else the scan's uses.
-      precedents: precedentFile(dataDir, shotIdx, shotUrl) ?? await precedentsOf(store, runId, root, config, elements, shotIdx, shotUrl),
+      ...(() => { const f = precedentFile(dataDir, shotIdx, shotUrl); if (f) return { precedents: f }; const r = precedentsOf(root, config, elements, shotIdx, shotUrl); return { precedents: r.uses, searched: r.searched }; })(),
       sourceRef: (e: any) => elements.sources?.[e.file]?.ref ?? 'worktree',
     });
     // Agent readiness: this run per repo (audit checks, the profile's usage checker by kind, reconciled with look-alikes), the trend, and bench runs.
@@ -401,32 +402,39 @@ function readQueue(file: string): ReviewQueueEntry[] | null {
  * literal props read from the source, and a photo when the crawler took one (shots/index.json `uses`,
  * keyed by "<file>:<line>"). Only components some card proposes are read.
  */
-async function precedentsOf(store: any, runId: string, root: string, config: Config, elements: any, shotIdx: any, shotUrl: (f: string) => string): Promise<Precedent[]> {
+function precedentsOf(root: string, config: Config, elements: any, shotIdx: any, shotUrl: (f: string) => string): { uses: Precedent[]; searched: Record<string, { files: number; unread: number }> } {
   const wanted = new Set<string>();
   for (const e of elements.evals ?? []) { if (e.use) wanted.add(e.use); for (const a of e.alternatives ?? []) if (a?.use) wanted.add(a.use); }
   for (const q of elements.questions ?? []) if (q.auto?.use) wanted.add(q.auto.use);
-  if (!wanted.size) return [];
-  const rows = await store.all('select target, component, file, line from instances where run_id=$1 order by target, file, line', [runId]).catch(() => []);
+  if (!wanted.size) return { uses: [], searched: {} };
   let targets: any[] = [];
-  try { targets = resolveTargets(root, config); } catch { return []; }
-  const texts = new Map<string, string | null>();
+  try { targets = resolveTargets(root, config); } catch { return { uses: [], searched: {} }; }
+  // Read from each app's source, following its imports: the scan's count of system uses doesn't follow a
+  // local file that re-exports a package, and only its own lines are known to be elements of that name.
+  const packages = allDsPackages(config);
+  const excludes = [...defaultExcludes(root), ...(config.exclude ?? []).map((e: string) => path.resolve(root, e))];
   const out: Precedent[] = [];
+  const searched: Record<string, { files: number; unread: number }> = {};
   const perComponent = new Map<string, number>();
-  for (const r of rows as any[]) {
-    if (!wanted.has(r.component)) continue;
-    if (!texts.has(r.file)) { const at = locate(root, targets, r.target, r.file); texts.set(r.file, at ? fs.readFileSync(at.abs, 'utf8') : null); }
-    const src = texts.get(r.file);
-    const props = src ? propsAt(src, Number(r.line), r.component) : null;
-    if (!props) continue;
-    // Up to 20 per app, component and props: enough examples for every answer, not a whole index.
-    const k = `${r.target}\u0001${r.component}\u0001${JSON.stringify(Object.entries(props).sort())}`;
-    if ((perComponent.get(k) ?? 0) >= 20) continue;
-    perComponent.set(k, (perComponent.get(k) ?? 0) + 1);
-    const s = shotIdx.uses?.[`${r.file}:${r.line}`];
-    out.push({ app: r.target, file: r.file, line: Number(r.line), component: r.component, props,
-      shot: s && !s.blank && !s.covered ? { url: shotUrl(s.file), box: s.box ?? null, page: s.page, pageName: pageName(s.page), ...(s.context?.file && s.context.box ? { context: { url: shotUrl(s.context.file), box: s.context.box } } : {}) } : null });
+  for (const t of targets) {
+    if (t.role === 'core') continue;
+    let found: ReturnType<typeof findUses>;
+    try { found = findUses({ dir: t.dir, packages, wanted, exclude: [...excludes, ...(t.exclude ?? []), ...usageExcludes(t.dir)], aliases: t.aliases }); }
+    catch { continue; }
+    searched[t.name] = { files: found.files, unread: found.unread };
+    for (const u of found.uses) {
+      // Up to 20 per app, component and props: enough examples for every answer, not a whole index.
+      const k = `${t.name}\u0001${u.component}\u0001${JSON.stringify(Object.entries(u.props).sort())}\u0001${u.dynamic.join()}`;
+      const seen = perComponent.get(k) ?? 0;
+      perComponent.set(k, seen + 1);
+      if (seen >= 20) continue;
+      const file = displayPath(root, u.file, t.dir);
+      const s = shotIdx.uses?.[`${file}:${u.line}`];
+      out.push({ app: t.name, file, line: u.line, component: u.component, props: u.props, ...(u.dynamic.length ? { dynamic: u.dynamic } : {}),
+        shot: s && !s.blank && !s.covered ? { url: shotUrl(s.file), box: s.box ?? null, page: s.page, pageName: pageName(s.page), ...(s.context?.file && s.context.box ? { context: { url: shotUrl(s.context.file), box: s.context.box } } : {}) } : null });
+    }
   }
-  return out;
+  return { uses: out, searched };
 }
 
 /** `<data>/precedent.json` ({ uses: [{ component, file, line, props }] }), as precedents, when a run wrote one. */

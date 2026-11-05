@@ -58,26 +58,77 @@ export function colourName(v: string): string {
   return hue < 15 || hue >= 345 ? "red" : hue < 40 ? "orange" : hue < 65 ? "yellow" : hue < 165 ? "green" : hue < 195 ? "teal" : hue < 255 ? "blue" : hue < 290 ? "purple" : "pink"
 }
 
+const PX = (v: string): number | null => { const r = v.match(/^(-?\d*\.?\d+)rem$/); if (r) return Math.round(Number(r[1]) * 16); const n = v.match(/^(-?\d*\.?\d+)(?:px)?$/); return n ? Math.round(Number(n[1])) : null }
+const isSetting = (v: string) => /^(--|var\()/.test(v)
+const isNone = (v: string) => !v || v === "unset" || v === "none"
+const STATES: [RegExp, string][] = [[/^hover$/, "hover"], [/^active$/, "pressed"], [/^focus(-visible)?$/, "focus"], [/^aria-pressed$|^aria-selected$|^data-selected$/, "selected"], [/^aria-expanded$|^data-open$/, "open"], [/^disabled$/, "disabled"]]
+const COLOUR_PROP = /^(bg|fg|background|text colou?r|border-?\s?colou?r|ring|outline-color)$/i
+const whatColour = (l: string) => /^(bg|background)$/i.test(l) ? "background" : /border/i.test(l) ? "border colour" : /ring|outline/i.test(l) ? "focus outline" : "text colour"
+
+/**
+ * One difference, in what a person would see: classes and tokens become sizes, or "uses a density setting";
+ * a hover or pressed look is "a different hover colour". The element first, the proposal second. Raw
+ * values stay in Technical details.
+ */
+export function plainChange(c: { label: string; from: string; to: string }): string {
+  const parts = c.label.split(":")
+  const l = parts[parts.length - 1].trim().toLowerCase()
+  const state = parts.slice(0, -1).map(p => STATES.find(([re]) => re.test(p))?.[1] ?? null)
+  if (parts.length > 1) return `a different ${state.find(Boolean) ?? "state"} ${COLOUR_PROP.test(l) ? "colour" : "look"}`
+  const a = PX(c.from), b = PX(c.to)
+  const padding = /^(px|padding-x)$/.test(l) ? "side padding" : /^(py|padding-y)$/.test(l) ? "top and bottom padding" : /^(pt|pb|pl|pr|padding|gap|margin)/.test(l) ? l.replace(/^pt$/, "top padding").replace(/^pb$/, "bottom padding").replace(/^pl$/, "left padding").replace(/^pr$/, "right padding").replace(/-/g, " ") : null
+  if (padding) {
+    if (a != null && b != null) return `${a} px ${padding} instead of ${b} px`
+    if (isSetting(c.to)) return `${a != null ? `${a} px ${padding}` : `its own ${padding}`}, where the system uses a ${/density/.test(c.to) ? "density" : "spacing"} setting`
+    if (isNone(c.from)) return `no ${padding} of its own`
+    return `a different ${padding}`
+  }
+  if (/^height$/.test(l) || /^width$/.test(l)) {
+    if (a != null && b != null && a !== b) return /height/.test(l) ? `${Math.abs(a - b)} px ${a > b ? "taller" : "shorter"}` : `${Math.abs(a - b)} px ${a > b ? "wider" : "narrower"}`
+    return `a different ${l}`
+  }
+  if (/radius|corner/.test(l)) {
+    if (a != null && b != null) return a > b ? "rounder corners" : "squarer corners"
+    if (isNone(c.from)) return "squarer corners"
+    if (isNone(c.to)) return "rounder corners"
+    return "different corners"
+  }
+  if (/font.?size|text size/.test(l)) return a != null && b != null ? `${a} px text instead of ${b} px` : "a different text size"
+  if (/font.?weight/.test(l)) { const n = (v: string) => Number(v) || ({ normal: 400, regular: 400, medium: 500, semibold: 600, bold: 700 } as Record<string, number>)[v] || null; const x = n(c.from), y = n(c.to); return x && y ? (x > y ? "bolder text" : "lighter text") : "a different text weight" }
+  if (/border.?width/.test(l)) return a === 0 || isNone(c.from) ? "no border of its own" : b === 0 || isNone(c.to) ? "a border the proposal doesn't have" : "a different border width"
+  if (/shadow/.test(l)) return isNone(c.from) ? "no shadow" : isNone(c.to) ? "a shadow the proposal doesn't have" : "a different shadow"
+  if (/decoration/.test(l)) return /underline/.test(c.from) ? "underlined" : /underline/.test(c.to) ? "not underlined" : "different text styling"
+  if (COLOUR_PROP.test(l)) {
+    const what = whatColour(l), ca = colourName(c.from), cb = colourName(c.to)
+    if (ca && cb && ca !== cb) return `${ca} ${what.replace(" colour", "")} instead of ${cb}`
+    return ca && cb ? `a slightly different ${what} (both ${ca})` : `a different ${what}`
+  }
+  return `a different ${l.replace(/[-_]/g, " ")}`
+}
+
+/** Near white: the page a proposal is drawn on. */
+const whiteOrClear = (v: string) => { const n = colourName(v); return n === "white" || n === "transparent" }
+
 /**
  * How the element differs from the proposal, in plain words: "4 px taller", "blue text instead of grey",
- * "12 px text instead of 14 px". The element first, the proposal second.
+ * "12 px text instead of 14 px". The same thing said once. A proposal is drawn on white, so its background
+ * says nothing beside an element on another surface.
  */
 export function plainDifferences(e: any): string[] {
   const d = deltaOf(e)
   if (!d) return []
-  const px = (v: string) => { const n = v.match(/(-?\d+(?:\.\d+)?)px/); return n ? Number(n[1]) : null }
-  return d.changes.slice(0, 5).map(c => {
-    const l = c.label.toLowerCase(), a = px(c.from), b = px(c.to)
-    if (/height/.test(l) && a != null && b != null && a !== b) return `${Math.round(Math.abs(a - b))} px ${a > b ? "taller" : "shorter"}`
-    if (/width/.test(l) && a != null && b != null && a !== b) return `${Math.round(Math.abs(a - b))} px ${a > b ? "wider" : "narrower"}`
-    if (/font.?size|text size/.test(l) && a != null && b != null) return `${Math.round(a)} px text instead of ${Math.round(b)} px`
-    if (/padding|gap|margin/.test(l) && a != null && b != null) return `${Math.round(a)} px ${l.replace(/[-_]/g, " ")} instead of ${Math.round(b)} px`
-    if (/radius|corner/.test(l) && a != null && b != null) return a > b ? "rounder corners" : "squarer corners"
-    const ca = colourName(c.from), cb = colourName(c.to)
-    if (ca && cb && ca !== cb) return `${ca} ${/background|fill/.test(l) ? "background" : /border/.test(l) ? "border" : "text"} instead of ${cb}`
-    if (ca && cb) return `a slightly different ${/background|fill/.test(l) ? "background" : /border/.test(l) ? "border colour" : "text colour"} (both ${ca})`
-    return `${c.label.replace(/[-_]/g, " ")}: ${c.from || "none"} instead of ${c.to || "none"}`
-  })
+  const surface = e.shot?.surface
+  const elsewhere = surface && !whiteOrClear(surface)
+  const kept = d.changes.filter(c => !(elsewhere && /^(bg|background)$/i.test(c.label)))
+  return [...new Set(kept.map(plainChange))].slice(0, 5)
+}
+
+/** Instructions for whoever builds it, not reasons to judge by: they stay in Technical details. */
+const BUILD_STEP = /^(Build|Migrate|Wrap|Check which|Keep|Use|Add|Put|Approve)\b|\bwraps the\b|\bholds an?\b/
+
+/** A plain reason without its building instructions. Empty when nothing else is left. */
+export function reasonToJudge(t: string): string {
+  return t.split(/(?<=[.!?])\s+/).filter(x => !BUILD_STEP.test(x.trim())).join(" ").trim()
 }
 
 /** A pick in a person's words: "a link-style button, inline size". The prop names stay beside it, small. */
@@ -178,6 +229,7 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
   const reasons = ((e.reasons ?? []).map((r: any) => r.plain).filter(Boolean) as string[])
     .map(t => t.replace(/\s*\((?:its |the )?(?:handler|onClick|prop|props|code)\b[^)]*\)/i, ""))
     .filter(t => !/\d+\s*%|\d+ of \d+ propert|\bmeasures\b/i.test(t))
+    .map(reasonToJudge).filter(Boolean)
   const differs = plainDifferences(e)
   const alts = (e.alternatives ?? []).filter((a: any) => a?.use && a.use !== pick?.use).slice(0, 3)
 
@@ -218,17 +270,32 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
         {differs.length > 0 && <p className="text-sm" data-slot="differences"><span className="text-muted-foreground">How it differs from the proposal: </span>{differs.join("; ")}.</p>}
       </section>
 
-      <section aria-labelledby={`ex-${e.id}`} className="flex flex-col gap-2" data-slot="examples">
+      {pick?.use && <section aria-labelledby={`ex-${e.id}`} className="flex flex-col gap-2" data-slot="examples">
         <h4 id={`ex-${e.id}`} className="text-sm font-medium">Where the app already uses {pickText(pick)}</h4>
         {item.examples.length ? (
           <div className="flex flex-wrap gap-4">{item.examples.map((x: any, k: number) => <Example key={k} x={x} pick={pick} />)}</div>
-        ) : <p className="text-sm text-muted-foreground">The app doesn't use {pickText(pick)} anywhere yet.</p>}
+        ) : item.nearest ? (
+          <div className="flex flex-col gap-2" data-slot="nearest">
+            <p className="text-sm">{item.nearest.label}</p>
+            <div className="flex flex-wrap gap-4">{item.nearest.examples.map((x: any, k: number) => <Example key={k} x={x} pick={{ use: x.component, props: x.props }} />)}</div>
+          </div>
+        ) : item.searched?.whole ? (
+          <p className="text-sm text-muted-foreground">The app doesn't use {pick.use} anywhere: dsa read its {item.searched.files} component files.</p>
+        ) : (
+          <p className="text-sm text-muted-foreground">{item.searched ? `dsa could only read ${item.searched.files - item.searched.unread} of the app's ${item.searched.files} component files` : "dsa didn't search the app's code for this"}, so it can't say whether the app uses {pick.use}.</p>
+        )}
+        {item.systemExample && (
+          <figure className="m-0 flex flex-col gap-1" data-slot="system-example">
+            <div className="w-fit rounded-md border bg-background p-1"><Natural url={item.systemExample.url} alt={`${SYS} ${pickText(pick)}, the system's own example`} /></div>
+            <figcaption className="text-xs">The system's own example of {pickText(pick)}</figcaption>
+          </figure>
+        )}
         {item.usesCount > item.examples.length && <p className="text-xs text-muted-foreground">{item.usesCount} places in all.</p>}
         {item.altExamples.length > 0 && alts[0] && (
           <div className="flex flex-col gap-1"><span className="text-xs text-muted-foreground">And where it uses the main alternative, {pickText(alts[0])}:</span>
             <div className="flex flex-wrap gap-4">{item.altExamples.map((x: any, k: number) => <Example key={k} x={x} pick={alts[0]} />)}</div></div>
         )}
-      </section>
+      </section>}
 
       {alts.length > 0 && (
         <section aria-labelledby={`alt-${e.id}`} className="flex flex-col gap-2" data-slot="alternatives">
@@ -261,6 +328,7 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
               <Button variant="outline" size="sm" className="self-start" onClick={onCode}>Open the code at {short(e.file)}:{e.line}</Button>
               <ul className="list-disc pl-5 text-xs text-muted-foreground">{(e.reasons ?? []).map((r: any, k: number) => <li key={k}>{r.text}</li>)}</ul>
               <p className="text-xs text-muted-foreground">The scanner's score: {Math.round((e.evidenceCap?.from ?? e.confidence) * 100)}% (not a checked track record).</p>
+              {(deltaOf(e)?.changes.length ?? 0) > 0 && <ul className="list-disc pl-5 text-xs text-muted-foreground" data-slot="raw-differences">{deltaOf(e)!.changes.map((c, k) => <li key={k}>{c.label}: {c.from} (element), {c.to} (proposal)</li>)}</ul>}
               {e.signature && <p className="text-xs text-muted-foreground">Measured: {[...(e.signature.matched ?? []), ...(e.signature.mismatched ?? [])].join(", ")}</p>}
             </div>
           </details>

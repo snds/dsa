@@ -27,6 +27,17 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   grouped with a count ("12 aren't reached yet: they only show after steps in a flow, such as opening
   …"); the code conditions sit behind "Technical details". A control's words read from the code show the
   values the code fills in as "…" ("Message on …: Open request …"), not as stray punctuation.
+- Label Review: where the app already uses a proposal is read from the source (`findUses`), following
+  local re-exports and vendored packages, across lines, and matched on the system's axes (not
+  `type="button"`). With no exact use it shows the nearest, labelled ("Not at this size, but here's the same
+  variant at sm"), then the system's own example. "Doesn't use" is said only when every file was read.
+- Differences on Label Review are said as what you'd see: sizes, "uses a density setting", "a different
+  hover colour"; raw values sit in Technical details, with building instructions. On another surface than
+  white, background differences are left out (shots record each element's `surface`).
+- Proposals drawn from source find a Storybook beside the packages (`apps/*/.storybook`), load its
+  stylesheets and Vite setup (`viteFinal`, Tailwind), and still draw when a decorator only works inside
+  Storybook. A drawing the system's styles didn't reach is `unstyled`: tried from stories, and otherwise
+  it needs evidence.
 - CI fails when the committed report UI (`packages/dashboard/templates/ui`) isn't built from `ui/src`.
 - `dsa render` draws again a cached proposal drawn with the element's own content that doesn't record
   which words it drew (made before drawings recorded them), or drew other words than the element has now.

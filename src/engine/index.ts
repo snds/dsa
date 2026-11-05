@@ -36,6 +36,7 @@ export * from './pipeline.js';
 export * from './placement.js';
 export * from './questions.js';
 export * from './reach.js';
+export * from './uses.js';
 export * from './readiness.js';
 export * from './remotes.js';
 export * from './rendered.js';

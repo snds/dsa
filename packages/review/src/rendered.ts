@@ -23,8 +23,9 @@ export const READ_STYLE = `(el) => {
     paddingLeft: cs.paddingLeft, paddingRight: cs.paddingRight, paddingTop: cs.paddingTop, paddingBottom: cs.paddingBottom,
     borderRadius: cs.borderTopLeftRadius, backgroundColor: cs.backgroundColor, color: cs.color,
     borderWidth: cs.borderTopWidth, borderColor: cs.borderTopColor, borderStyle: cs.borderTopStyle,
-    fontSize: cs.fontSize, fontWeight: cs.fontWeight, lineHeight: cs.lineHeight, textDecoration: cs.textDecorationLine,
+    fontFamily: cs.fontFamily, fontSize: cs.fontSize, fontWeight: cs.fontWeight, lineHeight: cs.lineHeight, textDecoration: cs.textDecorationLine,
     boxShadow: cs.boxShadow === 'none' ? 'none' : 'shadow', gap: cs.columnGap,
+    surface: (() => { for (let p = el.parentElement; p; p = p.parentElement) { const b = getComputedStyle(p).backgroundColor; const m = b.match(/[\\d.]+/g); if (m && (m.length < 4 || Number(m[3]) > 0.98)) return b; } return ''; })(),
   };
 }`;
 
@@ -158,12 +159,25 @@ export async function renderSignatures(opts: { root: string; config: Config; dat
  * keyed by that content, so the proposal shows the element as it would be, not a story's sample.
  */
 /**
+ * Did the system's stylesheet reach this drawing? A browser's defaults mean it didn't: a serif page font,
+ * or a button's stock outset border and 13.33 px Arial.
+ */
+export function unstyledLook(s: Styles | undefined): boolean {
+  if (!s) return false;
+  const font = String((s as any).fontFamily ?? '').replace(/["']/g, '').split(',')[0]!.trim().toLowerCase();
+  return /^(times|times new roman|serif|ui-serif)$/.test(font) || (s as any).borderStyle === 'outset' || (font === 'arial' && (s as any).fontSize === '13.3333px');
+}
+
+/**
  * A cached drawing can stand: its inputs hash the same, and, drawn with the element's own content, it
  * says which words it drew and they are the element's now. One made before drawings recorded their words
  * (no `text`) is drawn again, so the review can tell its words are the element's own.
  */
 export function reusable(c: Proposal, p: Wanted, hash: string): boolean {
   if (c.hash !== hash) return false;
+  // Drawn before drawings recorded their font, or without the system's styles: drawn again.
+  if (c.styles && !c.styles.fontFamily) return false;
+  if (c.unstyled) return false;
   return !(c.own && p.own && c.text !== (p.own.text ?? ''));
 }
 
@@ -299,7 +313,7 @@ export async function renderProposals(opts: { root: string; config: Config; data
       if (await source()) best = await fromSource(hpage, s, p, k, dir, hashOf(p.use));
       // Done: exact, with the element's own content, or (with none of its own) without a stand-in label.
       // Drawn with its own content and saying which words: one drawn before renders kept their text is drawn again.
-      const done = (b: Proposal | null) => Boolean(b && b.check === 'exact' && b.shot && (p.own ? b.own && typeof b.text === 'string' : !b.content));
+      const done = (b: Proposal | null) => Boolean(b && b.check === 'exact' && b.shot && (p.own ? b.own && typeof b.text === 'string' : !b.content) && !b.unstyled);
       if (!done(best) && (await storybook())) best = pickBetter(best, await fromStories(sbs!, s, p, k, dir, hashOf(p.use), rendered === 0));
       items[k] = best ?? { ...noOwn(p), check: 'none', ...(sbWhy ? { noSource: true } : {}), note: `${p.use} couldn't be drawn${sbWhy ? `: there's no Storybook to draw it from (${sbWhy})` : ''}.`, hash: hashOf(p.use) };
       rendered++;
@@ -313,6 +327,8 @@ export async function renderProposals(opts: { root: string; config: Config; data
   write();
   const fromSrc = Object.values(items).filter(p => p.via === 'source' && p.check === 'exact').length;
   log(`Proposed components: ${Object.keys(items).length} rendered with their props · ${exactCount()} exact (confirmed by the element's attributes or classes)${fromSrc ? ` · ${fromSrc} drawn from the system's source` : ''}.`);
+  const bare = Object.values(items).filter(p => p.unstyled).length;
+  if (bare) log(`  ${bare} drawn without the system's styles: they need evidence, not a decision. Check the system's Storybook preview loads its stylesheet.`);
   return { rendered, reused, exact: exactCount() };
 }
 
@@ -320,7 +336,7 @@ const ORDER: Record<Proposal['check'], number> = { exact: 0, unverified: 1, clos
 /** The better of two drawings: the surer props, then the element's own content, then no stand-in content, then a picture. */
 function pickBetter(a: Proposal | null, b: Proposal | null): Proposal | null {
   if (!a || !b) return a ?? b;
-  const d = ORDER[a.check] - ORDER[b.check] || Number(Boolean(b.own)) - Number(Boolean(a.own)) || Number(Boolean(a.content)) - Number(Boolean(b.content)) || Number(Boolean(b.shot)) - Number(Boolean(a.shot));
+  const d = Number(Boolean(a.unstyled)) - Number(Boolean(b.unstyled)) || ORDER[a.check] - ORDER[b.check] || Number(Boolean(b.own)) - Number(Boolean(a.own)) || Number(Boolean(a.content)) - Number(Boolean(b.content)) || Number(Boolean(b.shot)) - Number(Boolean(a.shot));
   return d > 0 ? b : a;
 }
 
@@ -353,7 +369,7 @@ async function fromSource(page: any, s: any, p: Wanted, k: string, dir: string, 
   const file = `proposal-${sha(k).slice(0, 12)}.png`;
   const shot = await shoot(page, sel, path.join(dir, file));
   const content = own && !own.own && own.why ? own.why : undefined;
-  return { ...noOwn(p), check, via: 'source', shot: shot ? file : undefined, styles: top.styles, ...(own?.own ? { own: true, text: p.own?.text ?? '' } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
+  return { ...noOwn(p), check, via: 'source', shot: shot ? file : undefined, styles: top.styles, ...(unstyledLook(top.styles) ? { unstyled: true } : {}), ...(own?.own ? { own: true, text: p.own?.text ?? '' } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
 }
 
 /** Runs in the page: did the element's own words and icon show, and set its accessible name. */
@@ -416,7 +432,7 @@ async function fromStories(sb: { url: string; stories: any[]; page: any }, s: an
     if (own?.own) await page.waitForTimeout(120);
     const shot = await shoot(page, sel, path.join(dir, file));
     const content = own?.own ? undefined : own?.why ? own.why : set ? (iconSize && icon ? `icon from ${icon.story}` : 'story default') : undefined;
-    best = { ...noOwn(p), check, via: 'story', shot: shot ? file : undefined, styles: top.styles, story: st.id, ...(own?.own ? { own: true, text: p.own?.text ?? '' } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
+    best = { ...noOwn(p), check, via: 'story', shot: shot ? file : undefined, styles: top.styles, ...(unstyledLook(top.styles) ? { unstyled: true } : {}), story: st.id, ...(own?.own ? { own: true, text: p.own?.text ?? '' } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
     if (check === 'exact') break;
   }
   if (best) return best;
