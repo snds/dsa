@@ -6,7 +6,9 @@ import { appSettings, lookalikeMap, readExceptions, type Config } from './config
 import { refineWithTypes } from './typecheck.js';
 import { buildPrecedent, type PrecedentIndex } from './precedent.js';
 import { readAliases } from './modules.js';
-import { applyLabels, readLabels } from './labels.js';
+import { applyCalibration, applyLabels, labelsRecord, loadCalibration, readLabels, saveCalibration } from './labels.js';
+import { gitRead } from './git-read.js';
+import { dsaVersion } from '../version.js';
 import { readRules, type DsRules } from './constraints.js';
 import type { CodeScanResult } from './scanners/code.js';
 import { defaultExcludes, globMatch, targetRelative } from './paths.js';
@@ -30,7 +32,7 @@ import { buildGraph, reachFor, type Reach } from './reach.js';
 import { readPagePlacement } from './placement.js';
 import { evaluateRows, loadRoleMap, readDecisions, ruleStats, DEFAULT_THRESHOLD, type ElementEval } from './elements.js';
 import { resetFeatureCaches } from './scanners/features.js';
-import { buildSignatures, signatureSummary, type SignatureSet } from './signatures.js';
+import { buildSignatures, signatureHash, signatureSummary, type SignatureSet } from './signatures.js';
 import { resetSystemIndex } from './host-context.js';
 import { useSystem } from './system.js';
 import type { ResolvedProfile } from '../profile.js';
@@ -96,6 +98,12 @@ export interface RunOptions {
   readiness?: boolean | undefined;
   /** A labels.jsonl to calibrate confidence on (labels.ts). Overrides the config's recommend.labels. */
   labels?: string | undefined;
+  /** A saved calibration file to apply instead of fitting one (overrides recommend.calibration). */
+  calibration?: string | undefined;
+  /** Apply a calibration fitted for another system (a different signature set): a cross-system test. */
+  forceCalibration?: boolean | undefined;
+  /** Save the calibration fitted on the labels to this file. */
+  saveCalibration?: string | undefined;
   /**
    * The dsa config: when given, instances come from the system model (every framework and markup
    * the model reads) instead of the engine's code scanner. Look-alikes and element review still come
@@ -269,7 +277,7 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
     await store.insertMany('lookalikes', ['run_id', 'target', 'element', 'component', 'file', 'line'], data.lookalikes.map(l => [runId, l.target, l.element, l.component, l.file, l.line]));
     await store.insertMany('tokens', ['run_id', 'target', 'file', 'raw_values', 'token_refs', 'is_new'], data.tokens.map(t => [runId, t.target, t.file, t.rawValues, t.tokenRefs, t.isNew]));
     // Confidence is measured precision where labels exist (labels.ts); otherwise it says it's uncalibrated.
-    calibrateOnLabels(evals, config, opts.labels, opts.configDir ?? opts.root, threshold, notes);
+    calibrateOnLabels(evals, config, { labels: opts.labels, calibration: opts.calibration, force: opts.forceCalibration, save: opts.saveCalibration }, opts.configDir ?? opts.root, threshold, notes, sigs);
     // Nothing is "ready" that a person can't see: no photo or no exact render keeps it under the bar (evidence-cap.ts).
     applyEvidenceCap(opts.dataDir, evals, threshold);
     await store.insertMany('element_evals', ['run_id', 'id', 'target', 'file', 'line', 'element', 'role', 'verdict', 'use_component', 'confidence', 'needs_human', 'exception', 'decided', 'data'],
@@ -332,7 +340,7 @@ export async function reevaluateElements(opts: { root: string; dataDir: string; 
     const before = new Map((await store.all<any>('select id, data from element_evals where run_id=$1', [runId])).map(r => { const d = typeof r.data === 'string' ? JSON.parse(r.data) : r.data; return [r.id, `${d.role}|${d.use}|${JSON.stringify(d.props ?? {})}`]; }));
     const changed = evals.filter(e => before.has(e.id) && before.get(e.id) !== `${e.role}|${e.use}|${JSON.stringify(e.props ?? {})}`).length;
     await store.exec('delete from element_evals where run_id=$1', [runId]);
-    calibrateOnLabels(evals, config, undefined, opts.configDir ?? opts.root, threshold, []);
+    calibrateOnLabels(evals, config, {}, opts.configDir ?? opts.root, threshold, [], sigs);
     // Nothing is "ready" that a person can't see: no photo or no exact render keeps it under the bar (evidence-cap.ts).
     applyEvidenceCap(opts.dataDir, evals, threshold);
     await store.insertMany('element_evals', ['run_id', 'id', 'target', 'file', 'line', 'element', 'role', 'verdict', 'use_component', 'confidence', 'needs_human', 'exception', 'decided', 'data'],
@@ -352,13 +360,32 @@ function rulesFor(config: Config, t: Target, configDir: string, notes: string[])
   return r;
 }
 
-/** Calibrate on the label set, from the option or the config's recommend.labels (relative to the config's folder). */
-function calibrateOnLabels(evals: ElementEval[], config: Config, option: string | undefined, configDir: string, threshold: number, notes: string[]) {
-  const file = option ?? config.recommend?.labels;
-  const read = file ? readLabels(path.resolve(configDir, file)) : { labels: [], skipped: 0 };
-  if (file && !read.labels.length) notes.push(`No labels read from ${file}${read.skipped ? ` (${read.skipped} unreadable lines)` : ''}: confidence stays uncalibrated.`);
+/**
+ * Confidence from labels: apply a saved calibration (recommend.calibration or --calibration), refusing one
+ * fitted for another system unless forced; else fit one on the label set (recommend.labels or --labels)
+ * and, when asked, save it with its labels' hashes, the engine's revision and the system's signature hash.
+ */
+function calibrateOnLabels(evals: ElementEval[], config: Config, o: { labels?: string | undefined; calibration?: string | undefined; force?: boolean | undefined; save?: string | undefined }, configDir: string, threshold: number, notes: string[], sigs?: SignatureSet) {
+  const sigHash = sigs ? signatureHash(sigs) : 'none';
+  const load = o.calibration ?? config.recommend?.calibration;
+  if (load) {
+    const file = path.resolve(configDir, load);
+    const { calibration, crossSystem } = loadCalibration(file, sigHash, o.force ?? config.recommend?.calibrationForce ?? false);
+    applyCalibration(evals, calibration.model, threshold);
+    notes.push(`Calibration from ${load}: fitted on ${calibration.labels.reduce((a, l) => a + l.count, 0)} labels (${calibration.model.matched} matched), engine ${calibration.engine.sha.slice(0, 12)}; ready cut ${calibration.model.cut ? calibration.model.cut.cut : 'none'}.${crossSystem ? ' FORCED ACROSS SYSTEMS: it was fitted for another signature set, so it is a cross-system test, not this system\'s calibration.' : ''}`);
+    return;
+  }
+  const lfile = o.labels ?? config.recommend?.labels;
+  const abs = lfile ? path.resolve(configDir, lfile) : undefined;
+  const read = abs ? readLabels(abs) : { labels: [], skipped: 0 };
+  if (lfile && !read.labels.length) notes.push(`No labels read from ${lfile}${read.skipped ? ` (${read.skipped} unreadable lines)` : ''}: confidence stays uncalibrated.`);
   const r = applyLabels(evals, read.labels, threshold);
   if (read.labels.length) notes.push(`Labels: ${read.labels.length} read${read.skipped ? `, ${read.skipped} skipped` : ''}, ${r.matched} matched an element; ${r.paths} decision path${r.paths === 1 ? '' : 's'} with a fit of their own.`);
+  if (o.save && r.model && abs) {
+    const sha = gitRead(path.dirname(new URL(import.meta.url).pathname), ['rev-parse', 'HEAD']);
+    saveCalibration(path.resolve(configDir, o.save), { version: 1, createdAt: new Date().toISOString(), engine: { version: dsaVersion(), sha: sha.ok ? sha.out : 'unknown' }, signatureHash: sigHash, labels: [labelsRecord(abs, read.labels.length)], threshold, model: r.model });
+    notes.push(`Calibration saved to ${o.save}.`);
+  }
 }
 
 /** The app's own system-component uses and git migrations, to learn from (precedent.ts). */

@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { parse as babelParse } from '@babel/parser';
@@ -590,4 +591,17 @@ export function signatureSummary(set: SignatureSet) {
     component: c.component, from: c.from, file: c.file, slot: c.slot, tag: c.tag, role: c.role, childSlots: c.childSlots, axes: c.axes, defaults: c.defaults, ...(c.axisClasses ? { axisClasses: c.axisClasses } : {}),
     sigs: c.sigs.map(s => ({ variant: s.variant, size: s.size, props: Object.fromEntries(s.props) })),
   }));
+}
+
+/**
+ * A hash of the system's signature set: each component's axes, defaults and the properties of every
+ * variant × size, without file paths. Two runs on the same system agree; another system differs. A saved
+ * calibration records it (labels.ts).
+ */
+export function signatureHash(set: SignatureSet): string {
+  const comps = [...set.components.values()].sort((a, b) => (a.component < b.component ? -1 : 1)).map(c => ({
+    c: c.component, tag: c.tag, axes: c.axes, defaults: c.defaults,
+    sigs: c.sigs.map(s => [s.variant, s.size, [...s.props].sort((x, y) => (x[0] < y[0] ? -1 : 1))]),
+  }));
+  return crypto.createHash('sha256').update(JSON.stringify(comps)).digest('hex');
 }

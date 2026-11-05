@@ -1022,6 +1022,14 @@
                 "typescript": {
                   "description": "Resolve spreads, class constants and prop unions with the TypeScript checker and the app's tsconfig (default true; skipped with a note when unavailable).",
                   "type": "boolean"
+                },
+                "calibration": {
+                  "description": "A saved calibration file (dsa run --save-calibration) to apply instead of fitting one, relative to this file.",
+                  "type": "string"
+                },
+                "calibrationForce": {
+                  "description": "Apply a calibration fitted for another system (a different signature set): a cross-system test, said so in the run's notes.",
+                  "type": "boolean"
                 }
               },
               "additionalProperties": false

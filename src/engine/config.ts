@@ -32,7 +32,7 @@ export interface Config {
    * How recommendations are made (dsa.config.json `recommend`): labels to calibrate confidence on, the
    * consumer's DS rules file, and whether the TypeScript checker runs (default: when it can).
    */
-  recommend?: { labels?: string | undefined; rules?: string | undefined; typescript?: boolean | undefined } | undefined;
+  recommend?: { labels?: string | undefined; rules?: string | undefined; typescript?: boolean | undefined; calibration?: string | undefined; calibrationForce?: boolean | undefined } | undefined;
   /** Element review: below this confidence an agent must ask a human (0..1, default 0.9). */
   review?: {
     threshold?: number | undefined;

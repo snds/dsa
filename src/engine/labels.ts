@@ -1,4 +1,6 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
 import { calibrate, type CalibrationStats, type Recommendation } from './classify.js';
 import type { ElementEval } from './elements.js';
 
@@ -176,7 +178,24 @@ export function readyCut(points: { score: number; ok: boolean }[]): { cut: numbe
  * Calibrate every evaluation on the labels (in place). Returns how many labels matched an element.
  * Decided elements are left alone: a person's decision isn't a guess.
  */
-export function applyLabels(evals: ElementEval[], labels: Label[], threshold: number): { matched: number; paths: number } {
+type Block = ReturnType<typeof isotonic>[number];
+
+/** A fitted calibration: what applyLabels learns from labels, and what a saved calibration file carries. */
+export interface CalibrationModel {
+  /** Labels that matched an element in the run it was fitted on. */
+  matched: number;
+  /** Per rule: agreement on the labels, the prior calibrate() replaces. */
+  ruleStats: Record<string, CalibrationStats>;
+  /** Isotonic blocks over all paths, and per path (paths with MIN_PATH_LABELS or more). */
+  pooled: Block[];
+  byPath: Record<string, Block[]>;
+  /** The ready cut (readyCut), or null when no score's band clears READY_LOWER_BOUND. */
+  cut: { cut: number; n: number; k: number; lower: number } | null;
+  /** Per path: errors among its labels in the ready band. */
+  pathErrorsInBand: Record<string, number>;
+}
+
+export function applyLabels(evals: ElementEval[], labels: Label[], threshold: number): { matched: number; paths: number; model?: CalibrationModel | undefined } {
   if (!labels.length) {
     for (const e of evals) e.calibration = { status: 'uncalibrated' };
     return { matched: 0, paths: 0 };
@@ -194,27 +213,49 @@ export function applyLabels(evals: ElementEval[], labels: Label[], threshold: nu
   // 2. Isotonic fit of the (now rule-calibrated) score to measured precision, per path, pooled when thin.
   const points = (ps: typeof pairs) => ps.map(({ e, l }) => ({ score: e.confidence, ok: isCorrect(e, l) }));
   const pooled = isotonic(points(pairs));
-  const byPath = new Map<string, ReturnType<typeof isotonic>>();
+  const byPath: Record<string, Block[]> = {};
   const pathPairs = new Map<string, typeof pairs>();
   for (const p of pairs) pathPairs.set(pathOf(p.e), [...(pathPairs.get(pathOf(p.e)) ?? []), p]);
-  for (const [k, ps] of pathPairs) if (ps.length >= MIN_PATH_LABELS) byPath.set(k, isotonic(points(ps)));
+  for (const [k, ps] of pathPairs) if (ps.length >= MIN_PATH_LABELS) byPath[k] = isotonic(points(ps));
   // 3. Ready is decided on a pooled band of calibrated scores across paths, where labels add up: the band
   //    is every score at or above a cut, and the cut is the LOWEST score at which the band's one-sided 95%
   //    lower bound reaches 0.99. The path's own labels in the band must show no error. With no such cut,
   //    nothing is ready. The cut is fitted on these labels and applies unchanged to every element.
-  const cut = readyCut(pairs.map(({ e, l }) => ({ score: e.confidence, ok: isCorrect(e, l) })));
+  const cut = readyCut(pairs.map(({ e, l }) => ({ score: e.confidence, ok: isCorrect(e, l) }))) ?? null;
+  const pathErrorsInBand: Record<string, number> = {};
+  if (cut) for (const p of pairs) if (p.e.confidence >= cut.cut && !isCorrect(p.e, p.l)) pathErrorsInBand[pathOf(p.e)] = (pathErrorsInBand[pathOf(p.e)] ?? 0) + 1;
+  const model: CalibrationModel = { matched: pairs.length, ruleStats: Object.fromEntries(all), pooled, byPath, cut, pathErrorsInBand };
+  applyFitted(evals, model, threshold);
+  return { matched: pairs.length, paths: Object.keys(byPath).length, model };
+}
+
+/**
+ * Apply a calibration fitted elsewhere (a saved calibration file): each rule's prior from its stats, then
+ * the fitted blocks and ready cut, unchanged. No element here was part of the fit.
+ */
+export function applyCalibration(evals: ElementEval[], model: CalibrationModel, threshold: number): void {
+  for (const e of evals) {
+    if (e.decided) continue;
+    const c = calibrate(e, model.ruleStats[e.ruleId]);
+    if (c !== e) Object.assign(e, { confidence: c.confidence, reasons: c.reasons, alternatives: c.alternatives, calibrated: c.calibrated });
+  }
+  applyFitted(evals, model, threshold);
+}
+
+/** Confidence from the fitted blocks; ready from the cut and the path's errors in its band. */
+function applyFitted(evals: ElementEval[], model: CalibrationModel, threshold: number): void {
+  const { pooled, byPath, cut } = model;
   const band = cut ? { lo: cut.cut, n: cut.n, k: cut.k } : undefined;
   const bandLower = cut ? cut.lower : 0;
   const bandReady = Boolean(cut);
-  const pathErrorsInBand = new Map<string, number>();
-  if (band) for (const p of pairs) if (p.e.confidence >= band.lo && !isCorrect(p.e, p.l)) pathErrorsInBand.set(pathOf(p.e), (pathErrorsInBand.get(pathOf(p.e)) ?? 0) + 1);
+  const pathErrorsInBand = new Map(Object.entries(model.pathErrorsInBand));
   // For the reason text when nothing is ready: the best band there is (the top pooled block).
   const top = pooled.length ? pooled[pooled.length - 1]! : undefined;
   for (const e of evals) {
     if (e.decided) continue;
     const key = pathOf(e);
-    const own = byPath.get(key);
-    const blocks = own ?? (pairs.length >= MIN_PATH_LABELS ? pooled : undefined);
+    const own = byPath[key];
+    const blocks = own ?? (model.matched >= MIN_PATH_LABELS ? pooled : undefined);
     if (!blocks || !blocks.length) { e.calibration = { status: 'uncalibrated', path: key }; continue; }
     const b = blockAt(blocks, e.confidence)!;
     const precision = Math.round((b.k / b.n) * 1000) / 1000, lower = Math.round(lowerBound(b.k, b.n) * 1000) / 1000;
@@ -228,5 +269,40 @@ export function applyLabels(evals: ElementEval[], labels: Label[], threshold: nu
     const why = ready ? '' : !bandReady ? `; no score has a band above it that clears 99% (the top block has ${top?.k ?? 0} of ${top?.n ?? 0} right, lower bound ${Math.round(lowerBound(top?.k ?? 0, top?.n ?? 0) * 1000) / 10}%)` : !inBand ? `, below the ready cut (${band!.lo})` : `; this path has ${pathErrorsInBand.get(key)} error(s) in the ready band`;
     e.reasons.push({ text: `Measured on labels: ${Math.round(precision * 100)}% right at this score (${b.k} of ${b.n}${own ? '' : ', all paths pooled'})${ready ? `; ready: the band at or above ${band?.lo} across paths clears 99% and this path has no error in it` : `, not ready${why}`}.`, delta: Math.round((e.confidence - before) * 100) / 100 });
   }
-  return { matched: pairs.length, paths: byPath.size };
+}
+
+/** A calibration saved to a file: what was fitted, on which labels, by which engine, for which system. */
+export interface CalibrationFile {
+  version: 1;
+  createdAt: string;
+  engine: { version: string; sha: string };
+  /** Hash of the system's signature set (signatureHash): a calibration belongs to one system. */
+  signatureHash: string;
+  labels: { path: string; sha256: string; count: number }[];
+  threshold: number;
+  model: CalibrationModel;
+}
+
+export function saveCalibration(file: string, c: CalibrationFile): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(c, null, 1) + '\n');
+}
+
+/**
+ * Read a calibration file. Refuses one fitted for another system (a different signature-set hash) unless
+ * `force`: then it applies, and the caller says so.
+ */
+export function loadCalibration(file: string, signatureHash: string, force = false): { calibration: CalibrationFile; crossSystem: boolean } {
+  const c = JSON.parse(fs.readFileSync(file, 'utf8')) as CalibrationFile;
+  if (c.version !== 1 || !c.model) throw new Error(`${file} isn't a dsa calibration file.`);
+  const crossSystem = c.signatureHash !== signatureHash;
+  if (crossSystem && !force) throw new Error(`${file} was fitted for another system (signature set ${c.signatureHash.slice(0, 12)}, this run's is ${signatureHash.slice(0, 12)}). Refit it on this system's labels, or force it (--force-calibration, recommend.calibrationForce) to test it across systems.`);
+  return { calibration: c, crossSystem };
+}
+
+/** Path, content hash and count of a labels file, for the calibration's record. */
+export function labelsRecord(file: string, count: number): { path: string; sha256: string; count: number } {
+  let sha = 'unreadable';
+  try { sha = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); } catch { /* recorded as unreadable */ }
+  return { path: file, sha256: sha, count };
 }

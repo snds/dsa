@@ -184,3 +184,46 @@ test('labels: held-out elements at or above the cut are ready; below it, or on a
   assert.equal(below!.calibration!.ready, false);
   assert.equal(errPath!.calibration!.ready, false, 'its path has an error in the band, measured on the labels');
 });
+
+import { applyCalibration, loadCalibration, saveCalibration, labelsRecord } from '../../src/engine/labels.js';
+import { buildSignatures as buildSigs, signatureHash } from '../../src/engine/signatures.js';
+import { ACME_UI as UI } from './setup.js';
+
+test('saved calibration: a round trip applies the same fit to elements of another run', () => {
+  const train = Array.from({ length: 60 }, (_, i) => ev(i, { confidence: i < 30 ? 0.6 : 0.95 }));
+  const labels: Label[] = train.map((e, i) => ({ id: e.id, truth: truth(i < 30 ? (i < 10 ? 'Button' : 'Toggle') : (i < 58 ? 'Button' : 'Toggle')) }));
+  const fresh = () => [ev(900, { confidence: 0.6 }), ev(901, { confidence: 0.95 })];
+  const inRun = fresh();
+  const r = applyLabels([...train, ...inRun], labels, 0.9);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-cal-'));
+  const lf = path.join(dir, 'labels.jsonl');
+  fs.writeFileSync(lf, labels.map(l => JSON.stringify(l)).join('\n'));
+  const file = path.join(dir, 'calibration.json');
+  saveCalibration(file, { version: 1, createdAt: '2026-11-04T00:00:00Z', engine: { version: 'test', sha: 'abc' }, signatureHash: 'sys-a', labels: [labelsRecord(lf, labels.length)], threshold: 0.9, model: r.model! });
+  const { calibration, crossSystem } = loadCalibration(file, 'sys-a');
+  assert.equal(crossSystem, false);
+  assert.equal(calibration.labels[0]!.count, 60);
+  assert.match(calibration.labels[0]!.sha256, /^[0-9a-f]{64}$/);
+  const other = fresh();
+  applyCalibration(other, calibration.model, 0.9);
+  assert.deepEqual(other.map(e => e.confidence), inRun.map(e => e.confidence));
+  assert.deepEqual(other.map(e => e.calibration?.ready), [false, false]);
+});
+
+test('saved calibration: another system is refused unless forced, and forcing says so', () => {
+  const evals = Array.from({ length: 30 }, (_, i) => ev(i));
+  const r = applyLabels(evals, evals.map(e => ({ id: e.id, truth: truth('Button') })), 0.9);
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-cal-')), 'c.json');
+  saveCalibration(file, { version: 1, createdAt: 'x', engine: { version: 't', sha: 's' }, signatureHash: 'sys-a', labels: [], threshold: 0.9, model: r.model! });
+  assert.throws(() => loadCalibration(file, 'sys-b'), /fitted for another system/);
+  assert.equal(loadCalibration(file, 'sys-b', true).crossSystem, true);
+});
+
+test('signature hash: the same system agrees, another differs', () => {
+  const a = buildSigs([{ dir: path.join(UI, 'ui'), name: '@acme/ui' }, { dir: path.join(UI, 'tokens'), name: '@acme/tokens' }]);
+  const b = buildSigs([{ dir: path.join(UI, 'ui'), name: '@acme/ui' }, { dir: path.join(UI, 'tokens'), name: '@acme/tokens' }]);
+  assert.equal(signatureHash(a), signatureHash(b));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-sys2-'));
+  fs.writeFileSync(path.join(dir, 'button.tsx'), `import { cva } from 'class-variance-authority';\nconst v = cva('h-10', { variants: { variant: { default: 'bg-black' } }, defaultVariants: { variant: 'default' } });\nexport function Button({ variant }: { variant?: 'default' }) { return <button className={v({ variant })} />; }\n`);
+  assert.notEqual(signatureHash(buildSigs([{ dir, name: 'other' }])), signatureHash(a));
+});

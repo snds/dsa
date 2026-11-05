@@ -169,7 +169,10 @@ export function addEngineCommands(program: Command, io: CliIo): void {
     .option("--allow-unreleased", "run even when the checkout isn't the live revision; the report says so on every page")
     .option("--no-history", "don't pull or push the data folder (history.adapter)")
     .option("--labels <file>", "a labels.jsonl to calibrate confidence on (overrides recommend.labels)")
-    .action(async (o: { registry?: boolean; remote?: boolean; git?: boolean; readiness?: boolean; drafts?: boolean; now?: string; allowUnreleased?: boolean; history?: boolean; labels?: string }, cmd: Command) => {
+    .option("--save-calibration <file>", "save the calibration fitted on --labels to this file")
+    .option("--calibration <file>", "apply a saved calibration instead of fitting one (overrides recommend.calibration)")
+    .option("--force-calibration", "apply a calibration fitted for another system (a cross-system test)")
+    .action(async (o: { registry?: boolean; remote?: boolean; git?: boolean; readiness?: boolean; drafts?: boolean; now?: string; allowUnreleased?: boolean; history?: boolean; labels?: string; saveCalibration?: string; calibration?: string; forceCalibration?: boolean }, cmd: Command) => {
       const ctx = await context(io, g(cmd));
       requirePackages(ctx);
       await storeFor(io, "run");
@@ -197,6 +200,9 @@ export function addEngineCommands(program: Command, io: CliIo): void {
         sources: { live },
         ...(o.now ? { now: new Date(o.now) } : {}),
         ...(o.labels ? { labels: path.resolve(io.cwd, o.labels) } : {}),
+        ...(o.saveCalibration ? { saveCalibration: path.resolve(io.cwd, o.saveCalibration) } : {}),
+        ...(o.calibration ? { calibration: path.resolve(io.cwd, o.calibration) } : {}),
+        ...(o.forceCalibration ? { forceCalibration: true } : {}),
         log: (m) => io.out(m),
       });
       const s = res.summary;

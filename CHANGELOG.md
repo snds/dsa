@@ -55,8 +55,13 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   sizes off the scale; `preferPrimitives` as a map (`{ "button": "Button" }`) makes that the only
   component for that element, and as a list prefers those components; `avoid` rules components out. A
   missing or unreadable file is noted and the run goes on without it.
+- A saved calibration file. `dsa run --labels <file> --save-calibration <out>` writes what was fitted
+  (rule stats, per-path isotonic fits, the ready cut or none) with the labels' paths, content hashes and
+  counts, the engine's version and revision, and a hash of the system's signature set. `--calibration`
+  (or `recommend.calibration`) applies it instead of fitting. A file fitted for another system is refused
+  unless forced (`--force-calibration`, `recommend.calibrationForce`), and a forced run says so in its notes.
 - `recommend` in dsa.config.json: `labels` (path, relative to the config), `rules` (path, relative to
-  each app) and `typescript` (boolean, default on).
+  each app), `typescript` (boolean, default on), `calibration` (path) and `calibrationForce` (boolean).
 - The element scanner skips files that aren't product code: tests, stories, examples, demos, fixtures,
   mocks, stubs and docs, reusing the model extractor's list (`NON_PRODUCT`). The run notes how many it
   left out.
