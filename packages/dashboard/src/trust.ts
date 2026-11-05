@@ -60,9 +60,9 @@ export const SHOT_MIN = 0.8;
 export const CONTAINER_ROLES = new Set(['static-table', 'data-table', 'clickable-region', 'native-dialog', 'drop-target', 'selector-card', 'choice-tile']);
 
 /** A proposal nothing can draw: the component isn't in the system's source or stories in a form dsa can find. */
-const NO_SOURCE = /isn't a component dsa found|isn't in the design system's Storybook|has no story to draw it from|there's no Storybook to draw it from/;
+export const NO_SOURCE = /isn't a component dsa found|isn't in the design system's Storybook|has no story to draw it from|there's no Storybook to draw it from/;
 
-const proposalKey = (use: string, props?: Record<string, unknown> | null) => {
+export const proposalKey = (use: string, props?: Record<string, unknown> | null) => {
   const p = Object.entries(props ?? {}).filter(([k, v]) => k !== 'render' && k !== 'asChild' && v != null).sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([k, v]) => `${k}=${v}`).join(';');
   return p ? `${use}|${p}` : use;
 };

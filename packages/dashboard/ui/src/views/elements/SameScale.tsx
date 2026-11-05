@@ -49,7 +49,7 @@ function Pane({ label, kind, children }: { label: React.ReactNode; kind: "app" |
 }
 
 /** The element and a small margin, cut from the screenshot at real size, with its box ringed. */
-function Crop({ url, box, alt }: { url: string; box?: Box | null; alt: string }) {
+export function Crop({ url, box, alt }: { url: string; box?: Box | null; alt: string }) {
   if (!box) return <Natural url={url} alt={alt} />
   const x = Math.max(0, box.x - MARGIN), y = Math.max(0, box.y - MARGIN)
   const w = Math.min(box.cw - x, box.w + MARGIN * 2), h = Math.min(box.ch - y, box.h + MARGIN * 2)
@@ -62,7 +62,25 @@ function Crop({ url, box, alt }: { url: string; box?: Box | null; alt: string })
 }
 
 /** An image at its real CSS size (its pixels over the capture's device pixel ratio). */
-function Natural({ url, alt }: { url: string; alt: string }) {
+export function Natural({ url, alt }: { url: string; alt: string }) {
   const [w, setW] = React.useState<number | null>(null)
   return <img src={url} alt={alt} loading="lazy" data-scale="1" className={cn("block max-w-none", !w && "max-h-24")} style={w ? { width: w / DPR } : undefined} onLoad={ev => setW((ev.target as HTMLImageElement).naturalWidth)} />
+}
+
+/**
+ * The element where it sits: the whole capture around it at its real size, the element ringed, with the
+ * page it was on in plain words. A capture is a margin around the element, not the full page.
+ */
+export function InContext({ url, box, alt, page }: { url: string; box?: Box | null; alt: string; page: string }) {
+  return (
+    <figure className="m-0 flex min-w-0 flex-col gap-1" data-slot="in-context">
+      <div className="w-fit max-w-full overflow-x-auto rounded-md border bg-background p-1">
+        <span className="relative block" style={box ? { width: box.cw, height: box.ch } : undefined} data-scale="1">
+          <img src={url} alt={alt} loading="lazy" className={cn("block max-w-none", box && "absolute inset-0")} style={box ? { width: box.cw, height: box.ch } : undefined} />
+          {box && <span className="pointer-events-none absolute rounded-[3px] outline-2 outline-offset-2 outline-primary" style={{ left: box.x, top: box.y, width: box.w, height: box.h }} />}
+        </span>
+      </div>
+      <figcaption className="text-[11px] text-muted-foreground">In context, on {page}</figcaption>
+    </figure>
+  )
 }

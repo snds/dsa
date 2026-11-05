@@ -9,7 +9,7 @@ import { D, short, SYS } from "@/lib/dsa"
 import { stageKey, useStaged } from "@/lib/staged"
 import { AskAgent } from "@/agent/AskAgent"
 import { Conf, ElementRow, NoShot, Reasons, ReviewControls, contentText, desc, nameOf, pickText, proposalCheck, proposalFor, revealedText, sourceLabel, sourceTip, useEl, useReviewState } from "./shared"
-import { SameScale } from "./SameScale"
+import { InContext, SameScale } from "./SameScale"
 import { useApp } from "@/lib/app"
 import { styleName } from "./units"
 
@@ -78,6 +78,8 @@ export function ReviewCard({ items, auto, pattern, options, fit, kind, title, as
   const label = `${heading} ×${n}`
   const tag = [...new Set(items.map(e => `<${e.element}>`))].join(" ")
   const ready = (context ?? []).map(id => byId.get(id)).filter(Boolean)
+  // Only an element a person can see both halves of is offered for a decision (report.ts withReview).
+  const reviewable = items.filter(e => !e.review || e.review.ready)
 
   return (
     <Card className={cn("gap-0 py-0", kind === "question" && state === "open" && "border-warning-soft-border", anyStaged && "border-primary/50")}>
@@ -117,26 +119,28 @@ export function ReviewCard({ items, auto, pattern, options, fit, kind, title, as
               {shown.verdict === "gap" && shown.gap && <p className="text-sm text-muted-foreground">{shown.gap}</p>}
             </div>
             {/* 3. The decision. */}
-            <ReviewControls items={items} auto={auto} pattern={pattern} options={options} label={label} />
+            {reviewable.length ? <ReviewControls items={reviewable} auto={auto} pattern={reviewable.length === items.length ? pattern : null} options={options} label={label} /> : <NeedsEvidence items={items} />}
+            {reviewable.length > 0 && reviewable.length < items.length && <NeedsEvidence items={items.filter(e => !reviewable.includes(e))} some />}
           </>
         )}
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-          <span>{split ? "" : scope}{ready.length > 0 && `${split ? "" : " "}${ready.length} more of this kind are already sure; they're listed under Ready.`}{elsewhere.length > 0 && ` ${otherApps(elsewhere)}`}</span>
+          <span>{split || !reviewable.length ? "" : scope}{ready.length > 0 && `${split ? "" : " "}${ready.length} more of this kind are already sure; they're listed under Ready.`}{elsewhere.length > 0 && ` ${otherApps(elsewhere)}`}</span>
           {D.serve && <AskAgent subject={{ kind: "review", ids: items.map(e => e.id), pattern: pattern ?? null }} label={kind === "question" ? "Talk it through" : "Ask the agent"} size="xs" variant="ghost" />}
         </div>
       </CardHeader>
       {/* 4. The evidence. */}
       <CardContent className={cn("flex flex-col gap-3 py-4", off && "opacity-50")}>
         <h4 className="text-xs font-medium text-muted-foreground">
-          {captured.length ? `${app && elsewhere.length ? `${mine.length === 1 ? "The case" : `${mine.length} cases`} in ${app}` : n === 1 ? "The case" : `All ${n} cases`} · ${looks.length === 1 ? "one look" : `${looks.length} looks`} · ${shotCount} captured · ${compares ? `the app next to ${SYS} ${pickText(shown)}` : "as the app renders it"}` : "Not captured in the app"}
+          {captured.length ? `${app && elsewhere.length ? `${mine.length === 1 ? "The case" : `${mine.length} cases`} in ${app}` : n === 1 ? "The case" : `All ${n} cases`} · ${(n => n === 1 ? "one look" : `${n} looks`)(new Set(looks.map(l => l.style)).size)} · ${shotCount} captured · ${compares ? `the app next to ${SYS} ${pickText(shown)}` : "as the app renders it"}` : "Not captured in the app"}
         </h4>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {visible.map(l => {
+          {visible.map((l, i) => {
             // A split card proposes per part: each look sits beside its own part's answer.
             const part = split?.find(p => p.ids.includes(l.rep.id))
             const t = part ? partShown(part) : shown
             const c = t?.verdict === "replace" && Boolean(t.use) && (!split || Boolean(part))
-            return <LookTile key={l.key} look={l} group={items.map(e => e.id)} target={t} proposal={c ? proposalFor(t, l.rep) : null} compare={c} measure={c && !unmeasured} />
+            const first = l.same && visible[i - 1]?.style !== l.style
+            return <LookTile key={l.key} look={l} sameAs={first ? visible.filter(x => x.style === l.style).length : 0} group={items.map(e => e.id)} target={t} proposal={c ? proposalFor(t, l.rep) : null} compare={c} measure={c && !unmeasured} />
           })}
           {uncaptured.length > 0 && <Uncaptured items={uncaptured} />}
         </div>
@@ -278,19 +282,28 @@ function Details({ items, ready = [] }: { items: any[]; ready?: any[] }) {
   )
 }
 
-interface Look { key: string; items: any[]; rep: any; shot: any | null; files: number }
+interface Look { key: string; items: any[]; rep: any; shot: any | null; files: number; style: string; same: boolean }
 
-/** Elements with the same classes render the same: one look, one screenshot. Captured looks first, biggest first. */
+/**
+ * Every element with its own photo gets its own tile: its photo, where it sits, its label and its code.
+ * Elements that look the same (same classes) and say the same (same words and content) sit next to each
+ * other, marked as the same look, but none stands in for another. Elements without a photo are grouped
+ * by their classes, to say once what's missing.
+ */
 export function looksOf(items: any[]): Look[] {
-  const m = new Map<string, any[]>()
-  for (const e of items) { const k = e.styleSig ?? e.styleKey ?? `id:${e.id}`; m.set(k, [...(m.get(k) ?? []), e]) }
-  return [...m].map(([key, list]) => {
-    const withShot = list.filter(e => e.shot).sort((a, b) => b.shot.match - a.shot.match)[0] ?? null
-    return { key, items: list, rep: withShot ?? list[0], shot: withShot?.shot ?? null, files: new Set(list.map(e => e.file)).size }
-  }).sort((a, b) => Number(Boolean(b.shot)) - Number(Boolean(a.shot)) || b.items.length - a.items.length)
+  const style = (e: any) => e.styleSig ?? e.styleKey ?? `id:${e.id}`
+  const content = (e: any) => `${style(e)}\u0001${e.ownHash ?? ""}\u0001${e.label ?? ""}`
+  const shot = items.filter(e => e.shot)
+  const groups = new Map<string, any[]>()
+  for (const e of shot) groups.set(content(e), [...(groups.get(content(e)) ?? []), e])
+  const captured = [...groups.values()].sort((a, b) => b.length - a.length).flatMap(list =>
+    [...list].sort((a, b) => b.shot.match - a.shot.match).map(e => ({ key: `id:${e.id}`, items: [e], rep: e, shot: e.shot, files: 1, style: content(e), same: list.length > 1 })))
+  const rest = new Map<string, any[]>()
+  for (const e of items.filter(e => !e.shot)) rest.set(style(e), [...(rest.get(style(e)) ?? []), e])
+  const uncaptured = [...rest].map(([key, list]) => ({ key, items: list, rep: list[0], shot: null, files: new Set(list.map(e => e.file)).size, style: key, same: false }))
+  return [...captured, ...uncaptured]
 }
 
-/** What changes, measured in the app against Storybook when possible, else read from the source against the signature. */
 export function deltaOf(e: any): { source: "measured" | "source"; changes: { label: string; from: string; to: string }[]; same: number; score: number } | null {
   const d = e.rendered?.diff
   if (d) return { source: "measured", changes: d.diffs.map((x: any) => ({ label: x.label, from: x.element, to: x.system })), same: d.same.length, score: d.score }
@@ -305,13 +318,12 @@ export function deltaOf(e: any): { source: "measured" | "source"; changes: { lab
  * captured at 2x and drawn at half their pixels), each labelled with what it is. The photo is cropped
  * to the element; a wide one (a table, a panel) keeps its size and scrolls instead of shrinking.
  */
-function LookTile({ look, group, target, proposal, compare, measure }: { look: Look; group: string[]; target: any; proposal: any; compare: boolean; measure: boolean }) {
+function LookTile({ look, sameAs, group, target, proposal, compare, measure }: { look: Look; sameAs: number; group: string[]; target: any; proposal: any; compare: boolean; measure: boolean }) {
   const { openLightbox, openCode, byId } = useEl()
   const e = look.rep, r = e.rendered
   const delta = deltaOf(e)
   const shotIds = group.filter(id => byId.get(id)?.shot)
   const openAt = (id: string) => openLightbox(shotIds, Math.max(0, shotIds.indexOf(id)), compare ? target : undefined)
-  const others = look.items.filter(x => x.shot && x.id !== e.id)
   const caption = e.shot.revealedBy ? revealedText(e.shot.revealedBy) : null
   // The exact proposal when there is one. Otherwise the closest variant Storybook showed, said as such.
   const exact = proposal?.url ? proposal : null
@@ -320,7 +332,8 @@ function LookTile({ look, group, target, proposal, compare, measure }: { look: L
   const chk = proposalCheck(proposal)
   const wide = (e.shot.box?.w ?? 0) > 340
   return (
-    <figure className={cn("m-0 flex min-w-0 flex-col gap-2 rounded-lg border bg-muted/20 p-2", wide && "md:col-span-2 xl:col-span-3")} data-element-id={e.id}>
+    <figure className={cn("m-0 flex min-w-0 flex-col gap-2 rounded-lg border bg-muted/20 p-2", wide && "md:col-span-2 xl:col-span-3", look.same && "border-primary/40")} data-element-id={e.id} data-same-look={look.same ? look.style : undefined}>
+      {sameAs > 1 && <span className="text-[11px] font-medium text-muted-foreground">Same look and words: {sameAs} elements, each shown</span>}
       <SameScale
         app={{ url: e.shot.url, box: e.shot.box, alt: `${sourceLabel(e.shot)}: ${e.snippet.slice(0, 60)}`, onOpen: () => openAt(e.id) }}
         proposed={compare ? (exact ? { url: exact.url, alt: `Proposed: ${SYS} ${pickText(target)}` } : closest ? { url: closest.url, alt: `Closest ${SYS} variant: ${target.use} ${closest.key}` } : null) : undefined}
@@ -350,19 +363,11 @@ function LookTile({ look, group, target, proposal, compare, measure }: { look: L
           </>
         ) : undefined}
       />
-      {others.length > 0 && (
-        <div className="flex flex-wrap gap-1" aria-label={`The other ${others.length} cases with this look`}>
-          {others.map(x => (
-            <button key={x.id} type="button" onClick={() => openAt(x.id)} className="h-9 max-w-24 cursor-zoom-in overflow-hidden rounded border bg-background" title={`${x.target} · ${short(x.file)}:${x.line}`} data-element-id={x.id}>
-              <img src={x.shot.url} alt={`Same look in ${x.target}: ${x.snippet.slice(0, 40)}`} loading="lazy" className="block h-full w-auto object-contain" />
-            </button>
-          ))}
-        </div>
-      )}
+      <InContext url={e.shot.url} box={e.shot.box} alt={`Where it sits: ${e.snippet.slice(0, 40)}`} page={e.review?.pageName ?? "its page"} />
+      {e.review && !e.review.ready && <EvidenceNote e={e} />}
       <figcaption className="flex flex-col gap-1.5 px-0.5">
         <span className="flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground">
-          <b className="font-medium text-foreground tabular-nums">×{look.items.length}</b>
-          <span>{look.files} file{look.files === 1 ? "" : "s"}</span>
+          <span>{short(e.file)}:{e.line}</span>
           {caption && <span className="truncate" title={caption}>{caption}</span>}
         </span>
         {measure && <Changes delta={delta} />}
@@ -421,9 +426,34 @@ function Uncaptured({ items }: { items: any[] }) {
     <div className="flex min-w-0 flex-col gap-2 rounded-lg border border-dashed p-3">
       <span className="flex items-center gap-1.5 text-xs font-medium"><ImageBrokenIcon className="text-muted-foreground" />{items.length} not {items.some(x => x.badShot) ? "shown" : "captured"}</span>
       {e.shotMissing || e.weakShot || e.badShot || e.reach?.status === "unused" ? <NoShot e={e} /> : <p className="text-xs text-muted-foreground">Not picked as an example this run.</p>}
-      {!e.systemPreview && <Pre className="max-h-28 text-[11px]">{e.snippet}</Pre>}
+      {e.review && !e.review.ready && <EvidenceNote e={e} />}
+      {/* The code is for engineers: behind a disclosure, never on the face a designer decides from. */}
+      {!e.systemPreview && <details className="text-xs"><summary className="cursor-pointer text-muted-foreground">Its code (for engineers)</summary><Pre className="mt-1 max-h-28 text-[11px]">{e.snippet}</Pre></details>}
       {items.length > 1 && <span className="text-[11px] text-muted-foreground">{[...new Set(items.map(x => short(x.file)))].slice(0, 3).join(", ")}{new Set(items.map(x => x.file)).size > 3 ? "…" : ""}</span>}
     </div>
   )
 }
 
+
+/** What's missing for a person to review one element, and what would fix it. */
+function EvidenceNote({ e }: { e: any }) {
+  return (
+    <div className="flex flex-col gap-1 rounded-md border border-dashed px-2 py-1.5 text-xs" data-slot="needs-evidence">
+      <b className="font-medium">Needs evidence before review</b>
+      {e.review.missing.map((m: any, i: number) => <span key={i}>{m.why} <span className="text-muted-foreground">To fix: {m.fix}</span></span>)}
+    </div>
+  )
+}
+
+/** Elements on this card that can't be decided yet: why, once per reason, and what would fix it. */
+function NeedsEvidence({ items, some }: { items: any[]; some?: boolean }) {
+  const reasons = new Map<string, { fix: string; n: number }>()
+  for (const e of items) for (const m of e.review?.missing ?? []) { const r = reasons.get(m.why) ?? { fix: m.fix, n: 0 }; r.n++; reasons.set(m.why, r) }
+  return (
+    <div className="flex flex-col gap-1 rounded-md border border-dashed px-3 py-2 text-sm" data-slot="needs-evidence">
+      <b className="font-medium">{some ? `${items.length} of these need evidence before review` : "Needs evidence before review"}</b>
+      <span className="text-xs text-muted-foreground">A decision needs the element as the app shows it and the proposal drawn with its own content. Until both exist, nothing is asked.</span>
+      <ul className="list-disc pl-4 text-xs">{[...reasons].map(([why, r]) => <li key={why}>{why}{items.length > 1 ? ` (${r.n})` : ""} <span className="text-muted-foreground">To fix: {r.fix}</span></li>)}</ul>
+    </div>
+  )
+}

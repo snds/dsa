@@ -2,10 +2,12 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { DEFAULT_THRESHOLD, freshShots, freshnessByApp, readShotIndex, autoPick, contentHash, ownOf, openStore, plainText, withPlain, withMetrics, appSettings, closestRendered, compareRendered, effectiveSettings, familyKey, figmaEnabled, homeOf, loadCatalog, patterns as stylePatterns, pushedThisWeek, questions, readEvents, readProposals, readRendered, renderIssue, renderedFor as composeRendered, resolveTargets, rowToFinding, sourceExcerpts, placeExcerpts, titleOf, type Config } from '@snds/dsa/engine';
+import { DEFAULT_THRESHOLD, locate, freshShots, freshnessByApp, readShotIndex, autoPick, contentHash, ownOf, openStore, plainText, withPlain, withMetrics, appSettings, closestRendered, compareRendered, effectiveSettings, familyKey, figmaEnabled, homeOf, loadCatalog, patterns as stylePatterns, pushedThisWeek, questions, readEvents, readProposals, readRendered, renderIssue, renderedFor as composeRendered, resolveTargets, rowToFinding, sourceExcerpts, placeExcerpts, titleOf, type Config } from '@snds/dsa/engine';
 
 import { scanEstimate, type PageActions, type ResolvedProfile } from '@snds/dsa';
 import { buildQueue, PKG_DIR } from './queue.js';
+import { hashText, propsAt } from '@snds/dsa';
+import { pageName, withReview, type Precedent, type ReviewQueueEntry } from './review.js';
 
 /**
  * Builds a single self-contained HTML report from the store: no server, opens from disk,
@@ -37,6 +39,8 @@ export interface ReportOptions {
    * run's evidence instead of the shared data folder's, so photos from different runs never mix.
    */
   runDir?: string | undefined;
+  /** The review queue (`dsa labels queue --out`); default <data>/review-queue.jsonl when it exists. */
+  reviewQueue?: string | undefined;
 }
 
 export async function renderReport(root: string, config: Config, dataDir: string, profile: ResolvedProfile, opts: ReportOptions = {}): Promise<string> {
@@ -187,7 +191,7 @@ export async function renderReport(root: string, config: Config, dataDir: string
       threshold: config.review?.threshold ?? DEFAULT_THRESHOLD,
       evals: evals.map((e: any) => ({ id: e.id, target: e.target, file: e.file, line: e.line, element: e.element, verdict: e.verdict, role: e.role, use: e.use, from: e.from, props: e.props, gap: e.gap,
         confidence: e.confidence, needsHuman: e.needsHuman, evidenceCap: e.evidenceCap ?? null, decided: e.decided, exception: e.exception, ruleId: e.ruleId, reasons: withPlain(e.reasons ?? []), alternatives: e.alternatives, signature: e.signature,
-        snippet: e.snippet, a11y: e.a11y, styleKey: e.styleKey, styleSig: e.styleSig, regions: e.regions ?? null,
+        snippet: e.snippet, srcHash: typeof e.source === 'string' ? hashText(e.source) : undefined, a11y: e.a11y, styleKey: e.styleKey, styleSig: e.styleSig, regions: e.regions ?? null,
 how: e.how ?? null, parent: e.parent ?? null, recipe: e.recipe ?? null,
         // Design identity (identity.ts): the family it belongs to, its name in designer words, and where its answer lands.
         family: familyKey(e), title: titleOf(e), home: homeOf(e.decided?.decision ?? e),
@@ -225,6 +229,15 @@ how: e.how ?? null, parent: e.parent ?? null, recipe: e.recipe ?? null,
       rendered: renderedSet ? { takenAt: renderedSet.takenAt, source: renderedSet.source, combos: Object.values(renderedSet.components).reduce((a, c) => a + Object.keys(c).length, 0) } : null,
       // Each proposed replacement rendered with its exact props (dsa render), keyed like proposalKey: the review shows the options as they would look.
       proposals: Object.fromEntries(Object.entries(readProposals(evidenceDir)).map(([k, p]) => [k, { use: p.use, props: p.props, check: p.check, url: p.shot ? renderedUrl(p.shot) : null, story: p.story ?? null, content: p.content ?? null, actual: p.actual ?? null, note: p.note ?? null, own: p.own ?? false, fallback: p.fallback ? renderedUrl(p.fallback) : null, ...(p.noSource ? { noSource: true } : {}) }])),
+    });
+    // Review for people: what each element can show, the queue, the system's allowed props, and where
+    // the app already uses each proposal (its precedents).
+    withReview(payload0(elements), {
+      queue: readQueue(opts.reviewQueue ?? path.join(dataDir, 'review-queue.jsonl')),
+      system: (readJson(path.join(dataDir, 'signatures.json')) ?? []).map((c: any) => ({ component: c.component, axes: c.axes ?? {}, defaults: c.defaults ?? {} })),
+      // The engine's own index of existing uses (<data>/precedent.json, when a run writes one), else the scan's uses.
+      precedents: precedentFile(dataDir, shotIdx, shotUrl) ?? await precedentsOf(store, runId, root, config, elements, shotIdx, shotUrl),
+      sourceRef: (e: any) => elements.sources?.[e.file]?.ref ?? 'worktree',
     });
     // Agent readiness: this run per repo (audit checks, the profile's usage checker by kind, reconciled with look-alikes), the trend, and bench runs.
     const provider = profile.readiness;
@@ -370,4 +383,57 @@ const mostCommon = (xs: string[]) => { const n = new Map<string, number>(); for 
 
 function readJson(file: string): any {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+}
+
+/** withReview takes a payload; the elements block is all it reads. */
+const payload0 = (elements: any) => ({ elements });
+
+function readQueue(file: string): ReviewQueueEntry[] | null {
+  try {
+    return fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)).filter((q: any) => typeof q.id === 'string').map((q: any) => ({ id: q.id, why: q.why === 'disagree' ? 'disagree' : 'audit' }));
+  } catch { return null; }
+}
+
+/**
+ * Where the app already uses each proposed component: the scan's system-component uses, with their
+ * literal props read from the source, and a photo when the crawler took one (shots/index.json `uses`,
+ * keyed by "<file>:<line>"). Only components some card proposes are read.
+ */
+async function precedentsOf(store: any, runId: string, root: string, config: Config, elements: any, shotIdx: any, shotUrl: (f: string) => string): Promise<Precedent[]> {
+  const wanted = new Set<string>();
+  for (const e of elements.evals ?? []) { if (e.use) wanted.add(e.use); for (const a of e.alternatives ?? []) if (a?.use) wanted.add(a.use); }
+  for (const q of elements.questions ?? []) if (q.auto?.use) wanted.add(q.auto.use);
+  if (!wanted.size) return [];
+  const rows = await store.all('select target, component, file, line from instances where run_id=$1 order by target, file, line', [runId]).catch(() => []);
+  let targets: any[] = [];
+  try { targets = resolveTargets(root, config); } catch { return []; }
+  const texts = new Map<string, string | null>();
+  const out: Precedent[] = [];
+  const perComponent = new Map<string, number>();
+  for (const r of rows as any[]) {
+    if (!wanted.has(r.component)) continue;
+    if (!texts.has(r.file)) { const at = locate(root, targets, r.target, r.file); texts.set(r.file, at ? fs.readFileSync(at.abs, 'utf8') : null); }
+    const src = texts.get(r.file);
+    const props = src ? propsAt(src, Number(r.line), r.component) : null;
+    if (!props) continue;
+    // Up to 20 per app, component and props: enough examples for every answer, not a whole index.
+    const k = `${r.target}\u0001${r.component}\u0001${JSON.stringify(Object.entries(props).sort())}`;
+    if ((perComponent.get(k) ?? 0) >= 20) continue;
+    perComponent.set(k, (perComponent.get(k) ?? 0) + 1);
+    const s = shotIdx.uses?.[`${r.file}:${r.line}`];
+    out.push({ app: r.target, file: r.file, line: Number(r.line), component: r.component, props,
+      shot: s && !s.blank && !s.covered ? { url: shotUrl(s.file), box: s.box ?? null, page: s.page, pageName: pageName(s.page) } : null });
+  }
+  return out;
+}
+
+/** `<data>/precedent.json` ({ uses: [{ component, file, line, props }] }), as precedents, when a run wrote one. */
+function precedentFile(dataDir: string, shotIdx: any, shotUrl: (f: string) => string): Precedent[] | null {
+  const j = readJson(path.join(dataDir, 'precedent.json'));
+  if (!Array.isArray(j?.uses)) return null;
+  return j.uses.filter((u: any) => u?.component && u.file && u.line).map((u: any) => {
+    const s = shotIdx.uses?.[`${u.file}:${u.line}`];
+    return { app: u.app ?? u.file.split('/')[0], file: u.file, line: Number(u.line), component: u.component, props: u.props ?? {},
+      shot: s && !s.blank && !s.covered ? { url: shotUrl(s.file), box: s.box ?? null, page: s.page, pageName: pageName(s.page) } : null };
+  });
 }

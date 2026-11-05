@@ -5,6 +5,7 @@ import path from 'node:path';
 import { hashText, historyPairsInFile, parseHunks, stripSystemComponents, systemImports, type Label, type StripTarget } from '@snds/dsa';
 import { allDsPackages, buildSignatures, normalize, resolveTargets, type Config, type Target } from '@snds/dsa/engine';
 import { isCorrect, matchLabels, predictionsOf } from './bench.js';
+import { evidenceOf, picksOf } from './review.js';
 
 /**
  * `dsa labels`: ground truth without hand-labelling everything (bootstrap-labels.ts in the core does the
@@ -225,8 +226,13 @@ export interface QueueItem {
  * disagree, or where two labels disagree, plus a random audit of a share of the rest (10% by default,
  * the same draw for the same seed). Human labels are never re-queued.
  */
-export function reviewQueue(o: { labels: Label[]; payload: any; judge?: Label[]; audit?: number; seed?: string }): { items: QueueItem[]; disagree: number; audited: number } {
+export function reviewQueue(o: { labels: Label[]; payload: any; judge?: Label[]; audit?: number; seed?: string }): { items: QueueItem[]; disagree: number; audited: number; needsEvidence: number } {
   const preds = predictionsOf(o.payload);
+  // Only what a person can see both halves of is asked (review.ts): the rest needs evidence first.
+  const picks = picksOf(o.payload);
+  const E = o.payload.elements;
+  const ready = new Set<string>((E?.evals ?? []).filter((e: any) => evidenceOf(E, e, picks.get(e.id) ?? (e.decided ? e.decided.decision : e)).ready).map((e: any) => e.id));
+  let needsEvidence = 0;
   const all = [...o.labels, ...(o.judge ?? [])];
   const pairs = matchLabels(all, preds);
   const byElem = new Map<string, { key: string; pred: (typeof pairs)[number]['pred']; labels: Label[] }>();
@@ -241,6 +247,7 @@ export function reviewQueue(o: { labels: Label[]; payload: any; judge?: Label[];
   const answer = (l: Label) => ({ method: l.method, labeler: l.labeler, verdict: l.truth.verdict, use: l.truth.use, props: l.truth.props });
   for (const g of byElem.values()) {
     if (g.labels.some((l) => l.method === 'human')) continue;
+    if (!g.pred || !ready.has(g.pred.id)) { needsEvidence++; continue; }
     const l0 = g.labels[0]!;
     const truths = new Set(g.labels.map((l) => `${l.truth.verdict}|${l.truth.use ?? ''}|${JSON.stringify(l.truth.props ?? {})}`));
     const wrong = g.pred ? g.labels.some((l) => !isCorrect(l, g.pred!)) : false;
@@ -254,5 +261,5 @@ export function reviewQueue(o: { labels: Label[]; payload: any; judge?: Label[];
   const share = o.audit ?? 0.1;
   const draw = (id: string) => parseInt(hashText(`${o.seed ?? 'dsa'}\u0001${id}`).slice(0, 8), 16) / 0xffffffff;
   const audit = rest.filter((x) => draw(x.id) < share);
-  return { items: [...items, ...audit], disagree: items.length, audited: audit.length };
+  return { items: [...items, ...audit], disagree: items.length, audited: audit.length, needsEvidence };
 }

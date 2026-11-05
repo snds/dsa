@@ -325,3 +325,30 @@ export function historyPairsInFile(o: { file: string; before: string; after: str
   }
   return out.sort((a, b) => a.line - b.line);
 }
+
+/**
+ * The literal props of a component element that opens on `line` (a use the scanner found), for the
+ * review's precedent examples: "the app already uses Button, variant outline, here". Null when no
+ * element of that name opens there.
+ */
+export function propsAt(src: string, line: number, component: string): Record<string, string> | null {
+  let ast: any;
+  try { ast = parseTsx(src); } catch { return null; }
+  let found: Record<string, string> | null = null;
+  walk(ast.program, (n) => {
+    if (found || n.type !== "JSXElement" || n.loc?.start.line !== line) return;
+    const nm = n.openingElement.name;
+    const name = nm.type === "JSXIdentifier" ? nm.name : nm.type === "JSXMemberExpression" ? nm.property.name : null;
+    if (name !== component) return;
+    const props: Record<string, string> = {};
+    for (const a of n.openingElement.attributes) {
+      if (a.type !== "JSXAttribute" || a.name.type !== "JSXIdentifier") continue;
+      const k = a.name.name as string;
+      if (/^(className|key|ref|id|style|children|on[A-Z]\w*|data-[\w-]+|aria-[\w-]+|title)$/.test(k)) continue;
+      const v = a.value ? literal(a.value) : "true";
+      if (v !== undefined) props[k] = v;
+    }
+    found = props;
+  });
+  return found;
+}

@@ -150,7 +150,7 @@ export function benchCommands(program: Command, api: AddonApi) {
       const file = path.resolve(api.cwd, o.out);
       fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(file, q.items.map((x) => JSON.stringify(x)).join('\n') + (q.items.length ? '\n' : ''));
-      api.out(`${q.items.length} to check (${q.disagree} disagree, ${q.audited} audit) -> ${o.out}.`);
+      api.out(`${q.items.length} to check (${q.disagree} disagree, ${q.audited} audit) -> ${o.out}. ${q.needsEvidence} need evidence before review and are left out.`);
     });
 }
 
