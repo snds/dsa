@@ -184,7 +184,7 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
 
   // Routes the app declares that need a value to open: listed in the result, so a person can name one.
   const needs = (target: string) => { const t = all.find(x => x.name === target); const v = t ? routeConfig(t.dir).needsValue : []; return v.length ? { needsValue: v } : {}; };
-  const sessions: { target: string; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; stop?: () => void; how?: string; need: ElementEval[]; storageState?: string | undefined; readApi?: boolean; readPaths?: string[] | undefined; signIn?: SignIn | undefined; draw?: DrawWith; reach?: ReachPlan | undefined; routeSource?: RouteSource | undefined; profiles?: Profile[] | undefined; appDir?: string | undefined }[] = [];
+  const sessions: { target: string; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; stop?: () => void; how?: string; need: ElementEval[]; storageState?: string | undefined; readApi?: boolean; readPaths?: string[] | undefined; signIn?: SignIn | undefined; draw?: DrawWith; reach?: ReachPlan | undefined; routeSource?: RouteSource | undefined; profiles?: Profile[] | undefined; appDir?: string | undefined; manifest?: ReachFile | undefined }[] = [];
   // Which routes render each element's file, from the scan's import graph and the routes in the source
   // (routes.ts): no config. Undefined when the app declares no routes we can read.
   const reachFor = (t: (typeof all)[number] | undefined, need: ElementEval[]): ReachPlan | undefined => {
@@ -212,7 +212,14 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
   // Elements that can't be photographed are drawn from the code (shots.draw: false turns it off).
   const drawOn = opts.config.shots?.draw !== false;
   // The app's own route list and starting profiles (apps[name].routeSource, .profiles).
-  const reachOwn = (name: string, dir: string) => { const a: any = opts.config.apps?.[name] ?? {}; return { appDir: dir, routeSource: a.routeSource as RouteSource | undefined, profiles: a.profiles as Profile[] | undefined }; };
+  const reachOwn = (name: string, dir: string) => {
+    const a: any = opts.config.apps?.[name] ?? {};
+    // The app's own reach manifest file (docs/reach-manifest.md): its routes, and named states as profiles.
+    let manifest: ReachFile | undefined;
+    try { manifest = JSON.parse(fs.readFileSync(path.join(dir, 'dsa.reach.json'), 'utf8')); } catch { /* none */ }
+    const fromFile: Profile[] = (manifest?.states ?? []).filter(x => x && x.name && x.route).map(x => ({ name: x.name, route: x.route!, storage: x.storage, session: x.session }));
+    return { appDir: dir, routeSource: a.routeSource as RouteSource | undefined, profiles: [...((a.profiles as Profile[] | undefined) ?? []), ...fromFile], manifest };
+  };
   const drawFor = (dir?: string, mount?: boolean): DrawWith | undefined => (drawOn ? { root: opts.root, dir, mount } : undefined);
   const evalTargets = [...new Set(evals.filter(e => !e.exception).map(e => e.target))].filter(t => !opts.target || t === opts.target);
   if (opts.url) {
@@ -276,7 +283,7 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
       const lines = (sh as any).ledger ?? process.env.DSA_LEDGER;
       if (lines) { const n = addToLedger(ledgerFile, readLedgerLines(path.resolve(opts.root, lines)), ledgerHash); if (n) log(`  ledger: ${n} record${n === 1 ? '' : 's'} added from ${lines}`); }
       const ledger = readLedger(ledgerFile, ledgerHash);
-      const r: Awaited<ReturnType<typeof session>> & { signIn?: string; expired?: boolean; broken?: string } = await session(pw, { ledger, reach: s.reach, draw: s.draw, url: s.url, routes: s.routes, first: s.first, flows: s.flows, crawl: s.crawl, examples: s.need, dir, storageState: s.storageState, readApi: s.readApi, readPaths: s.readPaths, signIn: s.signIn, maxPages: sh.maxPages ?? 90, pagesSet: sh.maxPages !== undefined, waitMs: sh.waitMs ?? 600, log, reveal: sh.reveal, maxActions: sh.maxActions ?? sh.maxTriggers, maxDepth: sh.maxDepth, maxMinutes: sh.maxMinutes, routeSource: s.routeSource, profiles: s.profiles, appDir: s.appDir });
+      const r: Awaited<ReturnType<typeof session>> & { signIn?: string; expired?: boolean; broken?: string } = await session(pw, { ledger, reach: s.reach, draw: s.draw, url: s.url, routes: s.routes, first: s.first, flows: s.flows, crawl: s.crawl, examples: s.need, dir, storageState: s.storageState, readApi: s.readApi, readPaths: s.readPaths, signIn: s.signIn, maxPages: sh.maxPages ?? 90, pagesSet: sh.maxPages !== undefined, waitMs: sh.waitMs ?? 600, log, reveal: sh.reveal, maxActions: sh.maxActions ?? sh.maxTriggers, maxDepth: sh.maxDepth, maxMinutes: sh.maxMinutes, routeSource: s.routeSource, profiles: s.profiles, appDir: s.appDir, manifest: s.manifest });
       const at = new Date().toISOString();
       if (r.ledger?.length) { const n = addToLedger(ledgerFile, r.ledger, ledgerHash); log(`  ledger: ${r.ledger.length} element${r.ledger.length === 1 ? '' : 's'} recorded rendering, ${n} new`); }
       const byId = new Map(s.need.map(e => [e.id, e]));
@@ -513,7 +520,7 @@ function callersOf(d: DrawWith, name: string, own: string): string[] {
 /** What the scan knows about reaching each element (routes.ts): the routes that render its file, and the patterns that need a value. */
 interface ReachPlan { byId: Record<string, string[]>; patterns: string[]; /** Per element: its file and its importers three steps up, as tag paths. */ near?: Record<string, string[]> }
 
-async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawWith | undefined; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; examples: ElementEval[]; dir: string; storageState?: string | undefined; readApi?: boolean | undefined; readPaths?: string[] | undefined; signIn?: SignIn | undefined; maxPages: number; waitMs: number; log: (m: string) => void; reveal?: boolean; maxActions?: number; maxDepth?: number; maxMinutes?: number; maxReplays?: number; routeSource?: RouteSource | undefined; appDir?: string | undefined; profiles?: Profile[] | undefined; pagesSet?: boolean | undefined; ledger?: Record<string, LedgerRec[]> | undefined }) {
+async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawWith | undefined; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; examples: ElementEval[]; dir: string; storageState?: string | undefined; readApi?: boolean | undefined; readPaths?: string[] | undefined; signIn?: SignIn | undefined; maxPages: number; waitMs: number; log: (m: string) => void; reveal?: boolean; maxActions?: number; maxDepth?: number; maxMinutes?: number; maxReplays?: number; routeSource?: RouteSource | undefined; appDir?: string | undefined; profiles?: Profile[] | undefined; pagesSet?: boolean | undefined; ledger?: Record<string, LedgerRec[]> | undefined; manifest?: ReachFile | undefined }) {
   const shots: Record<string, any> = {};
   const pages: string[] = [];
   let taggedPages = 0;
@@ -811,6 +818,9 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       o.log(`  ${got.length} route${got.length === 1 ? '' : 's'} from ${o.routeSource.module} (${o.routeSource.export}), ${fresh.length} new`);
     } else o.log(`  apps.routeSource: ${got}`);
   }
+  // The app's reach manifest: routes from its file, then whatever its dev build's window.__DSA__ declares.
+  for (const r of o.manifest?.routes ?? []) { const u = routeUrl(r, base); if (!queue.includes(u)) { queue.unshift(u); firstUrls.add(u); } }
+  if (remaining.length) await fromManifest();
   // The ledger first: elements an earlier run, a test or a person saw render, opened where they rendered,
   // with the state recorded above them set back.
   if (o.ledger && Object.keys(o.ledger).length && remaining.length && o.reveal !== false && !(o.signIn && auth.done)) await replayLedger();
@@ -1031,6 +1041,35 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     await browser.close().catch(() => {});
   }
   return { ledger: recorded, shots, pages, missing: [...remaining.map(r => r.id), ...setAside, ...drawnIds], drawn: drawnIds.length, why, fileOn: Object.fromEntries(Object.entries(fileOn).map(([k, u]) => [k, u && routeOf(u)])), tried: Object.fromEntries(everyone.filter(r => r.tried?.length).map(r => [r.id, r.tried!])), tagged: { pages: taggedPages, of: pages.length }, ...(signedOut() || auth.expired ? { signIn: wall.at || o.url } : {}), ...(auth.expired ? { expired: true } : {}), ...(isBroken() ? { broken: broken.first } : {}) };
+
+  /**
+   * The app's own reach manifest, when its dev build declares one (`window.__DSA__`, docs/reach-manifest.md):
+   * its routes go first in the queue, and each named state is put on (`go(name)`, after `seed()` when it has
+   * one) and looked at, those that say they show a missing element's file first. Up to 60, in a fifth of
+   * the time. Reaching an element is then a lookup, not a search.
+   */
+  async function fromManifest() {
+    await go(base.toString());
+    const m = await inPage<{ routes: string[]; states: { name: string; reveals: string[] }[] } | null>(page, READ_MANIFEST, null).catch(() => null);
+    if (!m) return;
+    let fresh = 0;
+    for (const r of m.routes) { const u = routeUrl(r, base); if (!queue.includes(u)) { queue.unshift(u); firstUrls.add(u); fresh++; } }
+    const stop = Date.now() + (deadline - Date.now()) * 0.2;
+    const wants = (st: { reveals: string[] }) => remaining.filter(r => st.reveals.some(f => r.e.file === f || r.e.file.endsWith('/' + f) || r.e.file.startsWith(f.replace(/\*\*?$/, '')))).length;
+    const order = [...m.states].sort((a, b) => wants(b) - wants(a)).slice(0, 60);
+    let tried = 0;
+    const before = remaining.length;
+    for (const st of order) {
+      if (!remaining.length || Date.now() >= stop) break;
+      await go(base.toString());
+      const ok = await inPage<boolean>(page, GO_MANIFEST, st.name).catch(() => false);
+      if (!ok) { o.log(`  manifest: go("${st.name}") failed`); continue; }
+      tried++;
+      await page.waitForTimeout(o.waitMs); await settle();
+      await sweeper(page.url())(`the app's manifest state “${st.name}”`);
+    }
+    o.log(`  manifest: ${m.routes.length} route${m.routes.length === 1 ? '' : 's'} (${fresh} new), ${tried} of ${m.states.length} state${m.states.length === 1 ? '' : 's'} put on, ${before - remaining.length} found`);
+  }
 
   /** Open a page; reload when only its hash differs (going there wouldn't load it). */
   async function go(u: string) {
@@ -1682,6 +1721,29 @@ const SET_STATE = `({ sets, within, check }) => {
 }`;
 
 /** Runs in the page: resolve once nothing in the DOM has changed for 250 ms, or after `max` ms. */
+/** dsa.reach.json beside the app (docs/reach-manifest.md): routes, and named states as a route with storage seeded. */
+export interface ReachFile { routes?: string[]; states?: { name: string; route?: string; storage?: Record<string, string | null>; session?: Record<string, string | null> }[] }
+
+/** Runs in the page: the app's window.__DSA__ manifest, its routes and its states (each a name, or { name, reveals }). */
+const READ_MANIFEST = `async () => {
+  const m = window.__DSA__;
+  if (!m || typeof m !== 'object') return null;
+  const call = async (f) => { try { return typeof f === 'function' ? await f() : f; } catch { return null; } };
+  const routes = (await call(m.routes)) || [];
+  const states = (await call(m.states)) || [];
+  return {
+    routes: Array.isArray(routes) ? routes.filter((r) => typeof r === 'string').slice(0, 2000) : [],
+    states: Array.isArray(states) ? states.map((s) => typeof s === 'string' ? { name: s, reveals: [] } : s && typeof s.name === 'string' ? { name: s.name, reveals: Array.isArray(s.reveals) ? s.reveals.filter((x) => typeof x === 'string') : [] } : null).filter(Boolean).slice(0, 500) : [],
+  };
+}`;
+
+/** Runs in the page: seed the app's data (when it says how), then put one of its named states on. */
+const GO_MANIFEST = `async (name) => {
+  const m = window.__DSA__;
+  if (!m || typeof m.go !== 'function') return false;
+  try { if (typeof m.seed === 'function') await m.seed(); await m.go(name); return true; } catch { return false; }
+}`;
+
 /** apps[name].routeSource: a module of the app (path from its folder) and the export that lists its routes. */
 export interface RouteSource { module: string; export: string }
 /** apps[name].profiles: a route opened with local (and session) storage seeded first. null removes a key. */

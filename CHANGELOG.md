@@ -32,6 +32,10 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- An opt-in reach manifest (docs/reach-manifest.md). A dev build's `window.__DSA__ = { routes(), states(),
+  go(name), seed() }` puts its routes first and each named state on in turn (those whose `reveals` name a
+  missing element's file first); `dsa.reach.json` beside the app adds routes, and states that are a route
+  with storage seeded. Reaching an element becomes a lookup.
 - Exact state setters. In tagged files (a plain `.ts` hook included) the tagger names each state hook by its
   setter as the app runs (`const [open, setOpen] = useState(…)` → "open"), with a statement after the
   declaration on the same line: no hook added or moved, Fast Refresh unchanged. Setting state picks the
