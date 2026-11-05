@@ -110,8 +110,28 @@ export function viteUrlOf(file: string, viteRoot: string, base = '/'): string {
   return b + '@fs' + (abs.startsWith('/') ? '' : '/') + abs;
 }
 
+/**
+ * A file in a copy of the app, named as the original: DSA_TAG_COPY is ["<copy folder>", "<app folder>"]. dsa's
+ * render tier runs the app's tests from a copy, so nothing they write lands in the app, with tags that still
+ * match the scan's.
+ */
+function asOriginal(file: string): string {
+  const c = process.env.DSA_TAG_COPY;
+  if (!c) return file;
+  try {
+    const [from, to] = JSON.parse(c) as [string, string];
+    const abs = path.resolve(file);
+    for (const f of new Set([from, fs.realpathSync(from)])) {
+      const rel = path.relative(f, abs);
+      if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) return path.join(to, rel);
+    }
+  } catch { /* not a copy */ }
+  return file;
+}
+
 /** A file's tag path under these options (root and app folder from the options, the environment, or found). */
-export function tagFileOf(file: string, o: TagOptions = {}): string | null {
+export function tagFileOf(given: string, o: TagOptions = {}): string | null {
+  const file = asOriginal(given);
   const root = o.root ?? process.env.DSA_TAG_ROOT ?? findRoot(path.dirname(path.resolve(file)));
   return root ? tagPath(file, root, o.dir ?? process.env.DSA_TAG_DIR) : null;
 }

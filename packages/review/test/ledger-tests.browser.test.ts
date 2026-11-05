@@ -23,8 +23,10 @@ const APP: Record<string, string> = {
   'vite.config.js': `export default { cacheDir: '../../.vite', esbuild: { jsx: 'automatic' }, test: { environment: 'happy-dom' } };\n`,
   'src/main.jsx': `import { createRoot } from 'react-dom/client';\nimport { Library } from './Library.jsx';\ncreateRoot(document.getElementById('root')).render(<Library />);\n`,
   'src/Library.jsx': `import { useState } from 'react';\nimport { Swatches } from './Swatches.jsx';\nexport function Library() {\n  const [picking] = useState(false);\n  return <main><h1>Library</h1>{picking && <Swatches colours={[]} />}</main>;\n}\n`,
-  'src/Swatches.jsx': `export function Swatches({ colours }) {\n  return <div>{colours.length > 0 && <button className="btn">Use {colours[0]}</button>}</div>;\n}\n`,
-  'src/Swatches.test.jsx': `import { test, expect } from 'vitest';\nimport { act } from 'react';\nimport { createRoot } from 'react-dom/client';\nimport { Swatches } from './Swatches.jsx';\nglobalThis.IS_REACT_ACT_ENVIRONMENT = true;\ntest('shows its colours', async () => {\n  const el = document.createElement('div');\n  document.body.appendChild(el);\n  const root = createRoot(el);\n  await act(() => root.render(<Swatches colours={['#2f6f4f', '#aa3300']} />));\n  expect(el.textContent).toContain('Use #2f6f4f');\n  act(() => root.unmount());\n});\n`,
+  // "Plenty" shows once the count passes 2: no literal says what to set it to, but the test's record does.
+  'src/Swatches.jsx': `import { useState } from 'react';\nexport function Swatches({ colours }) {\n  const [count, setCount] = useState(0);\n  return <div>{colours.length > 0 && <button className="btn">Use {colours[0]}</button>}\n    <i className="more" onClick={() => setCount(count + 1)}>more</i>\n    {count > 2 && <button className="btn">Plenty {count}</button>}</div>;\n}\n`,
+  // The test writes a file beside itself, as some apps' tests do: it must land in the copy, not the app.
+  'src/Swatches.test.jsx': `import fs from 'node:fs';\nimport { test, expect } from 'vitest';\nimport { act } from 'react';\nimport { createRoot } from 'react-dom/client';\nimport { Swatches } from './Swatches.jsx';\nglobalThis.IS_REACT_ACT_ENVIRONMENT = true;\ntest('shows its colours', async () => {\n  const el = document.createElement('div');\n  document.body.appendChild(el);\n  const root = createRoot(el);\n  await act(() => root.render(<Swatches colours={['#2f6f4f', '#aa3300']} />));\n  expect(el.textContent).toContain('Use #2f6f4f');\n  for (let i = 0; i < 3; i++) await act(() => el.querySelector('.more').click());\n  expect(el.textContent).toContain('Plenty 3');\n  act(() => root.unmount());\n  fs.writeFileSync('gaps.md', 'written by the test');\n});\n`,
 };
 
 test("the app's own tests: what they render is recorded with its props and drawn from that", { timeout: 300_000 }, async ({ skip }) => {
@@ -48,6 +50,14 @@ test("the app's own tests: what they render is recorded with its props and drawn
   const target = evals.find(e => e.file.endsWith('Swatches.jsx') && /Use/.test(e.match.text ?? ''));
   assert.ok(target, evals.map(e => `${e.file}:${e.line} ${e.match.text}`).join('\n'));
 
+  // Every path in the app, with its time: links (node_modules' packages) not followed.
+  const snapshot = () => {
+    const out: Record<string, number> = {};
+    const walk = (d: string) => { for (const x of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, x.name); out[path.relative(dir, p)] = fs.lstatSync(p).mtimeMs; if (x.isDirectory() && !x.isSymbolicLink()) walk(p); } };
+    walk(dir);
+    return out;
+  };
+  const before = snapshot();
   const logs: string[] = [];
   const config = loadConfig(root).config as any;
   config.shots = { ...(config.shots ?? {}), maxMinutes: 2, waitMs: 200, reveal: false, renderTests: { maxMinutes: 3 } };
@@ -62,6 +72,17 @@ test("the app's own tests: what they render is recorded with its props and drawn
   const shot = idx.shots[target!.id];
   assert.deepEqual([shot?.drawn, shot?.exact, shot?.source], ['mount', true, 'isolated'], all);
   assert.match(String(shot.content?.text ?? ''), /Use #2f6f4f/);
+  // Behind state no literal names: drawn after setting the state the test's record holds.
+  const plenty = evals.find(e => e.file.endsWith('Swatches.jsx') && /Plenty/.test(e.match.text ?? ''));
+  assert.ok(plenty);
+  const p = idx.shots[plenty!.id];
+  assert.deepEqual([p?.drawn, p?.exact, p?.source], ['mount', true, 'isolated'], all);
+  assert.match(String(p.content?.text ?? ''), /Plenty 3/);
+  assert.match(all, new RegExp(`${plenty!.id} .*after setting the state recorded with it`));
+  assert.match(all, /ledger: of [1-9]\d* with a record of their own, [1-9]\d* drawn as isolated renders; all: /);
+  assert.match(all, /known only from the app's tests: drawn isolated where they could be, not live/);
+  // Nothing in the app was written: not Vitest's cache, not the file the test wrote.
+  assert.deepEqual(snapshot(), before);
   // The test's address is never opened as a page.
   assert.doesNotMatch(all, /opened test:/);
 });

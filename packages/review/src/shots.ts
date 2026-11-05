@@ -294,6 +294,7 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
           const n = addToLedger(ledgerFile, readLedgerLines(out), ledgerHash);
           log(`  tests: the app's own tests rendered ${t.records} tagged element${t.records === 1 ? '' : 's'} in ${t.files} file${t.files === 1 ? '' : 's'} (${t.seconds}s${t.tests ? `; test files: ${t.tests}` : ''}${t.why ? `; ${t.why}` : ''}); ${n} new in the ledger`);
         } else log(`  tests: the app's own tests added nothing to the ledger: ${t.why ?? 'no reason given'} (${t.seconds}s)`);
+        if (t.browser) log(`  tests: not in a browser: ${t.browser}`);
       }
       const ledger = readLedger(ledgerFile, ledgerHash);
       const r: Awaited<ReturnType<typeof session>> & { signIn?: string; expired?: boolean; broken?: string } = await session(pw, { ledger, uses: instances.filter(i => s.target === '*' || i.target === s.target).map(i => ({ component: i.component, key: `${i.file}:${i.line}` })), reach: s.reach, draw: s.draw, url: s.url, routes: s.routes, first: s.first, flows: s.flows, crawl: s.crawl, examples: s.need, dir, storageState: s.storageState, readApi: s.readApi, readPaths: s.readPaths, signIn: s.signIn, maxPages: sh.maxPages ?? 90, pagesSet: sh.maxPages !== undefined, waitMs: sh.waitMs ?? 600, log, reveal: sh.reveal, maxActions: sh.maxActions ?? sh.maxTriggers, maxDepth: sh.maxDepth, maxMinutes: sh.maxMinutes, routeSource: s.routeSource, profiles: s.profiles, appDir: s.appDir, manifest: s.manifest, coverage: (sh as any).coverage });
@@ -1563,7 +1564,11 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
     }
     o.log(`  drawing ${remaining.length} not reached live: ${canMount ? "from the app's code where its component can be mounted, else as markup" : "as markup only (this build doesn't serve /@dsa/mount; add dsaTag to its Vite dev build to draw from the app's code)"}`);
     const tally = new Map<string, number>();
-    const count = (k: string) => tally.set(k, (tally.get(k) ?? 0) + 1);
+    // The same, for elements with a record of their own (a test or a person saw them render): why each that
+    // was recorded still wasn't drawn from the app's code.
+    const ownTally = new Map<string, number>();
+    let ownNow = false, ownCount = 0, ownIsolated = 0;
+    const count = (k: string) => { tally.set(k, (tally.get(k) ?? 0) + 1); if (ownNow) ownTally.set(k, (ownTally.get(k) ?? 0) + 1); };
     // A reason without its specifics, for the summary: "its component failed to render", "no element at its line…".
     const short = (u: string) => u.replace(/\b\d+:\d+\b/g, 'its line').replace(/^[\w$.]+(?=: | mounted)(: )?/, '').replace(/ with \d+ of the app's providers/, '').replace(/\s*\(.*$/, '').replace(/:.*$/, '').trim();
     const where = (r: Target) => `${r.id} (${r.e.file}:${r.e.line})`;
@@ -1579,6 +1584,8 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       loaded = page.url(); loadedFor = u;
     };
     for (const { r, u } of queue) {
+      ownNow = Boolean(ledgerNow[r.src]?.length);
+      if (ownNow) ownCount++;
       const out = (msg: string) => { note(r, msg); count(`not drawn (${short(msg.replace(/^not drawn: /, '').replace(/; not mounted.*$/, ''))})`); o.log(`  ${where(r)} ${msg}`); };
       if (n >= max || Date.now() > stop) { out(`not drawn: ${n >= max ? `over the ${max} drawings per app` : 'out of time for drawings'}`); continue; }
       const code = readSource(d.root, r.e.file, d.dir);
@@ -1611,10 +1618,14 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
           // any of its component's): an isolated render, instead of props guessed from the source. Either way
           // the element's conditions on those props are made to hold (forceGates).
           let withRecorded = false;
+          // The record whose state is set in the drawing: the element's own (the test or page it rendered in),
+          // else the one whose props it was mounted with.
+          let stateRec: LedgerRec | undefined;
           const propsFor = (name: string) => {
             const shaped = mountProps({ ...r.e, within: name }, code, callersOf(d, name, abs));
             const rec = recordOf(r, name);
             withRecorded = Boolean(rec);
+            stateRec = ledgerNow[r.src]?.[0] ?? rec;
             const f = forceGates(r.e, name, rec ? recordedProps(name, rec, shaped) : shaped, shaped, itemOf(name));
             forced = f.forced;
             return f.props;
@@ -1653,6 +1664,12 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
           const label = parent ? `${r.e.within} (drawn by ${parent}, the component around it)` : r.e.within;
           if (said.ok) {
             let hit = early ?? await find();
+            // The state recorded with it, set in the drawing, before its controls are tried.
+            if (!hit && stateRec) {
+              let set = 0;
+              for (const one of statesOf(stateRec)) set += (await inPage<SetResult>(page, SET_STATE, { sets: [one], within: '#dsa-mount' }).catch(() => NONE_SET)).set;
+              if (set) { await settle(1500); hit = await find(); if (hit) revealed = `setting the state recorded with it (${set} value${set === 1 ? '' : 's'})`; }
+            }
             // Behind a state inside it: the clicks the scan traced, then the drawing's own toggles, tabs and menus.
             let tried = '';
             if (!hit) { const rv = await revealInMount(r, find, () => mountAs(parent || r.e.within!)); hit = rv.hit; revealed = rv.after; tried = rv.tried; }
@@ -1717,6 +1734,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         drawnIds.push(r.id);
         remaining = remaining.filter(x => x.id !== r.id);
         n++;
+        if (ownNow && isolated) ownIsolated++;
         const msg = how === 'mount' ? `drawn from the app's code${isolated ? ` with the props the app passed it (recorded): an isolated render${forced.length ? ` (recorded props, condition forced: ${forced.join(', ')})` : ''}` : forced.length ? ` (condition forced: ${forced.join(', ')})` : ''} (${drawnBy ? `${drawnBy}, the component around it` : 'its component'}, in the app's build${providers ? `, with ${providers} of its providers` : ''}${wrapped ? `, ${wrapped} found in the source` : ''}${revealed ? `, after ${revealed.startsWith('setting ') ? revealed : `clicking ${revealed}`} in it` : ''})` : `drawn as markup only; not mounted: ${unmounted}`;
         count(placeholder ? `shown outlined (no size: ${short(placeholder)})` : how === 'mount' ? "drawn from the app's code" : `markup only (not mounted: ${short(unmounted)})`);
         o.log(`  ${where(r)} ${msg}${placeholder ? ` · shown outlined, it had no size: ${placeholder}` : ''}${cap.blank ? ' · blank' : ''}`);
@@ -1727,6 +1745,9 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       }
     }
     if (tally.size) o.log(`  drawings: ${[...tally].sort((a, b) => b[1] - a[1]).map(([w, k]) => `${k} ${w}`).join('; ')}`);
+    if (ownCount) o.log(`  ledger: of ${ownCount} with a record of their own, ${ownIsolated} drawn as isolated renders; all: ${[...ownTally].sort((a, b) => b[1] - a[1]).map(([w, k]) => `${k} ${w}`).join('; ')}`);
+    // Known only from the app's tests: drawn from the code with what the tests gave them, never live (a test names no page).
+    if (ledgerCover?.tests) o.log(`  ledger: ${ledgerCover.tests} known only from the app's tests: drawn isolated where they could be, not live (a test's record names no page to open)`);
   }
 
   /**
