@@ -376,6 +376,15 @@ function allTsx(src: string): string[] {
 }
 
 /**
+ * Where a system's components are: a package's src/, or, for a system that is a folder of components
+ * itself (a shadcn-style components/ui folder inside an app, with no src/ of its own), the folder.
+ */
+export function componentRoot(dir: string): string {
+  const src = path.join(dir, 'src');
+  return fs.existsSync(src) ? src : dir;
+}
+
+/**
  * Build signatures from the core packages. `packages` maps package dirs to their npm names,
  * so a component file maps to its public import (@acme/ui/button).
  */
@@ -383,7 +392,7 @@ export function buildSignatures(packages: { dir: string; name: string }[]): Sign
   const { aliases, values } = readTokenAliases(packages.map(p => p.dir));
   const components = new Map<string, ComponentSig>();
   for (const pkg of packages) {
-    const src = path.join(pkg.dir, 'src');
+    const src = componentRoot(pkg.dir);
     if (!fs.existsSync(src)) continue;
     const exportsMap = readExports(pkg.dir, pkg.name);
     for (const file of componentFiles(src)) {
@@ -441,7 +450,7 @@ export function buildSignatures(packages: { dir: string; name: string }[]): Sign
  * their signatures are the base component's, re-keyed: IconButton sm ≡ Button icon-sm, every variant.
  */
 function deriveSizeMapped(dir: string, components: Map<string, ComponentSig>) {
-  const src = path.join(dir, 'src');
+  const src = componentRoot(dir);
   if (!fs.existsSync(src)) return;
   for (const file of componentFiles(src)) {
     const ast = parseFile(file);

@@ -12,6 +12,8 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   or `<span>` with `animate-pulse`, a muted fill and no children, all three required) and a Label (a
   `<label>` with `htmlFor`, or wrapping a text field; never one holding a choice control or a button, which
   is that control's own anatomy, and never one inside a Field component).
+- A system can be a folder of components (a shadcn-style `components/ui` inside an app): when the system's
+  folder has no `src/`, its signatures are read from the folder itself.
 - Recommendations apply hard constraints before ranking (`src/engine/constraints.ts`). An element with
   `aria-pressed`, `aria-current` or a selected state only maps to a component with a prop for it
   (`pressed`, `isActive`, `value`, or a `data-state` it writes). A component with a fixed role can't take
