@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { parse as babelParse } from '@babel/parser';
 import { latestEvals } from '../src/engine/index.js';
 import dsaTagBabel from '../src/tag/babel.js';
 import { dsaTag, tagPath, tagSource } from '../src/tag/index.js';
@@ -169,8 +170,24 @@ test('the transform holds on a real code base: every file tagged, every output p
   const warns: string[] = [];
   const warn = console.warn;
   console.warn = (m: string) => { warns.push(m); };
+  // Names a file uses without declaring or importing them, before and after: tagging adds none (a bare
+  // useState where the file wrote React.useState would be one), only globalThis for its own calls.
+  const req = createRequire(fs.realpathSync(path.join(repo, 'node_modules/@babel/core/package.json')));
+  const traverse = req('@babel/traverse').default;
+  const free = (code: string) => { let g = new Set<string>(); traverse(babelParse(code, { sourceType: 'unambiguous', errorRecovery: true, plugins: ['jsx', 'typescript', 'decorators-legacy'] }), { Program(p: any) { g = new Set(Object.keys(p.scope.globals)); p.stop(); } }); return g; };
   let tagged = 0;
-  try { for (const f of files) if (tagSource(fs.readFileSync(f, 'utf8'), f, { when: true, root: repo, uses: true })) tagged++; } finally { console.warn = warn; }
+  const added: string[] = [];
+  try {
+    for (const f of files) {
+      const code = fs.readFileSync(f, 'utf8');
+      const out = tagSource(code, f, { when: true, root: repo, uses: true });
+      if (!out) continue;
+      tagged++;
+      const before = free(code);
+      for (const n of free(out.code)) if (!before.has(n) && n !== 'globalThis') added.push(`${path.relative(repo, f)}: ${n}`);
+    }
+  } finally { console.warn = warn; }
   assert.deepEqual(warns, []);
+  assert.deepEqual(added, []);
   assert.ok(tagged > 50, `${tagged} tagged`);
 });

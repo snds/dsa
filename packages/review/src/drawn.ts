@@ -60,6 +60,24 @@ function typesWithImports(ast: any, file: string, read: (file: string) => string
   return out;
 }
 
+/**
+ * The lists a file walks, by the name it gives each item: `uploads.map((up) => …)` → { up: 'uploads' },
+ * `props.rows.filter(row => …)` → { row: 'rows' }. A condition on an item's field (`up.failed`) is met by a
+ * list with one item that has it.
+ */
+export function itemAliases(code: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const m of code.matchAll(/(?<![\w$.])((?:props\.)?[A-Za-z_$][\w$]*)\s*\??\.\s*(?:map|filter|forEach|some|every|find|flatMap)\(\s*(?:async\s*)?\(?\s*([A-Za-z_$][\w$]*)/g)) {
+    const list = m[1]!.replace(/^props\./, '');
+    if (!(m[2]! in out)) out[m[2]!] = list;
+  }
+  return out;
+}
+
+/** `up.failed`, `row?.kind`: an item's field, when `up` names a list's item. */
+const itemField = (m: any, aliases: Record<string, string>): { list: string; field: string } | null =>
+  /MemberExpression$/.test(m?.type ?? '') && !m.computed && m.object?.type === 'Identifier' && aliases[m.object.name] && m.property?.name ? { list: aliases[m.object.name]!, field: m.property.name } : null;
+
 /** `x.length`, `x?.length > 0`, `x.length === 0`, `props.x.length >= 1`: the list, and whether the test wants it non-empty. */
 function lengthTest(e: any): { name: string; nonEmpty: boolean } | null {
   const list = (m: any): string | null => {
@@ -93,7 +111,7 @@ function lengthTest(e: any): { name: string; nonEmpty: boolean } | null {
  * a literal (`mode === 'edit'`) that literal. Gates on state are left to the state setter. Returns the props
  * and what it set, in words (`open = true`), so a drawing can say a condition was forced.
  */
-export function forceGates(e: ElementEval, name: string, given: Record<string, unknown>, shaped: Record<string, unknown> = {}, item?: (prop: string) => unknown): { props: Record<string, unknown>; forced: string[] } {
+export function forceGates(e: ElementEval, name: string, given: Record<string, unknown>, shaped: Record<string, unknown> = {}, item?: (prop: string) => unknown, aliases: Record<string, string> = {}): { props: Record<string, unknown>; forced: string[] } {
   const props: Record<string, unknown> = { ...given };
   const forced: string[] = [];
   const takes = (x: string) => x in props || x in shaped;
@@ -105,8 +123,20 @@ export function forceGates(e: ElementEval, name: string, given: Record<string, u
     set(x, s && typeof s === 'object' ? s : true);
   };
   const root = (m: any): string | null => m?.type === 'Identifier' ? m.name : /MemberExpression$/.test(m?.type ?? '') && !m.computed && m.object?.type === 'Identifier' && m.object.name === 'props' ? m.property?.name ?? null : null;
+  // A list prop with one item whose field holds `value` (true: any truthy value), the rest of the item as recorded or shaped.
+  const withItem = (f: { list: string; field: string }, value: unknown) => {
+    if (!takes(f.list)) return;
+    const cur = Array.isArray(props[f.list]) ? props[f.list] as unknown[] : [];
+    const ok = (x: any) => x && typeof x === 'object' && (value === true ? Boolean(x[f.field]) : value === false ? !x[f.field] : x[f.field] === value);
+    if (cur.some(ok)) return;
+    const s = shaped[f.list];
+    const base = [cur[0], item?.(f.list), Array.isArray(s) ? s[0] : undefined].find(x => x && typeof x === 'object') ?? {};
+    set(f.list, [{ ...(base as object), [f.field]: value }, ...cur.slice(0, 2)]);
+  };
   const visit = (x: any, truth: boolean): void => {
     if (!x) return;
+    const it = itemField(x, aliases);
+    if (it) return withItem(it, truth);
     const r = root(x);
     if (r) { if (takes(r)) truthy(r, truth); return; }
     if (x.type === 'UnaryExpression' && x.operator === '!') return visit(x.argument, !truth);
@@ -130,6 +160,9 @@ export function forceGates(e: ElementEval, name: string, given: Record<string, u
       return;
     }
     if (x.type === 'BinaryExpression' && /^[!=]==?$/.test(x.operator)) {
+      const ft = itemField(x.left, aliases) ?? itemField(x.right, aliases);
+      const fl = itemField(x.left, aliases) ? x.right : x.left;
+      if (ft && /^(String|Numeric|Boolean)Literal$/.test(fl?.type ?? '') && x.operator.startsWith('=') === truth) return withItem(ft, fl.value);
       const id = root(x.left) ? x.left : root(x.right) ? x.right : null;
       const lit = id === x.left ? x.right : x.left;
       const n = id && root(id);
@@ -635,6 +668,37 @@ export function parentComponent(code: string, name: string, line: number): strin
 }
 
 /**
+ * A read off nothing in a component's own props ("reading 'find'" on `rows.find(…)`, "reading 'name'" on
+ * `alias.owner.name`): the path from the prop to what was missing, and a value of the kind that read needs
+ * there: a list for a list's methods and length, a string for a string's, else an object with the field.
+ */
+export function nullRead(code: string, component: string, message: string): { path: string[]; value: Val } | null {
+  const k = message.match(/reading '([\w$]+)'/)?.[1];
+  if (!k) return null;
+  const ast = parse(code);
+  const fn = ast ? componentFn(ast, component) : null;
+  if (!fn) return null;
+  const param = fn.params?.[0];
+  const params = new Set<string>();
+  if (param?.type === 'ObjectPattern') for (const p of param.properties) if (p.type === 'ObjectProperty' && p.key?.name) params.add(p.value?.type === 'Identifier' ? p.value.name : p.key.name);
+  const propsName = param?.type === 'Identifier' ? param.name : '';
+  let found: string[] | null = null;
+  walk(fn.body, (n) => {
+    if (found || !/MemberExpression$/.test(n.type) || n.computed || n.property?.name !== k) return;
+    const at: string[] = [];
+    let o = n.object;
+    while (/MemberExpression$/.test(o?.type ?? '') && !o.computed && o.property?.name) { at.unshift(o.property.name); o = o.object; }
+    if (o?.type !== 'Identifier') return;
+    if (o.name === propsName && at.length) found = at;
+    else if (params.has(o.name)) found = [o.name, ...at];
+  });
+  if (!found) return null;
+  const value: Val = /^(length|map|filter|find|findIndex|forEach|some|every|reduce|flatMap|slice|includes|indexOf|join|at|sort)$/.test(k) ? []
+    : /^(trim|toLowerCase|toUpperCase|split|startsWith|endsWith|replace|padStart|charAt)$/.test(k) ? '' : { [k]: '' };
+  return { path: found, value };
+}
+
+/**
  * What a component that threw while drawing was missing, read off its error and its source: "the prop
  * invoice", "a provider for StoreCtx", "what useStore reads (a provider above it)". Empty when it can't tell.
  */
@@ -820,6 +884,7 @@ export function stateSets(gates: { test: string; negated: boolean; component?: s
       offset = at;
     }
     const want = new Map<string, Val>();
+    const aliases = itemAliases(code);
     const initial = (x: string) => initialOf(code, x);
     // A value of the state's declared type (`useState<PaletteColour[]>`, the type here or in a file it imports).
     let types: Map<string, any> | null = null;
@@ -857,6 +922,15 @@ export function stateSets(gates: { test: string; negated: boolean; component?: s
       if (e.type === 'LogicalExpression') {
         if ((e.operator === '&&' && truth) || (e.operator === '||' && !truth)) { visit(e.left, truth); visit(e.right, truth); }
         else visit(e.left, truth);
+        return;
+      }
+      // A condition on a list item's field (`up.failed`, `row.kind === 'document'`): the list with one such item.
+      const f = itemField(e, aliases) ?? (e.type === 'BinaryExpression' && /^[!=]==?$/.test(e.operator) && e.operator.startsWith('=') === truth ? itemField(e.left, aliases) ?? itemField(e.right, aliases) : null);
+      if (f && known(f.list)) {
+        const lit = e.type === 'BinaryExpression' ? (itemField(e.left, aliases) ? e.right : e.left) : null;
+        const v: Val = lit && /^(String|Numeric|Boolean)Literal$/.test(lit.type) ? lit.value : truth;
+        const it = itemOf(f.list);
+        want.set(f.list, [{ ...(it && typeof it === 'object' && !Array.isArray(it) ? it : {}), [f.field]: v }]);
         return;
       }
       // A list read for its length (`palette.length > 0`, `items.length`, `rows.length === 0`): one item, or none.

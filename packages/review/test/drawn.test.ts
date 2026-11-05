@@ -1,6 +1,6 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { forceGates, gateProps, markupOf, FN, MAP, SET, mountProps, stateValues, holdsInitially, stateSets } from '../src/drawn.js';
+import { forceGates, itemAliases, nullRead, gateProps, markupOf, FN, MAP, SET, mountProps, stateValues, holdsInitially, stateSets } from '../src/drawn.js';
 
 // What can't be photographed is drawn from the code: its own JSX as static markup (no app code runs), and
 // props that meet the gates the scan traced, for mounting its component in the app's build.
@@ -164,4 +164,23 @@ test('a state set for a condition takes its declared type, from the file or one 
   assert.deepEqual(value('palette.length > 0'), [{ hex: '', name: '', n: 0 }]);
   assert.equal(value('picked'), 'a');
   assert.deepEqual(value('draft'), { id: '', at: 0 });
+});
+
+test('a condition on a list item\'s field is met by a list with one such item: props and state', () => {
+  const code = `export function Uploads({ uploads, rows }) {\n  const [docs, setDocs] = useState([]);\n  return <ul>{uploads.map((up) => up.failed && <li>{up.name}</li>)}{props.rows.filter(row => row.kind === 'document')}{docs.map(d => d.open && <b />)}</ul>;\n}\n`;
+  assert.deepEqual(itemAliases(code), { up: 'uploads', row: 'rows', d: 'docs' });
+  const e = (gates: any[]) => ({ within: 'Uploads', reach: { gates: gates.map(g => ({ component: 'Uploads', file: 'u.jsx', ids: [], kind: 'cond', negated: false, ...g })) } }) as any;
+  const f = forceGates(e([{ test: 'up.failed' }, { test: "row.kind === 'document'" }]), 'Uploads', { uploads: [{ name: 'a.png', failed: false }], rows: [] }, {}, undefined, itemAliases(code));
+  assert.deepEqual(f.props, { uploads: [{ name: 'a.png', failed: true }, { name: 'a.png', failed: false }], rows: [{ kind: 'document' }] });
+  assert.deepEqual(f.forced, ['uploads = [{"name":"a.png","failed":true', 'rows = [{"kind":"document"}]']);
+  const state = `import { useState } from 'react';\nexport function Uploads() {\n  const [docs, setDocs] = useState([]);\n  return <ul>{docs.map(d => d.open && <b />)}</ul>;\n}\n`;
+  assert.deepEqual(stateSets([{ test: 'd.open', negated: false, component: 'Uploads', file: 'u.jsx' }], () => state)[0]!.slots[0]!.value, [{ open: true }]);
+});
+
+test('a read off nothing in its props: the path from the prop, and a value of the kind the read needs', () => {
+  const code = `export function Chips({ alias, rows, props2 }) {\n  return <div>{alias.owner.name}{rows.find(r => r.on)}{alias.label.trim()}</div>;\n}\n`;
+  assert.deepEqual(nullRead(code, 'Chips', "Cannot read properties of null (reading 'name')"), { path: ['alias', 'owner'], value: { name: '' } });
+  assert.deepEqual(nullRead(code, 'Chips', "Cannot read properties of undefined (reading 'find')"), { path: ['rows'], value: [] });
+  assert.deepEqual(nullRead(code, 'Chips', "Cannot read properties of undefined (reading 'trim')"), { path: ['alias', 'label'], value: '' });
+  assert.equal(nullRead(code, 'Chips', 'Something else'), null);
 });

@@ -12,7 +12,7 @@ import { appSurface, openSurface } from '@snds/dsa';
 import { detectApp, discoverRoutes, ensureBrowser, linkCoreForChild, routeConfig, startApp, tagPlan } from './apps.js';
 
 import { READ_STYLE } from './rendered.js';
-import { NO_SIZE, SHOW_MARKUP, forceGates, hookValue, markupOf, mountProps, parentComponent, holdsInitially, readSource, stateSets, stateValues, whatItNeeded, type StateSet } from './drawn.js';
+import { NO_SIZE, SHOW_MARKUP, forceGates, hookValue, itemAliases, nullRead, markupOf, mountProps, parentComponent, holdsInitially, readSource, stateSets, stateValues, whatItNeeded, type StateSet } from './drawn.js';
 import { needsValue, patternTest, routeFiles, routesReaching } from './routes.js';
 import { describeNetwork, flowProblems, guardNetwork, routeUrl, runFlow, type Flow, type GuardStats } from './flows.js';
 
@@ -283,7 +283,8 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
       const ledgerFile = path.join(dir, 'ledger.json');
       const at0 = { root: opts.root, dir: s.appDir ?? s.draw?.dir };
       const ledgerHash = (f: string) => contentHash(absOfTag(at0, f));
-      const lines = (sh as any).ledger ?? process.env.DSA_LEDGER;
+      // Records from `dsa record` (its default file), a configured file, or DSA_LEDGER.
+      const lines = (sh as any).ledger ?? process.env.DSA_LEDGER ?? (fs.existsSync(path.join(dir, 'ledger-lines.jsonl')) ? path.join(dir, 'ledger-lines.jsonl') : undefined);
       if (lines) { const n = addToLedger(ledgerFile, readLedgerLines(path.resolve(opts.root, lines)), ledgerHash); if (n) log(`  ledger: ${n} record${n === 1 ? '' : 's'} added from ${lines}`); }
       // The app's own component tests, rendered with tags and the ledger on (testTier.ts): states the crawler can't reach.
       const rt = (sh as any).renderTests as boolean | { maxMinutes?: number; include?: string[] } | undefined ?? (process.env.DSA_RENDER_TESTS === '1' ? true : undefined);
@@ -518,6 +519,37 @@ function importsNear(d: DrawWith, from: string, levels: number): string[] {
   }
   seen.delete(from);
   return [...seen];
+}
+
+/** A value at a path inside props, making the objects on the way. */
+function setPath(o: Record<string, unknown>, at: string[], v: unknown) {
+  let cur: any = o;
+  for (const k of at.slice(0, -1)) { if (!cur[k] || typeof cur[k] !== 'object') cur[k] = {}; cur = cur[k]; }
+  const last = at[at.length - 1]!;
+  if (cur[last] == null) cur[last] = v;
+  else if (v && typeof v === 'object' && !Array.isArray(v) && typeof cur[last] === 'object') Object.assign(cur[last], v);
+}
+
+/** The app's source files with their text, read once: where a hook or function's callers are looked for. */
+const textIndex = new WeakMap<DrawWith, [string, string][]>();
+/** A component in the app that calls `name(` (a hook, or a function that returns JSX), outside its own file. */
+function callerOf(d: DrawWith, name: string, own: string): { abs: string; name: string; code: string } | null {
+  let idx = textIndex.get(d);
+  if (!idx) {
+    idx = [];
+    for (const f of walk(d.dir ?? d.root, new Set(['.tsx', '.jsx']), [], true).slice(0, 6000)) {
+      if (/\.(test|spec|stories)\./.test(f)) continue;
+      try { idx.push([f, fs.readFileSync(f, 'utf8')]); } catch { /* moved */ }
+    }
+    textIndex.set(d, idx);
+  }
+  const call = new RegExp(`\\b${name.replace(/[$]/g, '\\$')}\\s*\\(`);
+  for (const [f, code] of idx) {
+    if (f === own || !call.test(code)) continue;
+    const c = parentComponent(code, name, 0);
+    if (c) return { abs: f, name: c, code };
+  }
+  return null;
 }
 
 /** An app's tests and stories, read once: each file's path and what it imports, by name without its extension. */
@@ -1646,6 +1678,8 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
       let isolated = false;
       // The conditions set on its props to draw it (`open = true`), said with the drawing.
       let forced: string[] = [];
+      // A value filled after the component read a field off nothing (`rows = []`), said with the drawing.
+      let filled = '';
       let exact = false;
       let unmounted = '';
       let providers = 0;
@@ -1673,24 +1707,41 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
           // The record whose state is set in the drawing: the element's own (the test or page it rendered in),
           // else the one whose props it was mounted with.
           let stateRec: LedgerRec | undefined;
+          // Where the component mounted lives: the element's file, unless its function is a hook or a plain
+          // function and the component that calls it is in another file.
+          let host = { files, file: r.e.file, code, abs };
+          // Values filled after a read off nothing (nullRead), by path from the props: one retry.
+          const patches: { path: string[]; value: unknown }[] = [];
           const propsFor = (name: string) => {
-            const shaped = mountProps({ ...r.e, within: name }, code, callersOf(d, name, abs));
+            const shaped = mountProps({ ...r.e, within: name }, host.code, callersOf(d, name, host.abs));
             const rec = recordOf(r, name);
             withRecorded = Boolean(rec);
             stateRec = ledgerNow[r.src]?.[0] ?? rec;
-            const f = forceGates(r.e, name, rec ? recordedProps(name, rec, shaped) : shaped, shaped, itemOf(name));
+            const f = forceGates(r.e, name, rec ? recordedProps(name, rec, shaped) : shaped, shaped, itemOf(name), itemAliases(host.code));
             forced = f.forced;
+            for (const p of patches) setPath(f.props, p.path, p.value);
             return f.props;
           };
-          const mountAs = (name: string) => inPage<Mounted>(page, MOUNT_IN_PAGE, [files, name, propsFor(name), r.e.file, wraps, scope])
+          const mountAs = (name: string) => inPage<Mounted>(page, MOUNT_IN_PAGE, [host.files, name, propsFor(name), host.file, wraps, scope])
             .catch((e: any): Mounted => ({ ok: false, why: `the page failed while mounting (${String(e?.message ?? e).split('\n')[0]!.slice(0, 80)})` }));
           const find = async () => ((await inPage<any[]>(page, FIND_IN_PAGE, [{ ...r, e: undefined }]).catch(() => [])) ?? [])[0] ?? null;
-          let said = await mountAs(r.e.within);
+          // A hook (useCellComments) or a plain function (buildColumns) isn't a component: React can't draw what it
+          // returns. The component that calls it is mounted instead: one in its own file, else one in the app.
+          let parent = '', hostNote = '';
+          if (/^use[A-Z]/.test(r.e.within) || !/^[A-Z]/.test(r.e.within)) {
+            const p = parentComponent(code, r.e.within, r.e.line);
+            if (p) parent = p;
+            else {
+              const c = callerOf(d, r.e.within, abs);
+              if (c) { host = { files: filesOf(c.abs), file: tagOfFile(d, c.abs) ?? r.e.file, code: c.code, abs: c.abs }; parent = c.name; hostNote = `, which calls ${r.e.within}, in ${host.file}`; }
+            }
+          }
+          const first = parent || r.e.within;
+          let said = await mountAs(first);
           // Found with the app's own providers: kept (a look marks what it finds, so it isn't looked for twice).
           let early: any = said.ok ? await find() : null;
-          if (!early) { scope = 'all'; said = await mountAs(r.e.within); }
+          if (!early) { scope = 'all'; said = await mountAs(first); }
           // A render helper (cellFor, renderBody) or a function inside a component: the component around it draws it.
-          let parent = '';
           if (!said.ok && /is not in its file as built/.test(said.why ?? '')) {
             const p = parentComponent(code, r.e.within, r.e.line);
             if (p) { const again = await mountAs(p); if (!/is not in its file as built/.test(again.why ?? '')) { said = again; parent = p; } }
@@ -1712,8 +1763,18 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
             wraps.push({ files: filesOf(pv.file), file: tagOfFile(d, pv.file) ?? path.relative(d.root, pv.file).split(path.sep).join('/'), name: pv.name, props, ...(pv.context ? { context: true } : {}) });
             said = await mountAs(parent || r.e.within);
           }
+          // A read off nothing in its own props: that value filled with the kind the read needs, and one more try.
+          if (!said.ok && said.threw && !host.abs.includes('node_modules')) {
+            const who = said.threw.component || parent || r.e.within;
+            const nr = nullRead(sourceOfThrow(d, said.threw, host.code, who), who, said.threw.message);
+            if (nr && who === (parent || r.e.within)) {
+              patches.push(nr);
+              const again = await mountAs(parent || r.e.within);
+              if (again.ok) { said = again; filled = `${nr.path.join('.')} = ${JSON.stringify(nr.value)}`; }
+            }
+          }
           providers = said.providers ?? 0;
-          const label = parent ? `${r.e.within} (drawn by ${parent}, the component around it)` : r.e.within;
+          const label = parent ? `${r.e.within} (drawn by ${parent}, ${hostNote ? `the component${hostNote}` : 'the component around it'})` : r.e.within;
           if (said.ok) {
             let hit = early ?? await find();
             // The state recorded with it, set in the drawing, before its controls are tried.
@@ -1729,6 +1790,9 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
             else unmounted = `${label} mounted${providers ? ` with ${providers} of the app's providers` : ''}, but the element wasn't in what it drew (a condition inside it wasn't met${tried ? `; clicked ${tried} in it` : ''})`;
           } else {
             if (said.threw) need = whatItNeeded(sourceOfThrow(d, said.threw, code, parent || r.e.within), said.threw.component || parent || r.e.within, said.threw.message);
+            // "X is not defined" where its own file never declares or imports X: the app's code, not a missing value.
+            const undef = (said.why ?? '').match(/\b([A-Za-z_$][\w$]*) is not defined\b/)?.[1];
+            if (undef && !new RegExp(`\\bimport\\b[^;]*\\b${undef}\\b|\\b(?:const|let|var|function|class)\\s+${undef}\\b|[{,]\\s*${undef}\\s*[,}=]`).test(code)) said.why = `${said.why} (${r.e.file} uses ${undef} but never declares or imports it: a bug in the app's code, not a value dsa can give it)`;
             unmounted = `${label}: ${said.why ?? 'no reason given'}${need ? `; it needed ${need}` : ''}${wraps.length ? ` (wrapped in ${wraps.map(w => w.name).join(', ')} from the source)` : ''}${searched.length ? `; provider search: ${searched.join('; ')}` : ''}`;
           }
           // Its component never recorded: the nearest component above it that was, mounted from its own file
@@ -1798,7 +1862,7 @@ async function session(pw: any, o: { reach?: ReachPlan | undefined; draw?: DrawW
         remaining = remaining.filter(x => x.id !== r.id);
         n++;
         if (ownNow && isolated) ownIsolated++;
-        const msg = how === 'mount' ? `drawn from the app's code${isolated ? ` with the props the app passed it (recorded): an isolated render${forced.length ? ` (recorded props, condition forced: ${forced.join(', ')})` : ''}` : forced.length ? ` (condition forced: ${forced.join(', ')})` : ''} (${drawnBy ? `${drawnBy}, the component around it` : 'its component'}, in the app's build${providers ? `, with ${providers} of its providers` : ''}${wrapped ? `, ${wrapped} found in the source` : ''}${revealed ? `, after ${revealed.startsWith('setting ') ? revealed : `clicking ${revealed}`} in it` : ''})` : `drawn as markup only; not mounted: ${unmounted}`;
+        const msg = how === 'mount' ? `drawn from the app's code${filled ? ` (after filling ${filled}, which it read a field off)` : ''}${isolated ? ` with the props the app passed it (recorded): an isolated render${forced.length ? ` (recorded props, condition forced: ${forced.join(', ')})` : ''}` : forced.length ? ` (condition forced: ${forced.join(', ')})` : ''} (${drawnBy ? `${drawnBy}, the component around it` : 'its component'}, in the app's build${providers ? `, with ${providers} of its providers` : ''}${wrapped ? `, ${wrapped} found in the source` : ''}${revealed ? `, after ${revealed.startsWith('setting ') ? revealed : `clicking ${revealed}`} in it` : ''})` : `drawn as markup only; not mounted: ${unmounted}`;
         count(placeholder ? `shown outlined (no size: ${short(placeholder)})` : how === 'mount' ? "drawn from the app's code" : `markup only (not mounted: ${short(unmounted)})`);
         o.log(`  ${where(r)} ${msg}${placeholder ? ` · shown outlined, it had no size: ${placeholder}` : ''}${cap.blank ? ' · blank' : ''}`);
       } catch (e: any) {

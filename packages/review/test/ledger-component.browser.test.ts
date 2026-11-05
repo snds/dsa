@@ -29,7 +29,13 @@ const APP: Record<string, string> = {
   'src/Drawer.jsx': `export function Drawer() {\n  return <nav><button className="btn">Close drawer</button></nav>;\n}\n`,
   'src/Drawer.test.jsx': `import { Drawer } from './Drawer.jsx';\n`,
   'src/Card.jsx': `export function Card() {\n  throw new Error('Card needs its store');\n  return <button className="btn">Card action</button>;\n}\n`,
-  'src/Library.jsx': `import { useState } from 'react';\nimport { Shelf } from './Shelf.jsx';\nimport { Tray } from './Tray.jsx';\nimport { Drawer } from './Drawer.jsx';\nimport { Card } from './Card.jsx';\nexport function Library() {\n  const [more] = useState(false);\n  return <main><h1>Library</h1><Shelf title="Ferns" items={[]} /><Tray label="Tools" />{more && <Drawer />}{more && <Card />}</main>;\n}\n`,
+  // A hook whose JSX only its caller (Grid, never shown) draws; uploads whose retry shows for a failed one; a
+  // panel that uses useState without importing it (the app's own bug).
+  'src/useRowTools.jsx': `export function useRowTools() {\n  return { menu: <button className="btn">Row menu</button> };\n}\n`,
+  'src/Grid.jsx': `import { useRowTools } from './useRowTools.jsx';\nexport function Grid() {\n  const tools = useRowTools();\n  return <section>{tools.menu}</section>;\n}\n`,
+  'src/Uploads.jsx': `export function Uploads({ uploads }) {\n  return <ul>{uploads.map((up) => <li key={up.name}>{up.name}{up.failed && <button className="btn">Retry {up.name}</button>}</li>)}</ul>;\n}\n`,
+  'src/Stale.jsx': `export function Stale() {\n  const [n] = useState(0);\n  return <button className="btn">Stale {n}</button>;\n}\n`,
+  'src/Library.jsx': `import { useState } from 'react';\nimport { Shelf } from './Shelf.jsx';\nimport { Tray } from './Tray.jsx';\nimport { Drawer } from './Drawer.jsx';\nimport { Card } from './Card.jsx';\nimport { Grid } from './Grid.jsx';\nimport { Uploads } from './Uploads.jsx';\nimport { Stale } from './Stale.jsx';\nexport function Library() {\n  const [more] = useState(false);\n  return <main><h1>Library</h1><Shelf title="Ferns" items={[]} /><Tray label="Tools" /><Uploads uploads={[{ name: 'a.png', failed: false }]} />{more && <Drawer />}{more && <Card />}{more && <Grid />}{more && <Stale />}</main>;\n}\n`,
 };
 
 test('the ledger: an element its component rendered without is drawn with the component\'s recorded props, its condition forced', { timeout: 300_000 }, async ({ skip }) => {
@@ -71,6 +77,17 @@ test('the ledger: an element its component rendered without is drawn with the co
   assert.match(all, /drawings, its component failed to render \(top \d+ of \d+ causes\): 1 × Card needs its store/);
   assert.match(all, /drawings, mounted but the element wasn't in what it drew \(top \d+ of \d+ conditions\): .*1 × “Date\.now\(\) < 0” in Shelf/);
   assert.ok(idx.drawCauses?.library?.threw?.length, JSON.stringify(idx.drawCauses));
+
+  // A hook's JSX, drawn by the component that calls it; a failed upload's retry, its item's field forced on;
+  // and the app's own missing import, said as such.
+  const of = (re: RegExp) => evals.find(e => e.file.endsWith('.jsx') && re.test(e.match.text ?? ''));
+  const menu = idx.shots[of(/Row menu/)!.id];
+  assert.deepEqual([menu?.drawn, menu?.exact], ['mount', true], all);
+  assert.match(all, /useRowTools \(drawn by Grid, the component, which calls useRowTools, in apps\/library\/src\/Grid\.jsx\)|drawn from the app's code .*Grid, the component around it/);
+  const retry = idx.shots[of(/Retry/)!.id];
+  assert.deepEqual([retry?.drawn, retry?.exact, retry?.source], ['mount', true, 'isolated'], all);
+  assert.match(String(retry.content?.text ?? ''), /Retry a\.png/);
+  assert.match(all, /Stale: its component failed to render: useState is not defined \(apps\/library\/src\/Stale\.jsx uses useState but never declares or imports it: a bug in the app's code/);
 
   // State inside the drawing, the drawing's own: a list one item, a flag true; and inside its portal.
   const by = (text: RegExp) => evals.find(e => e.file.endsWith('.jsx') && text.test(e.match.text ?? ''));
