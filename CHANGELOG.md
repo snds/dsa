@@ -213,6 +213,15 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- Drawing proposals from source no longer breaks partway through a run. When Vite found a dependency late it
+  rebuilt its bundle, and with the page open that loaded a second copy of React, so components imported
+  afterward failed with "Cannot read properties of null (reading 'useRef')". Vite now reads every component
+  before serving, and a page that hits this reloads and draws again.
+- A failed source drawing no longer replaces a story drawing that lost its inner content or the system's
+  styles. The drawing stays, and it still needs evidence.
+- Failed drawings are tried again on the next run instead of being cached. Only a component that isn't in
+  the system's source stays cached.
+- The render log counts real drawings: "N of M drawn with their props", how many have no picture, and why.
 - A review card showed one photo per look, so an element with its own photo appeared only as a small
   thumbnail of another element's (same classes, sometimes other words). Every element with a photo now
   has its own labelled tile: its photo at card scale, where it sits, its source label, match and code

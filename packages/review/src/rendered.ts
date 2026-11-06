@@ -5,7 +5,7 @@ import { capByEvidence, cardPicks, latestEvals, lookProps, ownKey, ownOf, propos
 
 import { cookiesFor, openSurface, serveStatic } from '@snds/dsa';
 import { detectApp, ensureBrowser, startApp } from './apps.js';
-import { harnessUrlFor, iconFile, openHarness, startHarness, type Harness } from './harness.js';
+import { harnessUrlFor, iconFile, openHarness, staleDeps, startHarness, type Harness } from './harness.js';
 
 /**
  * Rendered signatures: what each system component × variant × size actually looks like in a browser,
@@ -162,7 +162,7 @@ export async function renderSignatures(opts: { root: string; config: Config; dat
  * What a render says about its drawings, every time, zero included: how many the system's styles didn't
  * reach and how many miss what their element holds, each with the elements it caught.
  */
-export function drawingReport(items: Record<string, Proposal>, want: Map<string, Wanted>, source?: { failed: number; first?: string | undefined } | null): string[] {
+export function drawingReport(items: Record<string, Proposal>, want: Map<string, Wanted>, source?: { failed: number; first?: string | undefined; reloads?: number | undefined } | null): string[] {
   const name = (k: string) => { const p = items[k]!, w = want.get(k); const props = Object.entries(p.props ?? {}).map(([a, b]) => `${a}=${b}`).join(' '); return `${p.use}${props ? ` ${props}` : ''} (${(w?.where ?? []).slice(0, 2).join(', ') || 'no element'})`; };
   const named = (keys: string[]) => (keys.length ? `: ${keys.slice(0, 8).map(name).join('; ')}${keys.length > 8 ? `; and ${keys.length - 8} more` : ''}` : '');
   const keys = Object.keys(items);
@@ -174,7 +174,29 @@ export function drawingReport(items: Record<string, Proposal>, want: Map<string,
     `  Without the system's styles (unstyled): ${bare.length} of ${measured.length} drawings${named(bare)}.${bare.length ? " They need evidence, not a decision. Check the system's Storybook preview loads its stylesheet." : ''}`,
     `  Inner content: ${carried.length} drawn with what their element holds besides its words, ${lost.length} without it${named(lost)}.${lost.length ? ' Those need evidence, not a decision.' : ''}`,
     ...(source?.failed ? [`  From the system's source: ${source.failed} couldn't be drawn, so stories were tried. First reason: ${source.first ?? 'none given'}`] : []),
+    ...(source?.reloads ? [`  The drawing page was reloaded ${source.reloads} time${source.reloads === 1 ? '' : 's'} because Vite rebuilt its dependencies during the run.`] : []),
+    ...failureReasons(items),
   ];
+}
+
+/** Why the proposals with no picture have none, most common first, each reason with its count. */
+function failureReasons(items: Record<string, Proposal>): string[] {
+  const counts = new Map<string, number>();
+  for (const p of Object.values(items)) {
+    if (p.shot) continue;
+    const why = (p.note ?? 'no reason given').split(p.use).join('It');
+    counts.set(why, (counts.get(why) ?? 0) + 1);
+  }
+  return [...counts].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([why, n]) => `  No picture (${n}): ${why}`);
+}
+
+/** The summary of a render: how many proposals there are, and how many of them were actually drawn. */
+export function drawnSummary(items: Record<string, Proposal>): string {
+  const all = Object.values(items);
+  const drawn = all.filter(p => p.shot).length;
+  const exact = all.filter(p => p.shot && p.check === 'exact').length;
+  const fromSource = all.filter(p => p.shot && p.via === 'source' && p.check === 'exact').length;
+  return `Proposed components: ${drawn} of ${all.length} drawn with their props · ${all.length - drawn} with no picture · ${exact} exact (confirmed by the element's attributes or classes)${fromSource ? ` · ${fromSource} drawn from the system's source` : ''}`;
 }
 
 /**
@@ -194,6 +216,9 @@ export function unstyledLook(s: Styles | undefined): boolean {
  */
 export function reusable(c: Proposal, p: Wanted, hash: string): boolean {
   if (c.hash !== hash) return false;
+  // A drawing that failed is tried again: what failed may have been passing. The exception is a component
+  // that isn't in the system's source, where nothing can change until its hash does.
+  if (!c.shot && !c.hash.startsWith('none:')) return false;
   // Drawn before drawings recorded their font, or without the system's styles: drawn again.
   if (c.styles && !c.styles.fontFamily) return false;
   if (c.unstyled || c.innerLost) return false;
@@ -294,7 +319,7 @@ export async function renderProposals(opts: { root: string; config: Config; data
     fs.writeFileSync(path.join(opts.dataDir, 'rendered', 'proposals.json'), JSON.stringify({ takenAt: new Date().toISOString(), items }, null, 1));
   };
   const exactCount = () => Object.values(items).filter(p => p.check === 'exact').length;
-  if (!todo.length) { write(); log(`Proposed components: ${reused} rendered with their props (all cached).`); for (const l of drawingReport(items, want)) log(l); return { rendered: 0, reused, exact: exactCount() }; }
+  if (!todo.length) { write(); log(`${drawnSummary(items)} (all cached).`); for (const l of drawingReport(items, want)) log(l); return { rendered: 0, reused, exact: exactCount() }; }
 
   const dir = path.join(opts.dataDir, 'rendered');
   fs.mkdirSync(dir, { recursive: true });
@@ -329,12 +354,13 @@ export async function renderProposals(opts: { root: string; config: Config; data
     return sbs;
   };
   let srcFailed = 0, srcFirst: string | undefined;
+  const fresh: FreshDraw = { reloads: 0, gaveUp: new Set() };
   try {
     for (const [k, p] of todo) {
       const s = sigOf(p.use);
       if (!s) { items[k] = { ...noOwn(p), check: 'none', noSource: true, note: `${p.use} isn't a component dsa found in the design system's source, so it can't be drawn.`, hash: hashOf(p.use) }; continue; }
       let best: Proposal | null = null;
-      if (await source()) best = await fromSource(hpage, s, p, k, dir, hashOf(p.use));
+      if (await source()) best = await fromSource(hpage, harness!, fresh, s, p, k, dir, hashOf(p.use));
       if (best && best.check === 'none') { srcFailed++; srcFirst ??= best.note; }
       // Done: exact, with the element's own content, or (with none of its own) without a stand-in label.
       // Drawn with its own content and saying which words: one drawn before renders kept their text is drawn again.
@@ -350,17 +376,22 @@ export async function renderProposals(opts: { root: string; config: Config; data
     (sbs as { stop: () => void } | null)?.stop();
   }
   write();
-  const fromSrc = Object.values(items).filter(p => p.via === 'source' && p.check === 'exact').length;
-  log(`Proposed components: ${Object.keys(items).length} rendered with their props · ${exactCount()} exact (confirmed by the element's attributes or classes)${fromSrc ? ` · ${fromSrc} drawn from the system's source` : ''}.`);
-  for (const l of drawingReport(items, want, srcFailed ? { failed: srcFailed, first: srcFirst } : null)) log(l);
+  log(`${drawnSummary(items)}.`);
+  for (const l of drawingReport(items, want, srcFailed || fresh.reloads ? { failed: srcFailed, first: srcFirst, reloads: fresh.reloads } : null)) log(l);
   return { rendered, reused, exact: exactCount() };
 }
 
 const ORDER: Record<Proposal['check'], number> = { exact: 0, unverified: 1, closest: 2, none: 3 };
-/** The better of two drawings: the surer props, then the element's own content, then no stand-in content, then a picture. */
+/** What there is to look at: a drawing, else the component's story as written, else nothing. */
+const picture = (p: Proposal) => (p.shot ? 0 : p.fallback ? 1 : 2);
+/**
+ * The better of two drawings. First, one with a picture: a flawed drawing says what's wrong with it and can
+ * still be looked at, and one that failed has nothing to show. Then the styles and inner content, the surer
+ * props, the element's own content, and no stand-in content.
+ */
 function pickBetter(a: Proposal | null, b: Proposal | null): Proposal | null {
   if (!a || !b) return a ?? b;
-  const d = Number(Boolean(a.unstyled)) - Number(Boolean(b.unstyled)) || Number(Boolean(a.innerLost)) - Number(Boolean(b.innerLost)) || ORDER[a.check] - ORDER[b.check] || Number(Boolean(b.own)) - Number(Boolean(a.own)) || Number(Boolean(a.content)) - Number(Boolean(b.content)) || Number(Boolean(b.shot)) - Number(Boolean(a.shot));
+  const d = picture(a) - picture(b) || Number(Boolean(a.unstyled)) - Number(Boolean(b.unstyled)) || Number(Boolean(a.innerLost)) - Number(Boolean(b.innerLost)) || ORDER[a.check] - ORDER[b.check] || Number(Boolean(b.own)) - Number(Boolean(a.own)) || Number(Boolean(a.content)) - Number(Boolean(b.content));
   return d > 0 ? b : a;
 }
 
@@ -368,11 +399,11 @@ function pickBetter(a: Proposal | null, b: Proposal | null): Proposal | null {
 const DATA_TAGS = /^(table|thead|tbody|tr|ul|ol|dl)$/;
 
 /** Draw one proposal from the system's source in the harness page. */
-async function fromSource(page: any, s: any, p: Wanted, k: string, dir: string, hash: string): Promise<Proposal> {
+async function fromSource(page: any, h: Harness, fresh: FreshDraw, s: any, p: Wanted, k: string, dir: string, hash: string): Promise<Proposal> {
   const dataTag = DATA_TAGS.test(s.tag ?? '');
   const icon = p.own?.iconName && p.iconFile ? { file: harnessUrlFor(p.iconFile), name: p.own.iconName } : null;
   // With no words of its own, it's drawn with none: that is the element (no stand-in label it doesn't have).
-  const r = await run<{ ok: boolean; why?: string }>(page, DRAW, { file: harnessUrlFor(s.file), name: s.component, props: p.props, text: dataTag ? null : p.own?.text ?? null, icon, slot: s.slot, empty: true }).catch((e: any) => ({ ok: false, why: String(e?.message ?? e).split('\n')[0] }));
+  const r = await drawFresh(page, h, fresh, { file: harnessUrlFor(s.file), name: s.component, props: p.props, text: dataTag ? null : p.own?.text ?? null, icon, slot: s.slot, empty: true });
   if (!r.ok) return { ...noOwn(p), check: 'none', via: 'source', note: `${p.use} couldn't be drawn from the system's source: ${r.why}.`, hash };
   const found: Found[] = await run(page, SCAN, { slot: s.slot, want: p.props, classes: s.axisClasses ?? null });
   const top = topOf(found);
@@ -510,8 +541,27 @@ const SCAN = `({ slot, want, classes }) => {
 /** Runs in the harness page: draw one component (harness.ts). */
 const DRAW = `(a) => window.__dsaDraw(a)`;
 
+export interface FreshDraw { /** Times the page was reloaded. */ reloads: number; /** Files that fail the same way in a fresh page, so reloading won't help. */ gaveUp: Set<string> }
+
+/**
+ * Draw one component, and reload the page if its dependencies changed under it. Vite finds a dependency
+ * late, rebuilds its bundle and gives React a new URL. With a page open, what it imports from then on gets
+ * that second copy of React while react-dom keeps the first, so its hooks read a null dispatcher. A fresh
+ * page has one copy again.
+ */
+export async function drawFresh(page: any, h: Harness, fresh: FreshDraw, arg: { file: string } & Record<string, unknown>): Promise<{ ok: boolean; why?: string | undefined }> {
+  const draw = () => run<{ ok: boolean; why?: string }>(page, DRAW, arg).catch((e: any) => ({ ok: false, why: String(e?.message ?? e).split('\n')[0] }));
+  const r = await draw();
+  if (r.ok || !staleDeps(r.why) || fresh.gaveUp.has(arg.file)) return r;
+  fresh.reloads++;
+  if (!(await openHarness(page, h))) return r;
+  const again = await draw();
+  if (!again.ok && staleDeps(again.why)) fresh.gaveUp.add(arg.file);
+  return again;
+}
+
 /** For tests: the in-page prop check and the helper that runs it. */
-export const __test = { SCAN, get INJECT_OWN() { return INJECT_OWN; }, run };
+export const __test = { SCAN, get INJECT_OWN() { return INJECT_OWN; }, run, pickBetter };
 
 /** A proposal as stored: its component and props; the content it was asked to show isn't kept. */
 const noOwn = (p: Wanted) => ({ use: p.use, props: p.props });

@@ -7,7 +7,7 @@ import { parseConfig } from '@snds/dsa';
 import { readProposals } from '@snds/dsa/engine';
 import { fixtureCopy, loadConfig, NOW, runPipeline } from '../../../test/engine/fixture.js';
 import { openHarness, startHarness } from '../src/harness.js';
-import { READ_STYLE, __test as r, renderProposals, unstyledLook } from '../src/rendered.js';
+import { READ_STYLE, __test as r, drawFresh, renderProposals, unstyledLook } from '../src/rendered.js';
 
 // Proposals drawn without stories: the system's component mounted from its own source with the proposal's
 // props and the element's own words, inside what its Storybook preview adds (its CSS). Props confirmed from
@@ -131,5 +131,66 @@ export function MenuItem({ children }) { return h('div', { 'data-slot': 'menu-it
     assert.equal(look.paddingLeft, '12px', 'the utility classes were generated');
     assert.match(look.fontFamily, /Verdana/);
     assert.equal(unstyledLook(look), false);
+  } finally { await page.close(); await h!.stop(); }
+});
+
+/** A kit whose components use hooks, one of which brings a dependency that itself uses React. */
+function hookKit() {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-harness-')));
+  const ds = path.join(root, 'kit');
+  fs.mkdirSync(path.join(ds, 'src'), { recursive: true });
+  fs.symlinkSync(KIT, path.join(root, 'node_modules'), 'dir');
+  const comp = (n: string, more = '') => {
+    const file = path.join(ds, `src/${n}.jsx`);
+    fs.writeFileSync(file, `import { createElement as h, useRef } from 'react';\n${more}\nexport function ${n}({ children }) { useRef(null); return h('button', { 'data-slot': '${n}' }, children); }\n`);
+    return file;
+  };
+  return { root, first: comp('First'), late: comp('Late', "import { ThemeProvider } from 'next-themes';\nimport { Toaster } from 'sonner';\nexport const parts = [ThemeProvider, Toaster];"), after: comp('After') };
+}
+const arg = (file: string, name: string) => ({ file: '/@fs' + file, name, props: {}, text: 'Save', slot: name });
+
+test('a dependency found late puts a second React in the open page; a fresh page draws what that broke', { timeout: 120_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  if (!hasKit) skip('no Vite and React installed');
+  const kit = hookKit();
+  // Only the first file is known up front, so the others' dependencies are found during the run.
+  const h = await startHarness(kit.root, {} as any, [kit.first], () => {});
+  const page = await browser!.newPage();
+  const reacts = new Set<string>();
+  page.on('response', x => { if (/\/deps\/react\.js\?v=/.test(x.url())) reacts.add(x.url()); });
+  try {
+    assert.equal(await openHarness(page, h!), true);
+    const raw = (a: object) => page.evaluate((x) => (window as any).__dsaDraw(x), a as any);
+    assert.deepEqual(await raw(arg(kit.first, 'First')), { ok: true });
+    assert.deepEqual(await raw(arg(kit.late, 'Late')), { ok: true });
+    // The cause: a new bundle, a second React, and a component imported after it can't use hooks.
+    const broken: any = await raw(arg(kit.after, 'After'));
+    assert.match(broken.why, /Cannot read properties of null \(reading 'useRef'\)/);
+    assert.equal(reacts.size, 2, [...reacts].join('\n'));
+    // The fix: the failure reloads the page, and it draws. The module that failed is drawn fresh.
+    const fresh = { reloads: 0, gaveUp: new Set<string>() };
+    assert.deepEqual(await drawFresh(page, h!, fresh, arg(kit.after, 'After')), { ok: true });
+    assert.equal(fresh.reloads, 1);
+    assert.equal(await page.textContent('[data-slot=After]'), 'Save');
+    // Others keep drawing, with no more reloads.
+    assert.deepEqual(await drawFresh(page, h!, fresh, arg(kit.first, 'First')), { ok: true });
+    assert.equal(fresh.reloads, 1);
+  } finally { await page.close(); await h!.stop(); }
+});
+
+test('with every component known up front, the first bundle holds their dependencies, so React stays one copy', { timeout: 120_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  if (!hasKit) skip('no Vite and React installed');
+  const kit = hookKit();
+  const h = await startHarness(kit.root, {} as any, [kit.first, kit.late, kit.after], () => {});
+  const page = await browser!.newPage();
+  const reacts = new Set<string>();
+  page.on('response', x => { if (/\/deps\/react\.js\?v=/.test(x.url())) reacts.add(x.url()); });
+  try {
+    assert.equal(await openHarness(page, h!), true);
+    const fresh = { reloads: 0, gaveUp: new Set<string>() };
+    for (const [f, n] of [[kit.first, 'First'], [kit.late, 'Late'], [kit.after, 'After']] as const) assert.deepEqual(await drawFresh(page, h!, fresh, arg(f, n)), { ok: true }, n);
+    assert.equal(fresh.reloads, 0);
+    assert.equal(reacts.size, 1, [...reacts].join('\n'));
   } finally { await page.close(); await h!.stop(); }
 });

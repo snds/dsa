@@ -92,6 +92,18 @@ export async function storybookVite(preview: string, vite: any): Promise<{ plugi
   return out;
 }
 
+/**
+ * What a page says when its dependencies changed while it was open: a module from the old bundle that can't
+ * be fetched, or hooks reading a null dispatcher because a second copy of React was loaded.
+ */
+export const staleDeps = (why?: string) => /failed to fetch dynamically imported module|error loading dynamically imported module|importing a module script failed|outdated optimize dep|cannot read properties of null \(reading 'use[A-Z]|invalid hook call/i.test(why ?? '');
+
+/** The files Vite should read before serving, so their dependencies go in the first bundle. */
+export function crawlEntries(dir: string, files: (string | null)[]): string[] {
+  const out = files.filter((f): f is string => Boolean(f)).map(f => path.relative(dir, f).split(path.sep).join('/').replace(/[()[\]{}!*?+@]/g, '\\$&'));
+  return [...new Set(out)];
+}
+
 const fsUrl = (f: string) => '/@fs' + path.resolve(f).split(path.sep).join('/');
 
 /**
@@ -187,7 +199,9 @@ export async function startHarness(root: string, config: Config, sigFiles: strin
     plugins: [plugin, ...sb.plugins],
     ...(Object.keys(sb.alias).length ? { resolve: { alias: sb.alias } } : {}),
     server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, fs: { strict: false, allow: [path.resolve(root), ...sb.allow] } },
-    optimizeDeps: { include: ['react', 'react-dom/client'] },
+    // Bundled once, from everything it can draw. A dependency found later rebuilds the bundle, and that
+    // puts a second React in an open page (see drawFresh, which recovers when it happens all the same).
+    optimizeDeps: { include: ['react', 'react-dom/client'], entries: crawlEntries(dir, [...sigFiles, preview]) },
   });
   await server.listen();
   const base = server.resolvedUrls?.local?.[0] ?? `http://127.0.0.1:${server.config.server.port}/`;
