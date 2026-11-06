@@ -4,7 +4,7 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Badge } from "@/components/ui/badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { CaretRightIcon } from "@phosphor-icons/react"
-import { SEV, type Band } from "@/lib/dsa"
+import { SEV, ago, fmtDT, type Band } from "@/lib/dsa"
 import { hashFor, routePath } from "@/lib/app"
 
 /** Healthy / watch / act, as a shape and a color (never color alone). */
@@ -131,4 +131,10 @@ export function Facts({ rows }: { rows: [string, React.ReactNode][] }) {
       {rows.map(([k, v]) => <React.Fragment key={k}><dt className="text-muted-foreground">{k}</dt><dd className="min-w-0 break-words">{v}</dd></React.Fragment>)}
     </dl>
   )
+}
+
+/** When the photos and drawings were taken, beside the scan: they're often newer, and a reviewer judges by them. */
+export function EvidenceTimes({ photos, drawings }: { photos?: string | null; drawings?: string | null }) {
+  const parts = ([["Photos", photos], ["Drawings", drawings]] as const).filter(([, at]) => at)
+  return <>{parts.map(([name, at]) => <span key={name} data-slot="evidence-time" title={fmtDT(at)}> · {name}: {ago(at)}</span>)}</>
 }

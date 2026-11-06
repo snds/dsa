@@ -159,6 +159,25 @@ export async function renderSignatures(opts: { root: string; config: Config; dat
  * keyed by that content, so the proposal shows the element as it would be, not a story's sample.
  */
 /**
+ * What a render says about its drawings, every time, zero included: how many the system's styles didn't
+ * reach and how many miss what their element holds, each with the elements it caught.
+ */
+export function drawingReport(items: Record<string, Proposal>, want: Map<string, Wanted>, source?: { failed: number; first?: string | undefined } | null): string[] {
+  const name = (k: string) => { const p = items[k]!, w = want.get(k); const props = Object.entries(p.props ?? {}).map(([a, b]) => `${a}=${b}`).join(' '); return `${p.use}${props ? ` ${props}` : ''} (${(w?.where ?? []).slice(0, 2).join(', ') || 'no element'})`; };
+  const named = (keys: string[]) => (keys.length ? `: ${keys.slice(0, 8).map(name).join('; ')}${keys.length > 8 ? `; and ${keys.length - 8} more` : ''}` : '');
+  const keys = Object.keys(items);
+  const measured = keys.filter(k => items[k]!.styles);
+  const bare = keys.filter(k => items[k]!.unstyled);
+  const lost = keys.filter(k => items[k]!.innerLost);
+  const carried = keys.filter(k => items[k]!.inner);
+  return [
+    `  Without the system's styles (unstyled): ${bare.length} of ${measured.length} drawings${named(bare)}.${bare.length ? " They need evidence, not a decision. Check the system's Storybook preview loads its stylesheet." : ''}`,
+    `  Inner content: ${carried.length} drawn with what their element holds besides its words, ${lost.length} without it${named(lost)}.${lost.length ? ' Those need evidence, not a decision.' : ''}`,
+    ...(source?.failed ? [`  From the system's source: ${source.failed} couldn't be drawn, so stories were tried. First reason: ${source.first ?? 'none given'}`] : []),
+  ];
+}
+
+/**
  * Did the system's stylesheet reach this drawing? A browser's defaults mean it didn't: a serif page font,
  * or a button's stock outset border and 13.33 px Arial.
  */
@@ -177,11 +196,11 @@ export function reusable(c: Proposal, p: Wanted, hash: string): boolean {
   if (c.hash !== hash) return false;
   // Drawn before drawings recorded their font, or without the system's styles: drawn again.
   if (c.styles && !c.styles.fontFamily) return false;
-  if (c.unstyled) return false;
+  if (c.unstyled || c.innerLost) return false;
   return !(c.own && p.own && c.text !== (p.own.text ?? ''));
 }
 
-export interface Wanted { use: string; props: Record<string, string>; own?: OwnContent; /** The file the element's icon component comes from (when only its name is known), to draw that icon. */ iconFile?: string | undefined }
+export interface Wanted { /** The elements it's drawn for, as file:line. */ where?: string[] | undefined; use: string; props: Record<string, string>; own?: OwnContent; /** The file the element's icon component comes from (when only its name is known), to draw that icon. */ iconFile?: string | undefined }
 
 export async function wantedProposals(dataDir: string, threshold?: number, root?: string): Promise<Map<string, Wanted>> {
   const { evals } = await latestEvals(dataDir);
@@ -195,14 +214,18 @@ export async function wantedProposals(dataDir: string, threshold?: number, root?
   for (const list of [evals, uncapped]) for (const c of cardPicks(dataDir, list, threshold)) for (const id of c.ids) picks.set(id, [...(picks.get(id) ?? []), c.auto]);
   const out = new Map<string, Wanted>();
   let icon: string | undefined;
+  let at: string | undefined;
   const add = (r: any, own?: OwnContent | null) => {
     if (r?.verdict !== 'replace' || !r.use) return;
-    if (!out.has(proposalKey(r.use, r.props))) out.set(proposalKey(r.use, r.props), { use: r.use, props: lookProps(r.props) });
-    if (own) out.set(ownKey(r.use, r.props, own), { use: r.use, props: lookProps(r.props), own, ...(icon ? { iconFile: icon } : {}) });
+    const put = (k: string, w: Wanted) => out.set(k, { ...w, where: [...new Set([...(out.get(k)?.where ?? []), ...(at ? [at] : [])])] });
+    if (!out.has(proposalKey(r.use, r.props))) put(proposalKey(r.use, r.props), { use: r.use, props: lookProps(r.props) });
+    else if (at) put(proposalKey(r.use, r.props), out.get(proposalKey(r.use, r.props))!);
+    if (own) put(ownKey(r.use, r.props, own), { use: r.use, props: lookProps(r.props), own, ...(icon ? { iconFile: icon } : {}) });
   };
   for (const e of evals) {
     if (e.exception) continue;
     const own = ownOf(e, shots[e.id]);
+    at = `${e.file}:${e.line}`;
     icon = own?.iconName && root ? iconFile(root, e.file, own.iconName) ?? undefined : undefined;
     for (const p of picks.get(e.id) ?? []) add(p, own);
     for (const r of [e, e.decided?.decision, ...(e.alternatives ?? [])] as any[]) add(r, r === e || r === e.decided?.decision ? own : null);
@@ -271,7 +294,7 @@ export async function renderProposals(opts: { root: string; config: Config; data
     fs.writeFileSync(path.join(opts.dataDir, 'rendered', 'proposals.json'), JSON.stringify({ takenAt: new Date().toISOString(), items }, null, 1));
   };
   const exactCount = () => Object.values(items).filter(p => p.check === 'exact').length;
-  if (!todo.length) { write(); log(`Proposed components: ${reused} rendered with their props (all cached).`); return { rendered: 0, reused, exact: exactCount() }; }
+  if (!todo.length) { write(); log(`Proposed components: ${reused} rendered with their props (all cached).`); for (const l of drawingReport(items, want)) log(l); return { rendered: 0, reused, exact: exactCount() }; }
 
   const dir = path.join(opts.dataDir, 'rendered');
   fs.mkdirSync(dir, { recursive: true });
@@ -305,15 +328,17 @@ export async function renderProposals(opts: { root: string; config: Config; data
     } catch (e: any) { sbWhy = String(e?.message ?? e).split('\n')[0]!; log(`  Proposals: no stories to draw from (${sbWhy}).`); }
     return sbs;
   };
+  let srcFailed = 0, srcFirst: string | undefined;
   try {
     for (const [k, p] of todo) {
       const s = sigOf(p.use);
       if (!s) { items[k] = { ...noOwn(p), check: 'none', noSource: true, note: `${p.use} isn't a component dsa found in the design system's source, so it can't be drawn.`, hash: hashOf(p.use) }; continue; }
       let best: Proposal | null = null;
       if (await source()) best = await fromSource(hpage, s, p, k, dir, hashOf(p.use));
+      if (best && best.check === 'none') { srcFailed++; srcFirst ??= best.note; }
       // Done: exact, with the element's own content, or (with none of its own) without a stand-in label.
       // Drawn with its own content and saying which words: one drawn before renders kept their text is drawn again.
-      const done = (b: Proposal | null) => Boolean(b && b.check === 'exact' && b.shot && (p.own ? b.own && typeof b.text === 'string' : !b.content) && !b.unstyled);
+      const done = (b: Proposal | null) => Boolean(b && b.check === 'exact' && b.shot && (p.own ? b.own && typeof b.text === 'string' : !b.content) && !b.unstyled && !b.innerLost);
       if (!done(best) && (await storybook())) best = pickBetter(best, await fromStories(sbs!, s, p, k, dir, hashOf(p.use), rendered === 0));
       items[k] = best ?? { ...noOwn(p), check: 'none', ...(sbWhy ? { noSource: true } : {}), note: `${p.use} couldn't be drawn${sbWhy ? `: there's no Storybook to draw it from (${sbWhy})` : ''}.`, hash: hashOf(p.use) };
       rendered++;
@@ -327,8 +352,7 @@ export async function renderProposals(opts: { root: string; config: Config; data
   write();
   const fromSrc = Object.values(items).filter(p => p.via === 'source' && p.check === 'exact').length;
   log(`Proposed components: ${Object.keys(items).length} rendered with their props · ${exactCount()} exact (confirmed by the element's attributes or classes)${fromSrc ? ` · ${fromSrc} drawn from the system's source` : ''}.`);
-  const bare = Object.values(items).filter(p => p.unstyled).length;
-  if (bare) log(`  ${bare} drawn without the system's styles: they need evidence, not a decision. Check the system's Storybook preview loads its stylesheet.`);
+  for (const l of drawingReport(items, want, srcFailed ? { failed: srcFailed, first: srcFirst } : null)) log(l);
   return { rendered, reused, exact: exactCount() };
 }
 
@@ -336,7 +360,7 @@ const ORDER: Record<Proposal['check'], number> = { exact: 0, unverified: 1, clos
 /** The better of two drawings: the surer props, then the element's own content, then no stand-in content, then a picture. */
 function pickBetter(a: Proposal | null, b: Proposal | null): Proposal | null {
   if (!a || !b) return a ?? b;
-  const d = Number(Boolean(a.unstyled)) - Number(Boolean(b.unstyled)) || ORDER[a.check] - ORDER[b.check] || Number(Boolean(b.own)) - Number(Boolean(a.own)) || Number(Boolean(a.content)) - Number(Boolean(b.content)) || Number(Boolean(b.shot)) - Number(Boolean(a.shot));
+  const d = Number(Boolean(a.unstyled)) - Number(Boolean(b.unstyled)) || Number(Boolean(a.innerLost)) - Number(Boolean(b.innerLost)) || ORDER[a.check] - ORDER[b.check] || Number(Boolean(b.own)) - Number(Boolean(a.own)) || Number(Boolean(a.content)) - Number(Boolean(b.content)) || Number(Boolean(b.shot)) - Number(Boolean(a.shot));
   return d > 0 ? b : a;
 }
 
@@ -355,10 +379,10 @@ async function fromSource(page: any, s: any, p: Wanted, k: string, dir: string, 
   if (!top) return { ...noOwn(p), check: 'none', via: 'source', note: `${p.use} drew from the system's source, but nothing showed.`, hash };
   const check: Proposal['check'] = top.contradicted ? 'closest' : top.unknown ? 'unverified' : 'exact';
   const sel = `[data-dsa-p="${top.idx}"][data-slot="${s.slot}"]`;
-  let own: { own: boolean; why?: string } | null = null;
+  let own: { own: boolean; why?: string; inner?: boolean } | null = null;
   if (p.own) {
     if (dataTag) own = { own: false, why: "its rows come from data the scan couldn't read, so it's drawn empty" };
-    else if (p.own.icon) own = await run<{ own: boolean; why?: string }>(page, INJECT_OWN, { sel, own: p.own }).catch(() => ({ own: false, why: 'its content could not be set' }));
+    else if (p.own.icon || p.own.inner?.html) own = await run<{ own: boolean; why?: string; inner?: boolean }>(page, INJECT_OWN, { sel, own: p.own }).catch(() => ({ own: false, why: 'its content could not be set' }));
     else {
       // Its words went in as children; an icon named in the source was imported and drawn beside them.
       const shown = await run<{ text: boolean; icon: boolean }>(page, SHOWN_OWN, { sel, text: p.own.text ?? null, label: p.own.ariaLabel ?? null });
@@ -369,10 +393,13 @@ async function fromSource(page: any, s: any, p: Wanted, k: string, dir: string, 
   const file = `proposal-${sha(k).slice(0, 12)}.png`;
   const shot = await shoot(page, sel, path.join(dir, file));
   const content = own && !own.own && own.why ? own.why : undefined;
-  return { ...noOwn(p), check, via: 'source', shot: shot ? file : undefined, styles: top.styles, ...(unstyledLook(top.styles) ? { unstyled: true } : {}), ...(own?.own ? { own: true, text: p.own?.text ?? '' } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
+  return { ...noOwn(p), check, via: 'source', shot: shot ? file : undefined, styles: top.styles, ...(unstyledLook(top.styles) ? { unstyled: true } : {}), ...innerOf(p, own), ...(own?.own ? { own: true, text: p.own?.text ?? '' } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
 }
 
 /** Runs in the page: did the element's own words and icon show, and set its accessible name. */
+/** What the proposal stores about the element's inner content: drawn with it, or without it. */
+const innerOf = (p: Wanted, own: { own: boolean; inner?: boolean } | null) => (!p.own?.inner ? {} : own?.own && own.inner ? { inner: true } : { innerLost: true });
+
 const SHOWN_OWN = `({ sel, text, label }) => {
   const el = document.querySelector(sel);
   if (!el) return { text: false, icon: false };
@@ -428,11 +455,11 @@ async function fromStories(sb: { url: string; stories: any[]; page: any }, s: an
     const file = `proposal-${sha(k).slice(0, 12)}.png`;
     // The element's own words, name and icon in place of the story's: then the proposal is this element.
     const sel = `[data-dsa-p="${top.idx}"][data-slot="${s.slot}"]`;
-    const own = p.own ? await run<{ own: boolean; why?: string }>(page, INJECT_OWN, { sel, own: p.own }).catch(() => ({ own: false, why: 'its content could not be set' })) : null;
+    const own = p.own ? await run<{ own: boolean; why?: string; inner?: boolean }>(page, INJECT_OWN, { sel, own: p.own }).catch(() => ({ own: false, why: 'its content could not be set' })) : null;
     if (own?.own) await page.waitForTimeout(120);
     const shot = await shoot(page, sel, path.join(dir, file));
     const content = own?.own ? undefined : own?.why ? own.why : set ? (iconSize && icon ? `icon from ${icon.story}` : 'story default') : undefined;
-    best = { ...noOwn(p), check, via: 'story', shot: shot ? file : undefined, styles: top.styles, ...(unstyledLook(top.styles) ? { unstyled: true } : {}), story: st.id, ...(own?.own ? { own: true, text: p.own?.text ?? '' } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
+    best = { ...noOwn(p), check, via: 'story', shot: shot ? file : undefined, styles: top.styles, ...(unstyledLook(top.styles) ? { unstyled: true } : {}), ...innerOf(p, own), story: st.id, ...(own?.own ? { own: true, text: p.own?.text ?? '' } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
     if (check === 'exact') break;
   }
   if (best) return best;
@@ -484,7 +511,7 @@ const SCAN = `({ slot, want, classes }) => {
 const DRAW = `(a) => window.__dsaDraw(a)`;
 
 /** For tests: the in-page prop check and the helper that runs it. */
-export const __test = { SCAN, run };
+export const __test = { SCAN, get INJECT_OWN() { return INJECT_OWN; }, run };
 
 /** A proposal as stored: its component and props; the content it was asked to show isn't kept. */
 const noOwn = (p: Wanted) => ({ use: p.use, props: p.props });
@@ -504,6 +531,16 @@ async function run<T = any>(page: any, src: string, arg?: unknown): Promise<T> {
 const INJECT_OWN = `({ sel, own }) => {
   const el = document.querySelector(sel);
   if (!el) return { own: false, why: 'the component was not found to set its content' };
+  if (own.inner && own.inner.html) {
+    const t = document.createElement('template');
+    t.innerHTML = own.inner.html;
+    el.replaceChildren(...Array.from(t.content.childNodes));
+    if (own.ariaLabel) el.setAttribute('aria-label', own.ariaLabel);
+    // Each mark shows, at about the size it had: an icon font that isn't here spells its name out instead.
+    const shown = Array.from(el.querySelectorAll('[data-dsa-mark]'));
+    const ok = shown.length === own.inner.marks && shown.every(m => { const r = m.getBoundingClientRect(); const was = Number(m.getAttribute('data-dsa-mark')) || 0; return r.width > 0 && r.height > 0 && r.width <= Math.max(was * 1.6, was + 8); });
+    return { own: true, inner: ok && !own.inner.lost };
+  }
   const icons = Array.from(el.querySelectorAll('svg, [data-slot=icon]'));
   const iconOnly = !own.text;
   if (iconOnly && !own.icon) {

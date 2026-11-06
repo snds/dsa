@@ -106,6 +106,8 @@ export function plainChange(c: { label: string; from: string; to: string }): str
   return `a different ${l.replace(/[-_]/g, " ")}`
 }
 
+const CONTENT_SIZED = /^(static-table|data-table|clickable-region|native-dialog|drop-target|selector-card|choice-tile)$/
+
 /** Near white: the page a proposal is drawn on. */
 const whiteOrClear = (v: string) => { const n = colourName(v); return n === "white" || n === "transparent" }
 
@@ -119,7 +121,10 @@ export function plainDifferences(e: any): string[] {
   if (!d) return []
   const surface = e.shot?.surface
   const elsewhere = surface && !whiteOrClear(surface)
-  const kept = d.changes.filter(c => !(elsewhere && /^(bg|background)$/i.test(c.label)))
+  // A table's height is its rows, a tile's its contents: beside a story's sample content, that says nothing.
+  const inner = e.shot?.content?.inner
+  const sized = CONTENT_SIZED.test(e.role ?? "") || e.element === "table" || (inner?.blocks ?? 0) > 1
+  const kept = d.changes.filter(c => !(elsewhere && /^(bg|background)$/i.test(c.label)) && !(sized && /^(height|width)$/i.test(c.label)))
   return [...new Set(kept.map(plainChange))].slice(0, 5)
 }
 

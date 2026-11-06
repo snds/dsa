@@ -175,3 +175,18 @@ test("a proposal drawn without the system's styles needs evidence, not a decisio
   assert.equal(r.missing[0]!.kind, 'unstyled');
   assert.match(r.missing[0]!.why, /couldn't be drawn with the system's styles/);
 });
+
+test("a proposal that lacks what the element holds besides its words needs evidence", () => {
+  const E: any = payload([]).elements;
+  const key = 'Button|variant=outline#own1';
+  const pick = { verdict: 'replace', use: 'Button', props: { variant: 'outline' } };
+  const judge = (content: object, drawn: object = {}) => evidenceOf({ ...E, proposals: { ...E.proposals, [key]: { ...E.proposals[key], ...drawn } } }, el('x', { shot: shot({ content }) }), pick);
+  const holds = { text: 'Save', inner: { marks: 1, blocks: 1, lost: 0 } };
+  assert.equal(judge(holds).missing[0]!.why, "The proposal doesn't show this element's inner content.");
+  assert.equal(judge(holds, { innerLost: true }).missing[0]!.kind, 'no-inner');
+  assert.equal(judge(holds, { inner: true }).ready, true);
+  assert.equal(judge({ text: 'Save', inner: null }).ready, true, 'it holds only its words');
+  assert.equal(judge({ text: 'Save' }).missing[0]!.kind, 'no-inner', 'a photo from before this was recorded');
+  // Words come from the photo, so another element's drawing is caught even with no label.
+  assert.equal(evidenceOf(E, el('y', { label: null, shot: shot({ content: { text: 'Other', inner: null } }) }), pick).missing[0]!.kind, 'not-own-words');
+});

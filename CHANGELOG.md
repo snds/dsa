@@ -38,6 +38,19 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   stylesheets and Vite setup (`viteFinal`, Tailwind), and still draw when a decorator only works inside
   Storybook. A drawing the system's styles didn't reach is `unstyled`: tried from stories, and otherwise
   it needs evidence.
+- Proposals carry what an element holds besides its words: a shape made of borders, a swatch, a picture, an
+  icon-font glyph, separate blocks of text. A photo records a copy (`content.inner`: only what paints or
+  lays it out), the drawing holds it, and each mark is checked there. If it can't be shown, the element
+  needs evidence ("the proposal doesn't show this element's inner content"). Photos from before this are
+  taken again once.
+- The report page now gets each drawing's recorded words and each photo's words, so "with its own words"
+  is checked on real runs, not only in tests.
+- `dsa render` always logs how many drawings the system's styles missed and how many lack their element's
+  inner content, zero included, naming the elements; and how many couldn't be drawn from source, with the
+  first reason.
+- The dashboard header says when the photos and drawings were taken, beside the last scan.
+- Label Review leaves height and width out of the differences for content-sized elements (tables, tiles,
+  elements with several text blocks): beside a story's sample content they say nothing.
 - CI fails when the committed report UI (`packages/dashboard/templates/ui`) isn't built from `ui/src`.
 - `dsa render` draws again a cached proposal drawn with the element's own content that doesn't record
   which words it drew (made before drawings recorded them), or drew other words than the element has now.

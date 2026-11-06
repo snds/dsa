@@ -148,7 +148,9 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
   const hashes = new Map<string, string>();
   const hashOf = (e: ElementEval) => { if (!hashes.has(e.file)) hashes.set(e.file, fileHash(e)); return hashes.get(e.file)!; };
   // A shot without placement predates it (crawler 4): take it again once, so every example says where it sits.
-  const fresh = (entry: any, e: ElementEval) => !opts.fresh && entry && entry.fileHash === hashOf(e) && Date.now() - Date.parse(entry.at ?? 0) < maxAge && (entry.file ? 'placement' in entry : true);
+  const fresh = (entry: any, e: ElementEval) => !opts.fresh && entry && entry.fileHash === hashOf(e) && Date.now() - Date.parse(entry.at ?? 0) < maxAge && (entry.file ? 'placement' in entry : true)
+    // A photo that didn't record what its element holds besides words: taken again once.
+    && !(entry.file && !entry.drawn && entry.content && !('inner' in entry.content));
   // A "not found" is only worth reusing if nothing about how we'd look for it changed: the crawler
   // itself (CRAWLER) and the reveal steps traced for this element. Otherwise a fix never gets a retry.
   const stepsKey = (e: ElementEval) => (e.reach?.steps ?? []).map(x => x.event + ':' + x.label).join('|');
@@ -2628,8 +2630,77 @@ const OWN_CONTENT = `(id) => {
     // Icon sets draw detailed paths: kept up to 20 KB, so the proposal is drawn with this icon, not a stand-in.
     icon = s.outerHTML.length <= 20000 ? s.outerHTML : null;
   }
-  return { text: text || null, ariaLabel: el.getAttribute('aria-label'), icon };
+  // What it holds besides its words: marks (an inline shape, a picture, an icon-font glyph, a painted empty
+  // element) and separate blocks of text. A copy of those, with only what paints or lays them out, so the
+  // proposal can be drawn holding them. No classes, handlers or links: its tags, styles, words and shapes.
+  const inner = (() => {
+    if (/^(TABLE|INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return null;
+    const root = getComputedStyle(el);
+    const clear = (v) => !v || v === 'transparent' || /^rgba\\(.*,\\s*0\\)$/.test(v);
+    const ICON_FONT = /material|symbols|icons?\\b|phosphor|awesome/i;
+    let marks = 0, blocks = 0, lost = 0, svgs = 0;
+    const put = (to, cs, names) => { for (const [k, css] of names) { const v = cs[k]; if (v && v !== 'none' && v !== 'normal' && v !== 'auto' && v !== '0px') to.style[css] = v; } };
+    const copy = (n) => {
+      if (n.nodeType === 3) return (n.nodeValue || '').trim() ? document.createTextNode(n.nodeValue) : null;
+      if (n.nodeType !== 1) return null;
+      const cs = getComputedStyle(n), r = n.getBoundingClientRect();
+      if (cs.display === 'none' || cs.visibility === 'hidden' || (r.width <= 1 && r.height <= 1)) return null;
+      const tag = n.tagName.toLowerCase();
+      const mark = (to) => { marks++; to.setAttribute('data-dsa-mark', String(Math.round(r.width))); return to; };
+      if (tag === 'svg') {
+        const c = n.cloneNode(true);
+        c.querySelectorAll('script, foreignObject').forEach(x => x.remove());
+        for (const x of [c, ...c.querySelectorAll('*')]) for (const a of Array.from(x.attributes)) if (/^on/i.test(a.name) || /javascript:/i.test(a.value) || a.name === 'class' || a.name === 'style') x.removeAttribute(a.name);
+        c.setAttribute('width', String(Math.round(r.width))); c.setAttribute('height', String(Math.round(r.height)));
+        if (cs.fill !== 'none') c.setAttribute('fill', cs.fill);
+        if (cs.stroke !== 'none') { c.setAttribute('stroke', cs.stroke); c.setAttribute('stroke-width', cs.strokeWidth); }
+        svgs++;
+        return mark(c);
+      }
+      if (tag === 'img' || tag === 'canvas') {
+        let url = null;
+        try {
+          if (tag === 'canvas') url = n.toDataURL();
+          else { const k = document.createElement('canvas'); k.width = Math.min(n.naturalWidth || r.width, 256); k.height = Math.min(n.naturalHeight || r.height, 256); k.getContext('2d').drawImage(n, 0, 0, k.width, k.height); url = k.toDataURL('image/png'); }
+        } catch { /* from elsewhere: it can't be copied */ }
+        if (!url) { lost++; return null; }
+        const i = document.createElement('img');
+        i.src = url; i.alt = ''; i.style.width = r.width + 'px'; i.style.height = r.height + 'px'; i.style.objectFit = cs.objectFit; i.style.borderRadius = cs.borderTopLeftRadius;
+        return mark(i);
+      }
+      const to = document.createElement(cs.display === 'inline' ? 'span' : 'div');
+      put(to, cs, [['display', 'display'], ['flexDirection', 'flex-direction'], ['flexWrap', 'flex-wrap'], ['flexGrow', 'flex-grow'], ['alignItems', 'align-items'], ['justifyContent', 'justify-content'], ['columnGap', 'column-gap'], ['rowGap', 'row-gap'], ['marginTop', 'margin-top'], ['marginRight', 'margin-right'], ['marginBottom', 'margin-bottom'], ['marginLeft', 'margin-left'], ['paddingTop', 'padding-top'], ['paddingRight', 'padding-right'], ['paddingBottom', 'padding-bottom'], ['paddingLeft', 'padding-left'], ['borderRadius', 'border-radius'], ['clipPath', 'clip-path'], ['transform', 'transform']]);
+      if (!clear(cs.backgroundColor)) to.style.backgroundColor = cs.backgroundColor;
+      if (cs.backgroundImage !== 'none' && !/url\\(/.test(cs.backgroundImage)) to.style.backgroundImage = cs.backgroundImage;
+      if (cs.opacity !== '1') to.style.opacity = cs.opacity;
+      let bordered = false;
+      for (const side of ['Top', 'Right', 'Bottom', 'Left']) {
+        const w = cs['border' + side + 'Width'], st = cs['border' + side + 'Style'], col = cs['border' + side + 'Color'];
+        if (parseFloat(w) > 0 && st !== 'none') { to.style['border' + side] = w + ' ' + st + ' ' + col; if (!clear(col)) bordered = true; }
+      }
+      for (const [k, css] of [['fontSize', 'font-size'], ['fontWeight', 'font-weight'], ['color', 'color'], ['textTransform', 'text-transform'], ['letterSpacing', 'letter-spacing']]) if (cs[k] !== root[k]) to.style[css] = cs[k];
+      const words = Array.from(n.childNodes).filter(x => x.nodeType === 3 && (x.nodeValue || '').trim());
+      const glyph = ICON_FONT.test(cs.fontFamily) && !n.children.length && words.length > 0;
+      if (glyph) { to.style.fontFamily = cs.fontFamily; to.style.fontSize = cs.fontSize; to.style.fontVariationSettings = cs.fontVariationSettings; to.style.fontFeatureSettings = cs.fontFeatureSettings; to.style.lineHeight = cs.lineHeight; to.textContent = n.textContent; to.setAttribute('aria-hidden', 'true'); return mark(to); }
+      if (words.length) blocks++;
+      for (const k of Array.from(n.childNodes)) { const c = copy(k); if (c) to.append(c); }
+      // Nothing inside it, yet it paints: a swatch, a dot, a triangle made of borders.
+      if (!to.childNodes.length && (bordered || !clear(cs.backgroundColor) || cs.backgroundImage !== 'none' || cs.clipPath !== 'none')) { to.style.width = cs.width; to.style.height = cs.height; to.style.flexShrink = '0'; return mark(to); }
+      return to.childNodes.length ? to : null;
+    };
+    const box = document.createElement('div');
+    const direct = Array.from(el.childNodes).filter(x => x.nodeType === 3 && (x.nodeValue || '').trim());
+    if (direct.length) blocks++;
+    for (const k of Array.from(el.childNodes)) { const c = copy(k); if (c) box.append(c); }
+    // Its words alone, or its words and one inline icon, are carried without a copy.
+    if (!lost && (!marks || (marks === svgs && marks === 1 && icon)) && blocks <= 1) return null;
+    const html = box.innerHTML;
+    return { html: html.length <= 40000 ? html : null, marks, blocks, lost };
+  })();
+  return { text: text || null, ariaLabel: el.getAttribute('aria-label'), icon, inner };
 }`;
+/** For tests: the in-page capture of an element's own content. */
+export const __ownContent = OWN_CONTENT;
 
 /**
  * Runs in the page: is the element what shows at its centre? It is when the topmost element there is it,

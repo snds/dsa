@@ -2,7 +2,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { allDsPackages, defaultExcludes, displayPath, findUses, usageExcludes, DEFAULT_THRESHOLD, locate, freshShots, freshnessByApp, readShotIndex, autoPick, contentHash, ownOf, openStore, plainText, withPlain, withMetrics, appSettings, closestRendered, compareRendered, effectiveSettings, familyKey, figmaEnabled, homeOf, loadCatalog, patterns as stylePatterns, pushedThisWeek, questions, readEvents, readProposals, readRendered, renderIssue, renderedFor as composeRendered, resolveTargets, rowToFinding, sourceExcerpts, placeExcerpts, titleOf, type Config } from '@snds/dsa/engine';
+import { proposalsTakenAt, allDsPackages, defaultExcludes, displayPath, findUses, usageExcludes, DEFAULT_THRESHOLD, locate, freshShots, freshnessByApp, readShotIndex, autoPick, contentHash, ownOf, openStore, plainText, withPlain, withMetrics, appSettings, closestRendered, compareRendered, effectiveSettings, familyKey, figmaEnabled, homeOf, loadCatalog, patterns as stylePatterns, pushedThisWeek, questions, readEvents, readProposals, readRendered, renderIssue, renderedFor as composeRendered, resolveTargets, rowToFinding, sourceExcerpts, placeExcerpts, titleOf, type Config } from '@snds/dsa/engine';
 
 import { scanEstimate, type PageActions, type ResolvedProfile } from '@snds/dsa';
 import { buildQueue, PKG_DIR } from './queue.js';
@@ -160,6 +160,8 @@ export async function renderReport(root: string, config: Config, dataDir: string
     // Tagged: found by its source tag, so the place is exact (ties are then the nodes its one line made).
     const shotOf = (s: any) => ({ url: shotUrl(s.file), match: s.matchScore, page: s.page, box: s.box ?? null, revealedBy: s.revealedBy ?? null,
       ...(s.styles?.surface ? { surface: s.styles.surface } : {}),
+      // Its own words and how much it holds besides them (not the copy itself), to judge its proposal by.
+      ...(s.content ? { content: { text: s.content.text ?? null, ...('inner' in s.content ? { inner: s.content.inner ? { marks: s.content.inner.marks, blocks: s.content.inner.blocks, lost: s.content.inner.lost } : null } : {}) } } : {}),
       ...(s.blank ? { blank: true } : {}), ...(s.covered ? { covered: true } : {}), ...(s.via ? { via: s.via } : {}), ...(s.ties > 1 ? { ties: s.ties, alike: s.alike ?? 1 } : {}), ...(s.shared ? { shared: s.shared } : {}), ...(s.tagged ? { tagged: true } : {}),
       // Drawn direct from code (mount, markup): shown, labelled, never a photo. Uncovered: covering layers hidden.
       ...(s.drawn ? { drawn: s.drawn } : {}), ...(s.exact ? { exact: true } : {}), ...(s.placeholder ? { placeholder: s.placeholder } : {}), ...(s.uncovered ? { uncovered: s.uncovered } : {}),
@@ -227,11 +229,12 @@ how: e.how ?? null, parent: e.parent ?? null, recipe: e.recipe ?? null,
       // The code viewer's text. dsa serve reads whole files on request (/api/source); a static page carries excerpts.
       sources: opts.serve ? null : sourceExcerpts(root, config, evals.map((e: any) => ({ target: e.target, file: e.file, line: e.line, span: typeof e.source === 'string' ? e.source.split('\n').length : 1 }))),
       shotsTaken: shotIdx.takenAt ?? null,
+      drawingsTaken: proposalsTakenAt(evidenceDir),
       // Which run the photos are from, how many were set aside as older or unstamped, and the oldest that counts, per app.
       freshness: { run: fresh.run, stale: Object.keys(fresh.stale).length, byApp: freshnessByApp(fresh, id => appOfId.get(id)) },
       rendered: renderedSet ? { takenAt: renderedSet.takenAt, source: renderedSet.source, combos: Object.values(renderedSet.components).reduce((a, c) => a + Object.keys(c).length, 0) } : null,
       // Each proposed replacement rendered with its exact props (dsa render), keyed like proposalKey: the review shows the options as they would look.
-      proposals: Object.fromEntries(Object.entries(readProposals(evidenceDir)).map(([k, p]) => [k, { use: p.use, props: p.props, check: p.check, url: p.shot ? renderedUrl(p.shot) : null, story: p.story ?? null, content: p.content ?? null, actual: p.actual ?? null, note: p.note ?? null, own: p.own ?? false, fallback: p.fallback ? renderedUrl(p.fallback) : null, ...(p.noSource ? { noSource: true } : {}), ...(p.unstyled ? { unstyled: true } : {}) }])),
+      proposals: Object.fromEntries(Object.entries(readProposals(evidenceDir)).map(([k, p]) => [k, { use: p.use, props: p.props, check: p.check, url: p.shot ? renderedUrl(p.shot) : null, story: p.story ?? null, content: p.content ?? null, actual: p.actual ?? null, note: p.note ?? null, own: p.own ?? false, fallback: p.fallback ? renderedUrl(p.fallback) : null, ...(p.noSource ? { noSource: true } : {}), ...(p.unstyled ? { unstyled: true } : {}), ...(typeof p.text === 'string' ? { text: p.text } : {}), ...(p.inner ? { inner: true } : {}), ...(p.innerLost ? { innerLost: true } : {}) }])),
     });
     // Review for people: what each element can show, the queue, the system's allowed props, and where
     // the app already uses each proposal (its precedents).

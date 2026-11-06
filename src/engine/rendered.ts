@@ -54,6 +54,10 @@ export interface Proposal {
   text?: string | undefined;
   /** Drawn, but the system's stylesheet didn't reach it: a browser's default font or button. */
   unstyled?: boolean | undefined;
+  /** The element holds more than its words, and the drawing holds it too. */
+  inner?: boolean | undefined;
+  /** The element holds more than its words, and the drawing doesn't show all of it. */
+  innerLost?: boolean | undefined;
   /** When it couldn't be drawn with these props: the component's story as its authors wrote it, to show instead. */
   fallback?: string | undefined;
   /** Drawn from the system's own source (harness.ts), or from one of its stories. */
@@ -68,6 +72,11 @@ export const lookProps = (props?: Record<string, unknown> | null): Record<string
 export function proposalKey(use: string, props?: Record<string, unknown> | null) {
   const p = Object.entries(lookProps(props)).map(([k, v]) => `${k}=${v}`).join(';');
   return p ? `${use}|${p}` : use;
+}
+
+/** When the proposals were last drawn. */
+export function proposalsTakenAt(dataDir: string): string | null {
+  try { return JSON.parse(fs.readFileSync(path.join(dataDir, 'rendered', 'proposals.json'), 'utf8')).takenAt ?? null; } catch { return null; }
 }
 
 export function readProposals(dataDir: string): Record<string, Proposal> {

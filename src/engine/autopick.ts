@@ -51,13 +51,15 @@ export interface OwnContent {
   text?: string | undefined; ariaLabel?: string | undefined; icon?: string | undefined;
   /** No icon captured from a page: the icon component its JSX holds (`<PlusIcon />`), to draw that one. */
   iconName?: string | undefined;
+  /** What it holds besides its words and one icon: a copy (null: too large), its marks, text blocks, and pictures that can't be copied. */
+  inner?: { html: string | null; marks: number; blocks: number; lost: number } | null | undefined;
 }
 
 /** A short hash of an element's own content; null when it has none to give. */
 export function contentHash(own: OwnContent | null | undefined): string | null {
   if (!own || (!own.text && !own.ariaLabel && !own.icon && !own.iconName)) return null;
   // An icon named in the source (no markup) hashes as its name, so content without one hashes as before.
-  return crypto.createHash('sha1').update(JSON.stringify([own.text ?? '', own.ariaLabel ?? '', own.icon ?? (own.iconName ? `name:${own.iconName}` : '')])).digest('hex').slice(0, 10);
+  return crypto.createHash('sha1').update(JSON.stringify([own.text ?? '', own.ariaLabel ?? '', own.icon ?? (own.iconName ? `name:${own.iconName}` : ''), ...(own.inner?.html ? [own.inner.html] : [])])).digest('hex').slice(0, 10);
 }
 
 /** The key a proposal drawn with an element's own content is stored under: the proposal's key, then the content's hash. */
@@ -75,6 +77,7 @@ export function ownOf(e: Pick<ElementEval, 'match'> & { source?: string | undefi
   const icon = c?.icon || svgInSource(e);
   const own: OwnContent = { text: c?.text || e.match?.text || undefined, ariaLabel: c?.ariaLabel || e.match?.ariaLabel || undefined, icon, iconName: icon ? undefined : iconInSource(e) };
   if (!own.iconName) delete own.iconName;
+  if (c?.inner) own.inner = c.inner;
   return own.text || own.ariaLabel || own.icon || own.iconName ? own : null;
 }
 
