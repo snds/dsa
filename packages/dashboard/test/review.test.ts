@@ -190,3 +190,25 @@ test("a proposal that lacks what the element holds besides its words needs evide
   // Words come from the photo, so another element's drawing is caught even with no label.
   assert.equal(evidenceOf(E, el('y', { label: null, shot: shot({ content: { text: 'Other', inner: null } }) }), pick).missing[0]!.kind, 'not-own-words');
 });
+
+test("an icon-only button has no words to draw: its aria-label is not its words", () => {
+  const E: any = { ...payload([]).elements, proposals: { 'Button|variant=outline#own1': { use: 'Button', props: { variant: 'outline' }, check: 'exact', url: 'rendered/own.png', own: true, text: '', inner: true } } };
+  const pick = { verdict: 'replace', use: 'Button', props: { variant: 'outline' } };
+  const photo = { content: { text: null, inner: { marks: 1, blocks: 0, lost: 0 } } };
+  assert.equal(evidenceOf(E, el('x', { label: 'Open drawer', shot: shot(photo) }), pick).ready, true);
+  // Words the source holds and the photo missed are still its words: a drawing without them is wrong.
+  assert.equal(evidenceOf(E, el('x', { label: 'Open drawer', words: 'Open drawer', shot: shot(photo) }), pick).missing[0]!.kind, 'not-own-words');
+  // With no record from a photo, the label is all there is to go on.
+  assert.equal(evidenceOf(E, el('x', { label: 'Open drawer', shot: shot() }), pick).missing[0]!.kind, 'not-own-words');
+});
+
+test('no clear answer: reviewable only with a candidate drawn with its own content', () => {
+  const candidate = { verdict: 'replace', use: 'Button', props: { variant: 'ghost' } };
+  const drawn = (o: object) => ({ ...payload([]).elements, proposals: { 'Button|variant=ghost#own1': { use: 'Button', props: { variant: 'ghost' }, check: 'exact', url: 'rendered/c.png', own: true, text: 'Save', ...o } } });
+  const unclear = { verdict: 'unclear', use: null, props: null };
+  const element = (alternatives: object[]) => el('x', { ...unclear, alternatives, shot: shot({ content: { text: 'Save', inner: null } }) });
+  assert.equal(evidenceOf(drawn({}), element([candidate]), unclear).ready, true);
+  assert.equal(evidenceOf(drawn({}), element([]), unclear).missing[0]!.kind, 'no-candidates');
+  assert.equal(evidenceOf(drawn({ text: 'Other' }), element([candidate]), unclear).missing[0]!.kind, 'no-candidates', 'other words');
+  assert.equal(evidenceOf(drawn({ url: null }), element([candidate]), unclear).missing[0]!.kind, 'no-candidates', 'not drawn');
+});

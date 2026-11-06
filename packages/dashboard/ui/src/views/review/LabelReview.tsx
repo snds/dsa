@@ -151,6 +151,14 @@ export function plainPick(r: any): string {
 }
 
 /** "a link-style button, inline size" with its props small beside it. */
+/** What a card's heading says it proposes. A card with no component says so, in words. */
+export function proposalHeading(r: any): string {
+  if (r?.verdict === "replace" && r.use) return `${SYS} ${pickText(r)}`
+  if (r?.verdict === "gap") return `no ${SYS} component fits`
+  if (r?.verdict === "keep") return "keep it as it is"
+  return `no clear match in ${SYS}`
+}
+
 function PickName({ r }: { r: any }) {
   const props = pickText(r)
   return <><span>{plainPick(r)}</span>{r?.verdict === "replace" && <span className="ml-1 font-mono text-[10px] text-muted-foreground">({props})</span>}</>
@@ -237,6 +245,9 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
     .map(reasonToJudge).filter(Boolean)
   const differs = plainDifferences(e)
   const alts = (e.alternatives ?? []).filter((a: any) => a?.use && a.use !== pick?.use).slice(0, 3)
+  // With no proposal, these stand in its place, each drawn with the element's own content.
+  const candidates = pick?.verdict === "replace" ? [] : alts.filter((a: any) => ownWords(renderOf(a.use, a.props, e.ownHash), e))
+  const unclear = pick?.verdict !== "replace" && pick?.verdict !== "gap" && pick?.verdict !== "keep"
 
   const label = (truth: any) => ({
     id: e.id, ...item.label, truth: truth.verdict === "replace" ? { verdict: "replace", use: truth.use, props: Object.fromEntries(Object.entries(truth.props ?? {}).map(([k, v]) => [k, String(v)])) } : { verdict: truth.verdict },
@@ -252,7 +263,7 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
   return (
     <article className="flex flex-col gap-5 rounded-lg border p-4" aria-labelledby={`h-${e.id}`} data-slot="review-item" data-element-id={e.id}>
       <header className="flex flex-col gap-1">
-        <h3 id={`h-${e.id}`} className="font-heading text-base font-semibold">{e.title ?? "This element"} → {SYS} {pickText(pick)}</h3>
+        <h3 id={`h-${e.id}`} className="font-heading text-base font-semibold">{e.title ?? "This element"} → {proposalHeading(pick)}</h3>
         <p className="text-sm">{describe(e)}</p>
         {answered && <p className="text-xs text-muted-foreground">You answered: {answered.verdict === "right" ? "Right" : answered.verdict === "wrong" ? `Wrong, should be ${pickText(answered.label.truth)}` : "Not sure"}. Answer again to change it.</p>}
       </header>
@@ -262,10 +273,19 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
           <div className="w-fit rounded-md border bg-background p-1"><Crop url={e.shot.url} box={e.shot.box} alt={`The element now: ${describe(e)}`} /></div>
           <figcaption className="text-xs"><b className="font-medium">Now</b> · {sourceLabel(e.shot)}{e.review?.current === "isolated" ? " (drawn with the props it was recorded with)" : ""} · {e.target}</figcaption>
         </figure>
-        <figure className="m-0 flex flex-col gap-1" data-pane="proposed">
-          <div className="w-fit rounded-md border bg-background p-1">{proposal ? <Natural url={proposal.url} alt={`Proposed: ${SYS} ${pickText(pick)}, with its own words`} /> : <span className="text-xs">{pickText(pick)}: nothing to draw</span>}</div>
-          <figcaption className="text-xs"><b className="font-medium">Proposed</b> · {SYS} <PickName r={pick} />{ownWords(proposal, e) ? " · with its own words" : ""}</figcaption>
-        </figure>
+        {pick?.verdict === "replace" ? (
+          <figure className="m-0 flex flex-col gap-1" data-pane="proposed">
+            <div className="w-fit rounded-md border bg-background p-1">{proposal ? <Natural url={proposal.url} alt={`Proposed: ${SYS} ${pickText(pick)}, with its own words`} /> : <span className="text-xs">{pickText(pick)}: nothing to draw</span>}</div>
+            <figcaption className="text-xs"><b className="font-medium">Proposed</b> · {SYS} <PickName r={pick} />{ownWords(proposal, e) ? " · with its own words" : ""}</figcaption>
+          </figure>
+        ) : (
+          <div className="flex flex-col gap-1" data-pane="proposed">
+            <p className="text-sm">{pick?.verdict === "gap" ? `${SYS} has no such component.` : pick?.verdict === "keep" ? "dsa suggests keeping it as it is." : `dsa isn't sure which ${SYS} component this is. Here are the closest ones, with its own words.`}</p>
+            <div className="flex flex-wrap gap-4">{candidates.map((a: any, k: number) => { const r = renderOf(a.use, a.props, e.ownHash); return (
+              <figure key={k} className="m-0 flex flex-col gap-1" data-slot="candidate"><div className="w-fit rounded-md border bg-background p-1"><Natural url={r.url} alt={`${pick?.verdict === "gap" ? "Suggested stand-in" : "Candidate"}: ${SYS} ${pickText(a)}, with its own words`} /></div><figcaption className="text-xs"><b className="font-medium">{pick?.verdict === "gap" ? "Suggested stand-in" : "Candidate"}</b> · {SYS} <PickName r={a} /></figcaption></figure>
+            ) })}</div>
+          </div>
+        )}
         <InContext url={e.shot.context?.url ?? e.shot.url} box={e.shot.context?.box ?? e.shot.box} alt={`Where it sits on ${e.review?.pageName}`} page={e.review?.pageName ?? "its page"} />
       </section>
 
@@ -302,7 +322,7 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
         )}
       </section>}
 
-      {alts.length > 0 && (
+      {pick?.verdict === "replace" && alts.length > 0 && (
         <section aria-labelledby={`alt-${e.id}`} className="flex flex-col gap-2" data-slot="alternatives">
           <h4 id={`alt-${e.id}`} className="text-sm font-medium">What else dsa considered</h4>
           <div className="flex flex-wrap gap-4">{alts.map((a: any, k: number) => { const r = renderOf(a.use, a.props, e.ownHash); return (
@@ -312,11 +332,11 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
       )}
 
       <section aria-labelledby={`v-${e.id}`} className="flex flex-col gap-3" data-slot="verdict">
-        <h4 id={`v-${e.id}`} className="text-sm font-medium">Is {pickText(pick)} the right answer?</h4>
+        <h4 id={`v-${e.id}`} className="text-sm font-medium">{unclear ? "Which is the right answer?" : pick?.verdict === "gap" ? `Is it right that nothing in ${SYS} fits?` : `Is ${pickText(pick)} the right answer?`}</h4>
         <div role="radiogroup" aria-labelledby={`v-${e.id}`} className="flex flex-wrap gap-2">
-          {(["right", "wrong", "unsure"] as Verdict[]).map(v => (
+          {(unclear ? ["wrong", "unsure"] : ["right", "wrong", "unsure"] as Verdict[]).map((v: any) => (
             <Button key={v} role="radio" aria-checked={verdict === v} variant={verdict === v ? "default" : "outline"} onClick={() => setVerdict(v)}>
-              {v === "right" ? "Right" : v === "wrong" ? "Wrong" : "Not sure"}{verdict === v ? " (chosen)" : ""}
+              {v === "right" ? "Right" : v === "wrong" ? (unclear ? "Choose" : "Wrong") : "Not sure"}{verdict === v ? " (chosen)" : ""}
             </Button>
           ))}
         </div>

@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { capByEvidence, cardPicks, latestEvals, lookProps, ownKey, ownOf, proposalKey, readProposals, readRendered, resolveTargets, type Config, type OwnContent, type Proposal, type RenderedSet, type Styles } from '@snds/dsa/engine';
+import { BLANK_INSET, capByEvidence, cardPicks, decodePng, isBlank, latestEvals, lookProps, ownKey, ownOf, proposalKey, readProposals, readRendered, resolveTargets, type Config, type OwnContent, type Proposal, type RenderedSet, type Styles } from '@snds/dsa/engine';
 
 import { cookiesFor, openSurface, serveStatic } from '@snds/dsa';
 import { detectApp, ensureBrowser, startApp } from './apps.js';
@@ -219,6 +219,8 @@ export function reusable(c: Proposal, p: Wanted, hash: string): boolean {
   // A drawing that failed is tried again: what failed may have been passing. The exception is a component
   // that isn't in the system's source, where nothing can change until its hash does.
   if (!c.shot && !c.hash.startsWith('none:')) return false;
+  // A picture nobody looked at may be blank or hold another element's words: looked at first, by drawing again.
+  if (c.shot && !c.checked) return false;
   // Drawn before drawings recorded their font, or without the system's styles: drawn again.
   if (c.styles && !c.styles.fontFamily) return false;
   if (c.unstyled || c.innerLost) return false;
@@ -253,7 +255,9 @@ export async function wantedProposals(dataDir: string, threshold?: number, root?
     at = `${e.file}:${e.line}`;
     icon = own?.iconName && root ? iconFile(root, e.file, own.iconName) ?? undefined : undefined;
     for (const p of picks.get(e.id) ?? []) add(p, own);
-    for (const r of [e, e.decided?.decision, ...(e.alternatives ?? [])] as any[]) add(r, r === e || r === e.decided?.decision ? own : null);
+    // With no clear proposal, its candidates are what a person judges: drawn with its own content too.
+    const noProposal = e.verdict !== 'replace' || (picks.get(e.id) ?? []).some((p: any) => p?.verdict !== 'replace');
+    for (const r of [e, e.decided?.decision, ...(e.alternatives ?? [])] as any[]) add(r, r === e || r === e.decided?.decision || noProposal ? own : null);
   }
   return out;
 }
@@ -423,13 +427,84 @@ async function fromSource(page: any, h: Harness, fresh: FreshDraw, s: any, p: Wa
   }
   const file = `proposal-${sha(k).slice(0, 12)}.png`;
   const shot = await shoot(page, sel, path.join(dir, file));
+  const seen = shot ? await lookAt(page, sel, path.join(dir, file), p, own) : { shows: false, why: "no picture could be taken" };
+  if (!seen.shows) return { ...noOwn(p), check: 'none', via: 'source', note: `${p.use} drew from the system's source, but ${seen.why}.`, hash };
+  if (seen.notOwn) own = { own: false, why: seen.notOwn };
   const content = own && !own.own && own.why ? own.why : undefined;
-  return { ...noOwn(p), check, via: 'source', shot: shot ? file : undefined, styles: top.styles, ...(unstyledLook(top.styles) ? { unstyled: true } : {}), ...innerOf(p, own), ...(own?.own ? { own: true, text: p.own?.text ?? '' } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
+  return { ...noOwn(p), check, via: 'source', shot: file, ...(seen.notOwn ? {} : { checked: true }), styles: top.styles, ...(unstyledLook(top.styles) ? { unstyled: true } : {}), ...innerOf(p, own), ...(own?.own ? { own: true, text: p.own?.text ?? '' } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
 }
 
 /** Runs in the page: did the element's own words and icon show, and set its accessible name. */
 /** What the proposal stores about the element's inner content: drawn with it, or without it. */
 const innerOf = (p: Wanted, own: { own: boolean; inner?: boolean } | null) => (!p.own?.inner ? {} : own?.own && own.inner ? { inner: true } : { innerLost: true });
+
+/**
+ * Runs in the page, once a drawing is on screen: can it be seen, and do the words that show equal the ones
+ * it should hold? Marks and icons aren't words. Inner content is compared with what was put in, whose words
+ * are the ones that showed in the app (the photo's own words can include text it kept hidden).
+ */
+const SHOWN = `({ sel, words, inner }) => {
+  const el = document.querySelector(sel);
+  if (!el) return { shows: false, why: 'it was gone by the time it was looked at' };
+  const r = el.getBoundingClientRect();
+  if (r.width < 1 || r.height < 1) return { shows: false, why: 'it has no size' };
+  if (r.right <= 0 || r.bottom <= 0 || r.left >= innerWidth || r.top >= innerHeight) return { shows: false, why: 'it sits off the page' };
+  if (getComputedStyle(el).visibility !== 'visible') return { shows: false, why: "it's hidden, as an overlay part is when nothing opened it" };
+  let op = 1;
+  for (let n = el; n; n = n.parentElement) { const cs = getComputedStyle(n); if (cs.display === 'none') return { shows: false, why: "it's hidden, as an overlay part is when nothing opened it" }; op *= parseFloat(cs.opacity); }
+  if (op < 0.1) return { shows: false, why: "it's fully see-through, as an overlay part is before it opens" };
+  if (words === null) return { shows: true };
+  const NOT_WORDS = 'svg, style, script, [data-slot=icon], [aria-hidden=true], .material-symbols-outlined, .material-symbols-rounded, .material-icons, [data-dsa-mark]';
+  const seenIn = (root, live) => {
+    const out = [];
+    const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    while (walk.nextNode()) {
+      const t = walk.currentNode, at = t.parentElement;
+      if (!t.nodeValue || at.closest(NOT_WORDS)) continue;
+      if (live) { const cs = getComputedStyle(at); if (cs.visibility !== 'visible' || !at.getClientRects().length || /material|symbols|icons?\\b|phosphor|awesome/i.test(cs.fontFamily)) continue; }
+      out.push(t);
+    }
+    return out;
+  };
+  const say = (nodes) => nodes.map(t => t.nodeValue).join('').replace(/\\s+/g, ' ').trim();
+  const nodes = seenIn(el, true);
+  const shown = say(nodes);
+  let want = words;
+  if (inner) { const t = document.createElement('template'); t.innerHTML = inner; want = say(seenIn(t.content, false)); }
+  want = want.replace(/\\s+/g, ' ').trim();
+  if (shown.slice(0, Math.max(80, want.length)).trim() !== want && shown.slice(0, 80).trim() !== want) return { shows: true, notOwn: want ? 'the words that show are not its own' : 'it shows words the element does not have' };
+  if (!nodes.length) return { shows: true };
+  // Words the colour of what's behind them: every layer down to the first solid one.
+  const k = document.createElement('canvas'); k.width = k.height = 1;
+  const g = k.getContext('2d', { willReadFrequently: true });
+  const rgba = (c) => { g.clearRect(0, 0, 1, 1); g.fillStyle = 'rgba(0,0,0,0)'; g.fillStyle = c; g.fillRect(0, 0, 1, 1); return Array.from(g.getImageData(0, 0, 1, 1).data); };
+  const lum = (c) => { const f = c.slice(0, 3).map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * f[0] + 0.7152 * f[1] + 0.0722 * f[2]; };
+  const at = nodes[0].parentElement;
+  const ink = rgba(getComputedStyle(at).color);
+  if (ink[3] < 26) return { shows: true, notOwn: 'its words are see-through' };
+  let back = [255, 255, 255, 255];
+  for (let n = at; n; n = n.parentElement) {
+    const cs = getComputedStyle(n);
+    if (cs.backgroundImage !== 'none') return { shows: true };
+    const b = rgba(cs.backgroundColor);
+    if (b[3] > 230) { back = b; break; }
+  }
+  const a = lum(ink), b = lum(back);
+  if ((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) < 1.25) return { shows: true, notOwn: 'its words are the same colour as what is behind them' };
+  return { shows: true };
+}`;
+
+/**
+ * Look at a drawing before believing it. Can it be seen, in the page and in its picture? And where it claims
+ * the element's own words, are they what shows? `notOwn` says why not; a drawing that can't be seen isn't one.
+ */
+export async function lookAt(page: any, sel: string, file: string, p: Wanted, own: { own: boolean } | null): Promise<{ shows: boolean; why?: string; notOwn?: string }> {
+  const claims = Boolean(p.own && own?.own);
+  const seen = await run<{ shows: boolean; why?: string; notOwn?: string }>(page, SHOWN, { sel, words: claims ? p.own!.text ?? '' : null, inner: claims ? p.own!.inner?.html ?? null : null }).catch(() => ({ shows: false, why: 'it could not be looked at' }));
+  if (!seen.shows) return seen;
+  try { if (isBlank(decodePng(fs.readFileSync(file)), null, 2, BLANK_INSET)) return { shows: false, why: 'its picture is blank' }; } catch { /* an image we can't read: keep it */ }
+  return seen;
+}
 
 const SHOWN_OWN = `({ sel, text, label }) => {
   const el = document.querySelector(sel);
@@ -482,16 +557,20 @@ async function fromStories(sb: { url: string; stories: any[]; page: any }, s: an
     const top = topOf(found);
     if (!top) continue;
     const check: Proposal['check'] = top.contradicted ? 'closest' : top.unknown ? 'unverified' : 'exact';
-    if (best && ORDER[best.check] <= ORDER[check]) continue;
+    // A later story can still replace one as sure whose words turned out not to be the element's.
+    if (best && ORDER[best.check] <= ORDER[check] && !(p.own && !best.own && best.check === check)) continue;
     const file = `proposal-${sha(k).slice(0, 12)}.png`;
     // The element's own words, name and icon in place of the story's: then the proposal is this element.
     const sel = `[data-dsa-p="${top.idx}"][data-slot="${s.slot}"]`;
-    const own = p.own ? await run<{ own: boolean; why?: string; inner?: boolean }>(page, INJECT_OWN, { sel, own: p.own }).catch(() => ({ own: false, why: 'its content could not be set' })) : null;
+    let own = p.own ? await run<{ own: boolean; why?: string; inner?: boolean }>(page, INJECT_OWN, { sel, own: p.own }).catch(() => ({ own: false, why: 'its content could not be set' })) : null;
     if (own?.own) await page.waitForTimeout(120);
     const shot = await shoot(page, sel, path.join(dir, file));
+    const seen = shot ? await lookAt(page, sel, path.join(dir, file), p, own) : { shows: false, why: 'no picture could be taken' };
+    if (!seen.shows) continue;
+    if (seen.notOwn) own = { own: false, why: seen.notOwn };
     const content = own?.own ? undefined : own?.why ? own.why : set ? (iconSize && icon ? `icon from ${icon.story}` : 'story default') : undefined;
-    best = { ...noOwn(p), check, via: 'story', shot: shot ? file : undefined, styles: top.styles, ...(unstyledLook(top.styles) ? { unstyled: true } : {}), ...innerOf(p, own), story: st.id, ...(own?.own ? { own: true, text: p.own?.text ?? '' } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
-    if (check === 'exact') break;
+    best = { ...noOwn(p), check, via: 'story', shot: file, ...(seen.notOwn ? {} : { checked: true }), styles: top.styles, ...(unstyledLook(top.styles) ? { unstyled: true } : {}), ...innerOf(p, own), story: st.id, ...(own?.own ? { own: true, text: p.own?.text ?? '' } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
+    if (check === 'exact' && (!p.own || own?.own || !seen.notOwn)) break;
   }
   if (best) return best;
   // Nothing to photograph with these props: show the component's first story as its authors wrote it, and say why.
@@ -561,7 +640,7 @@ export async function drawFresh(page: any, h: Harness, fresh: FreshDraw, arg: { 
 }
 
 /** For tests: the in-page prop check and the helper that runs it. */
-export const __test = { SCAN, get INJECT_OWN() { return INJECT_OWN; }, run, pickBetter };
+export const __test = { SCAN, get INJECT_OWN() { return INJECT_OWN; }, run, pickBetter, get SHOWN() { return SHOWN; } };
 
 /** A proposal as stored: its component and props; the content it was asked to show isn't kept. */
 const noOwn = (p: Wanted) => ({ use: p.use, props: p.props });
@@ -602,9 +681,14 @@ const INJECT_OWN = `({ sel, own }) => {
   if (iconOnly) { el.textContent = ''; if (svg) el.append(svg); }
   else {
     if (svg && icons[0]) icons[0].replaceWith(svg); else if (svg) el.prepend(svg);
-    // The label: the deepest element holding the sample's words, else the element itself.
-    const holders = Array.from(el.querySelectorAll('*')).filter(n => !n.closest('svg') && n.children.length === 0 && (n.textContent || '').trim());
-    if (holders.length) { holders[0].textContent = own.text; holders.slice(1).forEach(h => h.remove()); }
+    // The sample's icon-font glyph is a word in that font: not the label, and not this element's.
+    const leaves = () => Array.from(el.querySelectorAll('*')).filter(n => !n.closest('svg') && n.children.length === 0 && (n.textContent || '').trim());
+    for (const n of leaves()) if (n.closest('.material-symbols-outlined, .material-symbols-rounded, .material-icons') || /material|symbols|icons?\\b|phosphor|awesome/i.test(getComputedStyle(n).fontFamily)) n.remove();
+    // The label: bare words directly in the element (beside an icon, say), else the deepest element holding the sample's words, else the element itself.
+    const holders = leaves();
+    const bare = Array.from(el.childNodes).filter(n => n.nodeType === 3 && (n.nodeValue || '').trim());
+    if (bare.length) { bare[0].nodeValue = own.text; bare.slice(1).forEach(n => n.remove()); holders.forEach(h => h.remove()); }
+    else if (holders.length) { holders[0].textContent = own.text; holders.slice(1).forEach(h => h.remove()); }
     else { for (const n of Array.from(el.childNodes)) if (n.nodeType === 3) n.remove(); el.append(document.createTextNode(own.text)); }
   }
   if (own.ariaLabel) el.setAttribute('aria-label', own.ariaLabel);

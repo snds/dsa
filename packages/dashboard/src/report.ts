@@ -201,7 +201,7 @@ how: e.how ?? null, parent: e.parent ?? null, recipe: e.recipe ?? null,
         // Design identity (identity.ts): the family it belongs to, its name in designer words, and where its answer lands.
         family: familyKey(e), title: titleOf(e), home: homeOf(e.decided?.decision ?? e),
         // What a person sees on it (its text, aria-label, or title), and how many lines its source spans: for the element list and code viewer.
-        label: e.match?.text || e.match?.ariaLabel || e.match?.title || null, span: typeof e.source === 'string' ? e.source.split('\n').length : 1,
+        label: e.match?.text || e.match?.ariaLabel || e.match?.title || null, words: e.match?.text || null, span: typeof e.source === 'string' ? e.source.split('\n').length : 1,
         shot: shotIdx.shots[e.id] ? shotOf(shotIdx.shots[e.id]) : null,
         // Its own content's key: its proposal drawn with its words and icon is stored under proposalKey#ownHash.
         ownHash: contentHash(ownOf(e, shotIdx.shots[e.id])),

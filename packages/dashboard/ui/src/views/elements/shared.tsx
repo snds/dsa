@@ -249,7 +249,7 @@ export const proposalFor = (r: any, e?: any): any | null => {
 }
 
 /** The element's words as its photo recorded them (else its label). */
-const wordsOf = (e: any) => String(e?.shot?.content?.text ?? e?.label ?? "").replace(/\s+/g, " ").trim()
+const wordsOf = (e: any): string => String((e.shot?.content ? e.shot.content.text || e.words : e.label) ?? "").replace(/\s+/g, " ").trim()
 /** Said "with its own words" only when the drawing's words are the element's (report review.ts, the same rule). */
 export const ownWords = (p: any, e: any): boolean => Boolean(p?.own) && (typeof p.text === "string" ? p.text.replace(/\s+/g, " ").trim() === wordsOf(e) : !wordsOf(e))
 /** An element a person can decide: its own photo (or isolated render) and its proposal both real (review.ts). */

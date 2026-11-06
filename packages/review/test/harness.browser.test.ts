@@ -7,7 +7,7 @@ import { parseConfig } from '@snds/dsa';
 import { readProposals } from '@snds/dsa/engine';
 import { fixtureCopy, loadConfig, NOW, runPipeline } from '../../../test/engine/fixture.js';
 import { openHarness, startHarness } from '../src/harness.js';
-import { READ_STYLE, __test as r, drawFresh, renderProposals, unstyledLook } from '../src/rendered.js';
+import { READ_STYLE, __test as r, drawFresh, lookAt, renderProposals, unstyledLook } from '../src/rendered.js';
 
 // Proposals drawn without stories: the system's component mounted from its own source with the proposal's
 // props and the element's own words, inside what its Storybook preview adds (its CSS). Props confirmed from
@@ -39,7 +39,8 @@ test('the review demo with no Storybook at all: drawn from source, exactly, with
   // Every element with words of its own (no photos here: its words come from its source) is drawn with them.
   const own = Object.entries(p).filter(([k]) => k.includes('#'));
   assert.ok(own.length >= 5, `${own.length} drawn with own content`);
-  for (const [k, v] of own.filter(([k]) => !k.startsWith('Table'))) assert.deepEqual([v.check, v.via, v.own], ['exact', 'source', true], `${k} ${JSON.stringify(v)}`);
+  // (A candidate that isn't in the system's source can't be drawn, and says so.)
+  for (const [k, v] of own.filter(([k, v]) => !k.startsWith('Table') && !v.noSource)) assert.deepEqual([v.check, v.via, v.own], ['exact', 'source', true], `${k} ${JSON.stringify(v)}`);
   // A select with no words of its own in the source (no story either): drawn from source as it is, with none.
   assert.deepEqual([p.Select!.check, p.Select!.via, p.Select!.content], ['exact', 'source', undefined]);
   // A toggle that shows no data-variant: its props confirmed from its classes.
@@ -192,5 +193,39 @@ test('with every component known up front, the first bundle holds their dependen
     for (const [f, n] of [[kit.first, 'First'], [kit.late, 'Late'], [kit.after, 'After']] as const) assert.deepEqual(await drawFresh(page, h!, fresh, arg(f, n)), { ok: true }, n);
     assert.equal(fresh.reloads, 0);
     assert.equal(reacts.size, 1, [...reacts].join('\n'));
+  } finally { await page.close(); await h!.stop(); }
+});
+
+test('a menu part drawn with nothing to open it is sized but not painted: looked at, it is no drawing', { timeout: 120_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  if (!hasKit || !fs.existsSync(path.join(KIT, '@base-ui/react'))) skip('no menu library installed');
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-harness-')));
+  const ds = path.join(root, 'kit');
+  fs.mkdirSync(path.join(ds, 'src'), { recursive: true });
+  fs.symlinkSync(KIT, path.join(root, 'node_modules'), 'dir');
+  const file = path.join(ds, 'src/Pick.jsx');
+  fs.writeFileSync(file, `import { createElement as h } from 'react';
+import { Menu } from '@base-ui/react/menu';
+export function Pick(props) { return h(Menu.Root, props); }
+export function PickContent({ children }) { return h(Menu.Portal, null, h(Menu.Positioner, null, h(Menu.Popup, null, children))); }
+export function PickItem({ children }) { return h(Menu.Item, { 'data-slot': 'pick-item', style: { height: 30, width: 120 } }, children); }
+`);
+  const h = await startHarness(root, {} as any, [file], () => {});
+  const page = await browser!.newPage({ viewport: { width: 800, height: 600 }, deviceScaleFactor: 2 });
+  try {
+    assert.equal(await openHarness(page, h!), true);
+    const fresh = { reloads: 0, gaveUp: new Set<string>() };
+    const out = await drawFresh(page, h!, fresh, { file: '/@fs' + file, name: 'PickItem', props: {}, text: 'Open drawer', slot: 'pick-item' });
+    // It drew, it has a size, and its words are in it, which is all the data ever said.
+    assert.deepEqual(out, { ok: true });
+    const item = page.locator('[data-slot=pick-item]').first();
+    assert.equal((await item.boundingBox())!.width, 120);
+    assert.equal(await item.textContent(), 'Open drawer');
+    const shot = path.join(root, 'item.png');
+    await item.screenshot({ path: shot });
+    // Looked at, it's see-through: its positioner has nothing to sit against.
+    const seen = await lookAt(page, '[data-slot=pick-item]', shot, { use: 'PickItem', props: {}, own: { text: 'Open drawer' } } as any, { own: true });
+    assert.equal(seen.shows, false);
+    assert.match(seen.why!, /see-through/);
   } finally { await page.close(); await h!.stop(); }
 });

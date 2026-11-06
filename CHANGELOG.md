@@ -221,6 +221,16 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   styles. The drawing stays, and it still needs evidence.
 - Failed drawings are tried again on the next run instead of being cached. Only a component that isn't in
   the system's source stays cached.
+- A drawing is looked at before it's believed. One that can't be seen (hidden, see-through, off the page, or
+  a blank picture) is no drawing, so it falls back to stories or is reported as not drawn. One that claims
+  the element's own words must show exactly those words, in a colour that differs from what's behind them.
+  Otherwise it says it isn't drawn with them, and the element needs evidence. Drawings made before this
+  check are drawn again.
+- A sample's bare words beside an icon-font glyph are replaced, instead of the glyph being given the words.
+- An icon-only button's aria-label no longer counts as words it should show, when a photo recorded none.
+- Label Review: a card with no clear answer shows its closest candidates, drawn with the element's own words,
+  and is held out if none is drawn. A gap card says the system has no such component and shows the suggested
+  stand-in where there is one. The heading no longer ends with nothing.
 - The render log counts real drawings: "N of M drawn with their props", how many have no picture, and why.
 - A review card showed one photo per look, so an element with its own photo appeared only as a small
   thumbnail of another element's (same classes, sometimes other words). Every element with a photo now

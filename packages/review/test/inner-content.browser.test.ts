@@ -52,3 +52,60 @@ test('marks and text blocks are captured with what paints them, and drawn inside
     assert.equal((await draw({ text: 'x', inner: { ...swatch.inner, lost: 1 } })).inner, false);
   } finally { await page.close(); }
 });
+
+// The picture must say what the data says. Each page below draws a component that a data field would call fine.
+const looked = async (page: any, html: string, words: string | null, inner: string | null = null) => {
+  await page.setContent(`<!doctype html><body style="margin:0;background:#fff;font:14px sans-serif">${html}</body>`);
+  return r.run<any>(page, r.SHOWN, { sel: '[data-slot=b]', words, inner });
+};
+
+test('a drawing that can\'t be seen is not a drawing, and words that don\'t show are not its own', { timeout: 60_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  const page = await browser!.newPage();
+  try {
+    assert.deepEqual(await looked(page, '<button data-slot="b">Open drawer</button>', 'Open drawer'), { shows: true });
+    // An overlay part with size, but nothing opened it.
+    assert.equal((await looked(page, '<div style="visibility:hidden"><div data-slot="b" style="height:30px">Open drawer</div></div>', 'Open drawer')).shows, false);
+    assert.equal((await looked(page, '<div style="opacity:0"><div data-slot="b" style="height:30px">Open drawer</div></div>', 'Open drawer')).shows, false);
+    assert.equal((await looked(page, '<div data-slot="b" style="position:fixed;top:-200px;height:30px">Open drawer</div>', 'Open drawer')).shows, false);
+    assert.equal((await looked(page, '<div data-slot="b"></div>', 'Open drawer')).shows, false);
+    // Equals, not includes: the sample's words beside its own are not its own.
+    assert.match((await looked(page, '<button data-slot="b">Open drawer New shelf</button>', 'Open drawer')).notOwn, /not its own/);
+    assert.match((await looked(page, '<button data-slot="b">New shelf</button>', '')).notOwn, /does not have/);
+    // White on white, and on a dark fill, in any colour syntax.
+    assert.match((await looked(page, '<button data-slot="b" style="color:#fff;background:#fff;border:0">Open drawer</button>', 'Open drawer')).notOwn, /same colour/);
+    assert.match((await looked(page, '<div data-slot="b" style="color:oklch(1 0 0);height:30px">Open drawer</div>', 'Open drawer')).notOwn, /same colour/);
+    assert.deepEqual(await looked(page, '<button data-slot="b" style="color:#fff;background:#123;border:0">Open drawer</button>', 'Open drawer'), { shows: true });
+    // Icons aren't words: an icon-only button holds none, and that's right.
+    assert.deepEqual(await looked(page, '<button data-slot="b"><svg width="16" height="16"><text>x</text><path d="M0 0h16v16z"/></svg><span class="material-symbols-outlined">add</span></button>', ''), { shows: true });
+    // Inner content is compared with what was put in: its words, not a hidden label's.
+    assert.deepEqual(await looked(page, '<button data-slot="b"><span data-dsa-mark="16">add</span><span>Blue</span></button>', 'Blue extra', '<span data-dsa-mark="16">add</span><span>Blue</span>'), { shows: true });
+  } finally { await page.close(); }
+});
+
+test("a sample's bare words beside its icon-font glyph are replaced, and the glyph doesn't get the words", { timeout: 60_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  const page = await browser!.newPage();
+  try {
+    const put = async (html: string) => {
+      await page.setContent(`<!doctype html><body>${html}</body>`);
+      const out = await r.run<any>(page, r.INJECT_OWN, { sel: '[data-slot=b]', own: { text: 'Open drawer' } });
+      assert.equal(out.own, true);
+      return { text: await page.textContent('[data-slot=b]'), seen: await r.run<any>(page, r.SHOWN, { sel: '[data-slot=b]', words: 'Open drawer', inner: null }) };
+    };
+    for (const sample of [
+      '<button data-slot="b"><span class="material-symbols-outlined">add</span>New shelf</button>',
+      '<button data-slot="b"><span style="font-family:\'Phosphor\'">plus</span>New shelf</button>',
+      '<button data-slot="b"><span class="material-icons">add</span><span>New shelf</span></button>',
+      '<button data-slot="b">New shelf</button>',
+      '<button data-slot="b"><span>New shelf</span><span>Today</span></button>',
+    ]) {
+      const got = await put(sample);
+      assert.equal(got.text, 'Open drawer', sample);
+      assert.deepEqual(got.seen, { shows: true }, sample);
+    }
+    // A component's own inline icon stays beside the words.
+    await put('<button data-slot="b"><svg data-slot="icon" width="16" height="16"><path d="M0 0h16v16z"/></svg>New shelf</button>');
+    assert.equal(await page.locator('[data-slot=b] svg').count(), 1);
+  } finally { await page.close(); }
+});

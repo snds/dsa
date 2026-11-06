@@ -76,13 +76,26 @@ export function proposalFor(E: any, e: any, pick: any): any | null {
   return plain ? { ...plain, own: false } : null;
 }
 
-/** The element's own words, as its photo recorded them (else its label), for comparing with a drawing's. */
-const wordsOf = (e: any): string => String(e.shot?.content?.text ?? e.label ?? '').replace(/\s+/g, ' ').trim();
+/**
+ * The element's own words, for comparing with a drawing's. With a photo, what it recorded, else the text its
+ * source holds: the two a drawing is given. Not its label, which can be an aria-label nobody sees (an icon-only
+ * button has no words to draw). With no photo's record, its label is all there is.
+ */
+const wordsOf = (e: any): string => String((e.shot?.content ? e.shot.content.text || e.words : e.label) ?? '').replace(/\s+/g, ' ').trim();
 /** A drawing shows the element's own words: drawn with them, and the words it drew are the element's. */
 export function drawnWithOwnWords(p: any, e: any): boolean {
   if (!p?.own) return false;
   if (typeof p.text !== 'string') return !wordsOf(e);
   return p.text.replace(/\s+/g, ' ').trim() === wordsOf(e);
+}
+
+/** What a card with no clear proposal can show: its candidates drawn with the element's own content. */
+export function candidatesOf(E: any, e: any): any[] {
+  return (e.alternatives ?? []).filter((a: any) => {
+    if (!a?.use) return false;
+    const p = proposalFor(E, e, { verdict: 'replace', use: a.use, props: a.props });
+    return Boolean(p?.url) && p.check !== 'none' && !p.unstyled && drawnWithOwnWords(p, e);
+  });
 }
 
 /** Can a person review this element? */
@@ -117,6 +130,8 @@ export function evidenceOf(E: any, e: any, pick: any): Evidence {
     else if (!container && s?.content && s.content.inner === undefined) missing.push({ kind: 'no-inner', group: "have a proposal that doesn't show their inner content", why: "The proposal doesn't show this element's inner content.", fix: 'Take the photo again so what it holds is recorded, then draw the proposal again (dsa render).' });
     else if (!container && s?.content?.inner && !p.inner) missing.push({ kind: 'no-inner', group: "have a proposal that doesn't show their inner content", why: "The proposal doesn't show this element's inner content.", fix: s.content.inner.lost ? 'A picture inside it comes from elsewhere and couldn\'t be copied. Compare the two in the app instead.' : 'Draw the proposal again (dsa render); if it stays missing, the system may not load the icon font it uses.' });
   }
+  // Nobody can decide in a vacuum: with no clear answer and no candidate to look at, it's held out.
+  if (pick?.verdict === 'unclear' && !candidatesOf(E, e).length) missing.push({ kind: 'no-candidates', group: 'have no clear answer and no candidate drawn to compare', why: 'dsa has no clear answer for it, and none of the candidates is drawn with its own content.', fix: 'Take the photo again and draw the proposals (dsa render), or answer it in Element Review.' });
   return { ready: !missing.length, current, missing };
 }
 
