@@ -213,6 +213,9 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- A rerun on unchanged code no longer empties the review. Every run stamped a new id, so a photo it kept was
+  called "from an older run", and with nothing to capture no element kept a photo. A photo this run checks and
+  keeps now counts as this run's, with its own age. A photo it didn't check still doesn't count.
 - Review cards show photos of how the app already uses the proposed component. The crawler looked for the
   scan's list of uses, which doesn't follow a local file that re-exports the system, so it photographed almost
   none of them. It now looks for the uses the report counts, wherever it goes, then for up to 5 minutes more

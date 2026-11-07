@@ -2,7 +2,7 @@ import { afterAll, test } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { latestEvals } from '@snds/dsa/engine';
+import { freshShots, latestEvals } from '@snds/dsa/engine';
 import { fixtureCopy, loadConfig, NOW, runPipeline } from '../../../test/engine/fixture.js';
 import { takeShots } from '../src/shots.js';
 
@@ -83,6 +83,11 @@ test("uses through a local re-export are photographed, a hidden one says so, and
   const again: string[] = [];
   await takeShots({ root, dataDir: data, config, target: 'orders', perGroup: 20, log: m => again.push(m) });
   assert.ok(again.some(l => /not starting the app/.test(l)), again.join('\n'));
+  // And the queue stays: a photo this run checked and kept counts as this run's, with its own age.
+  const kept = freshShots(read());
+  assert.ok(Object.keys(idx.shots).length > 0);
+  assert.deepEqual(Object.keys(kept.stale).filter(id => !read().shots[id].drawn), [], 'no photo is called old');
+  for (const id of Object.keys(idx.shots)) { assert.ok(kept.shots[id], `${id} still counts`); assert.equal(read().shots[id].at, idx.shots[id].at, 'its age is its own'); }
   assert.equal(read().uses['apps/orders/src/App.jsx:4'].file, use.file);
   // A changed file: looked for again.
   fs.appendFileSync(path.join(dir, 'src/App.jsx'), '// changed\n');

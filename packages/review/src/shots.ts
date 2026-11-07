@@ -221,7 +221,7 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
         continue;
       }
       const miss = index.useMisses?.[u.key];
-      if (!opts.fresh && !opts.retryMissing && miss && miss.fileHash === hashAt(u.file) && newEnough(miss) && miss.setup === setupOf(name)) continue;
+      if (!opts.fresh && !opts.retryMissing && miss && miss.fileHash === hashAt(u.file) && newEnough(miss) && miss.setup === setupOf(name) && miss.why !== 'out-of-time') continue;
       list.push({ key: u.key, component: u.component, look, file: u.shown, fileHash: hashAt(u.file), first: picked.has(look) });
     }
     // The looks the cards propose first; a look set in the code, which could be anything, last.
@@ -355,10 +355,10 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
       if (Object.keys(r.uses ?? {}).length) { index.uses ??= {}; for (const [k, v] of Object.entries<any>(r.uses)) { index.uses[k] = { ...v, run: index.run!.id, at }; if (index.useMisses) delete index.useMisses[k]; } }
       if (r.usesReport) {
         const u = r.usesReport;
-        // What couldn't be found stands until its file or the app's setup changes. A pass cut short proves nothing.
-        for (const [k, m] of Object.entries(u.missed)) if (m.why !== 'not-seen' || !u.cutShort) (index.useMisses ??= {})[k] = { ...m, at, setup: s.target === '*' ? '' : setupOf(s.target) };
+        // What couldn't be found stands until its file or the app's setup changes. A pass cut short proves nothing: looked for again next run, and said so.
+        for (const [k, m] of Object.entries(u.missed)) (index.useMisses ??= {})[k] = { ...m, ...(m.why === 'not-seen' && u.cutShort ? { why: 'out-of-time' } : {}), at, setup: s.target === '*' ? '' : setupOf(s.target) };
         const whyN = (w: string) => Object.values(u.missed).filter(m => m.why === w).length;
-        log(`  the app's own uses: ${Object.keys(r.uses ?? {}).length} photographed as examples (${Math.round(u.ms / 1000)}s, ${u.pages} extra page${u.pages === 1 ? '' : 's'}); not photographed: ${whyN('hidden')} hidden, ${whyN('covered')} covered, ${whyN('blank')} blank, ${whyN('not-seen')} on no page opened${u.cutShort ? ' (stopped by its time limit)' : ''}`);
+        log(`  the app's own uses: ${Object.keys(r.uses ?? {}).length} photographed as examples (${Math.round(u.ms / 1000)}s, ${u.pages} extra page${u.pages === 1 ? '' : 's'}); not photographed: ${whyN('hidden')} hidden, ${whyN('covered')} covered, ${whyN('blank')} blank, ${u.cutShort ? `${whyN('not-seen')} not reached before the time limit` : `${whyN('not-seen')} on no page opened`}`);
       }
       if (r.ledger?.length) { const n = addToLedger(ledgerFile, r.ledger, ledgerHash); log(`  ledger: ${r.ledger.length} element${r.ledger.length === 1 ? '' : 's'} recorded rendering, ${n} new`); }
       const byId = new Map(s.need.map(e => [e.id, e]));
@@ -430,6 +430,11 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
   }
   // Report "not found" for every cached miss too, so the review can say why there's no picture.
   for (const [id, m] of Object.entries<any>(misses)) if (!index.missing.includes(id) && evals.some(e => e.id === id && freshMiss(m, e))) index.missing.push(id);
+  // What this run didn't retake because it still stands counts as this run's: nothing about it has changed.
+  for (const e of evals) {
+    const s = index.shots[e.id];
+    if (s && s.run !== index.run.id && fresh(s, e) && s.file && fs.existsSync(path.join(dir, s.file))) s.confirmed = index.run.id;
+  }
   index.takenAt = new Date().toISOString();
   fs.writeFileSync(idxFile, JSON.stringify(index, null, 2));
   result.captured = result.apps.reduce((a, x) => a + (x.captured ?? 0), 0);

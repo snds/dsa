@@ -9,7 +9,9 @@ import path from 'node:path';
  * draws, so it isn't evidence of the code being scored:
  *
  *   - a shot from another run, taken before this run started, is missing;
- *   - a shot with no stamp at all (an index written before stamping) is missing too.
+ *   - a shot with no stamp at all (an index written before stamping) is missing too;
+ *   - unless this run checked it and it stands: its file is unchanged and it isn't too old. That shot says so
+ *     (`confirmed`, this run's id), so a rerun on unchanged code keeps its photos.
  *
  * Age is read from the shot's own `at`, never from the index, so a carried-forward photo shows its age.
  */
@@ -29,6 +31,7 @@ export interface ShotFreshness {
 /** One shot against its index's run: fresh, or why not. */
 export function staleWhy(shot: any, run: ShotRun | null | undefined): StaleWhy | null {
   if (!shot || typeof shot !== 'object') return null;
+  if (run?.id && shot.confirmed === run.id && shot.at) return null;
   if (!run?.id || !shot.run || !shot.at) return 'unstamped';
   if (shot.run === run.id) return null;
   const taken = Date.parse(shot.at), started = Date.parse(run.at);

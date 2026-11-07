@@ -355,6 +355,7 @@ test("a card's photos are of its own app: the same look first, then the nearest,
   assert.equal(why(['hidden']).line, 'The app uses Button in one place, but dsa has no photo of it: it was on the page, but hidden behind something closed, such as a menu or a tab.');
   assert.match(why(['not-seen', 'not-seen']).line, /2 places.*didn't show on any page dsa opened/);
   assert.match(why(['-']).line, /hasn't looked for it yet/);
+  assert.match(why(['not-seen', 'out-of-time']).line, /ran out of time before reaching it/, "a page the limit never reached isn't a page it isn't on");
   const none = item([use(1, { variant: 'outline' }, { missed: 'not-seen' })]);
   assert.deepEqual(none.photos, { cards: 1, withPhoto: 0, without: { 'not-seen': 1 } });
   // No clear pick: the closest candidate is what its photos are of.

@@ -210,12 +210,13 @@ const NO_PHOTO_WHY: Record<string, string> = {
   covered: 'something covers it in every photo',
   blank: 'its photos came out blank',
   'not-seen': "it didn't show on any page dsa opened, so it may only show after steps dsa can't take",
+  'out-of-time': 'dsa ran out of time before reaching it (the next screenshots run carries on)',
   untried: "dsa hasn't looked for it yet (take the screenshots again)",
 };
 /** Why no use has a photo, from what the crawler saw of each, in plain words. The likeliest to be fixable first. */
 function noPhotoLine(use: string, uses: Precedent[]): { line: string; why: string } {
   const has = (w: string) => uses.some((u) => (u.missed ?? 'untried') === w);
-  const why = ['hidden', 'covered', 'blank', 'untried', 'not-seen'].find(has) ?? 'untried';
+  const why = ['hidden', 'covered', 'blank', 'out-of-time', 'untried', 'not-seen'].find(has) ?? 'untried';
   const n = uses.length;
   return { why, line: `The app uses ${use} in ${n === 1 ? 'one place' : `${n} places`}, but dsa has no photo of ${n === 1 ? 'it' : 'them'}: ${NO_PHOTO_WHY[why]}.` };
 }
