@@ -302,7 +302,7 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
         {item.nearest && (item.nearest.examples.length > 0 || (!item.examples.length && !item.noPhoto)) && (
           <div className="flex flex-col gap-2" data-slot="nearest">
             {!item.examples.length && <p className="text-sm">{item.nearest.label}</p>}
-            {item.nearest.examples.length > 0 && <div className="flex flex-wrap gap-4">{item.nearest.examples.map((x: any, k: number) => <Example key={k} x={x} pick={{ use: x.component, props: x.props }} />)}</div>}
+            {item.nearest.examples.length > 0 && <div className="flex flex-wrap gap-4">{item.nearest.examples.map((x: any, k: number) => <Example key={k} x={x} pick={{ use: x.component, props: x.props }} close={item.nearest.kind === "close"} />)}</div>}
           </div>
         )}
         {item.noPhoto ? (
@@ -366,11 +366,11 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
 }
 
 /** A place the app already uses the component: a photo of the running app, around it, and the page it's on. */
-function Example({ x, pick }: { x: any; pick: any }) {
+function Example({ x, pick, close }: { x: any; pick: any; close?: boolean }) {
   return (
     <div className="max-w-full min-w-0" data-slot="example">
       <InContext url={x.shot.url} box={x.shot.box} alt={`Photo of the app: ${SYS} ${pickText(pick)} on ${x.shot.pageName}`} page={x.shot.pageName}
-        caption={<>Photo, on {x.shot.pageName}{x.differs ? ` · a different look: ${x.differs}` : ""}</>} />
+        caption={<>Photo, on {x.shot.pageName}{x.differs ? ` · ${close ? "a different look: " : ""}${x.differs}` : ""}</>} />
     </div>
   )
 }

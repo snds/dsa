@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { findUses } from '../../src/engine/uses.js';
+import { findUses, lookRules } from '../../src/engine/uses.js';
 
 // Where an app already uses the system's components: props across lines; through a local file that
 // re-exports a package; through a vendored copy of the package; and how much of the app was read.
@@ -65,4 +65,17 @@ test('a thin local wrapper of the same name counts as the system component', () 
   });
   const r = findUses({ dir, packages: ['@acme/kit'], wanted: new Set(['Input']) });
   assert.ok(r.uses.some(u => u.file.endsWith('A.tsx') && u.props.size === 'sm'));
+});
+
+test('one rule for a look, the crawler\'s and the card\'s: the axes with their defaults filled in', () => {
+  const rules = lookRules([{ component: 'Button', axes: { variant: ['default', 'link'], size: ['default', 'sm'] }, defaults: { variant: 'default', size: 'default' } }]);
+  assert.equal(rules.key('Button', { variant: 'link' }), rules.key('Button', { variant: 'link', size: 'default', type: 'button' }), 'unset is the default, and type="button" is no look');
+  assert.notEqual(rules.key('Button', { variant: 'link' }), rules.key('Button', { variant: 'link', size: 'sm' }));
+  assert.equal(rules.key('Button', {}), rules.key('Button', null));
+  assert.equal(rules.unknown('Button', ['disabled', 'onSelect']), false, 'set from the code, but not what it looks like');
+  assert.equal(rules.unknown('Button', ['variant']), true);
+  assert.equal(rules.unknown('Button', ['...']), true, 'a spread could hold anything');
+  // A component the system doesn't list: every prop that isn't about behaviour.
+  assert.equal(rules.unknown('Card', ['disabled']), false);
+  assert.equal(rules.unknown('Card', ['tone']), true);
 });

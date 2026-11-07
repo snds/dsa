@@ -6,6 +6,7 @@ import { allDsPackages, type Config } from './config.js';
 import { defaultExcludes, displayPath, usageExcludes, walk } from './paths.js';
 import type { Target } from './types.js';
 import { visit } from './scanners/features.js';
+import { canonicalProps } from '../bootstrap-labels.js';
 
 /**
  * Where an app already uses the system's components, with the props each use sets, read from its source.
@@ -155,8 +156,26 @@ export function findUses(o: { dir: string; packages: string[]; wanted?: Set<stri
 
 /** Props that say what an element does, not how it looks. */
 export const NOT_LOOK = /^(type|form|name|value|disabled|tabIndex|role|href|to|target|rel|htmlFor|placeholder|autoFocus|asChild|render|open|defaultOpen|checked|defaultChecked)$/;
-/** A use's look, as text: the props that change how it looks, in name order. */
-export const useLook = (props: Record<string, unknown> | undefined): string => JSON.stringify(Object.entries(props ?? {}).filter(([k]) => !NOT_LOOK.test(k)).sort((a, b) => (a[0] < b[0] ? -1 : 1)));
+/** What the system says about one component's look: the axes it has, and the value each takes when none is set. */
+export interface SystemLook { component: string; axes?: Record<string, string[]> | undefined; defaults?: Record<string, string> | undefined }
+/**
+ * What counts as the same look, one rule for what the crawler looks for and what a card shows: a use matches
+ * on the system's axes with their defaults filled in, so `variant="link"` is the look a card calls
+ * `variant link, size default`, and `disabled={busy}` says nothing about it.
+ */
+export function lookRules(system: readonly SystemLook[] | null | undefined) {
+  const axesOf = new Map((system ?? []).map((c) => [c.component, Object.keys({ ...(c.axes ?? {}), ...(c.defaults ?? {}) })]));
+  const defaultsOf = new Map((system ?? []).map((c) => [c.component, c.defaults ?? {}]));
+  const counts = (use: string, k: string) => { const axes = axesOf.get(use); return axes?.length ? axes.includes(k) : !NOT_LOOK.test(k); };
+  const look = (use: string, props: Record<string, unknown> | null | undefined) => canonicalProps(Object.fromEntries(Object.entries(props ?? {}).filter(([k]) => counts(use, k))), defaultsOf.get(use) ?? {});
+  return {
+    look,
+    key: (use: string, props: Record<string, unknown> | null | undefined) => `${use}|${JSON.stringify(look(use, props))}`,
+    /** An axis set from the code, or a spread, might be anything: its look isn't known. */
+    unknown: (use: string, dynamic: readonly string[] | null | undefined) => (dynamic ?? []).some((k) => k === '...' || counts(use, k)),
+    defaults: (use: string) => defaultsOf.get(use) ?? {},
+  };
+}
 
 /** One app's uses of the system's components, each with the key a photo of it is stored under ("file:line", as the tagger names the file). */
 export function appUses(root: string, config: Config, t: Target, wanted: Set<string>) {

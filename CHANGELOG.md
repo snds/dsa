@@ -213,6 +213,19 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- Review cards show the look they propose far more often. The photo pass matched looks by a different rule from
+  the cards, so `variant="link"` never matched a card's `variant link, size default`, and `disabled={busy}` made
+  a use's look "unknown". It also walked pages by how many files they held, and a limit per component let any
+  look use up a component's photos. Both now share one rule (the system's axes with defaults filled in), pages
+  are chosen by how many cards they can help, nearest the use's own line, and a look a card asks for has no
+  component limit. Any other look gets one photo, and the same look on one page gets one.
+- `elements.review.photos` and the log now count cards with a photo in the same look, cards with only another
+  look, cards with none, and how many different photos they use. Cards vary their photos: least shown first,
+  other pages before a repeat.
+- A photo of another look says what it is. The heading speaks for every tile under it. With no real axis in
+  common (two looks both at the default size don't count), a card shows one tile, as how the app uses that
+  component elsewhere. Variants read "the dark variant", not "in dark", which read as dark mode. Cards no
+  longer advise taking the screenshots again when that wouldn't help.
 - A rerun on unchanged code no longer empties the review. Every run stamped a new id, so a photo it kept was
   called "from an older run", and with nothing to capture no element kept a photo. A photo this run checks and
   keeps now counts as this run's, with its own age. A photo it didn't check still doesn't count.

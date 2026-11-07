@@ -6,7 +6,7 @@ import path from 'node:path';
 import { LEDGER_RUNTIME, fileOfTag, tagPath } from '@snds/dsa/tag';
 import { renderTests } from './testTier.js';
 import { addToLedger, contentHash, readLedger, readLedgerLines, recordsFor, type LedgerRec } from './ledger.js';
-import { BLANK_INSET, appUses, buildGraph, cardPicks, federate, useLook, decodePng, groupKey, isBlank, latestEvals, materializeRemotes, resolveTargets, targetRelative, walk, type Config, type ElementEval } from '@snds/dsa/engine';
+import { BLANK_INSET, appUses, buildGraph, cardPicks, federate, lookRules, decodePng, groupKey, isBlank, latestEvals, materializeRemotes, resolveTargets, targetRelative, walk, type Config, type ElementEval } from '@snds/dsa/engine';
 import { appSurface, openSurface } from '@snds/dsa';
 
 import { detectApp, discoverRoutes, ensureBrowser, linkCoreForChild, routeConfig, startApp, tagPlan } from './apps.js';
@@ -193,40 +193,49 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
    * A photo or a miss stands while its file is unchanged, so a normal run retakes nothing.
    */
   const usesPlan = (name: string): UsesPlan => {
-    const none: UsesPlan = { want: [], have: { looks: {}, components: {}, total: 0 }, keys: [] };
+    const none: UsesPlan = { want: [], have: { looks: {}, components: {}, total: 0, pages: {} }, keys: [], asks: {} };
     const t = all.find(x => x.name === name);
     if (!t || t.role === 'core') return none;
     const mine = evals.filter(e => e.target === name && !e.exception);
-    const picked = new Set<string>(), wanted = new Set<string>();
-    const note = (r: any) => { if (r?.use) { wanted.add(r.use); picked.add(`${r.use} ${useLook(r.props)}`); } };
-    try { for (const c of cardPicks(opts.dataDir, mine, opts.config.review?.threshold)) note(c.auto); } catch { /* no cards: the elements themselves say */ }
-    for (const e of mine) { note(e); note(e.decided?.decision); for (const a of e.alternatives ?? []) if (a?.use) wanted.add(a.use); }
+    const wanted = new Set<string>();
+    let system: any[] = [];
+    try { system = JSON.parse(fs.readFileSync(path.join(opts.dataDir, 'signatures.json'), 'utf8')); } catch { /* no system list: every prop that isn't about behaviour counts */ }
+    const rules = lookRules(system);
+    const picks = new Map<string, any>();
+    try { for (const c of cardPicks(opts.dataDir, mine, opts.config.review?.threshold)) for (const id of c.ids) { picks.set(id, c.auto); if (c.auto?.use) wanted.add(c.auto.use); } } catch { /* no cards: the elements themselves say */ }
+    // How much each look is asked for: a card a person must decide counts whole; one that may only come up in the audit counts for its tenth.
+    const asks: Record<string, number> = {};
+    for (const e of mine) {
+      for (const r of [e, e.decided?.decision, ...(e.alternatives ?? [])]) if ((r as any)?.use) wanted.add((r as any).use);
+      if (e.reach?.status === 'unused' || e.verdict === 'ignore') continue;
+      const pick: any = picks.get(e.id) ?? e.decided?.decision ?? e;
+      const about: any = pick?.use ? pick : (e.alternatives ?? []).find((a: any) => a?.use);
+      if (about?.use) { const k = rules.key(about.use, about.props); asks[k] = (asks[k] ?? 0) + (e.needsHuman && !e.decided ? 1 : 0.1); }
+    }
     if (!wanted.size) return none;
     let uses: ReturnType<typeof appUses>['uses'];
     try { uses = appUses(opts.root, cfg, t, wanted).uses; } catch { return none; }
     const hash = new Map<string, string>();
     const hashAt = (f: string) => { if (!hash.has(f)) hash.set(f, contentHash(f) ?? ''); return hash.get(f)!; };
-    const out: UsesPlan = { ...none, have: { looks: {}, components: {}, total: 0 }, keys: uses.map(u => u.key) };
+    const out: UsesPlan = { ...none, have: { looks: {}, components: {}, total: 0, pages: {} }, keys: uses.map(u => u.key), asks };
     const newEnough = (x: any) => Date.now() - Date.parse(x?.at ?? 0) < maxAge;
     const list: UsesPlan['want'] = [];
     for (const u of uses) {
-      const look = `${u.component} ${u.dynamic.length ? '?' : useLook(u.props)}`;
+      const look = rules.unknown(u.component, u.dynamic) ? `${u.component} ?` : rules.key(u.component, u.props);
+      const need = asks[look] ?? 0;
       const photo = index.uses?.[u.key];
       const stands = photo && photo.fileHash === hashAt(u.file) && newEnough(photo) && fs.existsSync(path.join(dir, photo.file));
       if (photo && !stands && !opts.fresh) delete index.uses![u.key];
       if (stands && !opts.fresh) {
-        out.have.looks[look] = (out.have.looks[look] ?? 0) + 1;
-        out.have.components[u.component] = (out.have.components[u.component] ?? 0) + 1;
-        out.have.total++;
+        countUse(out.have, { look, component: u.component, need }, photo.page);
         continue;
       }
       const miss = index.useMisses?.[u.key];
       if (!opts.fresh && !opts.retryMissing && miss && miss.fileHash === hashAt(u.file) && newEnough(miss) && miss.setup === setupOf(name) && miss.why !== 'out-of-time') continue;
-      list.push({ key: u.key, component: u.component, look, file: u.shown, fileHash: hashAt(u.file), first: picked.has(look) });
+      list.push({ key: u.key, component: u.component, look, file: u.shown, fileHash: hashAt(u.file), need });
     }
-    // The looks the cards propose first; a look set in the code, which could be anything, last.
-    const rank = (x: UsesPlan['want'][number]) => (x.first ? 0 : x.look.endsWith(' ?') ? 2 : 1);
-    out.want = list.filter(x => (out.have.looks[x.look] ?? 0) < USES_PER_LOOK && (out.have.components[x.component] ?? 0) < USES_PER_COMPONENT).sort((a, b) => rank(a) - rank(b));
+    // The looks the cards ask for most first; a look set in the code, which could be anything, last.
+    out.want = list.filter(x => usesUnderCap(out.have, x)).sort((a, b) => b.need - a.need || Number(a.look.endsWith(' ?')) - Number(b.look.endsWith(' ?')));
     return out;
   };
   const usesOf = new Map<string, UsesPlan>();
@@ -358,7 +367,14 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
         // What couldn't be found stands until its file or the app's setup changes. A pass cut short proves nothing: looked for again next run, and said so.
         for (const [k, m] of Object.entries(u.missed)) (index.useMisses ??= {})[k] = { ...m, ...(m.why === 'not-seen' && u.cutShort ? { why: 'out-of-time' } : {}), at, setup: s.target === '*' ? '' : setupOf(s.target) };
         const whyN = (w: string) => Object.values(u.missed).filter(m => m.why === w).length;
-        log(`  the app's own uses: ${Object.keys(r.uses ?? {}).length} photographed as examples (${Math.round(u.ms / 1000)}s, ${u.pages} extra page${u.pages === 1 ? '' : 's'}); not photographed: ${whyN('hidden')} hidden, ${whyN('covered')} covered, ${whyN('blank')} blank, ${u.cutShort ? `${whyN('not-seen')} not reached before the time limit` : `${whyN('not-seen')} on no page opened`}`);
+        // The honest measure: of the looks the cards propose, how many have a photo now, and how many cards that is.
+        const asked = Object.entries(usesPlanned?.asks ?? {});
+        const hasLook = new Set<string>(Object.entries(usesPlanned?.have.looks ?? {}).filter(([, n]) => n > 0).map(([l]) => l));
+        for (const v of Object.values<any>(r.uses ?? {})) hasLook.add(v.look);
+        const shown = asked.filter(([l]) => hasLook.has(l));
+        const round = (rows: [string, number][]) => Math.round(rows.reduce((sum, [, n]) => sum + n, 0));
+        if (asked.length) log(`  looks the cards propose: ${shown.length} of ${asked.length} have a photo, for about ${round(shown)} of ${round(asked)} cards`);
+        log(`  the app's own uses: ${Object.keys(r.uses ?? {}).length} photographed as examples (${Math.round(u.ms / 1000)}s, ${u.pages} extra page${u.pages === 1 ? '' : 's'}); not photographed: ${whyN('hidden')} hidden, ${whyN('covered')} covered, ${whyN('blank')} blank, ${whyN('repeat')} the same look on a page already photographed, ${u.cutShort ? `${whyN('not-seen')} not reached before the time limit` : `${whyN('not-seen')} on no page opened`}`);
       }
       if (r.ledger?.length) { const n = addToLedger(ledgerFile, r.ledger, ledgerHash); log(`  ledger: ${r.ledger.length} element${r.ledger.length === 1 ? '' : 's'} recorded rendering, ${n} new`); }
       const byId = new Map(s.need.map(e => [e.id, e]));
@@ -695,14 +711,47 @@ function callersOf(d: DrawWith, name: string, own: string): string[] {
 /** What the scan knows about reaching each element (routes.ts): the routes that render its file, and the patterns that need a value. */
 interface ReachPlan { byId: Record<string, string[]>; patterns: string[]; /** Per element: its file and its importers three steps up, as tag paths. */ near?: Record<string, string[]> }
 
-/** Of each look of a component, each component, and each app, this many photos of how the app uses it. */
-const USES_PER_LOOK = 3, USES_PER_COMPONENT = 15, USES_TOTAL = 300;
+/**
+ * How many photos of how the app uses a component. A look a card proposes: this many, each from another page.
+ * Any other look is only ever a nearest match, so one of each, and a limit per component and per app; those
+ * limits can't crowd out a look a card asks for.
+ */
+const USES_PER_LOOK = 3, USES_PER_OTHER_LOOK = 1, USES_PER_COMPONENT = 15, USES_TOTAL = 300;
 /** At most this long on looking for the app's own uses once the crawl is done. */
 const USES_MINUTES = 5;
-interface UsesCount { looks: Record<string, number>; components: Record<string, number>; total: number }
-interface UsesPlan { want: { key: string; component: string; look: string; file: string; fileHash: string; first: boolean }[]; have: UsesCount; keys: string[] }
+/** Of that, how much may go on opening pages nothing says hold a look the cards ask for, before the other looks get their turn. */
+const USES_UNSEEN_SHARE = 0.7;
+interface UsesCount { looks: Record<string, number>; components: Record<string, number>; total: number; /** The pages each look has a photo from. */ pages: Record<string, string[]> }
+interface UsesWant { key: string; component: string; look: string; file: string; fileHash: string; /** How many cards ask for this look; 0 when none does. */ need: number }
+interface UsesPlan { want: UsesWant[]; have: UsesCount; keys: string[]; asks: Record<string, number> }
+const usesUnderCap = (c: UsesCount, x: { look: string; component: string; need: number }) => (x.need > 0 ? (c.looks[x.look] ?? 0) < USES_PER_LOOK : (c.looks[x.look] ?? 0) < USES_PER_OTHER_LOOK && (c.components[x.component] ?? 0) < USES_PER_COMPONENT && c.total < USES_TOTAL);
+const countUse = (c: UsesCount, x: { look: string; component: string; need: number }, page: string | undefined) => {
+  c.looks[x.look] = (c.looks[x.look] ?? 0) + 1;
+  if (page) (c.pages[x.look] ??= []).push(page);
+  if (x.need > 0) return;
+  c.components[x.component] = (c.components[x.component] ?? 0) + 1;
+  c.total++;
+};
+/**
+ * How much a page is worth opening for, from the uses left in the files it renders: each look once. A look with
+ * no photo counts for the cards asking for it, one with a photo from another page for a fifth of that, a look no
+ * card asks for barely at all. A look already looked for and not found counts for less each time, since rendering
+ * its file doesn't mean rendering that line.
+ */
+export function usesPlaceWorth(place: { u: string; files: ReadonlySet<string> }, left: readonly UsesWant[], have: UsesCount, tried: ReadonlyMap<string, number>): number {
+  const looks = new Map<string, number>();
+  for (const w of left) {
+    if (!place.files.has(w.file) || have.pages[w.look]?.includes(place.u)) continue;
+    const v = w.need > 0 ? ((have.looks[w.look] ?? 0) ? w.need * 0.2 : w.need) : USES_OTHER_WORTH;
+    if (v > (looks.get(w.look) ?? 0)) looks.set(w.look, v);
+  }
+  let sum = 0;
+  for (const [look, v] of looks) sum += v / (1 + (tried.get(look) ?? 0));
+  return sum;
+}
+const USES_OTHER_WORTH = 0.0001;
 
-async function session(pw: any, o: { uses?: UsesPlan['want'] | undefined; usesHave?: UsesCount | undefined; reach?: ReachPlan | undefined; draw?: DrawWith | undefined; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; examples: ElementEval[]; dir: string; storageState?: string | undefined; readApi?: boolean | undefined; readPaths?: string[] | undefined; signIn?: SignIn | undefined; maxPages: number; waitMs: number; log: (m: string) => void; reveal?: boolean; maxActions?: number; maxDepth?: number; maxMinutes?: number; maxReplays?: number; routeSource?: RouteSource | undefined; appDir?: string | undefined; profiles?: Profile[] | undefined; pagesSet?: boolean | undefined; ledger?: Record<string, LedgerRec[]> | undefined; manifest?: ReachFile | undefined; coverage?: boolean | undefined }) {
+async function session(pw: any, o: { uses?: UsesWant[] | undefined; usesHave?: UsesCount | undefined; reach?: ReachPlan | undefined; draw?: DrawWith | undefined; url: string; routes: string[]; first?: string[]; flows?: Flow[]; crawl: boolean; examples: ElementEval[]; dir: string; storageState?: string | undefined; readApi?: boolean | undefined; readPaths?: string[] | undefined; signIn?: SignIn | undefined; maxPages: number; waitMs: number; log: (m: string) => void; reveal?: boolean; maxActions?: number; maxDepth?: number; maxMinutes?: number; maxReplays?: number; routeSource?: RouteSource | undefined; appDir?: string | undefined; profiles?: Profile[] | undefined; pagesSet?: boolean | undefined; ledger?: Record<string, LedgerRec[]> | undefined; manifest?: ReachFile | undefined; coverage?: boolean | undefined }) {
   const shots: Record<string, any> = {};
   const pages: string[] = [];
   let taggedPages = 0;
@@ -765,9 +814,9 @@ async function session(pw: any, o: { uses?: UsesPlan['want'] | undefined; usesHa
   let drawCauses: { threw: [string, number, string[]][]; unmet: [string, number][] } | null = null;
   // Photos of the app's own uses of system components (shots/index.json "uses"), a few of each look.
   const usesShot: Record<string, any> = {};
-  const usesCount = { looks: { ...(o.usesHave?.looks ?? {}) }, components: { ...(o.usesHave?.components ?? {}) }, total: o.usesHave?.total ?? 0 };
-  const usesUnder = (x: { look: string; component: string }) => usesCount.total < USES_TOTAL && (usesCount.looks[x.look] ?? 0) < USES_PER_LOOK && (usesCount.components[x.component] ?? 0) < USES_PER_COMPONENT;
-  const useWhy = new Map<string, 'hidden' | 'covered' | 'blank'>();
+  const usesCount: UsesCount = { looks: { ...(o.usesHave?.looks ?? {}) }, components: { ...(o.usesHave?.components ?? {}) }, total: o.usesHave?.total ?? 0, pages: Object.fromEntries(Object.entries(o.usesHave?.pages ?? {}).map(([k, v]) => [k, [...v]])) };
+  const usesUnder = (x: UsesWant) => usesUnderCap(usesCount, x);
+  const useWhy = new Map<string, 'hidden' | 'covered' | 'blank' | 'repeat'>();
   const useFails = new Map<string, number>();
   const usesTime = { ms: 0, pages: 0, cutShort: false };
   const usesLeft = () => (o.uses ?? []).filter(x => !usesShot[x.key] && (useFails.get(x.key) ?? 0) < 2 && usesUnder(x));
@@ -777,9 +826,12 @@ async function session(pw: any, o: { uses?: UsesPlan['want'] | undefined; usesHa
     const t0 = Date.now();
     const seen = await inPage<{ marked: { key: string; id: string }[]; hidden: string[] }>(page, MARK_USES, want.map(x => x.key)).catch(() => ({ marked: [], hidden: [] }));
     for (const k of seen.hidden) if (!useWhy.has(k)) useWhy.set(k, 'hidden');
-    for (const m of seen.marked) {
-      const w = want.find(x => x.key === m.key)!;
+    const wanted = new Map(want.map(x => [x.key, x]));
+    for (const m of seen.marked.sort((a, b) => wanted.get(b.key)!.need - wanted.get(a.key)!.need)) {
+      const w = wanted.get(m.key)!;
       if (!usesUnder(w)) continue;
+      // The same look on the same page says nothing new: another page's might.
+      if (usesCount.pages[w.look]?.includes(u)) { useWhy.set(m.key, 'repeat'); continue; }
       const file = `${m.id}.png`;
       const cap = await capture(page, m.id, path.join(o.dir, file)).catch(() => null);
       if (!cap || cap.blank || cap.covered) {
@@ -789,9 +841,7 @@ async function session(pw: any, o: { uses?: UsesPlan['want'] | undefined; usesHa
       }
       usesShot[m.key] = { file, page: u, box: cap.box, ...(cap.context ? { context: cap.context } : {}), matchScore: 1, tagged: true, component: w.component, look: w.look, fileHash: w.fileHash };
       useWhy.delete(m.key);
-      usesCount.looks[w.look] = (usesCount.looks[w.look] ?? 0) + 1;
-      usesCount.components[w.component] = (usesCount.components[w.component] ?? 0) + 1;
-      usesCount.total++;
+      countUse(usesCount, w, u);
     }
     usesTime.ms += Date.now() - t0;
   };
@@ -1310,45 +1360,72 @@ async function session(pw: any, o: { uses?: UsesPlan['want'] | undefined; usesHa
   }
 
   /**
-   * The uses the crawl didn't pass: first the places the ledger saw their files render (with the state it
-   * recorded), the places that hold the most of them first, then the routes not opened yet. It only looks: it
-   * opens nothing new. It stops at its time limit, or when there's enough of each look.
+   * The uses the crawl didn't pass. First the looks the cards ask for: the places the ledger saw their files
+   * render (with the state it recorded), the one that helps the most cards next each time, then the routes not
+   * opened yet. Then the same for every other look. It only looks: it opens nothing new. It stops at its time
+   * limit, or when there's enough of each look.
    */
   async function photographRest() {
     if (!usesLeft().length) return;
     const t0 = Date.now(), stop = t0 + USES_MINUTES * 60_000;
-    const inFile = new Map<string, LedgerRec[]>();
-    for (const [src, recs] of Object.entries(o.ledger ?? {})) { const f = src.replace(/:\d+:\d*$/, ''); inFile.set(f, [...(inFile.get(f) ?? []), ...recs]); }
-    const places = new Map<string, { u: string; sets: StateSet[]; files: Set<string> }>();
-    for (const w of usesLeft()) for (const rec of (inFile.get(w.file) ?? []).filter(x => !x.url.startsWith('test:')).slice(0, 6)) {
-      let u = '';
-      try { const x = new URL(rec.url); u = x.origin === base.origin ? rec.url : new URL(x.pathname + x.search + x.hash, base).toString(); } catch { continue; }
-      const sets = statesOf(rec), k = u + ' ' + JSON.stringify(sets);
-      const p = places.get(k) ?? places.set(k, { u, sets, files: new Set() }).get(k)!;
-      p.files.add(w.file);
+    const inFile = new Map<string, { line: number; rec: LedgerRec }[]>();
+    for (const [src, recs] of Object.entries(o.ledger ?? {})) {
+      const f = src.replace(/:\d+:\d*$/, ''), line = Number(/:(\d+):\d*$/.exec(src)?.[1] ?? 0);
+      let list = inFile.get(f);
+      if (!list) inFile.set(f, list = []);
+      for (const rec of recs) if (!rec.url.startsWith('test:')) list.push({ line, rec });
     }
-    const open = async (u: string) => { usesTime.pages++; await go(u); await photographUses(u); };
-    const ranked = [...places.values()].sort((a, b) => b.files.size - a.files.size);
-    for (const p of ranked) {
-      if (Date.now() >= stop) { usesTime.cutShort = true; break; }
-      const left = usesLeft();
-      if (!left.length) break;
-      if (!left.some(w => p.files.has(w.file))) continue;
-      await open(p.u);
-      for (const one of p.sets) {
-        if (!usesLeft().some(w => p.files.has(w.file))) break;
-        const r = await inPage<SetResult>(page, SET_STATE, { sets: [one] }).catch(() => NONE_SET);
-        if (!r.set) continue;
-        await page.waitForTimeout(o.waitMs); await settle();
-        await photographUses(p.u);
+    const places = new Map<string, { u: string; sets: StateSet[]; files: Set<string> }>();
+    for (const w of usesLeft()) {
+      // A big file renders on every page, so for a look a card asks for: what rendered nearest its line, likeliest the same part of the screen.
+      const at = Number(w.key.split(':').pop());
+      const all = inFile.get(w.file) ?? [];
+      for (const { rec } of (w.need > 0 ? [...all].sort((a, b) => Math.abs(a.line - at) - Math.abs(b.line - at)) : all).slice(0, 6)) {
+        let u = '';
+        try { const x = new URL(rec.url); u = x.origin === base.origin ? rec.url : new URL(x.pathname + x.search + x.hash, base).toString(); } catch { continue; }
+        const sets = statesOf(rec), k = u + ' ' + JSON.stringify(sets);
+        const p = places.get(k) ?? places.set(k, { u, sets, files: new Set() }).get(k)!;
+        p.files.add(w.file);
       }
     }
-    for (const u of queue.filter(q => !seen.has(q))) {
-      if (!usesLeft().length) break;
-      if (Date.now() >= stop) { usesTime.cutShort = true; break; }
-      seen.add(u);
-      await open(u);
-    }
+    const open = async (u: string) => { usesTime.pages++; await go(u); await photographUses(u); };
+    const unvisited = [...places.values()];
+    const tried = new Map<string, number>();
+    // The best place left, worked out afresh each time: what the last page found changes what the next is worth.
+    const visitPlaces = async (enough: number) => {
+      while (unvisited.length) {
+        if (Date.now() >= stop) { usesTime.cutShort = true; return; }
+        const left = usesLeft();
+        if (!left.length) return;
+        let best = -1, worth = 0;
+        unvisited.forEach((p, i) => { const v = usesPlaceWorth(p, left, usesCount, tried); if (v > worth) { worth = v; best = i; } });
+        if (best < 0 || worth < enough) return;
+        const p = unvisited.splice(best, 1)[0]!;
+        const lookedFor = new Set(left.filter(w => p.files.has(w.file)).map(w => w.look));
+        await open(p.u);
+        for (const one of p.sets) {
+          if (Date.now() >= stop || !usesLeft().some(w => p.files.has(w.file))) break;
+          const r = await inPage<SetResult>(page, SET_STATE, { sets: [one] }).catch(() => NONE_SET);
+          if (!r.set) continue;
+          await page.waitForTimeout(o.waitMs); await settle();
+          await photographUses(p.u);
+        }
+        for (const l of lookedFor) tried.set(l, (tried.get(l) ?? 0) + 1);
+      }
+    };
+    const visitQueue = async (more: () => boolean, until: number) => {
+      for (const u of queue.filter(q => !seen.has(q))) {
+        if (!more()) return;
+        if (Date.now() >= until) { if (until >= stop) usesTime.cutShort = true; return; }
+        seen.add(u);
+        await open(u);
+      }
+    };
+    // A look no card asks for is worth so little that even many of them come after any look one does.
+    await visitPlaces(0.01);
+    await visitQueue(() => usesLeft().some(w => w.need > 0), t0 + USES_MINUTES * 60_000 * USES_UNSEEN_SHARE);
+    await visitPlaces(0);
+    await visitQueue(() => usesLeft().length > 0, stop);
     if (usesLeft().length && Date.now() >= stop) usesTime.cutShort = true;
     usesTime.ms = Math.max(usesTime.ms, Date.now() - t0);
   }

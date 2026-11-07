@@ -7,14 +7,14 @@ import { proposalsTakenAt, appUses, DEFAULT_THRESHOLD, locate, freshShots, fresh
 import { scanEstimate, type PageActions, type ResolvedProfile } from '@snds/dsa';
 import { buildQueue, PKG_DIR } from './queue.js';
 import { hashText, propsAt } from '@snds/dsa';
-import { pageName, withReview, type Precedent, type ReviewQueueEntry } from './review.js';
+import { pageName, photosLine, withReview, type Precedent, type ReviewQueueEntry } from './review.js';
 
 /**
  * Builds a single self-contained HTML report from the store: no server, opens from disk,
  * safe to attach or host anywhere. Data is embedded as JSON; the page renders it.
  */
-export async function buildReport(root: string, config: Config, dataDir: string, profile: ResolvedProfile, outFile: string, opts: { runDir?: string | undefined } = {}): Promise<string> {
-  const html = await renderReport(root, config, dataDir, profile, { runDir: opts.runDir });
+export async function buildReport(root: string, config: Config, dataDir: string, profile: ResolvedProfile, outFile: string, opts: { runDir?: string | undefined; log?: ((m: string) => void) | undefined } = {}): Promise<string> {
+  const html = await renderReport(root, config, dataDir, profile, { runDir: opts.runDir, log: opts.log });
   fs.mkdirSync(path.dirname(outFile), { recursive: true });
   fs.writeFileSync(outFile, html);
   return outFile;
@@ -41,6 +41,8 @@ export interface ReportOptions {
   runDir?: string | undefined;
   /** The review queue (`dsa labels queue --out`); default <data>/review-queue.jsonl when it exists. */
   reviewQueue?: string | undefined;
+  /** Told how many cards show the look they propose (photosLine). */
+  log?: ((m: string) => void) | undefined;
 }
 
 export async function renderReport(root: string, config: Config, dataDir: string, profile: ResolvedProfile, opts: ReportOptions = {}): Promise<string> {
@@ -238,13 +240,14 @@ how: e.how ?? null, parent: e.parent ?? null, recipe: e.recipe ?? null,
     });
     // Review for people: what each element can show, the queue, the system's allowed props, and where
     // the app already uses each proposal (its precedents).
-    withReview(payload0(elements), {
+    const reviewed = withReview(payload0(elements), {
       queue: readQueue(opts.reviewQueue ?? path.join(dataDir, 'review-queue.jsonl')),
       system: (readJson(path.join(dataDir, 'signatures.json')) ?? []).map((c: any) => ({ component: c.component, axes: c.axes ?? {}, defaults: c.defaults ?? {} })),
       // The engine's own index of existing uses (<data>/precedent.json, when a run writes one), else the scan's uses.
       ...(() => { const f = precedentFile(dataDir, shotIdx, shotUrl); if (f) return { precedents: f }; const r = precedentsOf(root, config, elements, shotIdx, shotUrl); return { precedents: r.uses, searched: r.searched }; })(),
       sourceRef: (e: any) => elements.sources?.[e.file]?.ref ?? 'worktree',
     });
+    if (opts.log && reviewed.elements?.review?.photos) opts.log(photosLine(reviewed.elements.review.photos));
     // Agent readiness: this run per repo (audit checks, the profile's usage checker by kind, reconciled with look-alikes), the trend, and bench runs.
     const provider = profile.readiness;
     const det = (d: any) => (typeof d === 'string' ? JSON.parse(d) : d);
@@ -431,7 +434,9 @@ function precedentsOf(root: string, config: Config, elements: any, shotIdx: any,
       const seen = perComponent.get(k) ?? 0;
       perComponent.set(k, seen + 1);
       if (seen >= 20 && !photo) continue;
-      const missed = shotIdx.useMisses?.[u.key]?.why;
+      // A repeat stood aside for a photo of the same look on its page: if that photo has gone, it's simply not photographed yet.
+      const why = shotIdx.useMisses?.[u.key]?.why;
+      const missed = why === 'repeat' ? undefined : why;
       out.push({ app: t.name, file: u.shown, line: u.line, component: u.component, props: u.props, ...(u.dynamic.length ? { dynamic: u.dynamic } : {}), ...(missed ? { missed } : {}),
         shot: photo ? { url: shotUrl(s.file), box: s.box ?? null, page: s.page, pageName: pageName(s.page), ...(s.context?.file && s.context.box ? { context: { url: shotUrl(s.context.file), box: s.context.box } } : {}) } : null });
     }

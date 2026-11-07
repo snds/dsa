@@ -34,7 +34,7 @@ export default defineAddon({
       order: 50,
       async run({ ctx, options, log }) {
         if (options.report === false) return;
-        const out = await buildReport(ctx.root, ctx.config, ctx.dataDir, ctx.profile, reportFile(ctx.dataDir));
+        const out = await buildReport(ctx.root, ctx.config, ctx.dataDir, ctx.profile, reportFile(ctx.dataDir), { log });
         log(`Report: ${out}`);
       },
     },
@@ -70,7 +70,7 @@ export default defineAddon({
       .action(async (o: { runDir?: string }, cmd: Command) => {
         const ctx = await api.context(cmd);
         await api.requireStore('report');
-        api.out(await buildReport(ctx.root, ctx.config, ctx.dataDir, ctx.profile, reportFile(ctx.dataDir), { runDir: o.runDir ? path.resolve(api.cwd, o.runDir) : undefined }));
+        api.out(await buildReport(ctx.root, ctx.config, ctx.dataDir, ctx.profile, reportFile(ctx.dataDir), { runDir: o.runDir ? path.resolve(api.cwd, o.runDir) : undefined, log: (m) => console.error(m) }));
       });
 
     program

@@ -1,5 +1,5 @@
-import { canonicalProps, hashText } from '@snds/dsa';
-import { NOT_LOOK } from '@snds/dsa/engine';
+import { hashText } from '@snds/dsa';
+import { lookRules } from '@snds/dsa/engine';
 import { NO_SOURCE, SHOT_MIN, proposalKey } from './trust.js';
 
 /**
@@ -197,13 +197,28 @@ export function pageName(url: string | null | undefined): string {
   return words.join(' › ');
 }
 
-/** Props that don't change how a system component looks, when the system doesn't list its axes. */
-
-/** How a use's look differs from what's proposed, for its tile: "at sm, in outline". */
-function differsText(want: Record<string, string>, have: Record<string, string>): string {
-  const at = (k: string) => (k === 'size' ? 'at' : 'in');
-  return [...new Set([...Object.keys(want), ...Object.keys(have)])].filter((k) => want[k] !== have[k]).map((k) => `${at(k)} ${have[k] ?? 'its default'}`).join(', ');
+/** One axis of a look, in words: "the outline variant", "size sm". A bare "in dark" would read as dark mode. */
+function axisWords(k: string, v: string | undefined): string {
+  if (v === undefined || v === 'default') return `the default ${k}`;
+  if (v === 'true') return k;
+  if (v === 'false') return `not ${k}`;
+  return k === 'size' ? `size ${v}` : `the ${v} ${k}`;
 }
+
+/** How a use's look differs from what's proposed, for its tile: "the outline variant, size sm". */
+function differsText(want: Record<string, string>, have: Record<string, string>): string {
+  return [...new Set([...Object.keys(want), ...Object.keys(have)])].filter((k) => want[k] !== have[k]).sort((a, b) => Number(a === 'size') - Number(b === 'size')).map((k) => axisWords(k, have[k])).join(', ');
+}
+
+/**
+ * What a use really has in common with what's proposed. Every look fills in its defaults, so two looks both at
+ * the default size aren't alike for it: a link and a dark button at the default size share nothing to see. The
+ * variant is the exception, since the same variant at another size is the closest thing there is.
+ */
+export function sharedAxes(want: Record<string, string>, have: Record<string, string>, defaults: Record<string, string>): string[] {
+  return Object.keys(want).filter((k) => want[k] === have[k] && (k === 'variant' || want[k] !== defaults[k]));
+}
+const closeness = (shared: string[]) => shared.reduce((n, k) => n + (k === 'size' ? 1 : 2), 0);
 
 const NO_PHOTO_WHY: Record<string, string> = {
   hidden: 'it was on the page, but hidden behind something closed, such as a menu or a tab',
@@ -211,7 +226,7 @@ const NO_PHOTO_WHY: Record<string, string> = {
   blank: 'its photos came out blank',
   'not-seen': "it didn't show on any page dsa opened, so it may only show after steps dsa can't take",
   'out-of-time': 'dsa ran out of time before reaching it (the next screenshots run carries on)',
-  untried: "dsa hasn't looked for it yet (take the screenshots again)",
+  untried: "dsa hasn't photographed it yet",
 };
 /** Why no use has a photo, from what the crawler saw of each, in plain words. The likeliest to be fixable first. */
 function noPhotoLine(use: string, uses: Precedent[]): { line: string; why: string } {
@@ -221,19 +236,19 @@ function noPhotoLine(use: string, uses: Precedent[]): { line: string; why: strin
   return { why, line: `The app uses ${use} in ${n === 1 ? 'one place' : `${n} places`}, but dsa has no photo of ${n === 1 ? 'it' : 'them'}: ${NO_PHOTO_WHY[why]}.` };
 }
 
-/** "Not at this size, but here's the same variant at sm." The element's pick first, then the nearest use. */
-export function nearestLabel(use: string, want: Record<string, string>, have: Record<string, string>, photo = true): string {
-  const keys = [...new Set([...Object.keys(want), ...Object.keys(have)])];
-  const differ = keys.filter((k) => want[k] !== have[k]), alike = keys.filter((k) => want[k] === have[k]);
-  const at = (k: string) => (k === 'size' ? 'at' : 'in');
-  const value = (k: string) => have[k] ?? 'its default';
-  const noPhoto = ', but dsa has no photo of it yet.';
-  if (!differ.length) return photo ? `The app uses ${use} like this.` : `The app uses ${use} like this${noPhoto}`;
-  const first = differ[0]!;
-  const not = `Not ${at(first)} this ${differ.length > 1 ? 'combination' : first}`;
-  const there = differ.map((k) => `${at(k)} ${value(k)}`).join(', ');
-  if (!photo) return `The app uses ${use} ${there}${noPhoto}`;
-  return alike.length ? `${not}, but here's the same ${alike.join(' and ')} ${there}.` : `${not}, but here's ${use} ${there}.`;
+/** What sits above a card's photos of other looks. It speaks for every tile under it, so all of them share what it says they share. */
+export function nearestLabel(use: string, want: Record<string, string>, have: Record<string, string>, o: { photo?: boolean; shared?: string[]; many?: boolean } = {}): string {
+  const photo = o.photo ?? true, shared = o.shared ?? [];
+  const there = differsText(want, have);
+  if (!there) return photo ? `The app uses ${use} like this.` : `The app uses ${use} like this, but dsa has no photo of it yet.`;
+  if (!photo) return `The app uses ${use} with ${there}, but dsa has no photo of it yet.`;
+  if (shared.length) return `dsa has no photo of this look. ${o.many ? 'Here are uses' : "Here's a use"} with the same ${shared.join(' and ')}.`;
+  return `dsa has no photo of this look. Here's how this app uses ${use} elsewhere.`;
+}
+
+/** The count that doesn't flatter: a photo of another look isn't a photo of what's proposed, and one photo on many cards is one photo. */
+export function photosLine(p: { cards: number; sameLook: number; otherLook: number; elsewhere: number; none: number; distinctPhotos: number; mostShown: number }): string {
+  return `Review cards: ${p.cards}. Photo in the look proposed: ${p.sameLook}. Only another look: ${p.otherLook} (${p.elsewhere} of them just how the app uses it elsewhere). No photo: ${p.none}. ${p.distinctPhotos} different photos, none on more than ${p.mostShown} cards.`;
 }
 
 export interface ReviewQueueEntry { id: string; why: 'decide' | 'disagree' | 'audit'; note?: string | undefined }
@@ -288,34 +303,49 @@ export function withReview(payload: any, o: {
   }
   const queued = new Set(open.map((q) => q.id));
   const entries = [...open, ...more.filter((q) => !queued.has(q.id) && (queued.add(q.id), true))];
-  const defaults = new Map((o.system ?? []).map((c) => [c.component, c.defaults ?? {}]));
-  // A use matches on what the system's look depends on (its axes), not on type="button" and the like.
-  const axesOf = new Map((o.system ?? []).map((c) => [c.component, Object.keys({ ...(c.axes ?? {}), ...(c.defaults ?? {}) })]));
-  const look = (use: string, props: Record<string, unknown> | undefined) => {
-    const axes = axesOf.get(use);
-    const kept = Object.fromEntries(Object.entries(props ?? {}).filter(([k]) => (axes?.length ? axes.includes(k) : !NOT_LOOK.test(k))));
-    return canonicalProps(kept, defaults.get(use) ?? {});
-  };
-  const key = (use: string, props: Record<string, unknown> | undefined) => `${use}|${JSON.stringify(look(use, props))}`;
+  // A use matches on what the system's look depends on (its axes), not on type="button" and the like: the crawler's rule too.
+  const rules = lookRules(o.system);
+  const look = rules.look, key = rules.key;
   // A use with an axis set from the code might be anything: not an exact match, nor said to be.
-  const unknownLook = (u: Precedent) => (u.dynamic ?? []).some((k) => k === '...' || (axesOf.get(u.component)?.length ? axesOf.get(u.component)!.includes(k) : !NOT_LOOK.test(k)));
+  const unknownLook = (u: Precedent) => rules.unknown(u.component, u.dynamic);
   const precedents: Record<string, Precedent[]> = {};
   const byUse: Record<string, Precedent[]> = {};
   for (const u of o.precedents ?? []) { (byUse[u.component] ??= []).push(u); if (!unknownLook(u)) (precedents[key(u.component, u.props)] ??= []).push(u); }
   // Only a photo says how the app uses it. Without one, a tile only repeats the system's own drawing.
   const photos = (l: Precedent[]) => l.filter((u) => u.shot);
-  const alikeWith = (want: Record<string, unknown>, have: Record<string, unknown>) => Object.keys(want).filter((k) => want[k] === have[k]).length;
-  /** The nearest uses when there aren't enough exact ones in this app: the most axes alike, each saying how it differs. */
-  const nearestFor = (app: string, use: string, props: Record<string, unknown> | undefined, room: number) => {
-    const want = look(use, props), wanted = JSON.stringify(want);
+  // Cards that differ shouldn't all show the same picture: the photos shown least so far first, from different pages where there are any.
+  const shownSoFar = new Map<string, number>();
+  const varied = <T extends { shot?: Precedent['shot'] }>(list: T[], room: number): T[] => {
+    const n = (x: T) => shownSoFar.get(x.shot?.url ?? '') ?? 0;
+    const order = list.map((x, i) => ({ x, i })).sort((a, b) => n(a.x) - n(b.x) || a.i - b.i).map((r) => r.x);
+    const out: T[] = [], pages = new Set<unknown>();
+    for (const x of order) if (out.length < room && !pages.has(x.shot?.page)) { out.push(x); pages.add(x.shot?.page); }
+    for (const x of order) if (out.length < room && !out.includes(x)) out.push(x);
+    for (const x of out) shownSoFar.set(x.shot?.url ?? '', n(x) + 1);
+    return out;
+  };
+  /**
+   * With no photo of the look itself, what else this app can show. Uses sharing a real axis, closest first; the
+   * same variant is worth up to three tiles, a shared size alone only one. Sharing nothing, one tile, said to be
+   * how the app uses it elsewhere and not called close. Every tile shares what the heading says.
+   */
+  const nearestFor = (app: string, use: string, props: Record<string, unknown> | undefined) => {
+    const want = look(use, props), wanted = JSON.stringify(want), defaults = rules.defaults(use);
     const all = (byUse[use] ?? []).filter((u) => u.app === app);
-    const rank = all.filter((u) => !unknownLook(u)).map((u) => ({ u, have: look(use, u.props) })).filter((r) => JSON.stringify(r.have) !== wanted).sort((a, b) => alikeWith(want, b.have) - alikeWith(want, a.have));
+    const rank = all.filter((u) => !unknownLook(u)).map((u) => { const have = look(use, u.props), shared = sharedAxes(want, have, defaults); return { u, have, shared, close: closeness(shared) }; }).filter((r) => JSON.stringify(r.have) !== wanted).sort((a, b) => b.close - a.close);
     const set = all.filter(unknownLook);
     if (!rank.length && !set.length) return null;
-    const shown = [...rank.filter((r) => r.u.shot).map((r) => ({ ...r.u, differs: differsText(want, r.have) })), ...photos(set).map((u) => ({ ...u, differs: 'its look is set in the code' }))].slice(0, room);
+    const count = rank.length + set.length;
+    const best = rank.find((r) => r.u.shot);
+    if (best) {
+      const alike = rank.filter((r) => r.u.shot && r.shared.join() === best.shared.join()).map((r) => ({ ...r.u, differs: differsText(want, r.have) }));
+      const examples = varied(alike, best.close >= 2 ? 3 : 1);
+      return { kind: best.close ? 'close' : 'elsewhere', label: nearestLabel(use, want, best.have, { shared: best.shared, many: examples.length > 1 }), examples, count };
+    }
+    const examples = varied(photos(set).map((u) => ({ ...u, differs: 'its look is set in the code' })), 1);
     const top = rank[0];
-    const label = top ? nearestLabel(use, want, top.have, shown.length > 0) : `The app sets ${use}'s look in its code, so dsa can't say which it is${shown.length ? '.' : ', and has no photo of it yet.'}`;
-    return { label, examples: shown, count: rank.length + set.length };
+    const label = !examples.length && top ? nearestLabel(use, want, top.have, { photo: false }) : `The app sets ${use}'s look in its code, so dsa can't say which it is${examples.length ? '.' : ', and has no photo of it yet.'}`;
+    return { kind: examples.length ? 'set-in-code' : 'none', label, examples, count };
   };
   // Each queued element's label fields, so the page can write a labels.jsonl row as it is.
   const items = entries.map((q) => {
@@ -327,12 +357,13 @@ export function withReview(payload: any, o: {
     // The app under review: its own uses, not another app's.
     const inApp = (l: Precedent[] | undefined) => (l ?? []).filter((u) => u.app === e.target);
     const mine = about ? inApp(precedents[key(about.use, about.props)]) : [];
-    const examples = photos(mine).slice(0, 3);
-    const nearest = about && examples.length < 3 ? nearestFor(e.target, about.use, about.props, 3 - examples.length) : null;
+    const examples = varied(photos(mine), 3);
+    // One photo of the look itself beats any number of near ones.
+    const nearest = about && !examples.length ? nearestFor(e.target, about.use, about.props) : null;
     const everyUse = about ? inApp(byUse[about.use]) : [];
     const own = pick?.use ? E.proposals?.[proposalKey(pick.use, pick.props)] : null;
     const scope = o.searched?.[e.target];
-    const altEx = alts[0] && alts[0] !== about ? photos(inApp(precedents[key(alts[0].use, alts[0].props)])).slice(0, 1) : [];
+    const altEx = alts[0] && alts[0] !== about ? varied(photos(inApp(precedents[key(alts[0].use, alts[0].props)])), 1) : [];
     const noPhoto = about && !examples.length && !nearest?.examples.length && everyUse.length ? noPhotoLine(about.use, everyUse) : null;
     return {
       ...q, pick, about,
@@ -343,10 +374,15 @@ export function withReview(payload: any, o: {
       searched: scope ? { files: scope.files, unread: scope.unread, whole: scope.files > 0 && scope.unread === 0 } : null,
     };
   });
-  const photoCards = items.filter((i: any) => i.examples.length || i.nearest?.examples.length).length;
+  const sameLook = items.filter((i: any) => i.examples.length).length;
+  const otherLook = items.filter((i: any) => !i.examples.length && i.nearest?.examples.length);
+  const photoCards = sameLook + otherLook.length;
+  // The honest measure: a photo of another look on every card would still leave a person guessing. A photo counts once however many cards show it.
+  const timesShown = new Map<string, number>();
+  for (const i of items as any[]) for (const url of new Set<string>([...i.examples, ...(i.nearest?.examples ?? []), ...i.altExamples].map((x: any) => x.shot.url))) timesShown.set(url, (timesShown.get(url) ?? 0) + 1);
   const whyNot: Record<string, number> = {};
   for (const i of items) if (!i.examples.length && !i.nearest?.examples.length) { const w = i.noPhoto?.why ?? (i.about ? 'no-uses' : 'no-candidate'); whyNot[w] = (whyNot[w] ?? 0) + 1; }
   const setAside = live.filter((e: any) => !e.review.ready).length;
-  E.review = { items, photos: { cards: items.length, withPhoto: photoCards, without: whyNot }, setAside, ready: ready.length, decideNow: open.length, system: o.system ?? [], precedentSource: o.precedents ? 'uses' : 'none' };
+  E.review = { items, photos: { cards: items.length, sameLook, otherLook: otherLook.length, elsewhere: otherLook.filter((i: any) => i.nearest.kind === 'elsewhere').length, none: items.length - photoCards, withPhoto: photoCards, distinctPhotos: timesShown.size, mostShown: Math.max(0, ...timesShown.values()), without: whyNot }, setAside, ready: ready.length, decideNow: open.length, system: o.system ?? [], precedentSource: o.precedents ? 'uses' : 'none' };
   return payload;
 }
