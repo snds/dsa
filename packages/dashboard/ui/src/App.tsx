@@ -1,5 +1,5 @@
 import * as React from "react"
-import { GearSixIcon, ArrowClockwiseIcon, ArrowSquareOutIcon, PaperPlaneTiltIcon, SparkleIcon, WarningIcon } from "@phosphor-icons/react"
+import { GearSixIcon, ArrowClockwiseIcon, ArrowSquareOutIcon, CopyIcon, PaperPlaneTiltIcon, SparkleIcon, WarningIcon } from "@phosphor-icons/react"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -7,7 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { EvidenceTimes, Pre } from "@/components/bits"
-import { D, SYS, ago, api, fmtD, fmtDT } from "@/lib/dsa"
+import { D, SYS, ago, api, copy, fmtD, fmtDT } from "@/lib/dsa"
 import { Queue } from "@/views/Queue"
 import { Federation } from "@/views/Federation"
 import { Design } from "@/views/Design"
@@ -95,16 +95,26 @@ export function StaticRescan({ onPost }: { onPost: () => void }) {
       <ArrowSquareOutIcon data-icon="inline-start" />{r.label}
     </a>
   )
-  // The page can only open GitHub's form, not fill it in, so it says what to pick there.
+  // The page can only open GitHub's form, not fill it in. The command carries the setting, so it's
+  // the way to start this scan in one step; the form needs the setting picked again.
   const split = link && offersShots()
+  const setting = split && shots !== "normal"
+  const command = r.command && `${r.command}${setting ? ` -f shots=${shots}` : ""}`
   return (
     <div className="flex max-w-sm flex-col items-end gap-1">
       {split ? <><ButtonGroup>{link}<ShotsMenu variant="outline" /></ButtonGroup><ShotsNote /></> : link || (
         <Button variant="outline" onClick={onPost}><PaperPlaneTiltIcon data-icon="inline-start" />{r.label}</Button>
       )}
+      {command && (
+        <div className="flex w-full items-center gap-1 rounded-md border bg-muted/40 py-1 pr-1 pl-2">
+          <code className="min-w-0 flex-1 text-left font-mono text-xs break-all">{command}</code>
+          <Button size="icon-sm" variant="ghost" aria-label="Copy command" title="Copy command" onClick={() => copy(command, "Command copied. Run it in a terminal.")}><CopyIcon /></Button>
+        </div>
+      )}
       <NextScan prefix="Next scheduled scan" className="text-xs text-muted-foreground" />
       <p className="text-right text-xs text-muted-foreground">
-        {split && shots !== "normal" && <><b className="font-medium text-foreground">There, choose {shots} under Photos, then run the workflow.</b> </>}
+        {command && <>The command starts the scan from a terminal with GitHub's <span className="font-mono">gh</span> tool. </>}
+        {setting && <>On GitHub's page, choose {shots} under Photos. </>}
         {r.help}{target && <> <span className="font-mono break-all" title={r.url}>{r.kind === "link" ? "Opens" : "Sends to"} {target}</span></>}
       </p>
     </div>

@@ -125,6 +125,8 @@ export interface PageActions {
     estimateSeconds?: number | null | undefined;
     /** The scan job takes a setting for earlier photos, so the page offers one. */
     shots?: boolean | undefined;
+    /** link: the terminal command that does the same, for the viewer to copy. */
+    command?: string | undefined;
   };
   decisions: {
     kind: "export" | "post" | "issue";

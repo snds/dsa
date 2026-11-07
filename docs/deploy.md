@@ -386,7 +386,8 @@ on:
 ```
 
 Through the relay, the setting goes with the scan. A plain link can't fill in GitHub's Run workflow form, so
-the page says what to pick there.
+the page also shows a `gh workflow run` command with a Copy button. The command carries the setting, and the
+page names the choice to make if you use the form instead.
 
 The estimate is the median of recent successful runs (from GitHub) or of recorded scans
 (`<data>/scan-times.json`, which `dsa run` and `dsa serve` write). For a webhook, set

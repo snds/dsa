@@ -67,8 +67,9 @@ describe('the photo setting', () => {
     expect(workflowTakesShots(root, 'missing.yml')).toBe(false);
 
     const rescanFor = (workflow: string) => githubHost.actions({ root, host: { adapter: 'github', github: { repo: 'acme/site', workflow }, rescan: { url: 'https://github.test/acme/site/actions/workflows/x.yml', method: 'link' } } } as any).rescan;
-    expect(rescanFor('with.yml')).toMatchObject({ kind: 'link', shots: true });
+    expect(rescanFor('with.yml')).toMatchObject({ kind: 'link', shots: true, command: 'gh workflow run with.yml --repo acme/site' });
     expect(rescanFor('without.yml').shots).toBeUndefined();
+    expect(rescanFor('without.yml').command).toBe('gh workflow run without.yml --repo acme/site');
   });
 
   it('dsa serve turns a value it does not know away, before anything runs', async () => {

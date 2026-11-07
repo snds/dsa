@@ -59,6 +59,12 @@ export function workflowTakesShots(root: string, workflow: string): boolean {
   }
 }
 
+/** The terminal command that starts the scan workflow, for a page that can't start it itself. */
+function runCommand(s: { server: string; repo?: string | undefined; workflow: string; ref?: string | undefined }): string {
+  const host = new URL(s.server).host;
+  return `gh workflow run ${s.workflow} --repo ${host === "github.com" ? "" : `${host}/`}${s.repo}${s.ref ? ` --ref ${s.ref}` : ""}`;
+}
+
 /** "12", "#12" or an issue URL → 12. */
 export function issueNumber(ref: string): number {
   const m = ref.trim().match(/(?:^#?|\/issues\/)(\d+)\/?$/);
@@ -102,7 +108,7 @@ export const githubHost: HostAdapter = {
       rescan: c.host.relay?.url
         ? { ...relayRescan(c.host.relay.url, c.host.relay.label, c.host.rescan?.estimateSeconds), ...shots, help: `Starts the ${s.workflow} workflow in ${s.repo} through the scan relay at ${new URL(c.host.relay.url).host} and shows its progress here. You sign in with GitHub first; the new report loads once that run has deployed.` }
         : c.host.rescan
-        ? { ...generic.rescan, ...(generic.rescan.kind === "link" ? shots : {}) }
+        ? { ...generic.rescan, ...(generic.rescan.kind === "link" ? { ...shots, command: runCommand(s) } : {}) }
         : { kind: "none", label: "Re-scan", help: NO_RELAY },
       decisions:
         mode === "issue" || mode === "pr"
