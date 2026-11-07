@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parseConfig } from '@snds/dsa';
-import { readProposals } from '@snds/dsa/engine';
+import { decodePng, latestEvals, readProposals } from '@snds/dsa/engine';
 import { fixtureCopy, loadConfig, NOW, runPipeline } from '../../../test/engine/fixture.js';
 import { openHarness, startHarness } from '../src/harness.js';
 import { READ_STYLE, __test as r, drawFresh, lookAt, renderProposals, unstyledLook } from '../src/rendered.js';
@@ -314,4 +314,40 @@ export function PickTrigger({ children }) { return h(Menu.Trigger, { 'data-slot'
     assert.deepEqual(res, { ok: true });
     assert.equal(await page.textContent('[data-slot=pick-trigger]'), 'Open');
   } finally { await page.close(); await h!.stop(); }
+});
+
+test("a component that fills its container is drawn at its elements' widths; one with its own width isn't", { timeout: 180_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  if (!hasKit) skip('no Vite and React installed');
+  const { root, data } = demoWithBrowser();
+  fs.rmSync(path.join(root, 'storybook-static'), { recursive: true });
+  await runPipeline({ root, dataDir: data, git: false, now: NOW });
+  // Select fills whatever holds it.
+  const select = path.join(root, 'packages/ds-react/src/Select.tsx');
+  fs.writeFileSync(select, fs.readFileSync(select, 'utf8').replace('<select', "<select style={{ width: '100%', boxSizing: 'border-box' }}"));
+  // Photos say how wide the elements are; a photo that shows nothing doesn't count.
+  const { evals } = await latestEvals(data);
+  const widths = [161, 96];
+  const shots = Object.fromEntries(evals.map((e: any, i: number) => [e.id, { box: { x: 1, y: 1, w: widths[i % 2], h: 26, cw: 400, ch: 200 } }]));
+  const blank = { box: { x: 1, y: 1, w: 777, h: 4, cw: 900, ch: 200 }, blank: true };
+  fs.mkdirSync(path.join(data, 'shots'), { recursive: true });
+  fs.writeFileSync(path.join(data, 'shots', 'index.json'), JSON.stringify({ shots: { ...shots, [evals[0].id]: blank } }));
+  const config = { ...loadConfig(root).config, live: parseConfig({ live: {} }).live } as any;
+  await renderProposals({ root, config, dataDir: data });
+  const p = readProposals(data);
+  const s = p.Select!;
+  assert.equal(s.fills, true, JSON.stringify(s));
+  assert.ok(s.sizes!.length >= 1 && s.sizes!.every(z => [161, 96].includes(z.for)), JSON.stringify(s.sizes));
+  assert.equal(s.sizes![0]!.shot, s.shot, 'its main picture is its first size');
+  for (const z of s.sizes!) {
+    assert.equal(z.w, z.for);
+    // At 2x, with 6 px of room each side.
+    assert.equal(decodePng(fs.readFileSync(path.join(data, 'rendered', z.shot))).width, (z.for + 12) * 2);
+  }
+  const fixed = Object.values(p).filter(v => v.use === 'Toggle' && v.shot);
+  assert.ok(fixed.length > 0);
+  for (const v of fixed) assert.deepEqual([v.fills, v.sizes], [undefined, undefined], JSON.stringify(v));
+  // Nothing wanted changed: drawn once, reused after.
+  const again = await renderProposals({ root, config, dataDir: data });
+  assert.ok(again.reused >= Object.values(p).filter(v => v.shot && v.checked).length, `${again.reused} reused`);
 });

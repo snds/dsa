@@ -81,7 +81,8 @@ test('the queue holds only reviewable elements, with label fields and precedents
   const byId = new Map(p.elements.evals.map((e: any) => [e.id, e]));
   for (const it of R.items) assert.equal((byId.get(it.id) as any).review.ready, true, 'never a near-empty candidate');
   const it = R.items[0];
-  assert.deepEqual(it.examples.map((x: any) => x.file), ['ledger/src/Bar.tsx', 'ledger/src/Baz.tsx'], 'the same component and props, photos first');
+  assert.deepEqual(it.examples.map((x: any) => x.file), ['ledger/src/Bar.tsx'], "the same component and props, photos only: without one, a tile only repeats the system's drawing");
+  assert.equal(it.usesCount, 2);
   assert.deepEqual([it.label.app, it.label.sourceRef], ['ledger', 'abc123']);
   // A queue from dsa labels queue: kept only where it can be reviewed.
   const q = withReview(payload(evals), { queue: [{ id: 'e0', why: 'disagree' }, { id: 'e1', why: 'disagree' }] });
@@ -146,7 +147,7 @@ test("a control's words from the code show the values it fills in as gaps", () =
 
 test('a use matches on the system axes, not type="button"; no exact use shows the nearest, labelled; a claim of none needs the whole app read', () => {
   const system = [{ component: 'Button', axes: { variant: ['default', 'outline'], size: ['default', 'sm', 'xs'] }, defaults: { variant: 'default', size: 'default' } }];
-  const use = (line: number, props: object, o: object = {}) => ({ app: 'ledger', file: `ledger/src/U${line}.tsx`, line, component: 'Button', props, ...o });
+  const use = (line: number, props: object, o: object = {}) => ({ app: 'ledger', file: `ledger/src/U${line}.tsx`, line, component: 'Button', props, shot: { url: `shots/u${line}.png`, box: null, page: '/a', pageName: 'A' }, ...o });
   const pick = { use: 'Button', props: { variant: 'outline', size: 'xs' } };
   const withDrawing = (uses: any[], searched?: any) => {
     const p: any = payload([el('a', { ...pick, needsHuman: true })]);
@@ -260,4 +261,49 @@ test('one small part proposed as the whole it belongs to is compared with that p
   // About its size: nothing changes.
   const same = proposalFor({ proposals: { 'Sidebar#p': { ...whole, w: 40, h: 40 } } }, e(), pick);
   assert.equal(same.url, 'rendered/s.png');
+});
+
+test("width a component only has from its container isn't counted against it; its drawing is the one nearest the element's width", () => {
+  const pick = { verdict: 'replace', use: 'Field', props: {} };
+  const e = (w: number, h: number, o: object = {}) => el('name', { ownHash: 'f', use: 'Field', props: {}, shot: shot({ box: { x: 1, y: 1, w, h, cw: 400, ch: 200 }, content: { text: 'Alder', inner: null } }), ...o });
+  const fills = { use: 'Field', props: {}, check: 'exact', url: 'rendered/wide.png', own: true, text: 'Alder', w: 1232, h: 36, fills: true };
+  // Drawn at the page's width, it's still the same kind of thing as the element.
+  assert.deepEqual(reviewed({ proposals: { 'Field#f': fills } }, e(160, 26), pick).missing, []);
+  const sizes = [{ for: 160, url: 'rendered/160.png', w: 160, h: 36 }, { for: 40, url: 'rendered/40.png', w: 40, h: 36 }];
+  const E = { proposals: { 'Field#f': { ...fills, url: 'rendered/160.png', sizes } } };
+  assert.deepEqual([proposalFor(E, e(158, 26), pick).url, proposalFor(E, e(24, 20), pick).url, proposalFor(E, e(24, 20), pick).w], ['rendered/160.png', 'rendered/40.png', 40]);
+  // Filling its container doesn't excuse being many times taller; a fixed width still counts as width.
+  assert.deepEqual(reviewed({ proposals: { 'Field#f': { ...fills, h: 400 } } }, e(160, 26), pick).missing.map((m: any) => m.kind), ['whole-for-part']);
+  assert.deepEqual(reviewed({ proposals: { 'Field#f': { ...fills, fills: false } } }, e(160, 26), pick).missing.map((m: any) => m.kind), ['whole-for-part']);
+});
+
+test('a photo that shows nothing says so, and is never called a small part of anything', () => {
+  const pick = { verdict: 'replace', use: 'Sheet', props: {} };
+  const big = { use: 'Sheet', props: {}, check: 'exact', url: 'rendered/s.png', own: false, w: 1232, h: 900 };
+  const e = (w: number, h: number) => el('dot', { use: 'Sheet', props: {}, shot: shot({ blank: true, box: { x: 1, y: 1, w, h, cw: 40, ch: 40 } }) });
+  const tiny = reviewed({ proposals: { Sheet: big } }, e(4, 4), pick).missing;
+  assert.deepEqual(tiny.map((m: any) => m.kind), ['tiny-photo']);
+  assert.match(tiny[0].why, /only 4 × 4 px.*nothing usable/);
+  assert.deepEqual(reviewed({ proposals: { Sheet: big } }, e(1392, 17), pick).missing.map((m: any) => m.kind), ['blank']);
+});
+
+test('where the app uses it: only photos are tiles; with none, the page has a line to say so; a wordless drawing is no example', () => {
+  const system = [{ component: 'Button', axes: { size: ['default', 'sm'] }, defaults: { size: 'default' } }];
+  const use = (line: number, props: object, o: object = {}) => ({ app: 'ledger', file: `ledger/src/U${line}.tsx`, line, component: 'Button', props, shot: null, ...o });
+  const pick = { use: 'Button', props: {} };
+  const item = (uses: any[], plain: object = {}) => {
+    const p: any = payload([el('a', { ...pick, needsHuman: true })]);
+    p.elements.proposals.Button = { use: 'Button', props: {}, check: 'exact', url: 'r/b.png', ...plain };
+    p.elements.proposals['Button#own1'] = { use: 'Button', props: {}, check: 'exact', url: 'r/o.png', own: true, text: 'Save' };
+    return withReview(p, { audit: 0, system, precedents: uses }).elements.review.items[0];
+  };
+  const noPhotos = item([use(1, {}), use(2, {})]);
+  assert.deepEqual([noPhotos.examples, noPhotos.usesCount], [[], 2]);
+  const photo = { url: 's/u.png', box: null, page: '/a', pageName: 'A' };
+  assert.deepEqual(item([use(1, {}), use(2, {}, { shot: photo })]).examples.map((x: any) => x.line), [2]);
+  const near = item([use(3, { size: 'sm' })]);
+  assert.deepEqual(near.nearest.examples, []);
+  assert.equal(near.nearest.label, 'The app uses Button at sm, but dsa has no photo of it yet.');
+  assert.equal(item([]).systemExample.url, 'r/b.png');
+  assert.equal(item([], { bare: true }).systemExample, null);
 });

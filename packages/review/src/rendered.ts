@@ -38,7 +38,7 @@ const OPEN_MS = 300_000;
 const CLOSE_MS = 5_000;
 const SAVE_EVERY = 10;
 /** Raised when what a drawing must get right changes, so old drawings are looked at again. */
-const CHECKED = 2;
+const CHECKED = 3;
 /** What a whole structure says when it's drawn empty, or as its story wrote it, instead of with an element's content. */
 const DRAWN_EMPTY = "its rows come from data the scan couldn't read, so it's drawn empty";
 const EXAMPLE = "an example of the component, not this element's content";
@@ -295,10 +295,27 @@ export function reusable(c: Proposal, p: Wanted, hash: string): boolean {
   // Drawn before drawings recorded their font, or without the system's styles: drawn again.
   if (c.styles && !c.styles.fontFamily) return false;
   if (c.unstyled || c.innerLost) return false;
+  // Filling its container, and not yet drawn at the width of an element it's for.
+  if (c.sizes && drawWidths(p.widths).some(w => !c.sizes!.some(s => s.for === w))) return false;
   return !(c.own && p.own && c.text !== ownText(p.own));
 }
 
-export interface Wanted { /** The elements it's drawn for, as file:line. */ where?: string[] | undefined; use: string; props: Record<string, string>; own?: OwnContent; /** The file the element's icon component comes from (when only its name is known), to draw that icon. */ iconFile?: string | undefined }
+export interface Wanted { /** The elements it's drawn for, as file:line. */ where?: string[] | undefined; use: string; props: Record<string, string>; own?: OwnContent; /** The file the element's icon component comes from (when only its name is known), to draw that icon. */ iconFile?: string | undefined; /** How wide the elements it's drawn for are in their photos, in CSS px. */ widths?: number[] | undefined }
+
+/** Widths within this many px of each other share a drawing. */
+const WIDTH_NEAR = 4;
+/** No more drawings than this of one component. */
+const MAX_WIDTHS = 12;
+/** Drawn at this width when no element says how wide it should be. */
+const PLAIN_WIDTH = 320;
+/** The widths to draw at, the typical one first: that one is the drawing's main picture. */
+export function drawWidths(widths: number[] | undefined): number[] {
+  const merged: number[] = [];
+  for (const w of [...new Set(widths ?? [])].sort((a, b) => a - b)) if (!merged.length || w - merged[merged.length - 1]! > WIDTH_NEAR) merged.push(w);
+  const kept = merged.length <= MAX_WIDTHS ? merged : Array.from({ length: MAX_WIDTHS }, (_, i) => merged[Math.round((i * (merged.length - 1)) / (MAX_WIDTHS - 1))]!);
+  const typical = kept[Math.floor(kept.length / 2)];
+  return typical === undefined ? [] : [typical, ...kept.filter(w => w !== typical)];
+}
 
 export async function wantedProposals(dataDir: string, threshold?: number, root?: string): Promise<Map<string, Wanted>> {
   const { evals } = await latestEvals(dataDir);
@@ -313,17 +330,23 @@ export async function wantedProposals(dataDir: string, threshold?: number, root?
   const out = new Map<string, Wanted>();
   let icon: string | undefined;
   let at: string | undefined;
+  let width: number | undefined;
   const add = (r: any, own?: OwnContent | null) => {
     if (r?.verdict !== 'replace' || !r.use) return;
-    const put = (k: string, w: Wanted) => out.set(k, { ...w, where: [...new Set([...(out.get(k)?.where ?? []), ...(at ? [at] : [])])] });
+    const put = (k: string, w: Wanted) => {
+      const widths = [...new Set([...(out.get(k)?.widths ?? []), ...(width ? [width] : [])])];
+      out.set(k, { ...w, where: [...new Set([...(out.get(k)?.where ?? []), ...(at ? [at] : [])])], ...(widths.length ? { widths } : {}) });
+    };
     if (!out.has(proposalKey(r.use, r.props))) put(proposalKey(r.use, r.props), { use: r.use, props: lookProps(r.props) });
-    else if (at) put(proposalKey(r.use, r.props), out.get(proposalKey(r.use, r.props))!);
+    else put(proposalKey(r.use, r.props), out.get(proposalKey(r.use, r.props))!);
     if (own) put(ownKey(r.use, r.props, own), { use: r.use, props: lookProps(r.props), own, ...(icon ? { iconFile: icon } : {}) });
   };
   for (const e of evals) {
     if (e.exception) continue;
     const own = ownOf(e, shots[e.id]);
     at = `${e.file}:${e.line}`;
+    // A photo that shows nothing says nothing about how wide the element is.
+    width = !shots[e.id]?.blank && shots[e.id]?.box?.w >= 1 ? Math.round(shots[e.id].box.w) : undefined;
     icon = own?.iconName && root ? iconFile(root, e.file, own.iconName) ?? undefined : undefined;
     for (const p of picks.get(e.id) ?? []) add(p, own);
     // With no clear proposal, its candidates are what a person judges: drawn with its own content too.
@@ -554,7 +577,8 @@ async function fromSource(page: any, h: Harness, fresh: FreshDraw, s: any, p: Wa
   if (!seen.shows) return { ...noOwn(p), check: 'none', via: 'source', note: `${p.use} drew from the system's source, but ${seen.why}.`, hash };
   if (seen.notOwn) own = { own: false, why: seen.notOwn };
   const content = own && !own.own && own.why ? own.why : undefined;
-  return { ...noOwn(p), check, via: 'source', shot: file, ...(seen.notOwn ? {} : { checked: CHECKED }), styles: top.styles, ...(unstyledLook(top.styles) ? { unstyled: true } : {}), ...innerOf(p, own), ...(own?.own ? { own: true, text: ownText(p.own) } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
+  const size = await sizedDrawing(page, sel, p, k, dir, file);
+  return { ...noOwn(p), check, via: 'source', shot: file, ...size, ...(seen.notOwn ? {} : { checked: CHECKED }), styles: top.styles, ...(unstyledLook(top.styles) ? { unstyled: true } : {}), ...innerOf(p, own), ...(own?.own ? { own: true, text: ownText(p.own) } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
 }
 
 /** Runs in the page: did the element's own words and icon show, and set its accessible name. */
@@ -565,6 +589,57 @@ const isField = (p: Wanted) => p.own?.value != null || p.own?.placeholder != nul
 const severalBlocks = (p: Wanted) => Boolean(p.own?.inner?.html && p.own.inner.blocks > 1);
 /** Runs in the page: does this drawing hold a whole structure, rows or a list? */
 const HOLDS_STRUCTURE = `({ sel }) => { const el = document.querySelector(sel); return Boolean(el && (el.matches(${JSON.stringify(STRUCTURE)}) || el.querySelector(${JSON.stringify(STRUCTURE)}))); }`;
+
+/**
+ * Runs in the page: does the element's width come from its container? Half the room, and see. Says how the
+ * width follows the room, so a width can be asked for. A popup outside the drawing's root has no room to change.
+ */
+const FILLS = `({ sel }) => {
+  const el = document.querySelector(sel), root = el && el.closest('#root, #storybook-root');
+  if (!root) return null;
+  const room = root.getBoundingClientRect().width, was = el.getBoundingClientRect().width;
+  root.style.width = room / 2 + 'px';
+  const then = el.getBoundingClientRect().width;
+  root.style.width = '';
+  const rate = (was - then) / (room / 2);
+  return rate >= 0.4 ? { rate, rest: was - rate * room } : null;
+}`;
+/** Runs in the page: give the drawing the room that makes the element this wide (null: back as it was). */
+const SET_WIDTH = `({ sel, room }) => {
+  const el = document.querySelector(sel), root = el && el.closest('#root, #storybook-root');
+  if (!root) return null;
+  root.style.width = room === null ? '' : room + 'px';
+  const r = el.getBoundingClientRect();
+  return { w: Math.round(r.width * 10) / 10, h: Math.round(r.height * 10) / 10 };
+}`;
+/** Runs in the page: a control whose content is its words, with no words and nothing else in it? */
+const BARE = `({ sel }) => {
+  const el = document.querySelector(sel);
+  return Boolean(el && el.matches('button:not([role]), a, [role=button], [role=link]') && !el.children.length && !(el.textContent || '').trim());
+}`;
+
+/**
+ * A component that fills its container is as wide as the page it was drawn on, which says nothing about it.
+ * Drawn again at the width of each element it's for, so a person compares like with like. A whole structure
+ * keeps its room: squeezed to one element's width, a table is no longer an example of a table.
+ */
+async function sizedDrawing(page: any, sel: string, p: Wanted, k: string, dir: string, file: string): Promise<Pick<Proposal, 'fills' | 'sizes' | 'bare'>> {
+  const bare = !p.own && await run<boolean>(page, BARE, { sel }).catch(() => false);
+  const out = bare ? { bare: true } : {};
+  const f = await run<{ rate: number; rest: number } | null>(page, FILLS, { sel }).catch(() => null);
+  if (!f) return out;
+  if (await run<boolean>(page, HOLDS_STRUCTURE, { sel }).catch(() => false)) return { ...out, fills: true };
+  const widths = drawWidths(p.widths);
+  const sizes: NonNullable<Proposal['sizes']> = [];
+  for (const [i, w] of (widths.length ? widths : [PLAIN_WIDTH]).entries()) {
+    const box = await run<{ w: number; h: number } | null>(page, SET_WIDTH, { sel, room: Math.max(1, (w - f.rest) / f.rate) }).catch(() => null);
+    const shot = i === 0 ? file : `proposal-${sha(k).slice(0, 12)}-${w}.png`;
+    if (box && await shoot(page, sel, path.join(dir, shot))) sizes.push({ for: w, shot, w: box.w, h: box.h });
+    else if (i === 0) break; // the main picture stays as it was drawn, so no size may claim otherwise
+  }
+  await run(page, SET_WIDTH, { sel, room: null }).catch(() => {});
+  return { ...out, fills: true, ...(sizes.length ? { sizes } : {}) };
+}
 
 /**
  * Runs in the page, once a drawing is on screen: can it be seen, and do the words that show equal the ones
@@ -701,7 +776,8 @@ async function fromStories(sb: { url: string; stories: any[]; page: any }, s: an
     if (!seen.shows) return false;
     if (seen.notOwn) own = { own: false, why: seen.notOwn };
     const content = own?.own ? undefined : own?.why ? own.why : set ? (iconSize && icon ? `icon from ${icon.story}` : 'story default') : undefined;
-    best = { ...noOwn(p), check, via: 'story', shot: file, ...(seen.notOwn ? {} : { checked: CHECKED }), styles: top.styles, ...(unstyledLook(top.styles) ? { unstyled: true } : {}), ...innerOf(p, own), story: st.id, ...(own?.example ? { example: true } : {}), ...(own?.own ? { own: true, text: ownText(p.own) } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
+    const size = await sizedDrawing(page, sel, p, k, dir, file);
+    best = { ...noOwn(p), check, via: 'story', shot: file, ...size, ...(seen.notOwn ? {} : { checked: CHECKED }), styles: top.styles, ...(unstyledLook(top.styles) ? { unstyled: true } : {}), ...innerOf(p, own), story: st.id, ...(own?.example ? { example: true } : {}), ...(own?.own ? { own: true, text: ownText(p.own) } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
     return check === 'exact' && (!p.own || Boolean(own?.own) || !seen.notOwn);
   };
   let tried = 0;
@@ -788,7 +864,7 @@ export async function drawFresh(page: any, h: Harness, fresh: FreshDraw, arg: { 
 }
 
 /** For tests: the in-page prop check and the helper that runs it. */
-export const __test = { SCAN, get INJECT_OWN() { return INJECT_OWN; }, run, pickBetter, get SHOWN() { return SHOWN; } };
+export const __test = { SCAN, get INJECT_OWN() { return INJECT_OWN; }, run, pickBetter, get SHOWN() { return SHOWN; }, get FILLS() { return FILLS; }, get SET_WIDTH() { return SET_WIDTH; }, get BARE() { return BARE; } };
 
 /** A proposal as stored: its component and props; the content it was asked to show isn't kept. */
 const noOwn = (p: Wanted) => ({ use: p.use, props: p.props });

@@ -12,7 +12,7 @@ interface Box { x: number; y: number; w: number; h: number; cw: number; ch: numb
 /**
  * The element as the app draws it beside the proposal as Storybook draws it, both at their real CSS
  * size, so height, padding and type compare by eye. The photo is cropped to the element (its context
- * is one click away in the zoom view). Too wide for the card, a pane scrolls rather than shrinks.
+ * is one click away in the zoom view). Too wide for the card, a picture shrinks to fit and says so.
  */
 export function SameScale({ app, proposed, appLabel, proposedLabel }: {
   app: { url: string; box?: Box | null; alt: string; onOpen?: () => void }
@@ -42,29 +42,60 @@ export function SameScale({ app, proposed, appLabel, proposedLabel }: {
 function Pane({ label, kind, children }: { label: React.ReactNode; kind: "app" | "proposed"; children: React.ReactNode }) {
   return (
     <div className="flex max-w-full min-w-0 flex-col gap-1" data-pane={kind}>
-      <div className="w-fit max-w-full overflow-x-auto rounded-md border bg-background p-1">{children}</div>
+      <div className="w-fit max-w-full rounded-md border bg-background p-1">{children}</div>
       <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-muted-foreground">{label}</span>
     </div>
   )
 }
 
+/** Is this picture, `width` CSS px at its real size, drawn narrower than that? */
+function useShrunk(width: number | null) {
+  const ref = React.useRef<any>(null)
+  const [shrunk, setShrunk] = React.useState(false)
+  React.useLayoutEffect(() => {
+    const el = ref.current
+    if (!el || !width) return
+    const look = () => { if (el.clientWidth > 0) setShrunk(el.clientWidth < width - 1) }
+    look()
+    if (typeof ResizeObserver === "undefined") return
+    const watch = new ResizeObserver(look)
+    watch.observe(el)
+    return () => watch.disconnect()
+  }, [width])
+  return [ref, shrunk] as const
+}
+
+const SHRUNK = <span className="block text-[10px] text-muted-foreground" data-slot="shrunk">Shown smaller, to fit</span>
+
 /** The element and a small margin, cut from the screenshot at real size, with its box ringed. */
 export function Crop({ url, box, alt }: { url: string; box?: Box | null; alt: string }) {
+  const x = box ? Math.max(0, box.x - MARGIN) : 0, y = box ? Math.max(0, box.y - MARGIN) : 0
+  const w = box ? Math.min(box.cw - x, box.w + MARGIN * 2) : 0, h = box ? Math.min(box.ch - y, box.h + MARGIN * 2) : 0
+  const [ref, shrunk] = useShrunk(box ? w : null)
   if (!box) return <Natural url={url} alt={alt} />
-  const x = Math.max(0, box.x - MARGIN), y = Math.max(0, box.y - MARGIN)
-  const w = Math.min(box.cw - x, box.w + MARGIN * 2), h = Math.min(box.ch - y, box.h + MARGIN * 2)
+  // In shares of the crop, so it all shrinks together when the crop is wider than the card.
+  const across = (n: number) => `${(n / w) * 100}%`, down = (n: number) => `${(n / h) * 100}%`
   return (
-    <span className="relative block overflow-hidden" style={{ width: w, height: h }} data-scale="1">
-      <img src={url} alt={alt} loading="lazy" className="absolute max-w-none" style={{ left: -x, top: -y, width: box.cw, height: box.ch }} />
-      <span className="pointer-events-none absolute rounded-[3px] outline-2 outline-offset-2 outline-primary/70" style={{ left: box.x - x, top: box.y - y, width: box.w, height: box.h }} />
-    </span>
+    <>
+      <span ref={ref} className="relative block max-w-full overflow-hidden" style={{ width: w, aspectRatio: `${w} / ${h}` }} data-scale={shrunk ? "fit" : "1"}>
+        <img src={url} alt={alt} loading="lazy" className="absolute max-w-none" style={{ left: across(-x), top: down(-y), width: across(box.cw), height: down(box.ch) }} />
+        <span className="pointer-events-none absolute rounded-[3px] outline-2 outline-offset-2 outline-primary/70" style={{ left: across(box.x - x), top: down(box.y - y), width: across(box.w), height: down(box.h) }} />
+      </span>
+      {shrunk && SHRUNK}
+    </>
   )
 }
 
-/** An image at its real CSS size (its pixels over the capture's device pixel ratio). */
+/** An image at its real CSS size (its pixels over the capture's device pixel ratio), or the card's width if that's less. */
 export function Natural({ url, alt }: { url: string; alt: string }) {
   const [w, setW] = React.useState<number | null>(null)
-  return <img src={url} alt={alt} loading="lazy" data-scale="1" className={cn("block max-w-none", !w && "max-h-24")} style={w ? { width: w / DPR } : undefined} onLoad={ev => setW((ev.target as HTMLImageElement).naturalWidth)} />
+  const [ref, shrunk] = useShrunk(w ? w / DPR : null)
+  return (
+    <>
+      <img ref={ref} src={url} alt={alt} loading="lazy" data-scale={shrunk ? "fit" : "1"} className={cn("block h-auto max-w-full", !w && "max-h-24")} style={w ? { width: w / DPR } : undefined} onLoad={ev => setW((ev.target as HTMLImageElement).naturalWidth)} />
+      {shrunk && SHRUNK}
+    </>
+  )
 }
 
 /**

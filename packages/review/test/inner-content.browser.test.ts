@@ -211,3 +211,33 @@ test('what sits on top of something stays on top of it in the copy', { timeout: 
     assert.deepEqual(at, [true, true, true, true], 'inside the element, not beside it');
   } finally { await page.close(); }
 });
+
+test("a drawing's width: only what follows its container fills it, and it can be asked for a width", { timeout: 60_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  const page = await browser!.newPage({ viewport: { width: 1280, height: 900 } });
+  try {
+    await page.setContent(`<!doctype html><body style="margin:0;padding:24px"><div id="root">
+      <input id="full" style="width:100%;box-sizing:border-box">
+      <div style="padding:0 10px"><label id="inset" style="display:block">Alder</label></div>
+      <div id="half" style="width:50%;height:8px"></div>
+      <div id="fixed" style="width:256px;height:40px"></div>
+      <button id="wordless"></button><button id="worded">Alder</button><span id="dot" role="checkbox"></span>
+    </div><div id="popup" style="position:fixed;width:50%;height:9px"></div>`);
+    const fills = (id: string) => r.run<any>(page, r.FILLS, { sel: `#${id}` });
+    const room = (f: any, w: number) => Math.max(1, (w - f.rest) / f.rate);
+    const set = (id: string, f: any, w: number) => r.run<any>(page, r.SET_WIDTH, { sel: `#${id}`, room: room(f, w) });
+    assert.equal(await fills('fixed'), null, 'a fixed width is its own');
+    assert.equal(await fills('popup'), null, 'outside the drawing, the room has no say');
+    const full = await fills('full');
+    assert.equal((await set('full', full, 161)).w, 161);
+    await r.run(page, r.SET_WIDTH, { sel: '#full', room: null });
+    assert.equal(await page.evaluate(`document.getElementById('root').style.width`), '', 'back as it was');
+    const inset = await fills('inset');
+    assert.equal((await set('inset', inset, 96)).w, 96, 'room taken up around it is allowed for');
+    const half = await fills('half');
+    assert.equal((await set('half', half, 300)).w, 300, 'a share of the room is allowed for');
+    await r.run(page, r.SET_WIDTH, { sel: '#half', room: null });
+    const bare = (id: string) => r.run<boolean>(page, r.BARE, { sel: `#${id}` });
+    assert.deepEqual([await bare('wordless'), await bare('worded'), await bare('dot')], [true, false, false]);
+  } finally { await page.close(); }
+});

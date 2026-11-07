@@ -213,6 +213,15 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- A component that fills its container is no longer judged by the page it was drawn on. It's drawn at the
+  width of each element it's for (the nearest one is shown), so a field 161 px wide compares with a field about
+  161 px wide. Its width from the container no longer counts toward "a whole proposed for one small part": a
+  real whole, like a sidebar for its trigger, is still caught. A whole structure, like a table, keeps its room.
+- A photo that shows nothing is no longer also called a small part of anything. One only a few pixels across
+  says the capture found nothing usable.
+- Pictures wider than the card shrink to fit and say so, instead of giving the page a sideways scroll.
+- "Where the app already uses" shows photos only. With none, it says so in one line. A control drawn with no
+  words is no longer offered as the system's own example.
 - A whole structure (rows, a list, tabs, a menu) is no longer drawn with one line of joined words or one icon in it,
   which passed as the element's own because the words matched. It is shown as its story wrote it, labelled as an
   example of the component and not this element's content.

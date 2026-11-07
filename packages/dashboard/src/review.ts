@@ -72,21 +72,33 @@ export function proposalFor(E: any, e: any, pick: any): any | null {
   const key = proposalKey(pick.use, pick.props);
   const mine = e.ownHash ? E.proposals?.[`${key}#${e.ownHash}`] : null;
   const plain = E.proposals?.[key];
-  const p = mine ?? (plain ? { ...plain, own: false } : null);
+  const p = atWidthOf(mine ?? (plain ? { ...plain, own: false } : null), e);
   if (!p || !wholeForPart(p, e)) return p;
   // One small part proposed as the whole it belongs to: compared with that part, when one is drawn.
   for (const a of e.alternatives ?? []) {
     if (!a?.use || a.use === pick.use) continue;
-    const part = e.ownHash ? E.proposals?.[`${proposalKey(a.use, a.props)}#${e.ownHash}`] : E.proposals?.[proposalKey(a.use, a.props)];
+    const part = atWidthOf(e.ownHash ? E.proposals?.[`${proposalKey(a.use, a.props)}#${e.ownHash}`] : E.proposals?.[proposalKey(a.use, a.props)], e);
     if (part?.url && !wholeForPart(part, e)) return { ...part, partOf: pick.use, partUse: a.use };
   }
   return { ...p, wholeForPart: true };
 }
 
-/** Is the drawing many times the element? Then it's what the element belongs to, not what it would become. */
+/** A drawing that fills its container was drawn at the widths of its elements: the one nearest this element's. */
+export function atWidthOf(p: any, e: any): any {
+  if (!p?.sizes?.length) return p;
+  const w = e?.shot?.box?.w;
+  const s = w ? [...p.sizes].sort((a: any, b: any) => Math.abs(a.for - w) - Math.abs(b.for - w))[0] : p.sizes[0];
+  return { ...p, url: s.url, w: s.w, h: s.h };
+}
+
+/**
+ * Is the drawing many times the element? Then it's what the element belongs to, not what it would become.
+ * Width a component only has because it fills its container isn't counted: that's the page it was drawn on.
+ */
 export function wholeForPart(p: any, e: any): boolean {
   const b = e?.shot?.box;
-  return Boolean(p?.w && p?.h && b?.w && b?.h && p.w * p.h >= 9 * b.w * b.h);
+  if (!p?.w || !p?.h || !b?.w || !b?.h) return false;
+  return (p.fills ? Math.min(p.w, b.w) : p.w) * p.h >= 9 * b.w * b.h;
 }
 
 /**
@@ -111,6 +123,9 @@ export function candidatesOf(E: any, e: any): any[] {
   });
 }
 
+/** A box this small holds nothing a person can compare: what the capture landed on, not the element. */
+const tinyPhoto = (box: any): boolean => Boolean(box) && Math.min(box.w, box.h) <= 8;
+
 /** Can a person review this element? */
 export function evidenceOf(E: any, e: any, pick: any): Evidence {
   const missing: Evidence['missing'] = [];
@@ -120,7 +135,8 @@ export function evidenceOf(E: any, e: any, pick: any): Evidence {
     if (e.staleShot) missing.push({ kind: 'stale', why: 'Its only photo is from an older run, so it may not show the code as it is now.', group: 'have only an old photo, from before the code changed', fix: 'Take the screenshots again.' });
     else if (e.reach?.why) missing.push(unreached(e));
     else missing.push({ kind: 'no-photo', why: 'There is no photo of it in the app.', group: 'have no photo in the app', fix: 'Take screenshots of the app (dsa run with screenshots on).' });
-  } else if (s.blank) missing.push({ kind: 'blank', why: 'Its photo shows nothing: it may need a state the crawler could not set.', group: 'have a photo that shows nothing', fix: 'Add a flow that puts the page in that state.' });
+  } else if (s.blank && tinyPhoto(s.box)) missing.push({ kind: 'tiny-photo', why: `Its photo is only ${s.box.w} × ${s.box.h} px, so the capture found nothing usable to compare.`, group: 'have a photo only a few pixels across, so the capture found nothing usable', fix: 'Add a flow that puts the page in the state that shows it, then take the screenshots again.' });
+  else if (s.blank) missing.push({ kind: 'blank', why: 'Its photo shows nothing: it may need a state the crawler could not set.', group: 'have a photo that shows nothing', fix: 'Add a flow that puts the page in that state.' });
   else if (s.covered) missing.push({ kind: 'covered', why: 'Something else covers it in its photo.', group: 'are covered by something else in their photos', fix: 'Take the photo again with the covering layer closed.' });
   else if (s.source === 'isolated') current = 'isolated';
   else if (s.drawn === 'markup') missing.push({ kind: 'markup', group: 'could only be drawn as markup, not as the app draws them', why: 'Only its markup could be drawn, not the element as the app draws it.', fix: 'Reach it in the running app, or record its props so it can be drawn as an isolated render.' });
@@ -134,7 +150,8 @@ export function evidenceOf(E: any, e: any, pick: any): Evidence {
     const what = [pick.use, ...Object.entries(pick.props ?? {}).filter(([k]) => k !== 'render').map(([k, v]) => `${k} ${v}`)].join(', ');
     // Said plainly to be an example, so it isn't judged as this element's content. Nothing else is let off.
     const example = Boolean(p?.example);
-    if (p?.wholeForPart) missing.push({ kind: 'whole-for-part', group: 'propose the whole of a component for one small part of it', why: `${pick.use} is the whole component, and this element is one small part of it. No drawing shows that part.`, fix: 'Decide it with the whole component, or draw the part (dsa render).' });
+    // A photo that shows nothing can't say how big the element is, so it can't say it's a small part of anything.
+    if (p?.wholeForPart) { if (!s?.blank) missing.push({ kind: 'whole-for-part', group: 'propose the whole of a component for one small part of it', why: `${pick.use} is the whole component, and this element is one small part of it. No drawing shows that part.`, fix: 'Decide it with the whole component, or draw the part (dsa render).' }); }
     else if (p && p.check === 'none' && !p.url && (p.noSource || NO_SOURCE.test(p.note ?? ''))) missing.push({ kind: 'no-source', group: 'propose a component the system has nothing to draw from', why: `The system has nothing to draw ${pick.use} from.`, fix: `Add a story or source for ${pick.use}, or propose another component.` });
     else if (!p?.url) missing.push({ kind: 'not-drawn', group: "have a proposal that isn't drawn yet", why: `The proposal (${what}) isn't drawn yet.`, fix: 'Draw the proposals (dsa render).' });
     else if (p.check !== 'exact') missing.push({ kind: 'near-match', group: 'have a proposal drawn only as a near match', why: `The proposal (${what}) is only drawn as a near match, not with these props.`, fix: 'Draw the proposals (dsa render).' });
@@ -181,15 +198,17 @@ export function pageName(url: string | null | undefined): string {
 const NOT_LOOK = /^(type|form|name|value|disabled|tabIndex|role|href|to|target|rel|htmlFor|placeholder|autoFocus|asChild|render|open|defaultOpen|checked|defaultChecked)$/;
 
 /** "Not at this size, but here's the same variant at sm." The element's pick first, then the nearest use. */
-export function nearestLabel(use: string, want: Record<string, string>, have: Record<string, string>): string {
+export function nearestLabel(use: string, want: Record<string, string>, have: Record<string, string>, photo = true): string {
   const keys = [...new Set([...Object.keys(want), ...Object.keys(have)])];
   const differ = keys.filter((k) => want[k] !== have[k]), alike = keys.filter((k) => want[k] === have[k]);
   const at = (k: string) => (k === 'size' ? 'at' : 'in');
   const value = (k: string) => have[k] ?? 'its default';
-  if (!differ.length) return `The app uses ${use} like this.`;
+  const noPhoto = ', but dsa has no photo of it yet.';
+  if (!differ.length) return photo ? `The app uses ${use} like this.` : `The app uses ${use} like this${noPhoto}`;
   const first = differ[0]!;
   const not = `Not ${at(first)} this ${differ.length > 1 ? 'combination' : first}`;
   const there = differ.map((k) => `${at(k)} ${value(k)}`).join(', ');
+  if (!photo) return `The app uses ${use} ${there}${noPhoto}`;
   return alike.length ? `${not}, but here's the same ${alike.join(' and ')} ${there}.` : `${not}, but here's ${use} ${there}.`;
 }
 
@@ -259,7 +278,8 @@ export function withReview(payload: any, o: {
   const precedents: Record<string, Precedent[]> = {};
   const byUse: Record<string, Precedent[]> = {};
   for (const u of o.precedents ?? []) { (byUse[u.component] ??= []).push(u); if (!unknownLook(u)) (precedents[key(u.component, u.props)] ??= []).push(u); }
-  const photoFirst = (l: Precedent[]) => [...l.filter((u) => u.shot), ...l.filter((u) => !u.shot)];
+  // Only a photo says how the app uses it. Without one, a tile only repeats the system's own drawing.
+  const photos = (l: Precedent[]) => l.filter((u) => u.shot);
   /** The nearest uses when none is exact: the most axes alike, labelled by what differs. */
   const nearestFor = (use: string, props: Record<string, unknown> | undefined) => {
     const want = look(use, props);
@@ -270,7 +290,8 @@ export function withReview(payload: any, o: {
     const top = rank[0];
     if (!top) return null;
     const same = rank.filter((r) => JSON.stringify(r.have) === JSON.stringify(top.have)).map((r) => r.u);
-    return { label: nearestLabel(use, want, top.have), examples: photoFirst(same).slice(0, 3), count: same.length };
+    const examples = photos(same).slice(0, 3);
+    return { label: nearestLabel(use, want, top.have, examples.length > 0), examples, count: same.length };
   };
   // Each queued element's label fields, so the page can write a labels.jsonl row as it is.
   const items = entries.map((q) => {
@@ -278,16 +299,16 @@ export function withReview(payload: any, o: {
     const pick = picks.get(q.id) ?? e;
     const alts = (e.alternatives ?? []).filter((a: any) => a?.use && a.use !== pick?.use).slice(0, 3);
     const mine = pick?.use ? precedents[key(pick.use, pick.props)] ?? [] : [];
-    const examples = photoFirst(mine).slice(0, 3);
+    const examples = photos(mine).slice(0, 3);
     const nearest = pick?.use && !mine.length ? nearestFor(pick.use, pick.props) : null;
     const own = pick?.use ? E.proposals?.[proposalKey(pick.use, pick.props)] : null;
     const scope = o.searched?.[e.target];
-    const altEx = alts[0] ? (precedents[key(alts[0].use, alts[0].props)] ?? []).slice(0, 1) : [];
+    const altEx = alts[0] ? photos(precedents[key(alts[0].use, alts[0].props)] ?? []).slice(0, 1) : [];
     return {
       ...q, pick,
       label: { app: e.target, file: e.file, line: e.line, sourceRef: o.sourceRef?.(e) ?? 'worktree', elementHash: e.srcHash ?? hashText(String(e.snippet ?? e.id)) },
       examples, altExamples: altEx, usesCount: mine.length,
-      nearest, systemExample: !mine.length && own?.url && own.check === 'exact' && !own.unstyled ? { url: own.url } : null,
+      nearest, systemExample: !mine.length && own?.url && own.check === 'exact' && !own.unstyled && !own.bare ? { url: own.url } : null,
       // Said as "doesn't use it" only when the search read the whole app.
       searched: scope ? { files: scope.files, unread: scope.unread, whole: scope.files > 0 && scope.unread === 0 } : null,
     };

@@ -204,10 +204,10 @@ function NowStrip({ items, pick }: { items: any[]; pick: any }) {
       {shown.map(e => {
         const p = pick?.verdict === "replace" ? proposalFor(pick, e) : null
         return (
-          <figure key={e.id} className="m-0 flex flex-col gap-1">
-            <div className="flex items-center gap-2">
-              <span className="w-fit rounded-md border bg-background p-0.5" data-pane="now"><Crop url={e.shot.url} box={e.shot.box} alt={`Now: ${nameOf(e)}`} /></span>
-              {p?.url && <><ArrowRightIcon className="shrink-0 text-muted-foreground" aria-label="becomes" /><span className="w-fit rounded-md border bg-background p-0.5" data-pane="now-proposed"><Natural url={p.url} alt={`Proposed: ${SYS} ${p.partUse ?? pickText(pick)}${ownSays(p, e) ? `, ${ownSays(p, e)}` : ""}`} /></span></>}
+          <figure key={e.id} className="m-0 flex max-w-full min-w-0 flex-col gap-1">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="w-fit max-w-full min-w-0 rounded-md border bg-background p-0.5" data-pane="now"><Crop url={e.shot.url} box={e.shot.box} alt={`Now: ${nameOf(e)}`} /></span>
+              {p?.url && <><ArrowRightIcon className="shrink-0 text-muted-foreground" aria-label="becomes" /><span className="w-fit max-w-full min-w-0 rounded-md border bg-background p-0.5" data-pane="now-proposed"><Natural url={p.url} alt={`Proposed: ${SYS} ${p.partUse ?? pickText(pick)}${ownSays(p, e) ? `, ${ownSays(p, e)}` : ""}`} /></span></>}
             </div>
             <figcaption className="text-[11px] text-muted-foreground">Now{p?.url ? ` → ${ownSays(p, e) || "proposed"}` : ""}</figcaption>
           </figure>

@@ -244,21 +244,30 @@ export const proposalFor = (r: any, e?: any): any | null => {
   // Drawn with this element's own words and icon, when it was; else the proposal with the story's content,
   // which never counts as this element's own.
   const mine = e?.ownHash ? all[`${key}#${e.ownHash}`] : null
-  const p = mine ?? (all[key] ? { ...all[key], own: false } : null)
+  const p = atWidthOf(mine ?? (all[key] ? { ...all[key], own: false } : null), e)
   if (!p || !e || !wholeForPart(p, e)) return p
   // One small part proposed as the whole it belongs to: compared with that part, when one is drawn (review.ts).
   for (const a of e.alternatives ?? []) {
     if (!a?.use || a.use === r.use) continue
-    const part = e.ownHash ? all[`${proposalKey(a.use, a.props)}#${e.ownHash}`] : all[proposalKey(a.use, a.props)]
+    const part = atWidthOf(e.ownHash ? all[`${proposalKey(a.use, a.props)}#${e.ownHash}`] : all[proposalKey(a.use, a.props)], e)
     if (part?.url && !wholeForPart(part, e)) return { ...part, partOf: r.use, partUse: a.use }
   }
   return { ...p, wholeForPart: true }
 }
 
-/** Is the drawing many times the element? Then it's what the element belongs to (review.ts, the same rule). */
+/** A drawing that fills its container, at the width nearest this element's (review.ts, the same rule). */
+export const atWidthOf = (p: any, e: any): any => {
+  if (!p?.sizes?.length) return p
+  const w = e?.shot?.box?.w
+  const s = w ? [...p.sizes].sort((a: any, b: any) => Math.abs(a.for - w) - Math.abs(b.for - w))[0] : p.sizes[0]
+  return { ...p, url: s.url, w: s.w, h: s.h }
+}
+
+/** Is the drawing many times the element, not counting width it only has from its container? (review.ts, the same rule) */
 const wholeForPart = (p: any, e: any): boolean => {
   const b = e?.shot?.box
-  return Boolean(p?.w && p?.h && b?.w && b?.h && p.w * p.h >= 9 * b.w * b.h)
+  if (!p?.w || !p?.h || !b?.w || !b?.h) return false
+  return (p.fills ? Math.min(p.w, b.w) : p.w) * p.h >= 9 * b.w * b.h
 }
 
 /** The element's words as its photo recorded them (else its label). */

@@ -1,5 +1,5 @@
 import { expect, test, vi } from 'vitest';
-import { STUCK, __test, drawingReport, drawnSummary, replaceStuck, reusable, unstyledLook, withinLimit } from '../src/rendered.js';
+import { STUCK, __test, drawWidths, drawingReport, drawnSummary, replaceStuck, reusable, unstyledLook, withinLimit } from '../src/rendered.js';
 import { crawlEntries, staleDeps } from '../src/harness.js';
 const assert_ = (a: unknown, b: unknown) => expect(a).toBe(b);
 
@@ -7,7 +7,7 @@ const assert_ = (a: unknown, b: unknown) => expect(a).toBe(b);
 // own, so the cache draws it again instead of keeping it.
 
 const own = { text: 'Library' };
-const drawn = (o: object = {}) => ({ use: 'Button', props: {}, check: 'exact' as const, shot: 'a.png', checked: 2, own: true, hash: 'h', ...o });
+const drawn = (o: object = {}) => ({ use: 'Button', props: {}, check: 'exact' as const, shot: 'a.png', checked: 3, own: true, hash: 'h', ...o });
 
 test('a cached own-content drawing with no recorded words is drawn again', () => {
   expect(reusable(drawn() as any, { use: 'Button', props: {}, own } as any, 'h')).toBe(false);
@@ -23,7 +23,7 @@ test('one that drew the element’s own words, with the same inputs, stands', ()
 });
 
 test('a plain drawing (no own content wanted) stands on its hash alone', () => {
-  expect(reusable({ use: 'Button', props: {}, check: 'exact', shot: 'a.png', checked: 2, hash: 'h' } as any, { use: 'Button', props: {} } as any, 'h')).toBe(true);
+  expect(reusable({ use: 'Button', props: {}, check: 'exact', shot: 'a.png', checked: 3, hash: 'h' } as any, { use: 'Button', props: {} } as any, 'h')).toBe(true);
 });
 
 test("a browser's defaults mean the system's stylesheet didn't reach the drawing", () => {
@@ -36,7 +36,7 @@ test('a drawing made before drawings recorded their font, or without the system 
   const p = { use: 'Button', props: {} } as any;
   assert_(reusable({ use: 'Button', props: {}, check: 'exact', hash: 'h', styles: { fontSize: '14px' } } as any, p, 'h'), false);
   assert_(reusable({ use: 'Button', props: {}, check: 'exact', hash: 'h', unstyled: true, styles: { fontFamily: 'Times' } } as any, p, 'h'), false);
-  assert_(reusable({ use: 'Button', props: {}, check: 'exact', shot: 'a.png', checked: 2, hash: 'h', styles: { fontFamily: 'Inter' } } as any, p, 'h'), true);
+  assert_(reusable({ use: 'Button', props: {}, check: 'exact', shot: 'a.png', checked: 3, hash: 'h', styles: { fontFamily: 'Inter' } } as any, p, 'h'), true);
 });
 
 test('a render always says how many drawings the styles missed and which elements they are, zero included', () => {
@@ -103,7 +103,7 @@ test('a picture nobody looked at is drawn again, whatever it claims', () => {
   const own = { use: 'Button', props: {}, own: { text: 'Open drawer' } } as any;
   const drawn = { use: 'Button', props: {}, check: 'exact', shot: 'a.png', own: true, text: 'Open drawer', hash: 'h' } as any;
   assert_(reusable(drawn, own, 'h'), false);
-  assert_(reusable({ ...drawn, checked: 2 }, own, 'h'), true);
+  assert_(reusable({ ...drawn, checked: 3 }, own, 'h'), true);
 });
 
 test('work past its limit counts as stuck; work that finishes or fails in time does not', async () => {
@@ -154,9 +154,27 @@ test('a drawing from before the check changed is looked at again', () => {
   const want = { use: 'Button', props: {} } as any;
   const base = { use: 'Button', props: {}, check: 'exact', shot: 'a.png', hash: 'h', styles: { fontFamily: 'Inter' } } as any;
   expect(reusable({ ...base, checked: true }, want, 'h')).toBe(false);
-  expect(reusable({ ...base, checked: 2 }, want, 'h')).toBe(true);
+  expect(reusable({ ...base, checked: 3 }, want, 'h')).toBe(true);
   // A field's words count as its words.
   const field = { ...want, own: { value: 'Walnut' } };
-  expect(reusable({ ...base, checked: 2, own: true, text: 'Walnut' }, field, 'h')).toBe(true);
-  expect(reusable({ ...base, checked: 2, own: true, text: 'Other' }, field, 'h')).toBe(false);
+  expect(reusable({ ...base, checked: 3, own: true, text: 'Walnut' }, field, 'h')).toBe(true);
+  expect(reusable({ ...base, checked: 3, own: true, text: 'Other' }, field, 'h')).toBe(false);
+});
+
+test('the widths to draw at: close ones share, the typical one comes first, and there is a limit', () => {
+  expect(drawWidths(undefined)).toEqual([]);
+  expect(drawWidths([300, 161, 163, 96])).toEqual([161, 96, 300]);
+  const many = drawWidths(Array.from({ length: 40 }, (_, i) => 100 + i * 10));
+  expect(many.length).toBe(12);
+  expect(Math.min(...many)).toBe(100);
+  expect(Math.max(...many)).toBe(490);
+});
+
+test('a drawing that fills its container is drawn again when an element it has no size for wants it', () => {
+  const base = { use: 'Field', props: {}, check: 'exact', shot: 'a.png', hash: 'h', checked: 3, fills: true, sizes: [{ for: 160, shot: 'a.png', w: 160, h: 36 }] } as any;
+  expect(reusable(base, { use: 'Field', props: {}, widths: [160] } as any, 'h')).toBe(true);
+  expect(reusable(base, { use: 'Field', props: {}, widths: [162] } as any, 'h')).toBe(false);
+  expect(reusable(base, { use: 'Field', props: {}, widths: [160, 400] } as any, 'h')).toBe(false);
+  // One that doesn't fill has one picture, whatever its elements' widths.
+  expect(reusable({ ...base, fills: undefined, sizes: undefined }, { use: 'Field', props: {}, widths: [400] } as any, 'h')).toBe(true);
 });

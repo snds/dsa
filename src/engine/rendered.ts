@@ -64,6 +64,12 @@ export interface Proposal {
   innerLost?: boolean | undefined;
   /** When it couldn't be drawn with these props: the component's story as its authors wrote it, to show instead. */
   fallback?: string | undefined;
+  /** Its width comes from its container: what a drawing was given to fill says nothing about the component. */
+  fills?: boolean | undefined;
+  /** A drawing that fills its container, drawn at the widths of the elements it's for. The first is `shot`. */
+  sizes?: { for: number; shot: string; w: number; h: number }[] | undefined;
+  /** A control whose content is its words, drawn with none: it shows nothing of how the system looks. */
+  bare?: boolean | undefined;
   /** Drawn from the system's own source (harness.ts), or from one of its stories. */
   via?: 'source' | 'story' | undefined;
 }
