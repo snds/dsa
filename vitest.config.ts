@@ -19,6 +19,8 @@ export default defineConfig({
   },
   esbuild: { jsx: "automatic" },
   test: {
+    // A headless browser can take over 10 seconds to close when the whole suite is running.
+    hookTimeout: 30_000,
     include: ["test/**/*.test.ts", "packages/*/test/**/*.test.ts", "packages/dashboard/ui/test/**/*.test.tsx"],
     testTimeout: 30_000,
   },

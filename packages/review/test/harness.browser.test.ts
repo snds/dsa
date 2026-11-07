@@ -229,3 +229,65 @@ export function PickItem({ children }) { return h(Menu.Item, { 'data-slot': 'pic
     assert.match(seen.why!, /see-through/);
   } finally { await page.close(); await h!.stop(); }
 });
+
+// A page that never returns: Playwright's evaluate has no timeout, so one component looping forever used to hold a whole run.
+function demoWithBrowser() {
+  const root = fixtureCopy();
+  fs.cpSync(path.resolve(import.meta.dirname, '../../../test/fixtures/review-demo'), root, { recursive: true });
+  fs.symlinkSync(KIT, path.join(root, 'node_modules'), 'dir');
+  return { root, data: path.join(root, '.dsa') };
+}
+
+test('a component that never returns: the run finishes, reports it as not drawn and names it, and the rest is saved and reused', { timeout: 240_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  if (!hasKit) skip('no Vite and React installed');
+  const { root, data } = demoWithBrowser();
+  fs.rmSync(path.join(root, 'storybook-static'), { recursive: true });
+  await runPipeline({ root, dataDir: data, git: false, now: NOW });
+  // Toggle now hangs its page whenever it's drawn.
+  fs.writeFileSync(path.join(root, 'packages/ds-react/src/Toggle.tsx'), 'export function Toggle() { while (true) {} }\n');
+  const config = { ...loadConfig(root).config, live: parseConfig({ live: {} }).live, rendered: { drawSeconds: 5 } } as any;
+  const logs: string[] = [];
+  let savedBy10 = -1;
+  await renderProposals({ root, config, dataDir: data, log: m => { logs.push(m); if (/rendered 10\//.test(m)) savedBy10 = Object.keys(readProposals(data)).length; } });
+  const p = readProposals(data);
+  const toggles = Object.entries(p).filter(([, v]) => v.use === 'Toggle');
+  assert.ok(toggles.length > 0, 'the demo proposes Toggle');
+  for (const [k, v] of toggles) {
+    assert.deepEqual([v.check, v.shot], ['none', undefined], `${k} is not drawn`);
+    assert.match(v.note ?? '', /took longer than \d+ seconds .* stuck in a loop/);
+    assert.ok(logs.some(l => l.includes(k) && l.includes('Toggle') && /from the system's source/.test(l)), `the log names ${k}:\n${logs.join('\n')}`);
+  }
+  assert.ok(logs.some(l => new RegExp(`Stopped for taking too long: ${toggles.length} drawing`).test(l)), logs.join('\n'));
+  // The clean page carried on: everything else is still drawn from source.
+  const others = Object.values(p).filter(v => v.use !== 'Toggle');
+  assert.ok(others.filter(v => v.shot && v.via === 'source').length >= 4, JSON.stringify(others));
+  for (const v of others) assert.doesNotMatch(v.note ?? '', /took longer/, 'only the one that hangs is stopped');
+  // Saved along the way, so a run killed here would have kept them.
+  if (Object.keys(p).length > 10) assert.ok(savedBy10 >= 9, `${savedBy10} on disk by the tenth drawing`);
+  // A rerun picks up from what was saved: only the failed ones are tried again.
+  fs.writeFileSync(path.join(root, 'packages/ds-react/src/Toggle.tsx'), fs.readFileSync(path.resolve(import.meta.dirname, '../../../test/fixtures/review-demo/packages/ds-react/src/Toggle.tsx')));
+  const looked = Object.values(p).filter(v => v.checked).length;
+  const again = await renderProposals({ root, config, dataDir: data });
+  assert.ok(looked >= 4 && again.reused >= looked, `${again.reused} reused of ${looked} that were drawn and checked`);
+  const after = readProposals(data);
+  for (const [k] of toggles) assert.doesNotMatch(after[k]!.note ?? '', /took longer/, `${k} isn't stopped once its loop is gone`);
+  assert.ok(toggles.some(([k]) => after[k]!.shot), 'and with its own words, it is drawn');
+});
+
+test('a story that never returns: the drawing keeps what it had, and the rest of the run carries on', { timeout: 180_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  const { root, data } = demoWithBrowser();
+  const frame = path.join(root, 'storybook-static/iframe.html');
+  fs.writeFileSync(frame, fs.readFileSync(frame, 'utf8').replace('<head>', `<head><script>if (new URLSearchParams(location.search).get('id') === 'button--icon') while (true) {}</script>`));
+  await runPipeline({ root, dataDir: data, git: false, now: NOW });
+  const config = { ...loadConfig(root).config, live: parseConfig({ live: { storybook: { dir: 'storybook-static' } } }).live, rendered: { harness: false, drawSeconds: 4 } } as any;
+  const logs: string[] = [];
+  await renderProposals({ root, config, dataDir: data, log: m => logs.push(m) });
+  const stopped = logs.filter(l => /Stopped after \d+ seconds: .*story button--icon/.test(l));
+  assert.ok(stopped.length > 0, logs.join('\n'));
+  const p = readProposals(data);
+  const buttons = Object.values(p).filter(v => v.use === 'Button');
+  assert.ok(buttons.some(v => v.check === 'exact' && v.shot), 'the other stories are still drawn, on a clean page');
+  assert.ok(buttons.some(v => v.props.size === 'icon' && v.shot && v.check === 'closest'), 'one that hung on its last story keeps the picture it had');
+});

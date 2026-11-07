@@ -29,6 +29,51 @@ export const READ_STYLE = `(el) => {
   };
 }`;
 
+/** How long one drawing may take before its page counts as stuck (`rendered.drawSeconds`). */
+const DRAW_SECONDS = 30;
+/** The first drawing on a page also waits for its server to build what it needs, so it gets this many times as long. */
+const FIRST_DRAW = 5;
+/** A page that's opening has limits on each step, but not on the calls between them. */
+const OPEN_MS = 300_000;
+const CLOSE_MS = 5_000;
+const SAVE_EVERY = 10;
+
+/** What `withinLimit` gives back when the work didn't finish in time. */
+export const STUCK = Symbol('stuck');
+
+/**
+ * The work's answer, or STUCK if it's still going after `ms`. Playwright's `page.evaluate` has no timeout, so a
+ * page looping forever would otherwise hold the run forever. The late work stops when its page closes.
+ */
+export async function withinLimit<T>(work: () => Promise<T>, ms: number): Promise<T | typeof STUCK> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<typeof STUCK>(r => { timer = setTimeout(() => r(STUCK), ms); });
+  try { return await Promise.race([work(), late]); } finally { clearTimeout(timer); }
+}
+
+/** Close something that may be stuck. False only if it never answered: a close that fails left nothing open. */
+async function closed(close: () => Promise<unknown>, ms = CLOSE_MS): Promise<boolean> {
+  return (await withinLimit(close, ms).catch(() => undefined)) !== STUCK;
+}
+
+/**
+ * Get a clean page in place of a stuck one. A stuck renderer may not answer a close, so that has a limit too;
+ * then the whole browser goes, and every page it held is opened again.
+ */
+export async function replaceStuck<B extends { close: () => Promise<unknown> }>(o: { page: { close: (a?: any) => Promise<unknown> } | null | undefined; browser: B; launch: () => Promise<B>; open: (b: B) => Promise<void>; openAll: (b: B) => Promise<void>; log: (m: string) => void; closeMs?: number }): Promise<B> {
+  if (!o.page || await closed(() => o.page!.close({ runBeforeUnload: false }), o.closeMs)) {
+    try { await o.open(o.browser); return o.browser; } catch { /* the browser itself has gone: a new one */ }
+  }
+  o.log("  A stuck page wouldn't close, so the browser was restarted.");
+  if (!(await closed(() => o.browser.close(), o.closeMs))) o.log("  The old browser wouldn't close either, so it was left behind. It goes when this run ends.");
+  const browser = await o.launch();
+  await o.openAll(browser);
+  return browser;
+}
+
+/** A drawing stopped for taking too long, named in the render log. */
+export interface StuckDraw { key: string; use: string; where: string[]; from: string; seconds: number }
+
 interface StoryCache { hash: string; files: string[]; results: { component: string; key: string; styles: Styles; shot?: string }[] }
 
 const sha = (s: string | Buffer) => crypto.createHash('sha1').update(s).digest('hex').slice(0, 16);
@@ -96,8 +141,10 @@ export async function renderSignatures(opts: { root: string; config: Config; dat
     log(`Storybook (${source}): ${stories.length} stories, ${wanted.length} cover components with signatures · ${reused} unchanged (cached) · ${todo.length} to measure.`);
     if (todo.length) {
       const pw = await ensureBrowser(log);
-      const browser = await pw.chromium.launch();
-      const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2, ...(storageState ? { storageState } : {}) });
+      let browser = await pw.chromium.launch();
+      const openPage = (b: any) => b.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2, ...(storageState ? { storageState } : {}) });
+      let page = await openPage(browser);
+      const limit = (opts.config.rendered?.drawSeconds ?? DRAW_SECONDS) * 1000;
       try {
         const started = Date.now();
         const budget = (opts.config.rendered?.maxMinutes ?? 8) * 60000;
@@ -107,38 +154,53 @@ export async function renderSignatures(opts: { root: string; config: Config; dat
           if (Date.now() - started > budget) { out.notes.push(`Stopped after ${n - 1} of ${todo.length} stories (rendered.maxMinutes); the rest are measured next run.`); log(`  time budget reached after ${n - 1} stories`); break; }
           if (n === 1 || n % 10 === 0 || n === todo.length) log(`  measuring stories ${n}/${todo.length}…`);
           const comps = byStem.get(path.basename(s.importPath).replace(/\.stories\.tsx?$/, ''))!;
-          try {
-            // Storybook dev keeps connections open (HMR), so "network idle" never comes: wait for the story to render instead.
-            await page.goto(new URL(`iframe.html?id=${encodeURIComponent(s.id)}&viewMode=story`, url).toString(), { waitUntil: 'domcontentloaded', timeout: 60000 });
-            await page.waitForFunction(`(() => { const r = document.querySelector('#storybook-root, #root'); return r && r.children.length > 0; })()`, null, { timeout: n === 1 ? 90000 : 20000 });
-            await page.waitForTimeout(250);
-          } catch (e: any) { out.notes.push(`${s.id}: ${String(e.message).split('\n')[0]}`); continue; }
-          const results: StoryCache['results'] = [];
-          for (const c of comps) {
-            const found: { key: string; styles: Styles; idx: number }[] = await page.evaluate(`(() => {
-              const read = ${READ_STYLE};
-              const els = Array.from(document.querySelectorAll('[data-slot="${c.slot}"]'));
-              const seen = new Set(); const out = [];
-              els.forEach((el, idx) => {
-                const r = el.getBoundingClientRect(); if (!r.width || !r.height) return;
-                if (el.matches(':disabled,[aria-disabled="true"],[data-disabled]')) return;
-                const key = (el.getAttribute('data-variant') || '${c.defaults?.variant ?? 'default'}') + '/' + (el.getAttribute('data-size') || '${c.defaults?.size ?? 'default'}');
-                if (seen.has(key)) return; seen.add(key);
-                el.setAttribute('data-dsa-r', String(idx));
-                out.push({ key, styles: read(el), idx });
-              });
-              return out;
-            })()`);
-            for (const f of found) {
-              const file = `${c.component}-${f.key.replace(/[^\w-]+/g, '_')}-${sha(s.id).slice(0, 6)}.png`;
-              const shot = await shoot(page, `[data-dsa-r="${f.idx}"][data-slot="${c.slot}"]`, path.join(dir, file));
-              results.push({ component: c.component, key: f.key, styles: f.styles, shot: shot ? file : undefined });
+          const storyPage = page;
+          const ms = limit * (n === 1 ? FIRST_DRAW : 2);
+          const measuredStory = await withinLimit(async () => {
+            const page = storyPage;
+            try {
+              // Storybook dev keeps connections open (HMR), so "network idle" never comes: wait for the story to render instead.
+              await page.goto(new URL(`iframe.html?id=${encodeURIComponent(s.id)}&viewMode=story`, url).toString(), { waitUntil: 'domcontentloaded', timeout: 60000 });
+              await page.waitForFunction(`(() => { const r = document.querySelector('#storybook-root, #root'); return r && r.children.length > 0; })()`, null, { timeout: n === 1 ? 90000 : 20000 });
+              await page.waitForTimeout(250);
+            } catch (e: any) { out.notes.push(`${s.id}: ${String(e.message).split('\n')[0]}`); return null; }
+            const results: StoryCache['results'] = [];
+            for (const c of comps) {
+              const found: { key: string; styles: Styles; idx: number }[] = await page.evaluate(`(() => {
+                const read = ${READ_STYLE};
+                const els = Array.from(document.querySelectorAll('[data-slot="${c.slot}"]'));
+                const seen = new Set(); const out = [];
+                els.forEach((el, idx) => {
+                  const r = el.getBoundingClientRect(); if (!r.width || !r.height) return;
+                  if (el.matches(':disabled,[aria-disabled="true"],[data-disabled]')) return;
+                  const key = (el.getAttribute('data-variant') || '${c.defaults?.variant ?? 'default'}') + '/' + (el.getAttribute('data-size') || '${c.defaults?.size ?? 'default'}');
+                  if (seen.has(key)) return; seen.add(key);
+                  el.setAttribute('data-dsa-r', String(idx));
+                  out.push({ key, styles: read(el), idx });
+                });
+                return out;
+              })()`);
+              for (const f of found) {
+                const file = `${c.component}-${f.key.replace(/[^\w-]+/g, '_')}-${sha(s.id).slice(0, 6)}.png`;
+                const shot = await shoot(page, `[data-dsa-r="${f.idx}"][data-slot="${c.slot}"]`, path.join(dir, file));
+                results.push({ component: c.component, key: f.key, styles: f.styles, shot: shot ? file : undefined });
+              }
             }
+            return results;
+          }, ms);
+          if (measuredStory === STUCK) {
+            out.notes.push(`${s.id}: stopped after ${ms / 1000} seconds. It may be stuck in a loop.`);
+            log(`  Stopped after ${ms / 1000} seconds, so not measured: story ${s.id}.`);
+            let fresh: any = null;
+            browser = await replaceStuck({ page, browser, launch: () => pw.chromium.launch(), open: async b => { fresh = await openPage(b); }, openAll: async b => { fresh = await openPage(b); }, log });
+            page = fresh;
+            continue;
           }
-          out.stories[s.id] = { hash: hashFiles(inputsOf(s), tHash), files: inputsOf(s), results };
+          if (!measuredStory) continue;
+          out.stories[s.id] = { hash: hashFiles(inputsOf(s), tHash), files: inputsOf(s), results: measuredStory };
           measured++;
         }
-      } finally { await browser.close(); }
+      } finally { await closed(() => browser.close()); }
     }
     // Assemble: stories in rank order, first story that shows a combination wins.
     for (const s of wanted) for (const r of out.stories[s.id]?.results ?? []) {
@@ -162,7 +224,7 @@ export async function renderSignatures(opts: { root: string; config: Config; dat
  * What a render says about its drawings, every time, zero included: how many the system's styles didn't
  * reach and how many miss what their element holds, each with the elements it caught.
  */
-export function drawingReport(items: Record<string, Proposal>, want: Map<string, Wanted>, source?: { failed: number; first?: string | undefined; reloads?: number | undefined } | null): string[] {
+export function drawingReport(items: Record<string, Proposal>, want: Map<string, Wanted>, source?: { failed: number; first?: string | undefined; reloads?: number | undefined; stuck?: StuckDraw[] | undefined } | null): string[] {
   const name = (k: string) => { const p = items[k]!, w = want.get(k); const props = Object.entries(p.props ?? {}).map(([a, b]) => `${a}=${b}`).join(' '); return `${p.use}${props ? ` ${props}` : ''} (${(w?.where ?? []).slice(0, 2).join(', ') || 'no element'})`; };
   const named = (keys: string[]) => (keys.length ? `: ${keys.slice(0, 8).map(name).join('; ')}${keys.length > 8 ? `; and ${keys.length - 8} more` : ''}` : '');
   const keys = Object.keys(items);
@@ -176,6 +238,8 @@ export function drawingReport(items: Record<string, Proposal>, want: Map<string,
     ...(source?.failed ? [`  From the system's source: ${source.failed} couldn't be drawn, so stories were tried. First reason: ${source.first ?? 'none given'}`] : []),
     ...(source?.reloads ? [`  The drawing page was reloaded ${source.reloads} time${source.reloads === 1 ? '' : 's'} because Vite rebuilt its dependencies during the run.`] : []),
     ...failureReasons(items),
+    `  Stopped for taking too long: ${source?.stuck?.length ?? 0} drawing${source?.stuck?.length === 1 ? '' : 's'}.${source?.stuck?.length ? ' Each one may be stuck in a loop:' : ''}`,
+    ...(source?.stuck ?? []).map(d => `    ${d.key} · ${d.use} · from ${d.from}, after ${d.seconds} seconds · ${items[d.key]?.shot ? 'drawn another way' : 'not drawn'}${d.where.length ? ` · ${d.where.slice(0, 2).join(', ')}` : ''}`),
   ];
 }
 
@@ -320,7 +384,10 @@ export async function renderProposals(opts: { root: string; config: Config; data
   const reused = Object.keys(items).length;
   const write = () => {
     fs.mkdirSync(path.join(opts.dataDir, 'rendered'), { recursive: true });
-    fs.writeFileSync(path.join(opts.dataDir, 'rendered', 'proposals.json'), JSON.stringify({ takenAt: new Date().toISOString(), items }, null, 1));
+    // Whole or not at all: a run killed mid-save keeps the last save, and the next run picks up from it.
+    const file = path.join(opts.dataDir, 'rendered', 'proposals.json');
+    fs.writeFileSync(`${file}.${process.pid}.tmp`, JSON.stringify({ takenAt: new Date().toISOString(), items }, null, 1));
+    fs.renameSync(`${file}.${process.pid}.tmp`, file);
   };
   const exactCount = () => Object.values(items).filter(p => p.check === 'exact').length;
   if (!todo.length) { write(); log(`${drawnSummary(items)} (all cached).`); for (const l of drawingReport(items, want)) log(l); return { rendered: 0, reused, exact: exactCount() }; }
@@ -329,22 +396,25 @@ export async function renderProposals(opts: { root: string; config: Config; data
   fs.mkdirSync(dir, { recursive: true });
   log(`Proposed components: ${todo.length} to render with their props, ${reused} cached.`);
   const pw = await ensureBrowser(log);
-  const browser = await pw.chromium.launch();
+  let browser = await pw.chromium.launch();
   let rendered = 0;
+  const limit = (opts.config.rendered?.drawSeconds ?? DRAW_SECONDS) * 1000;
   // The system's own source: started once, when something needs drawing.
-  let harness: Harness | null = null, hpage: any = null, harnessTried = false;
+  let harness: Harness | null = null, hpage: any = null, harnessTried = false, sourceWarm = false;
+  const dropHarness = async (why: string) => { log(why); await withinLimit(() => (harness as Harness | null)?.stop() ?? Promise.resolve(), CLOSE_MS).catch(() => {}); harness = null; hpage = null; };
+  const openSource = async (b: any) => {
+    hpage = await b.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2 });
+    if ((await withinLimit(() => openHarness(hpage, harness!), OPEN_MS)) !== true) { await closed(() => hpage.close({ runBeforeUnload: false })); await dropHarness("  Proposals: the drawing page didn't load; drawing from its stories."); }
+  };
   const source = async () => {
     if (harnessTried) return harness;
     harnessTried = true;
     try { harness = await startHarness(opts.root, opts.config, sigs.filter(c => c.file).map(c => c.file), log); } catch (e: any) { log(`  Proposals: the system's source didn't start for drawing (${String(e?.message ?? e).split('\n')[0]}); drawing from its stories.`); harness = null; }
-    if (harness) {
-      hpage = await browser.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2 });
-      if (!(await openHarness(hpage, harness))) { log("  Proposals: the drawing page didn't load; drawing from its stories."); await harness.stop().catch(() => {}); harness = null; }
-    }
+    if (harness) await openSource(browser);
     return harness;
   };
   // Its stories: started only when the source didn't draw something exactly.
-  let sbs: { url: string; stories: any[]; page: any; stop: () => void } | null = null, sbWhy: string | null = null;
+  let sbs: { url: string; stories: any[]; page: any; stop: () => void; open: (b: any) => Promise<any>; warm: boolean } | null = null, sbWhy: string | null = null;
   const storybook = async () => {
     if (sbs || sbWhy) return sbs;
     try {
@@ -352,36 +422,71 @@ export async function renderProposals(opts: { root: string; config: Config; data
       if (!sb) { const started = await startStorybook(opts.root, opts.config, log); sb = started; stop = started.stop; }
       const index: any = await storyIndex(sb.url, sb.cookie);
       const stories = Object.values<any>(index.entries ?? index.stories ?? {}).filter(st => st.type !== 'docs' && st.importPath);
-      const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2, ...(sb.storageState ? { storageState: sb.storageState } : {}) });
-      sbs = { url: sb.url, stories, page, stop };
+      const open = (b: any) => b.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2, ...(sb!.storageState ? { storageState: sb!.storageState } : {}) });
+      sbs = { url: sb.url, stories, page: await open(browser), stop, open, warm: false };
     } catch (e: any) { sbWhy = String(e?.message ?? e).split('\n')[0]!; log(`  Proposals: no stories to draw from (${sbWhy}).`); }
     return sbs;
   };
   let srcFailed = 0, srcFirst: string | undefined;
   const fresh: FreshDraw = { reloads: 0, gaveUp: new Set() };
+  const stuck: StuckDraw[] = [];
+  // A clean page in place of one that stopped answering: the rest of the run carries on with it.
+  const renew = async (which: 'source' | 'story') => {
+    const s0 = sbs as NonNullable<typeof sbs> | null;
+    browser = await replaceStuck({
+      page: which === 'source' ? hpage : s0?.page, browser, launch: () => pw.chromium.launch(), log,
+      open: async b => { if (which === 'source') await openSource(b); else s0!.page = await s0!.open(b); },
+      openAll: async b => { if (harness) await openSource(b); if (s0) s0.page = await s0.open(b); },
+    });
+  };
+  const stopped = async (which: 'source' | 'story', k: string, p: Wanted, from: string, ms: number) => {
+    stuck.push({ key: k, use: p.use, where: p.where ?? [], from, seconds: ms / 1000 });
+    log(`  Stopped after ${ms / 1000} seconds: ${k} (${p.use}) from ${from}. It may be stuck in a loop.`);
+    await renew(which);
+    write();
+  };
+  const brokePage = (p: Wanted, via: Proposal['via'], e: any, hash: string): Proposal => ({ ...noOwn(p), check: 'none', via, note: `${p.use} couldn't be drawn: its page stopped working (${String(e?.message ?? e).split('\n')[0]}).`, hash });
   try {
+    let n = 0;
     for (const [k, p] of todo) {
+      if (++n % SAVE_EVERY === 0) write();
       const s = sigOf(p.use);
       if (!s) { items[k] = { ...noOwn(p), check: 'none', noSource: true, note: `${p.use} isn't a component dsa found in the design system's source, so it can't be drawn.`, hash: hashOf(p.use) }; continue; }
+      const hash = hashOf(p.use);
       let best: Proposal | null = null;
-      if (await source()) best = await fromSource(hpage, harness!, fresh, s, p, k, dir, hashOf(p.use));
+      if (await source()) {
+        const ms = sourceWarm ? limit : limit * FIRST_DRAW;
+        sourceWarm = true;
+        try {
+          const drawn = await withinLimit(() => fromSource(hpage, harness!, fresh, s, p, k, dir, hash), ms);
+          if (drawn === STUCK) {
+            await stopped('source', k, p, "the system's source", ms);
+            best = { ...noOwn(p), check: 'none', via: 'source', note: `${p.use} took longer than ${ms / 1000} seconds to draw from the system's source, so it was stopped. It may be stuck in a loop.`, hash };
+          } else best = drawn;
+        } catch (e) { await renew('source'); best = brokePage(p, 'source', e, hash); }
+      }
       if (best && best.check === 'none') { srcFailed++; srcFirst ??= best.note; }
       // Done: exact, with the element's own content, or (with none of its own) without a stand-in label.
       // Drawn with its own content and saying which words: one drawn before renders kept their text is drawn again.
       const done = (b: Proposal | null) => Boolean(b && b.check === 'exact' && b.shot && (p.own ? b.own && typeof b.text === 'string' : !b.content) && !b.unstyled && !b.innerLost);
-      if (!done(best) && (await storybook())) best = pickBetter(best, await fromStories(sbs!, s, p, k, dir, hashOf(p.use), rendered === 0));
-      items[k] = best ?? { ...noOwn(p), check: 'none', ...(sbWhy ? { noSource: true } : {}), note: `${p.use} couldn't be drawn${sbWhy ? `: there's no Storybook to draw it from (${sbWhy})` : ''}.`, hash: hashOf(p.use) };
+      if (!done(best) && (await storybook())) {
+        const sb = sbs!, first = !sb.warm;
+        sb.warm = true;
+        try { best = pickBetter(best, await fromStories(sb, s, p, k, dir, hash, first, { ms: limit, stopped: (from, ms) => stopped('story', k, p, from, ms) })); }
+        catch (e) { await renew('story'); best = pickBetter(best, brokePage(p, 'story', e, hash)); }
+      }
+      items[k] = best ?? { ...noOwn(p), check: 'none', ...(sbWhy ? { noSource: true } : {}), note: `${p.use} couldn't be drawn${sbWhy ? `: there's no Storybook to draw it from (${sbWhy})` : ''}.`, hash };
       rendered++;
       if (rendered % 10 === 0) log(`  rendered ${rendered}/${todo.length}…`);
     }
   } finally {
-    await browser.close().catch(() => {});
-    await (harness as Harness | null)?.stop().catch(() => {});
+    write();
+    await closed(() => browser.close());
+    await withinLimit(() => (harness as Harness | null)?.stop() ?? Promise.resolve(), CLOSE_MS).catch(() => {});
     (sbs as { stop: () => void } | null)?.stop();
   }
-  write();
   log(`${drawnSummary(items)}.`);
-  for (const l of drawingReport(items, want, srcFailed || fresh.reloads ? { failed: srcFailed, first: srcFirst, reloads: fresh.reloads } : null)) log(l);
+  for (const l of drawingReport(items, want, { failed: srcFailed, first: srcFirst, reloads: fresh.reloads, stuck })) log(l);
   return { rendered, reused, exact: exactCount() };
 }
 
@@ -460,7 +565,7 @@ const SHOWN = `({ sel, words, inner }) => {
     const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     while (walk.nextNode()) {
       const t = walk.currentNode, at = t.parentElement;
-      if (!t.nodeValue || at.closest(NOT_WORDS)) continue;
+      if (!t.nodeValue || (at && at.closest(NOT_WORDS))) continue;
       if (live) { const cs = getComputedStyle(at); if (cs.visibility !== 'visible' || !at.getClientRects().length || /material|symbols|icons?\\b|phosphor|awesome/i.test(cs.fontFamily)) continue; }
       out.push(t);
     }
@@ -514,8 +619,7 @@ const SHOWN_OWN = `({ sel, text, label }) => {
 }`;
 
 /** Draw one proposal from the component's stories: one that shows these props as written, else one driven by args. */
-async function fromStories(sb: { url: string; stories: any[]; page: any }, s: any, p: Wanted, k: string, dir: string, hash: string, first: boolean): Promise<Proposal> {
-  const page = sb.page;
+async function fromStories(sb: { url: string; stories: any[]; page: any }, s: any, p: Wanted, k: string, dir: string, hash: string, first: boolean, guard: { ms: number; stopped: (from: string, ms: number) => Promise<void> }): Promise<Proposal> {
   // Args-driven stories (Default, Playground), then ones showing many combinations, then the rest.
   const rank = (x: any) => (/default|playground|basic|primary/i.test(x.name) ? 0 : /all|variant|size|matrix|gallery|overview/i.test(x.name) ? 1 : 2);
   const stemOf = (f: string) => path.basename(f).split('.')[0]!.toLowerCase();
@@ -531,7 +635,9 @@ async function fromStories(sb: { url: string; stories: any[]; page: any }, s: an
   const iconSize = /icon/i.test(p.props.size ?? '');
   let icon: { html: string; story: string } | null = null;
   let n = 0;
-  for (const { st, set } of attempts) {
+  // One story with its own time limit: true when this drawing needs no more. A stuck story ends the search here.
+  const attempt = async (st: any, set: boolean): Promise<boolean> => {
+    const page = sb.page;
     try {
       await page.goto(new URL(`iframe.html?id=${encodeURIComponent(st.id)}&viewMode=story${set && args ? `&args=${encodeURIComponent(args)}` : ''}`, sb.url).toString(), { waitUntil: 'domcontentloaded', timeout: 60000 });
       await page.waitForFunction(`(() => { const r = document.querySelector('#storybook-root, #root'); return r && r.children.length > 0; })()`, null, { timeout: first && n++ === 0 ? 90000 : 20000 });
@@ -541,7 +647,7 @@ async function fromStories(sb: { url: string; stories: any[]; page: any }, s: an
         await page.waitForTimeout(600);
       }
       await page.waitForTimeout(250);
-    } catch { continue; }
+    } catch { return false; }
     if (iconSize && !icon) {
       const html: string | null = await page.evaluate(`(() => { const i = document.querySelector('[data-slot="${s.slot}"] [data-slot=icon], [data-slot="${s.slot}"] svg'); return i ? i.outerHTML : null; })()`);
       if (html) icon = { html, story: st.id };
@@ -555,10 +661,10 @@ async function fromStories(sb: { url: string; stories: any[]; page: any }, s: an
       if (await trigger.count()) { await trigger.click({ timeout: 2000 }).catch(() => {}); await page.waitForTimeout(500); found = await scan(); }
     }
     const top = topOf(found);
-    if (!top) continue;
+    if (!top) return false;
     const check: Proposal['check'] = top.contradicted ? 'closest' : top.unknown ? 'unverified' : 'exact';
     // A later story can still replace one as sure whose words turned out not to be the element's.
-    if (best && ORDER[best.check] <= ORDER[check] && !(p.own && !best.own && best.check === check)) continue;
+    if (best && ORDER[best.check] <= ORDER[check] && !(p.own && !best.own && best.check === check)) return false;
     const file = `proposal-${sha(k).slice(0, 12)}.png`;
     // The element's own words, name and icon in place of the story's: then the proposal is this element.
     const sel = `[data-dsa-p="${top.idx}"][data-slot="${s.slot}"]`;
@@ -566,21 +672,37 @@ async function fromStories(sb: { url: string; stories: any[]; page: any }, s: an
     if (own?.own) await page.waitForTimeout(120);
     const shot = await shoot(page, sel, path.join(dir, file));
     const seen = shot ? await lookAt(page, sel, path.join(dir, file), p, own) : { shows: false, why: 'no picture could be taken' };
-    if (!seen.shows) continue;
+    if (!seen.shows) return false;
     if (seen.notOwn) own = { own: false, why: seen.notOwn };
     const content = own?.own ? undefined : own?.why ? own.why : set ? (iconSize && icon ? `icon from ${icon.story}` : 'story default') : undefined;
     best = { ...noOwn(p), check, via: 'story', shot: file, ...(seen.notOwn ? {} : { checked: true }), styles: top.styles, ...(unstyledLook(top.styles) ? { unstyled: true } : {}), ...innerOf(p, own), story: st.id, ...(own?.own ? { own: true, text: p.own?.text ?? '' } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
-    if (check === 'exact' && (!p.own || own?.own || !seen.notOwn)) break;
+    return check === 'exact' && (!p.own || Boolean(own?.own) || !seen.notOwn);
+  };
+  let tried = 0;
+  for (const { st, set } of attempts) {
+    const ms = guard.ms * (first && tried++ === 0 ? FIRST_DRAW : 1);
+    const finished = await withinLimit(() => attempt(st, set), ms);
+    if (finished === STUCK) {
+      await guard.stopped(`story ${st.id}`, ms);
+      return best ?? { ...noOwn(p), check: 'none', via: 'story', story: st.id, note: `${p.use} took longer than ${ms / 1000} seconds to draw from its story, so it was stopped. It may be stuck in a loop.`, hash };
+    }
+    if (finished) break;
   }
   if (best) return best;
   // Nothing to photograph with these props: show the component's first story as its authors wrote it, and say why.
   let fallback: string | undefined;
-  try {
-    await page.goto(new URL(`iframe.html?id=${encodeURIComponent(candidates[0]!.id)}&viewMode=story`, sb.url).toString(), { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.waitForTimeout(400);
-    const f = `fallback-${sha(k).slice(0, 12)}.png`;
-    if (await shoot(page, '#storybook-root > *, #root > *', path.join(dir, f))) fallback = f;
-  } catch { /* no fallback */ }
+  const asWritten = await withinLimit(async () => {
+    const page = sb.page;
+    try {
+      await page.goto(new URL(`iframe.html?id=${encodeURIComponent(candidates[0]!.id)}&viewMode=story`, sb.url).toString(), { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await page.waitForTimeout(400);
+      const f = `fallback-${sha(k).slice(0, 12)}.png`;
+      if (await shoot(page, '#storybook-root > *, #root > *', path.join(dir, f))) return f;
+    } catch { /* no fallback */ }
+    return undefined;
+  }, guard.ms);
+  if (asWritten === STUCK) await guard.stopped(`story ${candidates[0]!.id}`, guard.ms);
+  else fallback = asWritten;
   return { ...noOwn(p), check: 'none', via: 'story', note: `${p.use} doesn't show in its stories: it may only appear inside something closed, like a menu or a dialog, and opening it didn't show it.${fallback ? ' Its story as written is shown instead.' : ''}`, story: candidates[0]!.id, ...(fallback ? { fallback } : {}), hash };
 }
 

@@ -1,5 +1,5 @@
-import { expect, test } from 'vitest';
-import { __test, drawingReport, drawnSummary, reusable, unstyledLook } from '../src/rendered.js';
+import { expect, test, vi } from 'vitest';
+import { STUCK, __test, drawingReport, drawnSummary, replaceStuck, reusable, unstyledLook, withinLimit } from '../src/rendered.js';
 import { crawlEntries, staleDeps } from '../src/harness.js';
 const assert_ = (a: unknown, b: unknown) => expect(a).toBe(b);
 
@@ -104,4 +104,48 @@ test('a picture nobody looked at is drawn again, whatever it claims', () => {
   const drawn = { use: 'Button', props: {}, check: 'exact', shot: 'a.png', own: true, text: 'Open drawer', hash: 'h' } as any;
   assert_(reusable(drawn, own, 'h'), false);
   assert_(reusable({ ...drawn, checked: true }, own, 'h'), true);
+});
+
+test('work past its limit counts as stuck; work that finishes or fails in time does not', async () => {
+  expect(await withinLimit(() => new Promise(() => {}), 10)).toBe(STUCK);
+  expect(await withinLimit(async () => 7, 1000)).toBe(7);
+  await expect(withinLimit(async () => { throw new Error('broke'); }, 1000)).rejects.toThrow('broke');
+});
+
+test('a stuck page is replaced; one that will not close takes the browser with it', async () => {
+  const never = () => new Promise<void>(() => {});
+  const old = { close: vi.fn(async () => {}) };
+  const made = { close: vi.fn(async () => {}) };
+  const opened: string[] = [];
+  const launch = vi.fn(async () => made);
+  const base = { browser: old, launch, open: async (b: any) => { opened.push(b === old ? 'one on the old browser' : 'one on the new browser'); }, openAll: async (b: any) => { opened.push(b === made ? 'all on the new browser' : 'all on the old browser'); }, log: () => {}, closeMs: 10 };
+  expect(await replaceStuck({ ...base, page: { close: async () => {} } })).toBe(old);
+  expect(opened).toEqual(['one on the old browser']);
+  expect(launch).not.toHaveBeenCalled();
+
+  opened.length = 0;
+  const logs: string[] = [];
+  expect(await replaceStuck({ ...base, page: { close: never }, log: m => logs.push(m) })).toBe(made);
+  expect(opened).toEqual(['all on the new browser']);
+  expect(old.close).toHaveBeenCalled();
+  expect(logs.join()).toContain('restarted');
+
+  // The browser won't answer either: left behind, and the run still gets a new one.
+  opened.length = 0; logs.length = 0;
+  expect(await replaceStuck({ ...base, browser: { close: never } as any, page: { close: never }, log: m => logs.push(m) })).toBe(made);
+  expect(logs.join()).toContain('left behind');
+  // A page that closed, but the browser can't open another: a new browser too.
+  opened.length = 0;
+  expect(await replaceStuck({ ...base, page: { close: async () => {} }, open: async () => { throw new Error('browser gone'); } })).toBe(made);
+  expect(opened).toEqual(['all on the new browser']);
+});
+
+test('the render log names each drawing that was stopped, zero included', () => {
+  const want = new Map() as any;
+  const items = { 'Menu#a': { use: 'Menu', props: {}, check: 'none', note: 'x' }, 'Tabs#b': { use: 'Tabs', props: {}, check: 'exact', shot: 'b.png' } } as any;
+  expect(drawingReport(items, want).join('\n')).toContain('Stopped for taking too long: 0 drawings.');
+  const log = drawingReport(items, want, { failed: 1, stuck: [{ key: 'Menu#a', use: 'Menu', where: ['src/A.tsx:4'], from: "the system's source", seconds: 30 }, { key: 'Tabs#b', use: 'Tabs', where: [], from: 'story tabs--default', seconds: 30 }] }).join('\n');
+  expect(log).toContain('Stopped for taking too long: 2 drawings.');
+  expect(log).toContain("Menu#a · Menu · from the system's source, after 30 seconds · not drawn · src/A.tsx:4");
+  expect(log).toContain('Tabs#b · Tabs · from story tabs--default, after 30 seconds · drawn another way');
 });

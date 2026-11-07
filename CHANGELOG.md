@@ -213,6 +213,13 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- `dsa render` can no longer hang on a page that never returns. Each drawing has a time limit (`rendered.drawSeconds`,
+  default 30; the first on a page gets five times as long). A drawing past it is stopped, recorded as not drawn
+  with a plain reason, and named in the render log with its key and component. The page is replaced, or the
+  browser restarted if the page won't close, and the run carries on. Rendered signatures get the same limit.
+- A render saves its proposals every 10 items, after a stopped drawing and if it fails, so a killed run keeps
+  its finished drawings and a rerun reuses them. Saves are whole or not at all.
+- A drawing whose inner content has bare words at its top level is no longer rejected as "could not be looked at".
 - Drawing proposals from source no longer breaks partway through a run. When Vite found a dependency late it
   rebuilt its bundle, and with the page open that loaded a second copy of React, so components imported
   afterward failed with "Cannot read properties of null (reading 'useRef')". Vite now reads every component

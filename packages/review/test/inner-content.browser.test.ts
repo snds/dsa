@@ -109,3 +109,13 @@ test("a sample's bare words beside its icon-font glyph are replaced, and the gly
     assert.equal(await page.locator('[data-slot=b] svg').count(), 1);
   } finally { await page.close(); }
 });
+
+test('inner content with bare words at its top level is compared, not thrown out', { timeout: 60_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  const page = await browser!.newPage();
+  try {
+    await page.setContent('<button data-slot="b" style="font:14px sans-serif">Blue <span>swatch</span></button>');
+    const seen = await r.run<any>(page, r.SHOWN, { sel: '[data-slot=b]', words: 'Blue swatch', inner: 'Blue <span>swatch</span>' });
+    assert.deepEqual(seen, { shows: true });
+  } finally { await page.close(); }
+});
