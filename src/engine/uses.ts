@@ -177,6 +177,26 @@ export function lookRules(system: readonly SystemLook[] | null | undefined) {
   };
 }
 
+const NOT_PRODUCT_WORDS = new Set(['lab', 'labs', 'specimen', 'specimens', 'demo', 'demos', 'playground', 'playgrounds', 'sandbox', 'sandboxes', 'showcase', 'showcases', 'styleguide']);
+const wordsOf = (s: string) => s.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+
+/**
+ * Is this a page built to show components off, not the product? Told from whole words in the file's path (within
+ * its app) or the page's address, so "label" and "collaborate" don't count. `shots.notProduct` adds paths or words;
+ * `false` turns it off, for an app where "lab" is a real part of the product.
+ */
+export function notProductRule(setting?: string[] | false | undefined) {
+  const hit = (where: string) => setting !== false && (wordsOf(where).some((w) => NOT_PRODUCT_WORDS.has(w)) || (setting ?? []).some((x) => where.includes(x)));
+  return {
+    file: (appPath: string) => hit(appPath),
+    // A page's path and the first step of its hash route: later steps name records, and a record can be called anything.
+    page: (url: string | null | undefined) => {
+      if (!url) return false;
+      try { const u = new URL(url); return hit(`${u.pathname} ${u.hash.slice(1).split('/').filter(Boolean)[0] ?? ''}`); } catch { return hit(url.split('?')[0]!); }
+    },
+  };
+}
+
 /** One app's uses of the system's components, each with the key a photo of it is stored under ("file:line", as the tagger names the file). */
 export function appUses(root: string, config: Config, t: Target, wanted: Set<string>) {
   const found = findUses({ dir: t.dir, packages: allDsPackages(config), wanted, exclude: [...defaultExcludes(root), ...(config.exclude ?? []).map((e: string) => path.resolve(root, e)), ...(t.exclude ?? []), ...usageExcludes(t.dir)], aliases: t.aliases });

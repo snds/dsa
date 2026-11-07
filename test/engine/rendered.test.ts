@@ -26,9 +26,11 @@ const STYLE = { height: 32, paddingLeft: '12px', borderRadius: '6px', color: 'rg
 const FILLED = { ...STYLE, backgroundColor: 'rgb(30, 60, 200)', color: 'rgb(255, 255, 255)' };
 const CLEAR = { ...STYLE, backgroundColor: 'rgba(0, 0, 0, 0)' };
 
+let lastData = '';
 async function measured(styles: Record<string, string | number>, variants: (pick: string) => Record<string, any>) {
   const root = fixtureCopy();
   const data = path.join(root, '.dsa');
+  lastData = data;
   await runPipeline({ root, dataDir: data, git: false, now: NOW });
   const e = (await latestEvals(data)).evals.find(x => x.verdict === 'replace' && x.use)!;
   assert.ok(e, 'the fixture has a replacement');
@@ -59,6 +61,20 @@ test('rendered evidence never switches the pick; disagreement lowers confidence 
   assert.equal(after.alternatives[0]?.props?.variant, 'other', 'the rendered variant is offered');
   for (const a of after.alternatives) assert.ok(a.confidence <= after.confidence, `alternative ${a.confidence} above the pick ${after.confidence}`);
   assert.ok(after.reasons.some(r => /^Rendered: .*kept/.test(r.text)), JSON.stringify(after.reasons));
+});
+
+test('measured again on the same evaluation, rendered evidence counts once: a confirmed pick and a disagreeing one stay as they were', async () => {
+  for (const [styles, variants] of [[CLEAR, (pick: string) => ({ [pick]: CLEAR })], [FILLED, (pick: string) => ({ [pick]: CLEAR, other: FILLED })]] as const) {
+    const { after } = await measured(styles, variants as any);
+    const data = lastData;
+    await applyRenderedEvidence(data, 0.9);
+    await applyRenderedEvidence(data, 0.9);
+    const again = (await latestEvals(data)).evals.find(x => x.id === after.id)!;
+    assert.equal(again.confidence, after.confidence, 'a rerun on unchanged evidence moves nothing');
+    assert.equal(again.needsHuman, after.needsHuman);
+    assert.deepEqual(again.reasons, after.reasons);
+    assert.deepEqual(again.alternatives, after.alternatives);
+  }
 });
 
 test('rendered evidence: a weak lead (under the minimum margin) changes nothing', async () => {

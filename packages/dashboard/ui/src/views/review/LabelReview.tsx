@@ -305,9 +305,15 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
             {item.nearest.examples.length > 0 && <div className="flex flex-wrap gap-4">{item.nearest.examples.map((x: any, k: number) => <Example key={k} x={x} pick={{ use: x.component, props: x.props }} close={item.nearest.kind === "close"} />)}</div>}
           </div>
         )}
+        {item.labExamples?.length > 0 && (
+          <div className="flex flex-col gap-2" data-slot="lab-examples">
+            <p className="text-sm">{item.nearest ? "And this look on a lab page:" : "dsa only has this look on a lab page, not in the product."}</p>
+            <div className="flex flex-wrap gap-4">{item.labExamples.map((x: any, k: number) => <Example key={k} x={x} pick={item.about} />)}</div>
+          </div>
+        )}
         {item.noPhoto ? (
           <p className="text-sm text-muted-foreground" data-slot="no-photos">{item.noPhoto.line}</p>
-        ) : !item.examples.length && !item.nearest ? (
+        ) : !item.examples.length && !item.nearest && !item.labExamples?.length ? (
           item.searched?.whole ? <p className="text-sm text-muted-foreground">The app doesn't use {item.about.use} anywhere: dsa read its {item.searched.files} component files.</p>
           : <p className="text-sm text-muted-foreground">{item.searched ? `dsa could only read ${item.searched.files - item.searched.unread} of the app's ${item.searched.files} component files` : "dsa didn't search the app's code for this"}, so it can't say whether the app uses {item.about.use}.</p>
         ) : null}
@@ -369,8 +375,8 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
 function Example({ x, pick, close }: { x: any; pick: any; close?: boolean }) {
   return (
     <div className="max-w-full min-w-0" data-slot="example">
-      <InContext url={x.shot.url} box={x.shot.box} alt={`Photo of the app: ${SYS} ${pickText(pick)} on ${x.shot.pageName}`} page={x.shot.pageName}
-        caption={<>Photo, on {x.shot.pageName}{x.differs ? ` · ${close ? "a different look: " : ""}${x.differs}` : ""}</>} />
+      <InContext url={x.shot.url} box={x.shot.box} alt={`${x.lab ? "Photo from a lab page, not the product" : "Photo of the app"}: ${SYS} ${pickText(pick)} on ${x.shot.pageName}`} page={x.shot.pageName}
+        caption={<>{x.lab ? `From a lab page, not the product (${x.shot.pageName})` : `Photo, on ${x.shot.pageName}`}{x.differs ? ` · ${close ? "a different look: " : ""}${x.differs}` : ""}</>} />
     </div>
   )
 }

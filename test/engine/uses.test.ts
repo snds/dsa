@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { findUses, lookRules } from '../../src/engine/uses.js';
+import { findUses, lookRules, notProductRule } from '../../src/engine/uses.js';
 
 // Where an app already uses the system's components: props across lines; through a local file that
 // re-exports a package; through a vendored copy of the package; and how much of the app was read.
@@ -78,4 +78,17 @@ test('one rule for a look, the crawler\'s and the card\'s: the axes with their d
   // A component the system doesn't list: every prop that isn't about behaviour.
   assert.equal(rules.unknown('Card', ['disabled']), false);
   assert.equal(rules.unknown('Card', ['tone']), true);
+});
+
+test('a lab, specimen or demo page is told from whole words; a setting adds to them or turns it off', () => {
+  const rule = notProductRule();
+  for (const f of ['src/features/widgetLab/gallery/x.tsx', 'src/demo/a.tsx', 'src/specimens.tsx', 'src/design-playground/a.tsx']) assert.equal(rule.file(f), true, f);
+  for (const f of ['src/LabelList.tsx', 'src/collaborate/a.tsx', 'src/gallery/Grid.tsx', 'src/demographics.tsx']) assert.equal(rule.file(f), false, f);
+  assert.equal(rule.page('http://x.test/labs/token-lab.html#gallery'), true);
+  assert.equal(rule.page('http://x.test/#/labs/one'), true);
+  assert.equal(rule.page('http://x.test/#/colours/lab-001'), false, 'a record can be called anything');
+  assert.equal(rule.page('http://x.test/#/colours/gallery'), false);
+  assert.equal(notProductRule(['internal-kit/']).file('src/internal-kit/a.tsx'), true);
+  assert.equal(notProductRule(false).file('src/demo/a.tsx'), false);
+  assert.equal(notProductRule(false).page('http://x.test/labs/a.html'), false);
 });

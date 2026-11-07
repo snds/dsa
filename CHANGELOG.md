@@ -213,6 +213,17 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- Photos from lab, specimen and demo pages no longer pass as how the product uses a component. Product pages are
+  opened and shown first, and a lab photo appears only when the product has none of that look, captioned "From a
+  lab page, not the product". They don't use up a look's photos, and `review.photos.labOnly` counts them apart from
+  `sameLook`. Told from words in the file path or address; `shots.notProduct` adds to them or turns this off.
+- A normal rerun on unchanged code now gives the same review as the run before it. Drawings count on a
+  rerun as photos do (they were dropped because they have no page position to check). A photo the last run
+  set aside as old stays set aside, so it can't change the queue. Rendered evidence counts once, not once more
+  each run.
+- The pass over the app's own uses remembers the pages it has looked at, so a rerun opens only pages nobody has
+  opened. When none are left, what it couldn't find stands and the app isn't started for it. A new use, a changed
+  file, a changed setup, `--fresh` or `--retry-missing` opens every page again.
 - Review cards show the look they propose far more often. The photo pass matched looks by a different rule from
   the cards, so `variant="link"` never matched a card's `variant link, size default`, and `disabled={busy}` made
   a use's look "unknown". It also walked pages by how many files they held, and a limit per component let any

@@ -2,7 +2,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { proposalsTakenAt, appUses, DEFAULT_THRESHOLD, locate, freshShots, freshnessByApp, readShotIndex, autoPick, contentHash, ownOf, openStore, plainText, withPlain, withMetrics, appSettings, closestRendered, compareRendered, effectiveSettings, familyKey, figmaEnabled, homeOf, loadCatalog, patterns as stylePatterns, pushedThisWeek, questions, readEvents, readProposals, readRendered, renderIssue, renderedFor as composeRendered, resolveTargets, rowToFinding, sourceExcerpts, placeExcerpts, titleOf, type Config } from '@snds/dsa/engine';
+import { proposalsTakenAt, appUses, notProductRule, targetRelative, DEFAULT_THRESHOLD, locate, freshShots, freshnessByApp, readShotIndex, autoPick, contentHash, ownOf, openStore, plainText, withPlain, withMetrics, appSettings, closestRendered, compareRendered, effectiveSettings, familyKey, figmaEnabled, homeOf, loadCatalog, patterns as stylePatterns, pushedThisWeek, questions, readEvents, readProposals, readRendered, renderIssue, renderedFor as composeRendered, resolveTargets, rowToFinding, sourceExcerpts, placeExcerpts, titleOf, type Config } from '@snds/dsa/engine';
 
 import { scanEstimate, type PageActions, type ResolvedProfile } from '@snds/dsa';
 import { buildQueue, PKG_DIR } from './queue.js';
@@ -244,7 +244,7 @@ how: e.how ?? null, parent: e.parent ?? null, recipe: e.recipe ?? null,
       queue: readQueue(opts.reviewQueue ?? path.join(dataDir, 'review-queue.jsonl')),
       system: (readJson(path.join(dataDir, 'signatures.json')) ?? []).map((c: any) => ({ component: c.component, axes: c.axes ?? {}, defaults: c.defaults ?? {} })),
       // The engine's own index of existing uses (<data>/precedent.json, when a run writes one), else the scan's uses.
-      ...(() => { const f = precedentFile(dataDir, shotIdx, shotUrl); if (f) return { precedents: f }; const r = precedentsOf(root, config, elements, shotIdx, shotUrl); return { precedents: r.uses, searched: r.searched }; })(),
+      ...(() => { const f = precedentFile(dataDir, shotIdx, shotUrl, notProductRule(config.shots?.notProduct)); if (f) return { precedents: f }; const r = precedentsOf(root, config, elements, shotIdx, shotUrl); return { precedents: r.uses, searched: r.searched }; })(),
       sourceRef: (e: any) => elements.sources?.[e.file]?.ref ?? 'worktree',
     });
     if (opts.log && reviewed.elements?.review?.photos) opts.log(photosLine(reviewed.elements.review.photos));
@@ -420,6 +420,7 @@ function precedentsOf(root: string, config: Config, elements: any, shotIdx: any,
   const out: Precedent[] = [];
   const searched: Record<string, { files: number; unread: number }> = {};
   const perComponent = new Map<string, number>();
+  const notProduct = notProductRule(config.shots?.notProduct);
   for (const t of targets) {
     if (t.role === 'core') continue;
     let found: ReturnType<typeof appUses>;
@@ -437,7 +438,8 @@ function precedentsOf(root: string, config: Config, elements: any, shotIdx: any,
       // A repeat stood aside for a photo of the same look on its page: if that photo has gone, it's simply not photographed yet.
       const why = shotIdx.useMisses?.[u.key]?.why;
       const missed = why === 'repeat' ? undefined : why;
-      out.push({ app: t.name, file: u.shown, line: u.line, component: u.component, props: u.props, ...(u.dynamic.length ? { dynamic: u.dynamic } : {}), ...(missed ? { missed } : {}),
+      const lab = notProduct.file(targetRelative(root, u.shown, t.dir)) || (photo && notProduct.page(s.page));
+      out.push({ ...(lab ? { lab: true } : {}), app: t.name, file: u.shown, line: u.line, component: u.component, props: u.props, ...(u.dynamic.length ? { dynamic: u.dynamic } : {}), ...(missed ? { missed } : {}),
         shot: photo ? { url: shotUrl(s.file), box: s.box ?? null, page: s.page, pageName: pageName(s.page), ...(s.context?.file && s.context.box ? { context: { url: shotUrl(s.context.file), box: s.context.box } } : {}) } : null });
     }
   }
@@ -445,12 +447,13 @@ function precedentsOf(root: string, config: Config, elements: any, shotIdx: any,
 }
 
 /** `<data>/precedent.json` ({ uses: [{ component, file, line, props }] }), as precedents, when a run wrote one. */
-function precedentFile(dataDir: string, shotIdx: any, shotUrl: (f: string) => string): Precedent[] | null {
+function precedentFile(dataDir: string, shotIdx: any, shotUrl: (f: string) => string, notProduct: ReturnType<typeof notProductRule>): Precedent[] | null {
   const j = readJson(path.join(dataDir, 'precedent.json'));
   if (!Array.isArray(j?.uses)) return null;
   return j.uses.filter((u: any) => u?.component && u.file && u.line).map((u: any) => {
     const s = shotIdx.uses?.[`${u.file}:${u.line}`];
-    return { app: u.app ?? u.file.split('/')[0], file: u.file, line: Number(u.line), component: u.component, props: u.props ?? {},
+    const lab = notProduct.file(String(u.file).split('/').slice(1).join('/')) || notProduct.page(s?.page);
+    return { ...(lab ? { lab: true } : {}), app: u.app ?? u.file.split('/')[0], file: u.file, line: Number(u.line), component: u.component, props: u.props ?? {},
       shot: s && !s.blank && !s.covered ? { url: shotUrl(s.file), box: s.box ?? null, page: s.page, pageName: pageName(s.page) } : null };
   });
 }

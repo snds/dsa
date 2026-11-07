@@ -176,7 +176,7 @@ export function evidenceOf(E: any, e: any, pick: any): Evidence {
 export function pageName(url: string | null | undefined): string {
   if (!url) return 'an unknown page';
   let route = url;
-  try { const u = new URL(url); route = u.hash.length > 1 ? u.hash.slice(1) : u.pathname; } catch { /* a bare path */ }
+  try { const u = new URL(url); route = u.hash.length <= 1 ? u.pathname : u.hash[1] === '/' || /^\/(index\.html?)?$/.test(u.pathname) ? u.hash.slice(1) : `${u.pathname}/${u.hash.slice(1)}`; } catch { /* a bare path */ }
   // A segment that is a framework's generated id (_r_4k_, :r1:) says nothing to a person: left out.
   const all = route.split('?')[0]!.split('/').filter(Boolean).map((x) => decodeURIComponent(x));
   const parts = all.filter((x) => !/^(_r_\w*_|:r\w*:|_+)$/.test(x));
@@ -247,8 +247,8 @@ export function nearestLabel(use: string, want: Record<string, string>, have: Re
 }
 
 /** The count that doesn't flatter: a photo of another look isn't a photo of what's proposed, and one photo on many cards is one photo. */
-export function photosLine(p: { cards: number; sameLook: number; otherLook: number; elsewhere: number; none: number; distinctPhotos: number; mostShown: number }): string {
-  return `Review cards: ${p.cards}. Photo in the look proposed: ${p.sameLook}. Only another look: ${p.otherLook} (${p.elsewhere} of them just how the app uses it elsewhere). No photo: ${p.none}. ${p.distinctPhotos} different photos, none on more than ${p.mostShown} cards.`;
+export function photosLine(p: { cards: number; sameLook: number; otherLook: number; elsewhere: number; labOnly: number; none: number; distinctPhotos: number; mostShown: number }): string {
+  return `Review cards: ${p.cards}. Photo in the look proposed, in the product: ${p.sameLook}. Only another look in the product: ${p.otherLook} (${p.elsewhere} of them just how the app uses it elsewhere). Only from a lab page: ${p.labOnly}. No photo: ${p.none}. ${p.distinctPhotos} different photos, none on more than ${p.mostShown} cards.`;
 }
 
 export interface ReviewQueueEntry { id: string; why: 'decide' | 'disagree' | 'audit'; note?: string | undefined }
@@ -263,7 +263,7 @@ export function canDecideNow(e: any): boolean {
 }
 
 /** One place the app already uses a system component, with its props and, when the crawler has one, its photo. */
-export interface Precedent { app: string; file: string; line: number; component: string; props: Record<string, string>; /** Why it has no photo, as the crawler saw it. */ missed?: string | undefined; /** Props set from the code, so their value isn't known. */ dynamic?: string[] | undefined; shot?: { url: string; box: any; page?: string | undefined; pageName: string } | null }
+export interface Precedent { /** From a lab, specimen or demo page, not the product. */ lab?: boolean | undefined; app: string; file: string; line: number; component: string; props: Record<string, string>; /** Why it has no photo, as the crawler saw it. */ missed?: string | undefined; /** Props set from the code, so their value isn't known. */ dynamic?: string[] | undefined; shot?: { url: string; box: any; page?: string | undefined; pageName: string } | null }
 
 /**
  * Add what the review needs to a report payload (in place): each element's evidence (`review`), the
@@ -324,25 +324,29 @@ export function withReview(payload: any, o: {
     for (const x of out) shownSoFar.set(x.shot?.url ?? '', n(x) + 1);
     return out;
   };
+  // A lab's photo only when the product has none.
+  const productFirst = <T extends { lab?: boolean | undefined }>(l: T[]): T[] => { const real = l.filter((u) => !u.lab); return real.length ? real : l; };
   /**
    * With no photo of the look itself, what else this app can show. Uses sharing a real axis, closest first; the
    * same variant is worth up to three tiles, a shared size alone only one. Sharing nothing, one tile, said to be
    * how the app uses it elsewhere and not called close. Every tile shares what the heading says.
    */
-  const nearestFor = (app: string, use: string, props: Record<string, unknown> | undefined) => {
+  const nearestFor = (app: string, use: string, props: Record<string, unknown> | undefined, labToo: boolean) => {
     const want = look(use, props), wanted = JSON.stringify(want), defaults = rules.defaults(use);
     const all = (byUse[use] ?? []).filter((u) => u.app === app);
     const rank = all.filter((u) => !unknownLook(u)).map((u) => { const have = look(use, u.props), shared = sharedAxes(want, have, defaults); return { u, have, shared, close: closeness(shared) }; }).filter((r) => JSON.stringify(r.have) !== wanted).sort((a, b) => b.close - a.close);
     const set = all.filter(unknownLook);
     if (!rank.length && !set.length) return null;
     const count = rank.length + set.length;
-    const best = rank.find((r) => r.u.shot);
+    // A product photo of any look before a lab's, however close the lab's is.
+    const best = rank.find((r) => r.u.shot && !r.u.lab) ?? (labToo ? rank.find((r) => r.u.shot) : undefined);
     if (best) {
-      const alike = rank.filter((r) => r.u.shot && r.shared.join() === best.shared.join()).map((r) => ({ ...r.u, differs: differsText(want, r.have) }));
-      const examples = varied(alike, best.close >= 2 ? 3 : 1);
+      const alike = rank.filter((r) => r.u.shot && !r.u.lab === !best.u.lab && r.shared.join() === best.shared.join()).map((r) => ({ ...r.u, differs: differsText(want, r.have) }));
+      const examples = varied(alike, best.close >= 2 && !best.u.lab ? 3 : 1);
       return { kind: best.close ? 'close' : 'elsewhere', label: nearestLabel(use, want, best.have, { shared: best.shared, many: examples.length > 1 }), examples, count };
     }
-    const examples = varied(photos(set).map((u) => ({ ...u, differs: 'its look is set in the code' })), 1);
+    const setPhotos = photos(set).filter((u) => labToo || !u.lab);
+    const examples = varied(productFirst(setPhotos).map((u) => ({ ...u, differs: 'its look is set in the code' })), 1);
     const top = rank[0];
     const label = !examples.length && top ? nearestLabel(use, want, top.have, { photo: false }) : `The app sets ${use}'s look in its code, so dsa can't say which it is${examples.length ? '.' : ', and has no photo of it yet.'}`;
     return { kind: examples.length ? 'set-in-code' : 'none', label, examples, count };
@@ -357,32 +361,37 @@ export function withReview(payload: any, o: {
     // The app under review: its own uses, not another app's.
     const inApp = (l: Precedent[] | undefined) => (l ?? []).filter((u) => u.app === e.target);
     const mine = about ? inApp(precedents[key(about.use, about.props)]) : [];
-    const examples = varied(photos(mine), 3);
+    const examples = varied(photos(mine).filter((u) => !u.lab), 3);
+    // The look on a lab page shows the look but not the product, so it comes with the product's nearest, after it.
+    const labExamples = examples.length ? [] : varied(photos(mine), 1);
     // One photo of the look itself beats any number of near ones.
-    const nearest = about && !examples.length ? nearestFor(e.target, about.use, about.props) : null;
+    const found = about && !examples.length ? nearestFor(e.target, about.use, about.props, !labExamples.length) : null;
+    const nearest = found && labExamples.length ? (found.examples.length ? { ...found, label: found.label.replace('dsa has no photo of this look.', 'dsa has no photo of this look in the product.') } : null) : found;
     const everyUse = about ? inApp(byUse[about.use]) : [];
     const own = pick?.use ? E.proposals?.[proposalKey(pick.use, pick.props)] : null;
     const scope = o.searched?.[e.target];
-    const altEx = alts[0] && alts[0] !== about ? varied(photos(inApp(precedents[key(alts[0].use, alts[0].props)])), 1) : [];
-    const noPhoto = about && !examples.length && !nearest?.examples.length && everyUse.length ? noPhotoLine(about.use, everyUse) : null;
+    const altEx = alts[0] && alts[0] !== about ? varied(productFirst(photos(inApp(precedents[key(alts[0].use, alts[0].props)]))), 1) : [];
+    const noPhoto = about && !examples.length && !labExamples.length && !nearest?.examples.length && everyUse.length ? noPhotoLine(about.use, everyUse) : null;
     return {
       ...q, pick, about,
       label: { app: e.target, file: e.file, line: e.line, sourceRef: o.sourceRef?.(e) ?? 'worktree', elementHash: e.srcHash ?? hashText(String(e.snippet ?? e.id)) },
-      examples, altExamples: altEx, usesCount: mine.length,
+      examples, labExamples, altExamples: altEx, usesCount: mine.filter((u) => !u.lab).length,
       nearest, noPhoto, systemExample: !mine.length && own?.url && own.check === 'exact' && !own.unstyled && !own.bare ? { url: own.url } : null,
       // Said as "doesn't use it" only when the search read the whole app.
       searched: scope ? { files: scope.files, unread: scope.unread, whole: scope.files > 0 && scope.unread === 0 } : null,
     };
   });
   const sameLook = items.filter((i: any) => i.examples.length).length;
-  const otherLook = items.filter((i: any) => !i.examples.length && i.nearest?.examples.length);
-  const photoCards = sameLook + otherLook.length;
+  const otherLook = items.filter((i: any) => !i.examples.length && i.nearest?.examples.some((x: any) => !x.lab));
+  // Every photo on the card is from a lab: it shows the look, not how the product uses it.
+  const labOnly = items.filter((i: any) => !i.examples.length && !i.nearest?.examples.some((x: any) => !x.lab) && (i.labExamples.length || i.nearest?.examples.length)).length;
+  const photoCards = sameLook + otherLook.length + labOnly;
   // The honest measure: a photo of another look on every card would still leave a person guessing. A photo counts once however many cards show it.
   const timesShown = new Map<string, number>();
-  for (const i of items as any[]) for (const url of new Set<string>([...i.examples, ...(i.nearest?.examples ?? []), ...i.altExamples].map((x: any) => x.shot.url))) timesShown.set(url, (timesShown.get(url) ?? 0) + 1);
+  for (const i of items as any[]) for (const url of new Set<string>([...i.examples, ...i.labExamples, ...(i.nearest?.examples ?? []), ...i.altExamples].map((x: any) => x.shot.url))) timesShown.set(url, (timesShown.get(url) ?? 0) + 1);
   const whyNot: Record<string, number> = {};
-  for (const i of items) if (!i.examples.length && !i.nearest?.examples.length) { const w = i.noPhoto?.why ?? (i.about ? 'no-uses' : 'no-candidate'); whyNot[w] = (whyNot[w] ?? 0) + 1; }
+  for (const i of items) if (!i.examples.length && !i.labExamples.length && !i.nearest?.examples.length) { const w = i.noPhoto?.why ?? (i.about ? 'no-uses' : 'no-candidate'); whyNot[w] = (whyNot[w] ?? 0) + 1; }
   const setAside = live.filter((e: any) => !e.review.ready).length;
-  E.review = { items, photos: { cards: items.length, sameLook, otherLook: otherLook.length, elsewhere: otherLook.filter((i: any) => i.nearest.kind === 'elsewhere').length, none: items.length - photoCards, withPhoto: photoCards, distinctPhotos: timesShown.size, mostShown: Math.max(0, ...timesShown.values()), without: whyNot }, setAside, ready: ready.length, decideNow: open.length, system: o.system ?? [], precedentSource: o.precedents ? 'uses' : 'none' };
+  E.review = { items, photos: { cards: items.length, sameLook, otherLook: otherLook.length, elsewhere: otherLook.filter((i: any) => i.nearest.kind === 'elsewhere').length, labOnly, none: items.length - photoCards, withPhoto: photoCards, distinctPhotos: timesShown.size, mostShown: Math.max(0, ...timesShown.values()), without: whyNot }, setAside, ready: ready.length, decideNow: open.length, system: o.system ?? [], precedentSource: o.precedents ? 'uses' : 'none' };
   return payload;
 }

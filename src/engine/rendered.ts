@@ -218,7 +218,10 @@ export async function applyRenderedEvidence(dataDir: string, threshold = 0.9): P
       const st: Styles | undefined = idx.shots?.[e.id]?.styles ?? (e.styleSig ? bySig.get(e.styleSig) : undefined);
       const comp = e.signature && rendered.components[e.signature.component];
       if (!st || !comp || e.decided || e.verdict !== 'replace') continue;
-      e.reasons = (e.reasons ?? []).filter((r: any) => !String(r.text).startsWith('Rendered:'));
+      // Measured again: take last time's measurement off first, its effect with its reason, or each run adds it again.
+      const earlier = (e.reasons ?? []).filter((r: any) => String(r.text).startsWith('Rendered:'));
+      e.confidence = Math.round((e.confidence - earlier.reduce((sum: number, r: any) => sum + (r.delta ?? 0), 0)) * 100) / 100;
+      e.reasons = (e.reasons ?? []).filter((r: any) => !earlier.includes(r));
       const pick = renderedFor(comp, e.signature.variant, e.signature.size);
       if (!pick) continue;
       res.measured++;
@@ -243,7 +246,8 @@ export async function applyRenderedEvidence(dataDir: string, threshold = 0.9): P
         const strong = mine.score < RENDER_ABSTAIN_PICK && best.score >= RENDER_ABSTAIN_OTHER && !contradicts;
         e.confidence = Math.min(before, strong ? Math.max(0.5, cap - 0.1) : cap);
         const alt = { verdict: e.verdict, role: e.role, use: e.use, from: e.from, props: { ...e.props, variant: best.v }, confidence: Math.min(e.confidence, Math.round(best.score * 100) / 100) };
-        e.alternatives = [alt, ...(e.alternatives ?? []).map((a: any) => ({ ...a, confidence: Math.min(a.confidence ?? 0, e.confidence) }))].slice(0, 3);
+        const same = (a: any) => a.use === alt.use && JSON.stringify(a.props ?? {}) === JSON.stringify(alt.props);
+        e.alternatives = [alt, ...(e.alternatives ?? []).filter((a: any) => !same(a)).map((a: any) => ({ ...a, confidence: Math.min(a.confidence ?? 0, e.confidence) }))].slice(0, 3);
         if (strong) {
           // The rendering clearly contradicts the pick and the classes don't say otherwise: abstain.
           e.alternatives = [{ verdict: e.verdict, role: e.role, use: e.use, from: e.from, props: { ...e.props }, confidence: e.confidence }, ...e.alternatives].slice(0, 3);

@@ -343,7 +343,7 @@ test("a card's photos are of its own app: the same look first, then the nearest,
   const mixed = item([use(1, { variant: 'outline' }, { shot: photo(1) }), use(2, { variant: 'outline', size: 'sm' }, { shot: photo(2) }), use(3, {}, { shot: photo(3) }), use(4, {}, { shot: photo(4) })]);
   assert.deepEqual(mixed.it.examples.map((x: any) => x.line), [1]);
   assert.equal(mixed.it.nearest, null, 'one photo of the look itself beats any number of near ones');
-  assert.deepEqual(mixed.photos, { cards: 1, sameLook: 1, otherLook: 0, elsewhere: 0, none: 0, withPhoto: 1, distinctPhotos: 1, mostShown: 1, without: {} });
+  assert.deepEqual(mixed.photos, { cards: 1, sameLook: 1, otherLook: 0, elsewhere: 0, labOnly: 0, none: 0, withPhoto: 1, distinctPhotos: 1, mostShown: 1, without: {} });
   // Another app's uses don't stand in, with or without a photo.
   const elsewhere = item([use(1, { variant: 'outline' }, { app: 'other', shot: photo(1) })]);
   assert.deepEqual([elsewhere.it.examples, elsewhere.it.usesCount, elsewhere.it.nearest, elsewhere.it.noPhoto], [[], 0, null, null]);
@@ -358,7 +358,7 @@ test("a card's photos are of its own app: the same look first, then the nearest,
   assert.match(why(['-']).line, /hasn't photographed it yet\.$/, 'no advice to take the screenshots again: a fresh run says this too');
   assert.match(why(['not-seen', 'out-of-time']).line, /ran out of time before reaching it/, "a page the limit never reached isn't a page it isn't on");
   const none = item([use(1, { variant: 'outline' }, { missed: 'not-seen' })]);
-  assert.deepEqual(none.photos, { cards: 1, sameLook: 0, otherLook: 0, elsewhere: 0, none: 1, withPhoto: 0, distinctPhotos: 0, mostShown: 0, without: { 'not-seen': 1 } });
+  assert.deepEqual(none.photos, { cards: 1, sameLook: 0, otherLook: 0, elsewhere: 0, labOnly: 0, none: 1, withPhoto: 0, distinctPhotos: 0, mostShown: 0, without: { 'not-seen': 1 } });
   // No clear pick: the closest candidate is what its photos are of.
   const unclear = item([use(1, {}, { shot: photo(1) })], { verdict: 'unclear', use: null, props: null, alternatives: [{ verdict: 'replace', use: 'Button', props: {} }] });
   assert.equal(unclear.it.about.use, 'Button');
@@ -367,8 +367,8 @@ test("a card's photos are of its own app: the same look first, then the nearest,
 
 describe('photos of other looks say what they are', () => {
   const system: any[] = [{ component: 'Button', axes: { variant: ['default', 'dark', 'ghost', 'link'], size: ['default', 'xs', 'lg', 'icon'] }, defaults: { variant: 'default', size: 'default' } }];
-  const use = (line: number, props: object, photo = true, page = `/p${line}`) => ({ app: 'ledger', file: `ledger/src/U${line}.tsx`, line, component: 'Button', props, shot: photo ? { url: `s/${line}.png`, box: null, page, pageName: page } : null });
-  const cards = (picks: object[], uses: any[]) => {
+  const use = (line: number, props: Record<string, unknown>, photo = true, page = `/p${line}`) => ({ app: 'ledger', file: `ledger/src/U${line}.tsx`, line, component: 'Button', props, shot: photo ? { url: `s/${line}.png`, box: null, page, pageName: page } : null });
+  const cards = (picks: Record<string, unknown>[], uses: any[]) => {
     const p: any = payload(picks.map((props, i) => el(`e${i}`, { use: 'Button', props, needsHuman: true })));
     for (const props of picks) p.elements.proposals[`${proposalKey('Button', props)}#own1`] = { use: 'Button', props, check: 'exact', url: 'r/o.png', own: true, text: 'Save' };
     return withReview(p, { audit: 0, system, precedents: uses }).elements.review;
@@ -397,13 +397,69 @@ describe('photos of other looks say what they are', () => {
     const uses = [use(1, { variant: 'dark' }), use(2, { variant: 'dark', size: 'lg' }), use(3, { variant: 'dark', size: 'icon' })];
     const review = cards([{ variant: 'link' }, { variant: 'ghost' }, { variant: 'link', size: 'xs' }], uses);
     assert.deepEqual(review.items.map((i: any) => i.nearest.examples[0].line).sort(), [1, 2, 3], 'each card a different photo');
-    assert.deepEqual(review.photos, { cards: 3, sameLook: 0, otherLook: 3, elsewhere: 3, none: 0, withPhoto: 3, distinctPhotos: 3, mostShown: 1, without: {} });
+    assert.deepEqual(review.photos, { cards: 3, sameLook: 0, otherLook: 3, elsewhere: 3, labOnly: 0, none: 0, withPhoto: 3, distinctPhotos: 3, mostShown: 1, without: {} });
     assert.equal(cards([{ variant: 'link' }, { variant: 'ghost' }], [use(1, { variant: 'dark' })]).photos.mostShown, 2);
     const samePage = cards([{ variant: 'ghost' }], [use(1, { variant: 'ghost' }, true, '/a'), use(2, { variant: 'ghost' }, true, '/a'), use(3, { variant: 'ghost' }, true, '/b')]).items[0];
     assert.deepEqual(samePage.examples.map((x: any) => x.line), [1, 3, 2], 'other pages before a repeat of this one');
   });
 
   test('the log line counts the look itself, apart from every other look', () => {
-    assert.equal(photosLine({ cards: 118, sameLook: 60, otherLook: 40, elsewhere: 25, none: 18, distinctPhotos: 70, mostShown: 6 }), 'Review cards: 118. Photo in the look proposed: 60. Only another look: 40 (25 of them just how the app uses it elsewhere). No photo: 18. 70 different photos, none on more than 6 cards.');
+    assert.equal(photosLine({ cards: 118, sameLook: 60, otherLook: 40, elsewhere: 25, labOnly: 5, none: 13, distinctPhotos: 70, mostShown: 6 }), 'Review cards: 118. Photo in the look proposed, in the product: 60. Only another look in the product: 40 (25 of them just how the app uses it elsewhere). Only from a lab page: 5. No photo: 13. 70 different photos, none on more than 6 cards.');
+  });
+});
+
+describe('a lab page is not the product', () => {
+  const system: any[] = [{ component: 'Button', axes: { variant: ['default', 'link', 'ghost'], size: ['default', 'xs'] }, defaults: { variant: 'default', size: 'default' } }];
+  const use = (line: number, props: Record<string, string>, lab = false) => ({ app: 'ledger', file: `ledger/src/U${line}.tsx`, line, component: 'Button', props, ...(lab ? { lab } : {}), shot: { url: `s/${line}.png`, box: null, page: `/p${line}`, pageName: `/p${line}` } });
+  const card = (uses: any[]) => {
+    const props = { variant: 'link' };
+    const p: any = payload([el('e0', { use: 'Button', props, needsHuman: true })]);
+    p.elements.proposals[`${proposalKey('Button', props)}#own1`] = { use: 'Button', props, check: 'exact', url: 'r/o.png', own: true, text: 'Save' };
+    return withReview(p, { audit: 0, system, precedents: uses }).elements.review;
+  };
+  const link = { variant: 'link' }, ghost = { variant: 'ghost' };
+
+  test('a product photo of the look: the lab photo stays out of it', () => {
+    const r = card([use(1, link, true), use(2, link)]);
+    assert.deepEqual(r.items[0].examples.map((x: any) => x.line), [2]);
+    assert.deepEqual(r.items[0].labExamples, []);
+    assert.equal(r.photos.sameLook, 1);
+    assert.equal(r.photos.labOnly, 0);
+  });
+
+  test('the look only on a lab page, nothing else: shown, and counted apart', () => {
+    const r = card([use(1, link, true), use(2, link, true)]);
+    assert.deepEqual(r.items[0].examples, []);
+    assert.equal(r.items[0].labExamples.length, 1, 'one is enough');
+    assert.equal(r.items[0].noPhoto, null);
+    assert.deepEqual([r.photos.sameLook, r.photos.otherLook, r.photos.labOnly, r.photos.none, r.photos.withPhoto], [0, 0, 1, 0, 1]);
+  });
+
+  test('the look on a lab page and another look in the product: the product leads, and it counts as another look', () => {
+    const r = card([use(1, link, true), use(2, ghost)]);
+    assert.deepEqual(r.items[0].nearest.examples.map((x: any) => x.line), [2]);
+    assert.match(r.items[0].nearest.label, /no photo of this look in the product/);
+    assert.deepEqual(r.items[0].labExamples.map((x: any) => x.line), [1]);
+    assert.deepEqual([r.photos.sameLook, r.photos.otherLook, r.photos.labOnly], [0, 1, 0]);
+  });
+
+  test('another look: the product before a closer one from a lab; only a lab, one tile, counted apart', () => {
+    const closer = { variant: 'link', size: 'xs' };
+    const props = { variant: 'link', size: 'lg' };
+    const p: any = payload([el('e0', { use: 'Button', props, needsHuman: true })]);
+    p.elements.proposals[`${proposalKey('Button', props)}#own1`] = { use: 'Button', props, check: 'exact', url: 'r/o.png', own: true, text: 'Save' };
+    const sys: any[] = [{ component: 'Button', axes: { variant: ['default', 'link', 'ghost'], size: ['default', 'xs', 'lg'] }, defaults: { variant: 'default', size: 'default' } }];
+    const both = withReview(JSON.parse(JSON.stringify(p)), { audit: 0, system: sys, precedents: [use(1, closer, true), use(2, ghost)] }).elements.review;
+    assert.deepEqual(both.items[0].nearest.examples.map((x: any) => x.line), [2]);
+    const labs = withReview(JSON.parse(JSON.stringify(p)), { audit: 0, system: sys, precedents: [use(1, closer, true), use(3, closer, true)] }).elements.review;
+    assert.equal(labs.items[0].nearest.examples.length, 1);
+    assert.deepEqual([labs.photos.otherLook, labs.photos.labOnly], [0, 1]);
+  });
+
+  test('the log line keeps them apart, and a named page in another file says where it is', () => {
+    assert.match(photosLine({ cards: 3, sameLook: 1, otherLook: 0, elsewhere: 0, labOnly: 2, none: 0, distinctPhotos: 2, mostShown: 1 }), /in the product: 1\..*Only from a lab page: 2\./);
+    assert.equal(pageName('http://x.test/labs/token-lab.html#gallery'), 'Labs › Token lab.html › Gallery');
+    assert.equal(pageName('http://x.test/#/colours/gallery'), 'Colours › Gallery');
+    assert.equal(pageName('http://x.test/index.html#gallery'), 'Gallery');
   });
 });
