@@ -976,6 +976,11 @@
         "maxMinutes": {
           "type": "number",
           "minimum": 0
+        },
+        "drawSeconds": {
+          "description": "How long one drawing may take before its page counts as stuck and is replaced (default 30; the first on a page gets five times as long). It is recorded as not drawn, and named in the render log.",
+          "type": "number",
+          "minimum": 1
         }
       },
       "additionalProperties": false

@@ -1,5 +1,5 @@
 import { canonicalProps, hashText } from '@snds/dsa';
-import { CONTAINER_ROLES, NO_SOURCE, SHOT_MIN, proposalKey } from './trust.js';
+import { NO_SOURCE, SHOT_MIN, proposalKey } from './trust.js';
 
 /**
  * Review for people. A person (a designer first) decides from what they can see, never from code, so an
@@ -71,19 +71,60 @@ export function proposalFor(E: any, e: any, pick: any): any | null {
   if (pick?.verdict !== 'replace' || !pick.use) return null;
   const key = proposalKey(pick.use, pick.props);
   const mine = e.ownHash ? E.proposals?.[`${key}#${e.ownHash}`] : null;
-  if (mine) return mine;
   const plain = E.proposals?.[key];
-  return plain ? { ...plain, own: false } : null;
+  const p = atWidthOf(mine ?? (plain ? { ...plain, own: false } : null), e);
+  if (!p || !wholeForPart(p, e)) return p;
+  // One small part proposed as the whole it belongs to: compared with that part, when one is drawn.
+  for (const a of e.alternatives ?? []) {
+    if (!a?.use || a.use === pick.use) continue;
+    const part = atWidthOf(e.ownHash ? E.proposals?.[`${proposalKey(a.use, a.props)}#${e.ownHash}`] : E.proposals?.[proposalKey(a.use, a.props)], e);
+    if (part?.url && !wholeForPart(part, e)) return { ...part, partOf: pick.use, partUse: a.use };
+  }
+  return { ...p, wholeForPart: true };
 }
 
-/** The element's own words, as its photo recorded them (else its label), for comparing with a drawing's. */
-const wordsOf = (e: any): string => String(e.shot?.content?.text ?? e.label ?? '').replace(/\s+/g, ' ').trim();
+/** A drawing that fills its container was drawn at the widths of its elements: the one nearest this element's. */
+export function atWidthOf(p: any, e: any): any {
+  if (!p?.sizes?.length) return p;
+  const w = e?.shot?.box?.w;
+  const s = w ? [...p.sizes].sort((a: any, b: any) => Math.abs(a.for - w) - Math.abs(b.for - w))[0] : p.sizes[0];
+  return { ...p, url: s.url, w: s.w, h: s.h, wider: Boolean(s.wider), cut: Boolean(s.cut) };
+}
+
+/**
+ * Is the drawing many times the element? Then it's what the element belongs to, not what it would become.
+ * Width a component only has because it fills its container isn't counted: that's the page it was drawn on.
+ */
+export function wholeForPart(p: any, e: any): boolean {
+  const b = e?.shot?.box;
+  if (!p?.w || !p?.h || !b?.w || !b?.h) return false;
+  return (p.fills ? Math.min(p.w, b.w) : p.w) * p.h >= 9 * b.w * b.h;
+}
+
+/**
+ * The element's own words, for comparing with a drawing's. With a photo, what it recorded, else the text its
+ * source holds: the two a drawing is given. Not its label, which can be an aria-label nobody sees (an icon-only
+ * button has no words to draw). With no photo's record, its label is all there is.
+ */
+const wordsOf = (e: any): string => String((e.shot?.content ? e.shot.content.text || e.shot.content.value || e.shot.content.placeholder || e.words : e.label) ?? '').replace(/\s+/g, ' ').trim();
 /** A drawing shows the element's own words: drawn with them, and the words it drew are the element's. */
 export function drawnWithOwnWords(p: any, e: any): boolean {
   if (!p?.own) return false;
   if (typeof p.text !== 'string') return !wordsOf(e);
   return p.text.replace(/\s+/g, ' ').trim() === wordsOf(e);
 }
+
+/** What a card with no clear proposal can show: its candidates drawn with the element's own content. */
+export function candidatesOf(E: any, e: any): any[] {
+  return (e.alternatives ?? []).filter((a: any) => {
+    if (!a?.use) return false;
+    const p = proposalFor(E, e, { verdict: 'replace', use: a.use, props: a.props });
+    return Boolean(p?.url) && p.check !== 'none' && !p.unstyled && !p.cut && drawnWithOwnWords(p, e);
+  });
+}
+
+/** A box this small holds nothing a person can compare: what the capture landed on, not the element. */
+const tinyPhoto = (box: any): boolean => Boolean(box) && Math.min(box.w, box.h) <= 8;
 
 /** Can a person review this element? */
 export function evidenceOf(E: any, e: any, pick: any): Evidence {
@@ -94,26 +135,39 @@ export function evidenceOf(E: any, e: any, pick: any): Evidence {
     if (e.staleShot) missing.push({ kind: 'stale', why: 'Its only photo is from an older run, so it may not show the code as it is now.', group: 'have only an old photo, from before the code changed', fix: 'Take the screenshots again.' });
     else if (e.reach?.why) missing.push(unreached(e));
     else missing.push({ kind: 'no-photo', why: 'There is no photo of it in the app.', group: 'have no photo in the app', fix: 'Take screenshots of the app (dsa run with screenshots on).' });
-  } else if (s.blank) missing.push({ kind: 'blank', why: 'Its photo shows nothing: it may need a state the crawler could not set.', group: 'have a photo that shows nothing', fix: 'Add a flow that puts the page in that state.' });
+  } else if (s.blank && tinyPhoto(s.box)) missing.push({ kind: 'tiny-photo', why: `Its photo is only ${s.box.w} × ${s.box.h} px, so the capture found nothing usable to compare.`, group: 'have a photo only a few pixels across, so the capture found nothing usable', fix: 'Add a flow that puts the page in the state that shows it, then take the screenshots again.' });
+  else if (s.blank) missing.push({ kind: 'blank', why: 'Its photo shows nothing: it may need a state the crawler could not set.', group: 'have a photo that shows nothing', fix: 'Add a flow that puts the page in that state.' });
   else if (s.covered) missing.push({ kind: 'covered', why: 'Something else covers it in its photo.', group: 'are covered by something else in their photos', fix: 'Take the photo again with the covering layer closed.' });
   else if (s.source === 'isolated') current = 'isolated';
   else if (s.drawn === 'markup') missing.push({ kind: 'markup', group: 'could only be drawn as markup, not as the app draws them', why: 'Only its markup could be drawn, not the element as the app draws it.', fix: 'Reach it in the running app, or record its props so it can be drawn as an isolated render.' });
   else if (s.drawn) missing.push({ kind: 'guessed', group: 'were drawn with guessed props, so they may not look like the real thing', why: 'It was drawn from the code with guessed props, so it may not look like the real thing.', fix: 'Reach it in the running app, or record its props so it can be drawn as an isolated render.' });
   else if (!s.tagged && (s.match ?? 0) < SHOT_MIN) missing.push({ kind: 'unsure-photo', group: 'have a photo that may be of a different element', why: 'Its photo may be of a different element that looks like it.', fix: 'Build the app with source tags, so the photo is found by its line.' });
   else current = 'live';
+  // A field's words are what the reviewer compares; a photo from before they were recorded can't show that they match.
+  if (s?.content && !s.drawn && /^<(input|textarea|select)\b/i.test(e.snippet ?? '') && !('value' in s.content)) missing.push({ kind: 'no-field-words', group: "have a photo that didn't record what's typed in them", why: "Its photo didn't record what's typed in it, so the proposal can't be drawn with it.", fix: 'Take the screenshots again.' });
   if (pick?.verdict === 'replace' && pick.use) {
     const p = proposalFor(E, e, pick);
     const what = [pick.use, ...Object.entries(pick.props ?? {}).filter(([k]) => k !== 'render').map(([k, v]) => `${k} ${v}`)].join(', ');
-    const container = CONTAINER_ROLES.has(e.role) || CONTAINER_ROLES.has(pick.role);
-    if (p && p.check === 'none' && !p.url && (p.noSource || NO_SOURCE.test(p.note ?? ''))) missing.push({ kind: 'no-source', group: 'propose a component the system has nothing to draw from', why: `The system has nothing to draw ${pick.use} from.`, fix: `Add a story or source for ${pick.use}, or propose another component.` });
+    // Said plainly to be an example, so it isn't judged as this element's content. Nothing else is let off.
+    const example = Boolean(p?.example);
+    // A photo that shows nothing can't say how big the element is, so it can't say it's a small part of anything.
+    if (p?.wholeForPart) { if (!s?.blank) missing.push({ kind: 'whole-for-part', group: 'propose the whole of a component for one small part of it', why: `${pick.use} is the whole component, and this element is one small part of it. No drawing shows that part.`, fix: 'Decide it with the whole component, or draw the part (dsa render).' }); }
+    else if (p && p.check === 'none' && !p.url && (p.noSource || NO_SOURCE.test(p.note ?? ''))) missing.push({ kind: 'no-source', group: 'propose a component the system has nothing to draw from', why: `The system has nothing to draw ${pick.use} from.`, fix: `Add a story or source for ${pick.use}, or propose another component.` });
     else if (!p?.url) missing.push({ kind: 'not-drawn', group: "have a proposal that isn't drawn yet", why: `The proposal (${what}) isn't drawn yet.`, fix: 'Draw the proposals (dsa render).' });
     else if (p.check !== 'exact') missing.push({ kind: 'near-match', group: 'have a proposal drawn only as a near match', why: `The proposal (${what}) is only drawn as a near match, not with these props.`, fix: 'Draw the proposals (dsa render).' });
     // Drawn without the system's stylesheet it looks broken, and would be judged for that, not for the fit.
     else if (p.unstyled) missing.push({ kind: 'unstyled', group: "have a proposal that couldn't be drawn with the system's styles", why: "The proposal couldn't be drawn with the system's styles, so it wouldn't look like the real component.", fix: "Check the system's Storybook preview loads its stylesheet, then draw the proposals again (dsa render)." });
+    // Compared by what shows: a word cut short, or no word at all, can't be judged against the element's.
+    else if (p.cut) missing.push({ kind: 'cut-off', group: 'have a proposal whose words are cut off in its drawing', why: "The proposal's words are cut off in its drawing, even with all the room the page has, so it can't be compared.", fix: "Check how the component handles long words, or propose another component." });
     // A stand-in icon reads as a different control; sample words as a different label: neither is decidable.
-    else if (!container && /stand-in|^icon|icon .*couldn't be loaded/.test(p.content ?? '')) missing.push({ kind: 'stand-in-icon', group: "have a proposal drawn with a stand-in icon, not their own", why: "The proposal is drawn with a stand-in icon, not this element's own icon, so it may read as a different control.", fix: "Take the photo again so its icon is recorded, then draw the proposal again (dsa render)." });
-    else if (!container && (e.ownHash || p.content) && !drawnWithOwnWords(p, e)) missing.push({ kind: 'not-own-words', group: "have a proposal drawn with other words than their own", why: p.own ? "The proposal's words aren't this element's own." : "The proposal shows the system's sample words, not this element's own.", fix: 'Draw the proposal again once its own words are known (a photo records them).' });
+    else if (!example && /stand-in|^icon|icon .*couldn't be loaded/.test(p.content ?? '')) missing.push({ kind: 'stand-in-icon', group: "have a proposal drawn with a stand-in icon, not their own", why: "The proposal is drawn with a stand-in icon, not this element's own icon, so it may read as a different control.", fix: "Take the photo again so its icon is recorded, then draw the proposal again (dsa render)." });
+    else if (!example && (e.ownHash || p.content) && !drawnWithOwnWords(p, e)) missing.push({ kind: 'not-own-words', group: "have a proposal drawn with other words than their own", why: p.own ? "The proposal's words aren't this element's own." : "The proposal shows the system's sample words, not this element's own.", fix: 'Draw the proposal again once its own words are known (a photo records them).' });
+    // A swatch's marker, an icon font's glyph, a second line: the proposal must hold them too, or it reads as another control.
+    else if (!example && s?.content && s.content.inner === undefined) missing.push({ kind: 'no-inner', group: "have a proposal that doesn't show their inner content", why: "The proposal doesn't show this element's inner content.", fix: 'Take the photo again so what it holds is recorded, then draw the proposal again (dsa render).' });
+    else if (!example && s?.content?.inner && !p.inner) missing.push({ kind: 'no-inner', group: "have a proposal that doesn't show their inner content", why: "The proposal doesn't show this element's inner content.", fix: s.content.inner.lost ? 'A picture inside it comes from elsewhere and couldn\'t be copied. Compare the two in the app instead.' : 'Draw the proposal again (dsa render); if it stays missing, the system may not load the icon font it uses.' });
   }
+  // Nobody can decide in a vacuum: with no clear answer and no candidate to look at, it's held out.
+  if (pick?.verdict === 'unclear' && !candidatesOf(E, e).length) missing.push({ kind: 'no-candidates', group: 'have no clear answer and no candidate drawn to compare', why: 'dsa has no clear answer for it, and none of the candidates is drawn with its own content.', fix: 'Take the photo again and draw the proposals (dsa render), or answer it in Element Review.' });
   return { ready: !missing.length, current, missing };
 }
 
@@ -146,15 +200,17 @@ export function pageName(url: string | null | undefined): string {
 const NOT_LOOK = /^(type|form|name|value|disabled|tabIndex|role|href|to|target|rel|htmlFor|placeholder|autoFocus|asChild|render|open|defaultOpen|checked|defaultChecked)$/;
 
 /** "Not at this size, but here's the same variant at sm." The element's pick first, then the nearest use. */
-export function nearestLabel(use: string, want: Record<string, string>, have: Record<string, string>): string {
+export function nearestLabel(use: string, want: Record<string, string>, have: Record<string, string>, photo = true): string {
   const keys = [...new Set([...Object.keys(want), ...Object.keys(have)])];
   const differ = keys.filter((k) => want[k] !== have[k]), alike = keys.filter((k) => want[k] === have[k]);
   const at = (k: string) => (k === 'size' ? 'at' : 'in');
   const value = (k: string) => have[k] ?? 'its default';
-  if (!differ.length) return `The app uses ${use} like this.`;
+  const noPhoto = ', but dsa has no photo of it yet.';
+  if (!differ.length) return photo ? `The app uses ${use} like this.` : `The app uses ${use} like this${noPhoto}`;
   const first = differ[0]!;
   const not = `Not ${at(first)} this ${differ.length > 1 ? 'combination' : first}`;
   const there = differ.map((k) => `${at(k)} ${value(k)}`).join(', ');
+  if (!photo) return `The app uses ${use} ${there}${noPhoto}`;
   return alike.length ? `${not}, but here's the same ${alike.join(' and ')} ${there}.` : `${not}, but here's ${use} ${there}.`;
 }
 
@@ -224,7 +280,8 @@ export function withReview(payload: any, o: {
   const precedents: Record<string, Precedent[]> = {};
   const byUse: Record<string, Precedent[]> = {};
   for (const u of o.precedents ?? []) { (byUse[u.component] ??= []).push(u); if (!unknownLook(u)) (precedents[key(u.component, u.props)] ??= []).push(u); }
-  const photoFirst = (l: Precedent[]) => [...l.filter((u) => u.shot), ...l.filter((u) => !u.shot)];
+  // Only a photo says how the app uses it. Without one, a tile only repeats the system's own drawing.
+  const photos = (l: Precedent[]) => l.filter((u) => u.shot);
   /** The nearest uses when none is exact: the most axes alike, labelled by what differs. */
   const nearestFor = (use: string, props: Record<string, unknown> | undefined) => {
     const want = look(use, props);
@@ -235,7 +292,8 @@ export function withReview(payload: any, o: {
     const top = rank[0];
     if (!top) return null;
     const same = rank.filter((r) => JSON.stringify(r.have) === JSON.stringify(top.have)).map((r) => r.u);
-    return { label: nearestLabel(use, want, top.have), examples: photoFirst(same).slice(0, 3), count: same.length };
+    const examples = photos(same).slice(0, 3);
+    return { label: nearestLabel(use, want, top.have, examples.length > 0), examples, count: same.length };
   };
   // Each queued element's label fields, so the page can write a labels.jsonl row as it is.
   const items = entries.map((q) => {
@@ -243,16 +301,16 @@ export function withReview(payload: any, o: {
     const pick = picks.get(q.id) ?? e;
     const alts = (e.alternatives ?? []).filter((a: any) => a?.use && a.use !== pick?.use).slice(0, 3);
     const mine = pick?.use ? precedents[key(pick.use, pick.props)] ?? [] : [];
-    const examples = photoFirst(mine).slice(0, 3);
+    const examples = photos(mine).slice(0, 3);
     const nearest = pick?.use && !mine.length ? nearestFor(pick.use, pick.props) : null;
     const own = pick?.use ? E.proposals?.[proposalKey(pick.use, pick.props)] : null;
     const scope = o.searched?.[e.target];
-    const altEx = alts[0] ? (precedents[key(alts[0].use, alts[0].props)] ?? []).slice(0, 1) : [];
+    const altEx = alts[0] ? photos(precedents[key(alts[0].use, alts[0].props)] ?? []).slice(0, 1) : [];
     return {
       ...q, pick,
       label: { app: e.target, file: e.file, line: e.line, sourceRef: o.sourceRef?.(e) ?? 'worktree', elementHash: e.srcHash ?? hashText(String(e.snippet ?? e.id)) },
       examples, altExamples: altEx, usesCount: mine.length,
-      nearest, systemExample: !mine.length && own?.url && own.check === 'exact' && !own.unstyled ? { url: own.url } : null,
+      nearest, systemExample: !mine.length && own?.url && own.check === 'exact' && !own.unstyled && !own.bare ? { url: own.url } : null,
       // Said as "doesn't use it" only when the search read the whole app.
       searched: scope ? { files: scope.files, unread: scope.unread, whole: scope.files > 0 && scope.unread === 0 } : null,
     };

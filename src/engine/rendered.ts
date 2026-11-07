@@ -54,8 +54,24 @@ export interface Proposal {
   text?: string | undefined;
   /** Drawn, but the system's stylesheet didn't reach it: a browser's default font or button. */
   unstyled?: boolean | undefined;
+  /** The element holds more than its words, and the drawing holds it too. */
+  inner?: boolean | undefined;
+  /** Looked at after drawing: it can be seen, and any claim to the element's own words is true of what shows. */
+  checked?: boolean | number | undefined;
+  /** The component as its story wrote it, standing in as an example: this element's content can't go in a whole structure. */
+  example?: boolean | undefined;
+  /** The element holds more than its words, and the drawing doesn't show all of it. */
+  innerLost?: boolean | undefined;
   /** When it couldn't be drawn with these props: the component's story as its authors wrote it, to show instead. */
   fallback?: string | undefined;
+  /** Its width comes from its container: what a drawing was given to fill says nothing about the component. */
+  fills?: boolean | undefined;
+  /** A drawing that fills its container, drawn at the widths of the elements it's for. The first is `shot`. */
+  sizes?: { for: number; shot: string; w: number; h: number; wider?: boolean | undefined; cut?: boolean | undefined }[] | undefined;
+  /** Its words don't all show in its picture: wider than their box, or squeezed out of sight. */
+  cut?: boolean | undefined;
+  /** A control whose content is its words, drawn with none: it shows nothing of how the system looks. */
+  bare?: boolean | undefined;
   /** Drawn from the system's own source (harness.ts), or from one of its stories. */
   via?: 'source' | 'story' | undefined;
 }
@@ -68,6 +84,11 @@ export const lookProps = (props?: Record<string, unknown> | null): Record<string
 export function proposalKey(use: string, props?: Record<string, unknown> | null) {
   const p = Object.entries(lookProps(props)).map(([k, v]) => `${k}=${v}`).join(';');
   return p ? `${use}|${p}` : use;
+}
+
+/** When the proposals were last drawn. */
+export function proposalsTakenAt(dataDir: string): string | null {
+  try { return JSON.parse(fs.readFileSync(path.join(dataDir, 'rendered', 'proposals.json'), 'utf8')).takenAt ?? null; } catch { return null; }
 }
 
 export function readProposals(dataDir: string): Record<string, Proposal> {

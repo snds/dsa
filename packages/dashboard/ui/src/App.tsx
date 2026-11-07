@@ -6,7 +6,7 @@ import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
-import { Pre } from "@/components/bits"
+import { EvidenceTimes, Pre } from "@/components/bits"
 import { D, SYS, ago, api, fmtD, fmtDT } from "@/lib/dsa"
 import { Queue } from "@/views/Queue"
 import { Federation } from "@/views/Federation"
@@ -160,6 +160,7 @@ function Shell() {
                   <TooltipContent>{fmtDT(D.run.takenAt)} · run {D.run.id}</TooltipContent>
                 </Tooltip>
               ) : "No scans yet"}
+              <EvidenceTimes photos={D.elements?.shotsTaken} drawings={D.elements?.drawingsTaken} />
               {D.live && <span> · <LiveRevision /></span>}
               {D.schedule?.length > 0 && <span> · <NextScan /></span>}
               {figma && <span> · {figma}</span>}

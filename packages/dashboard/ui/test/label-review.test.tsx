@@ -95,6 +95,8 @@ test("one item: no code on its face; both images at real size; where it sits; an
   expect(ex.length).toBeGreaterThanOrEqual(1)
   expect(ex[0]!.querySelector("img")?.getAttribute("src")).toBe("shots/use.png")
   expect(item.querySelector('[data-slot="alternatives"] img')?.getAttribute("src")).toBe("rendered/toggle.png")
+  // Not drawn with this element's content, it says it's only an example.
+  expect(item.querySelector('[data-slot="alternative"] figcaption')?.textContent).toContain("an example of the component, not this element's content")
   // The engineer's way in is there, behind the disclosure.
   expect([...item.querySelectorAll("details button")].some(b => /Open the code/.test(b.textContent ?? ""))).toBe(true)
 })
@@ -183,4 +185,20 @@ test("building instructions aren't reasons to judge by", async () => {
   const L = await import("@/views/review/LabelReview")
   expect(L.reasonToJudge("It only works inside a menu. Build the right-click menu with ContextMenu: ContextMenuTrigger wraps the target.")).toBe("It only works inside a menu.")
   expect(L.reasonToJudge("Migrate ContextMenu with its parts.")).toBe("")
+})
+
+test("a table's height is its rows: not a difference beside the story's sample rows", async () => {
+  const L = await import("@/views/review/LabelReview")
+  const diff = { rendered: { diff: { same: [], score: 0.5, diffs: [{ label: "height", element: "86", system: "252" }, { label: "radius", element: "0px", system: "8px" }] } } }
+  expect(L.plainDifferences({ ...diff, role: "static-table", element: "table" })).toEqual(["squarer corners"])
+  expect(L.plainDifferences({ ...diff, role: "button", element: "button", shot: { content: { inner: { marks: 0, blocks: 2, lost: 0 } } } })).toEqual(["squarer corners"])
+  expect(L.plainDifferences({ ...diff, role: "button", element: "button" })).toEqual(["166 px shorter", "squarer corners"])
+})
+
+test("the header says when the photos and drawings were taken", async () => {
+  const { EvidenceTimes } = await import("@/components/bits")
+  const host = await mount(<EvidenceTimes photos={new Date().toISOString()} drawings="2026-11-05T19:02:05Z" />)
+  const times = [...host.querySelectorAll('[data-slot="evidence-time"]')].map(n => n.textContent)
+  expect(times[0]).toMatch(/^ · Photos: \S/)
+  expect(times[1]).toMatch(/^ · Drawings: \S/)
 })

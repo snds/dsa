@@ -333,6 +333,7 @@ export const ConfigSchema = z
         storiesPerComponent: z.number().int().min(1).optional(),
         harness: z.boolean().optional().describe("Draw proposals from the design system's own source with its Vite and React, its Storybook preview file for CSS and providers (default true). false: from its stories only."),
         maxMinutes: z.number().min(0).optional(),
+        drawSeconds: z.number().min(1).optional().describe("How long one drawing may take before its page counts as stuck and is replaced (default 30; the first on a page gets five times as long). It is recorded as not drawn, and named in the render log."),
       })
       .optional()
       .describe("Rendered signatures measured in the system's Storybook (the review add-on)."),

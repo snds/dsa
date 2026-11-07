@@ -5,7 +5,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Note } from "@/components/bits"
 import { D, api, say, short, SYS } from "@/lib/dsa"
 import { relayWho } from "@/lib/useScan"
-import { ElCtx, ownWords, pickText, sourceLabel } from "@/views/elements/shared"
+import { ElCtx, WIDER, altSays, atWidthOf, ownSays, ownWords, pickText, proposalFor, sourceLabel } from "@/views/elements/shared"
 import { deltaOf } from "@/views/elements/ReviewCard"
 import { CodeViewer } from "@/views/elements/CodeViewer"
 import { Crop, InContext, Natural } from "@/views/elements/SameScale"
@@ -106,6 +106,8 @@ export function plainChange(c: { label: string; from: string; to: string }): str
   return `a different ${l.replace(/[-_]/g, " ")}`
 }
 
+const CONTENT_SIZED = /^(static-table|data-table|clickable-region|native-dialog|drop-target|selector-card|choice-tile)$/
+
 /** Near white: the page a proposal is drawn on. */
 const whiteOrClear = (v: string) => { const n = colourName(v); return n === "white" || n === "transparent" }
 
@@ -119,7 +121,10 @@ export function plainDifferences(e: any): string[] {
   if (!d) return []
   const surface = e.shot?.surface
   const elsewhere = surface && !whiteOrClear(surface)
-  const kept = d.changes.filter(c => !(elsewhere && /^(bg|background)$/i.test(c.label)))
+  // A table's height is its rows, a tile's its contents: beside a story's sample content, that says nothing.
+  const inner = e.shot?.content?.inner
+  const sized = CONTENT_SIZED.test(e.role ?? "") || e.element === "table" || (inner?.blocks ?? 0) > 1
+  const kept = d.changes.filter(c => !(elsewhere && /^(bg|background)$/i.test(c.label)) && !(sized && /^(height|width)$/i.test(c.label)))
   return [...new Set(kept.map(plainChange))].slice(0, 5)
 }
 
@@ -146,18 +151,26 @@ export function plainPick(r: any): string {
 }
 
 /** "a link-style button, inline size" with its props small beside it. */
+/** What a card's heading says it proposes. A card with no component says so, in words. */
+export function proposalHeading(r: any): string {
+  if (r?.verdict === "replace" && r.use) return `${SYS} ${pickText(r)}`
+  if (r?.verdict === "gap") return `no ${SYS} component fits`
+  if (r?.verdict === "keep") return "keep it as it is"
+  return `no clear match in ${SYS}`
+}
+
 function PickName({ r }: { r: any }) {
   const props = pickText(r)
   return <><span>{plainPick(r)}</span>{r?.verdict === "replace" && <span className="ml-1 font-mono text-[10px] text-muted-foreground">({props})</span>}</>
 }
 
-/** The render stored for a component and props, if one was drawn (proposalKey's format). */
-function renderOf(use: string, props: Record<string, any> | undefined, ownHash?: string | null): any | null {
+/** The render stored for a component and props, if one was drawn (proposalKey's format), at this element's width. */
+function renderOf(use: string, props: Record<string, any> | undefined, e?: any): any | null {
   const P = D.elements.proposals ?? {}
   const p = Object.entries(props ?? {}).filter(([k, v]) => k !== "render" && k !== "asChild" && v != null).sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([k, v]) => `${k}=${v}`).join(";")
   const key = p ? `${use}|${p}` : use
-  const hit = (ownHash && P[`${key}#${ownHash}`]) || P[key]
-  return hit?.url ? hit : null
+  const hit = (e?.ownHash && P[`${key}#${e.ownHash}`]) || P[key]
+  return hit?.url ? atWidthOf(hit, e) : null
 }
 
 type Verdict = "right" | "wrong" | "unsure"
@@ -220,7 +233,8 @@ export function LabelReview() {
 
 function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: any; labeler: string; onAnswer: (row: any) => void; answered: any; onCode: () => void }) {
   const pick = item.pick
-  const proposal = pick?.verdict === "replace" ? renderOf(pick.use, pick.props, e.ownHash) : null
+  const drawn = pick?.verdict === "replace" ? proposalFor(pick, e) : null
+  const proposal = drawn?.url ? drawn : null
   const [verdict, setVerdict] = React.useState<Verdict | null>(null)
   const [note, setNote] = React.useState("")
   const [choice, setChoice] = React.useState<any>(null)
@@ -232,6 +246,9 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
     .map(reasonToJudge).filter(Boolean)
   const differs = plainDifferences(e)
   const alts = (e.alternatives ?? []).filter((a: any) => a?.use && a.use !== pick?.use).slice(0, 3)
+  // With no proposal, these stand in its place, each drawn with the element's own content.
+  const candidates = pick?.verdict === "replace" ? [] : alts.filter((a: any) => { const r = renderOf(a.use, a.props, e); return !r?.cut && ownWords(r, e) })
+  const unclear = pick?.verdict !== "replace" && pick?.verdict !== "gap" && pick?.verdict !== "keep"
 
   const label = (truth: any) => ({
     id: e.id, ...item.label, truth: truth.verdict === "replace" ? { verdict: "replace", use: truth.use, props: Object.fromEntries(Object.entries(truth.props ?? {}).map(([k, v]) => [k, String(v)])) } : { verdict: truth.verdict },
@@ -247,20 +264,29 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
   return (
     <article className="flex flex-col gap-5 rounded-lg border p-4" aria-labelledby={`h-${e.id}`} data-slot="review-item" data-element-id={e.id}>
       <header className="flex flex-col gap-1">
-        <h3 id={`h-${e.id}`} className="font-heading text-base font-semibold">{e.title ?? "This element"} → {SYS} {pickText(pick)}</h3>
+        <h3 id={`h-${e.id}`} className="font-heading text-base font-semibold">{e.title ?? "This element"} → {proposalHeading(pick)}</h3>
         <p className="text-sm">{describe(e)}</p>
         {answered && <p className="text-xs text-muted-foreground">You answered: {answered.verdict === "right" ? "Right" : answered.verdict === "wrong" ? `Wrong, should be ${pickText(answered.label.truth)}` : "Not sure"}. Answer again to change it.</p>}
       </header>
 
       <section aria-label="The element and the proposal, at their real size" className="flex flex-wrap items-start gap-6" data-slot="same-scale">
-        <figure className="m-0 flex flex-col gap-1" data-pane="app">
-          <div className="w-fit rounded-md border bg-background p-1"><Crop url={e.shot.url} box={e.shot.box} alt={`The element now: ${describe(e)}`} /></div>
+        <figure className="m-0 flex max-w-full min-w-0 flex-col gap-1" data-pane="app">
+          <div className="w-fit max-w-full rounded-md border bg-background p-1"><Crop url={e.shot.url} box={e.shot.box} alt={`The element now: ${describe(e)}`} /></div>
           <figcaption className="text-xs"><b className="font-medium">Now</b> · {sourceLabel(e.shot)}{e.review?.current === "isolated" ? " (drawn with the props it was recorded with)" : ""} · {e.target}</figcaption>
         </figure>
-        <figure className="m-0 flex flex-col gap-1" data-pane="proposed">
-          <div className="w-fit rounded-md border bg-background p-1">{proposal ? <Natural url={proposal.url} alt={`Proposed: ${SYS} ${pickText(pick)}, with its own words`} /> : <span className="text-xs">{pickText(pick)}: nothing to draw</span>}</div>
-          <figcaption className="text-xs"><b className="font-medium">Proposed</b> · {SYS} <PickName r={pick} />{ownWords(proposal, e) ? " · with its own words" : ""}</figcaption>
-        </figure>
+        {pick?.verdict === "replace" ? (
+          <figure className="m-0 flex max-w-full min-w-0 flex-col gap-1" data-pane="proposed">
+            <div className="w-fit max-w-full rounded-md border bg-background p-1">{proposal ? <Natural url={proposal.url} alt={`Proposed: ${SYS} ${proposal.partUse ?? pickText(pick)}${ownSays(proposal, e) ? `, ${ownSays(proposal, e)}` : ""}`} /> : <span className="text-xs">{pickText(pick)}: nothing to draw</span>}</div>
+            <figcaption className="text-xs"><b className="font-medium">Proposed</b> · {SYS} {proposal?.partUse ? <>{proposal.partUse}, the part of {pick.use} this element would be</> : <PickName r={pick} />}{ownSays(proposal, e) ? ` · ${ownSays(proposal, e)}` : ""}{proposal?.wider ? ` · ${WIDER}` : ""}</figcaption>
+          </figure>
+        ) : (
+          <div className="flex max-w-full min-w-0 flex-col gap-1" data-pane="proposed">
+            <p className="text-sm">{pick?.verdict === "gap" ? `${SYS} has no such component.` : pick?.verdict === "keep" ? "dsa suggests keeping it as it is." : `dsa isn't sure which ${SYS} component this is. ${candidates.length === 1 ? "Here is the closest one" : "Here are the closest ones"}${candidates.some((a: any) => ownSays(renderOf(a.use, a.props, e), e) === "with its own words") ? ", with its own words" : ""}.`}</p>
+            <div className="flex flex-wrap gap-4">{candidates.map((a: any, k: number) => { const r = renderOf(a.use, a.props, e); return (
+              <figure key={k} className="m-0 flex max-w-full min-w-0 flex-col gap-1" data-slot="candidate"><div className="w-fit max-w-full rounded-md border bg-background p-1"><Natural url={r.url} alt={`${pick?.verdict === "gap" ? "Suggested stand-in" : "Candidate"}: ${SYS} ${pickText(a)}, with its own words`} /></div><figcaption className="text-xs"><b className="font-medium">{pick?.verdict === "gap" ? "Suggested stand-in" : "Candidate"}</b> · {SYS} <PickName r={a} />{r.wider ? ` · ${WIDER}` : ""}</figcaption></figure>
+            ) })}</div>
+          </div>
+        )}
         <InContext url={e.shot.context?.url ?? e.shot.url} box={e.shot.context?.box ?? e.shot.box} alt={`Where it sits on ${e.review?.pageName}`} page={e.review?.pageName ?? "its page"} />
       </section>
 
@@ -274,10 +300,12 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
         <h4 id={`ex-${e.id}`} className="text-sm font-medium">Where the app already uses {pickText(pick)}</h4>
         {item.examples.length ? (
           <div className="flex flex-wrap gap-4">{item.examples.map((x: any, k: number) => <Example key={k} x={x} pick={pick} />)}</div>
+        ) : item.usesCount ? (
+          <p className="text-sm text-muted-foreground" data-slot="no-photos">The app uses {pickText(pick)} in {item.usesCount === 1 ? "one place" : `${item.usesCount} places`}, but dsa has no photo of {item.usesCount === 1 ? "it" : "them"} yet.</p>
         ) : item.nearest ? (
           <div className="flex flex-col gap-2" data-slot="nearest">
             <p className="text-sm">{item.nearest.label}</p>
-            <div className="flex flex-wrap gap-4">{item.nearest.examples.map((x: any, k: number) => <Example key={k} x={x} pick={{ use: x.component, props: x.props }} />)}</div>
+            {item.nearest.examples.length > 0 && <div className="flex flex-wrap gap-4">{item.nearest.examples.map((x: any, k: number) => <Example key={k} x={x} pick={{ use: x.component, props: x.props }} />)}</div>}
           </div>
         ) : item.searched?.whole ? (
           <p className="text-sm text-muted-foreground">The app doesn't use {pick.use} anywhere: dsa read its {item.searched.files} component files.</p>
@@ -285,33 +313,33 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
           <p className="text-sm text-muted-foreground">{item.searched ? `dsa could only read ${item.searched.files - item.searched.unread} of the app's ${item.searched.files} component files` : "dsa didn't search the app's code for this"}, so it can't say whether the app uses {pick.use}.</p>
         )}
         {item.systemExample && (
-          <figure className="m-0 flex flex-col gap-1" data-slot="system-example">
-            <div className="w-fit rounded-md border bg-background p-1"><Natural url={item.systemExample.url} alt={`${SYS} ${pickText(pick)}, the system's own example`} /></div>
+          <figure className="m-0 flex max-w-full min-w-0 flex-col gap-1" data-slot="system-example">
+            <div className="w-fit max-w-full rounded-md border bg-background p-1"><Natural url={item.systemExample.url} alt={`${SYS} ${pickText(pick)}, the system's own example`} /></div>
             <figcaption className="text-xs">The system's own example of {pickText(pick)}</figcaption>
           </figure>
         )}
-        {item.usesCount > item.examples.length && <p className="text-xs text-muted-foreground">{item.usesCount} places in all.</p>}
+        {item.examples.length > 0 && item.usesCount > item.examples.length && <p className="text-xs text-muted-foreground">{item.usesCount} places in all.</p>}
         {item.altExamples.length > 0 && alts[0] && (
           <div className="flex flex-col gap-1"><span className="text-xs text-muted-foreground">And where it uses the main alternative, {pickText(alts[0])}:</span>
             <div className="flex flex-wrap gap-4">{item.altExamples.map((x: any, k: number) => <Example key={k} x={x} pick={alts[0]} />)}</div></div>
         )}
       </section>}
 
-      {alts.length > 0 && (
+      {pick?.verdict === "replace" && alts.length > 0 && (
         <section aria-labelledby={`alt-${e.id}`} className="flex flex-col gap-2" data-slot="alternatives">
           <h4 id={`alt-${e.id}`} className="text-sm font-medium">What else dsa considered</h4>
-          <div className="flex flex-wrap gap-4">{alts.map((a: any, k: number) => { const r = renderOf(a.use, a.props, e.ownHash); return (
-            <figure key={k} className="m-0 flex flex-col gap-1"><div className="w-fit rounded-md border bg-background p-1">{r ? <Natural url={r.url} alt={`${SYS} ${pickText(a)}`} /> : <span className="text-xs">Not drawn</span>}</div><figcaption className="text-xs"><PickName r={a} /></figcaption></figure>
+          <div className="flex flex-wrap gap-4">{alts.map((a: any, k: number) => { const found = renderOf(a.use, a.props, e); const r = found && !found.bare && !found.cut ? found : null; return (
+            <figure key={k} className="m-0 flex max-w-full min-w-0 flex-col gap-1" data-slot="alternative"><div className="w-fit max-w-full rounded-md border bg-background p-1">{r ? <Natural url={r.url} alt={`${SYS} ${pickText(a)}, ${altSays(r, e)}`} /> : <span className="text-xs">Not drawn</span>}</div><figcaption className="text-xs"><PickName r={a} />{r ? ` · ${altSays(r, e)}` : ""}{r?.wider ? ` · ${WIDER}` : ""}</figcaption></figure>
           ) })}</div>
         </section>
       )}
 
       <section aria-labelledby={`v-${e.id}`} className="flex flex-col gap-3" data-slot="verdict">
-        <h4 id={`v-${e.id}`} className="text-sm font-medium">Is {pickText(pick)} the right answer?</h4>
+        <h4 id={`v-${e.id}`} className="text-sm font-medium">{unclear ? "Which is the right answer?" : pick?.verdict === "gap" ? `Is it right that nothing in ${SYS} fits?` : `Is ${pickText(pick)} the right answer?`}</h4>
         <div role="radiogroup" aria-labelledby={`v-${e.id}`} className="flex flex-wrap gap-2">
-          {(["right", "wrong", "unsure"] as Verdict[]).map(v => (
+          {(unclear ? ["wrong", "unsure"] : ["right", "wrong", "unsure"] as Verdict[]).map((v: any) => (
             <Button key={v} role="radio" aria-checked={verdict === v} variant={verdict === v ? "default" : "outline"} onClick={() => setVerdict(v)}>
-              {v === "right" ? "Right" : v === "wrong" ? "Wrong" : "Not sure"}{verdict === v ? " (chosen)" : ""}
+              {v === "right" ? "Right" : v === "wrong" ? (unclear ? "Choose" : "Wrong") : "Not sure"}{verdict === v ? " (chosen)" : ""}
             </Button>
           ))}
         </div>
@@ -338,16 +366,12 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
   )
 }
 
-/** A place the app already uses the component with these props: its photo when there is one, else the render, and where. */
+/** A place the app already uses the component with these props: its photo, and where. */
 function Example({ x, pick }: { x: any; pick: any }) {
-  const r = renderOf(pick.use, pick.props)
   return (
-    <figure className="m-0 flex flex-col gap-1" data-slot="example">
-      <div className="w-fit rounded-md border bg-background p-1">
-        {x.shot ? <Crop url={x.shot.url} box={x.shot.box} alt={`${SYS} ${pickText(pick)} on ${x.shot.pageName}`} />
-          : r ? <Natural url={r.url} alt={`${SYS} ${pickText(pick)}`} /> : <span className="text-xs">No picture yet</span>}
-      </div>
-      <figcaption className="text-xs">{x.shot ? `On ${x.shot.pageName}` : `In ${x.app}, no photo yet (the system's drawing)`}</figcaption>
+    <figure className="m-0 flex max-w-full min-w-0 flex-col gap-1" data-slot="example">
+      <div className="w-fit max-w-full rounded-md border bg-background p-1"><Crop url={x.shot.url} box={x.shot.box} alt={`${SYS} ${pickText(pick)} on ${x.shot.pageName}`} /></div>
+      <figcaption className="text-xs">On {x.shot.pageName}</figcaption>
     </figure>
   )
 }
@@ -363,7 +387,7 @@ function Choose({ e, pick, alts, value, onChange }: { e: any; pick: any; alts: a
   const [props, setProps] = React.useState<Record<string, string>>(() => ({ ...(comp?.defaults ?? {}), ...(use === pick?.use ? Object.fromEntries(Object.entries(pick?.props ?? {}).map(([k, v]) => [k, String(v)])) : {}) }))
   const kind = value?.verdict ?? "replace"
   React.useEffect(() => { onChange(kind === "replace" ? { verdict: "replace", use, props } : value) }, [use, props]) // eslint-disable-line react-hooks/exhaustive-deps
-  const r = kind === "replace" ? renderOf(use, Object.fromEntries(Object.entries(props).filter(([k, v]) => comp?.defaults?.[k] !== v)), e.ownHash) ?? renderOf(use, props, e.ownHash) : null
+  const r = kind === "replace" ? renderOf(use, Object.fromEntries(Object.entries(props).filter(([k, v]) => comp?.defaults?.[k] !== v)), e) ?? renderOf(use, props, e) : null
   return (
     <fieldset className="flex flex-col gap-3 rounded-md border p-3">
       <legend className="px-1 text-sm font-medium">The right answer</legend>
@@ -385,7 +409,7 @@ function Choose({ e, pick, alts, value, onChange }: { e: any; pick: any; alts: a
             </div>
           </fieldset>
         ))}
-        <figure className="m-0 flex flex-col gap-1"><div className="w-fit rounded-md border bg-background p-1">{r ? <Natural url={r.url} alt={`${SYS} ${use}`} /> : <span className="text-xs">Not drawn with these props yet</span>}</div><figcaption className="text-xs"><PickName r={{ verdict: "replace", use, props }} /></figcaption></figure>
+        <figure className="m-0 flex max-w-full min-w-0 flex-col gap-1"><div className="w-fit max-w-full rounded-md border bg-background p-1">{r ? <Natural url={r.url} alt={`${SYS} ${use}`} /> : <span className="text-xs">Not drawn with these props yet</span>}</div><figcaption className="text-xs"><PickName r={{ verdict: "replace", use, props }} /></figcaption></figure>
       </>}
     </fieldset>
   )

@@ -104,9 +104,11 @@ test("photo and proposal are drawn at one scale: real CSS size, the photo croppe
   const s = card("Ghost buttons").querySelector('[data-slot="same-scale"]')!
   const crop = s.querySelector<HTMLElement>('[data-pane="app"] [data-scale="1"]')!
   // The element (100×36) and 6px around it; the screenshot under it at its CSS size, not shrunk to fit.
-  expect([crop.style.width, crop.style.height]).toEqual(["112px", "48px"])
+  // In shares of the crop, so all of it shrinks together when the crop is wider than the card.
+  expect([crop.style.width, (crop.style as any).aspectRatio]).toEqual(["112px", "112 / 48"])
   const img = crop.querySelector("img")!
-  expect([img.style.width, img.style.left, img.style.top]).toEqual(["240px", "-14px", "-24px"])
+  const px = (share: string, of: number) => Math.round((parseFloat(share) / 100) * of)
+  expect([px(img.style.width, 112), px(img.style.left, 112), px(img.style.top, 48)]).toEqual([240, -14, -24])
   // The proposal: its pixels over the capture's 2x, once loaded.
   const p = s.querySelector<HTMLImageElement>('[data-pane="proposed"] img')!
   Object.defineProperty(p, "naturalWidth", { value: 180 })

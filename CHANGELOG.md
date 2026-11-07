@@ -38,6 +38,19 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   stylesheets and Vite setup (`viteFinal`, Tailwind), and still draw when a decorator only works inside
   Storybook. A drawing the system's styles didn't reach is `unstyled`: tried from stories, and otherwise
   it needs evidence.
+- Proposals carry what an element holds besides its words: a shape made of borders, a swatch, a picture, an
+  icon-font glyph, separate blocks of text. A photo records a copy (`content.inner`: only what paints or
+  lays it out), the drawing holds it, and each mark is checked there. If it can't be shown, the element
+  needs evidence ("the proposal doesn't show this element's inner content"). Photos from before this are
+  taken again once.
+- The report page now gets each drawing's recorded words and each photo's words, so "with its own words"
+  is checked on real runs, not only in tests.
+- `dsa render` always logs how many drawings the system's styles missed and how many lack their element's
+  inner content, zero included, naming the elements; and how many couldn't be drawn from source, with the
+  first reason.
+- The dashboard header says when the photos and drawings were taken, beside the last scan.
+- Label Review leaves height and width out of the differences for content-sized elements (tables, tiles,
+  elements with several text blocks): beside a story's sample content they say nothing.
 - CI fails when the committed report UI (`packages/dashboard/templates/ui`) isn't built from `ui/src`.
 - `dsa render` draws again a cached proposal drawn with the element's own content that doesn't record
   which words it drew (made before drawings recorded them), or drew other words than the element has now.
@@ -200,6 +213,60 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- A component that fills its container is no longer judged by the page it was drawn on. It's drawn at the
+  width of each element it's for (the nearest one is shown), so a field 161 px wide compares with a field about
+  161 px wide. Its width from the container no longer counts toward "a whole proposed for one small part": a
+  real whole, like a sidebar for its trigger, is still caught. A whole structure, like a table, keeps its room.
+- A drawing at an element's width widens as far as its words need, and the card says so. Words are checked
+  where they're drawn, not as recorded: a drawing whose words are still cut off, or don't show at all, is held
+  out with a plain reason.
+- "What else dsa considered" says when an alternative is only an example, and leaves out one with nothing in it.
+- A photo that shows nothing is no longer also called a small part of anything. One only a few pixels across
+  says the capture found nothing usable.
+- Pictures wider than the card shrink to fit and say so, instead of giving the page a sideways scroll.
+- "Where the app already uses" shows photos only. With none, it says so in one line. A control drawn with no
+  words is no longer offered as the system's own example.
+- A whole structure (rows, a list, tabs, a menu) is no longer drawn with one line of joined words or one icon in it,
+  which passed as the element's own because the words matched. It is shown as its story wrote it, labelled as an
+  example of the component and not this element's content.
+- A field's value and placeholder are recorded with its photo, drawn in the proposal and counted in the word check.
+  A password's value is never recorded. A photo from before this needs taking again, and says so.
+- The review gate no longer lets a container through with a story's sample in it. Only a drawing labelled as an
+  example is exempt from the own-words check.
+- One small part proposed as the whole it belongs to is compared with that part when it's drawn, and otherwise held
+  out with a reason. "With its own words" is only said when there are words.
+- A drawing of a trigger no longer hangs. The harness mounted it inside its own open popup, and now mounts it beside
+  what it opens, closed.
+- Copies of what an element holds keep what sits on top of what (a marker over a swatch), and pictures are kept at
+  about twice their size, so they fit. Photos with a copy are taken again once.
+- Every drawing is looked at again on the next render, once.
+
+- `dsa render` can no longer hang on a page that never returns. Each drawing has a time limit (`rendered.drawSeconds`,
+  default 30; the first on a page gets five times as long). A drawing past it is stopped, recorded as not drawn
+  with a plain reason, and named in the render log with its key and component. The page is replaced, or the
+  browser restarted if the page won't close, and the run carries on. Rendered signatures get the same limit.
+- A render saves its proposals every 10 items, after a stopped drawing and if it fails, so a killed run keeps
+  its finished drawings and a rerun reuses them. Saves are whole or not at all.
+- A drawing whose inner content has bare words at its top level is no longer rejected as "could not be looked at".
+- Drawing proposals from source no longer breaks partway through a run. When Vite found a dependency late it
+  rebuilt its bundle, and with the page open that loaded a second copy of React, so components imported
+  afterward failed with "Cannot read properties of null (reading 'useRef')". Vite now reads every component
+  before serving, and a page that hits this reloads and draws again.
+- A failed source drawing no longer replaces a story drawing that lost its inner content or the system's
+  styles. The drawing stays, and it still needs evidence.
+- Failed drawings are tried again on the next run instead of being cached. Only a component that isn't in
+  the system's source stays cached.
+- A drawing is looked at before it's believed. One that can't be seen (hidden, see-through, off the page, or
+  a blank picture) is no drawing, so it falls back to stories or is reported as not drawn. One that claims
+  the element's own words must show exactly those words, in a colour that differs from what's behind them.
+  Otherwise it says it isn't drawn with them, and the element needs evidence. Drawings made before this
+  check are drawn again.
+- A sample's bare words beside an icon-font glyph are replaced, instead of the glyph being given the words.
+- An icon-only button's aria-label no longer counts as words it should show, when a photo recorded none.
+- Label Review: a card with no clear answer shows its closest candidates, drawn with the element's own words,
+  and is held out if none is drawn. A gap card says the system has no such component and shows the suggested
+  stand-in where there is one. The heading no longer ends with nothing.
+- The render log counts real drawings: "N of M drawn with their props", how many have no picture, and why.
 - A review card showed one photo per look, so an element with its own photo appeared only as a small
   thumbnail of another element's (same classes, sometimes other words). Every element with a photo now
   has its own labelled tile: its photo at card scale, where it sits, its source label, match and code
