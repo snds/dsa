@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { findUses } from '../../src/engine/uses.js';
+import { findUses, lookRules, notProductRule } from '../../src/engine/uses.js';
 
 // Where an app already uses the system's components: props across lines; through a local file that
 // re-exports a package; through a vendored copy of the package; and how much of the app was read.
@@ -65,4 +65,30 @@ test('a thin local wrapper of the same name counts as the system component', () 
   });
   const r = findUses({ dir, packages: ['@acme/kit'], wanted: new Set(['Input']) });
   assert.ok(r.uses.some(u => u.file.endsWith('A.tsx') && u.props.size === 'sm'));
+});
+
+test('one rule for a look, the crawler\'s and the card\'s: the axes with their defaults filled in', () => {
+  const rules = lookRules([{ component: 'Button', axes: { variant: ['default', 'link'], size: ['default', 'sm'] }, defaults: { variant: 'default', size: 'default' } }]);
+  assert.equal(rules.key('Button', { variant: 'link' }), rules.key('Button', { variant: 'link', size: 'default', type: 'button' }), 'unset is the default, and type="button" is no look');
+  assert.notEqual(rules.key('Button', { variant: 'link' }), rules.key('Button', { variant: 'link', size: 'sm' }));
+  assert.equal(rules.key('Button', {}), rules.key('Button', null));
+  assert.equal(rules.unknown('Button', ['disabled', 'onSelect']), false, 'set from the code, but not what it looks like');
+  assert.equal(rules.unknown('Button', ['variant']), true);
+  assert.equal(rules.unknown('Button', ['...']), true, 'a spread could hold anything');
+  // A component the system doesn't list: every prop that isn't about behaviour.
+  assert.equal(rules.unknown('Card', ['disabled']), false);
+  assert.equal(rules.unknown('Card', ['tone']), true);
+});
+
+test('a lab, specimen or demo page is told from whole words; a setting adds to them or turns it off', () => {
+  const rule = notProductRule();
+  for (const f of ['src/features/widgetLab/gallery/x.tsx', 'src/demo/a.tsx', 'src/specimens.tsx', 'src/design-playground/a.tsx']) assert.equal(rule.file(f), true, f);
+  for (const f of ['src/LabelList.tsx', 'src/collaborate/a.tsx', 'src/gallery/Grid.tsx', 'src/demographics.tsx']) assert.equal(rule.file(f), false, f);
+  assert.equal(rule.page('http://x.test/labs/token-lab.html#gallery'), true);
+  assert.equal(rule.page('http://x.test/#/labs/one'), true);
+  assert.equal(rule.page('http://x.test/#/colours/lab-001'), false, 'a record can be called anything');
+  assert.equal(rule.page('http://x.test/#/colours/gallery'), false);
+  assert.equal(notProductRule(['internal-kit/']).file('src/internal-kit/a.tsx'), true);
+  assert.equal(notProductRule(false).file('src/demo/a.tsx'), false);
+  assert.equal(notProductRule(false).page('http://x.test/labs/a.html'), false);
 });

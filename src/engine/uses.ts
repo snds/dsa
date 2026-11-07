@@ -2,8 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parse as babelParse } from '@babel/parser';
 import { readAliases, resolveSpecifier } from './modules.js';
-import { walk } from './paths.js';
+import { allDsPackages, type Config } from './config.js';
+import { defaultExcludes, displayPath, usageExcludes, walk } from './paths.js';
+import type { Target } from './types.js';
 import { visit } from './scanners/features.js';
+import { canonicalProps } from '../bootstrap-labels.js';
 
 /**
  * Where an app already uses the system's components, with the props each use sets, read from its source.
@@ -149,4 +152,53 @@ export function findUses(o: { dir: string; packages: string[]; wanted?: Set<stri
     });
   }
   return { uses, files: files.length, unread };
+}
+
+/** Props that say what an element does, not how it looks. */
+export const NOT_LOOK = /^(type|form|name|value|disabled|tabIndex|role|href|to|target|rel|htmlFor|placeholder|autoFocus|asChild|render|open|defaultOpen|checked|defaultChecked)$/;
+/** What the system says about one component's look: the axes it has, and the value each takes when none is set. */
+export interface SystemLook { component: string; axes?: Record<string, string[]> | undefined; defaults?: Record<string, string> | undefined }
+/**
+ * What counts as the same look, one rule for what the crawler looks for and what a card shows: a use matches
+ * on the system's axes with their defaults filled in, so `variant="link"` is the look a card calls
+ * `variant link, size default`, and `disabled={busy}` says nothing about it.
+ */
+export function lookRules(system: readonly SystemLook[] | null | undefined) {
+  const axesOf = new Map((system ?? []).map((c) => [c.component, Object.keys({ ...(c.axes ?? {}), ...(c.defaults ?? {}) })]));
+  const defaultsOf = new Map((system ?? []).map((c) => [c.component, c.defaults ?? {}]));
+  const counts = (use: string, k: string) => { const axes = axesOf.get(use); return axes?.length ? axes.includes(k) : !NOT_LOOK.test(k); };
+  const look = (use: string, props: Record<string, unknown> | null | undefined) => canonicalProps(Object.fromEntries(Object.entries(props ?? {}).filter(([k]) => counts(use, k))), defaultsOf.get(use) ?? {});
+  return {
+    look,
+    key: (use: string, props: Record<string, unknown> | null | undefined) => `${use}|${JSON.stringify(look(use, props))}`,
+    /** An axis set from the code, or a spread, might be anything: its look isn't known. */
+    unknown: (use: string, dynamic: readonly string[] | null | undefined) => (dynamic ?? []).some((k) => k === '...' || counts(use, k)),
+    defaults: (use: string) => defaultsOf.get(use) ?? {},
+  };
+}
+
+const NOT_PRODUCT_WORDS = new Set(['lab', 'labs', 'specimen', 'specimens', 'demo', 'demos', 'playground', 'playgrounds', 'sandbox', 'sandboxes', 'showcase', 'showcases', 'styleguide']);
+const wordsOf = (s: string) => s.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+
+/**
+ * Is this a page built to show components off, not the product? Told from whole words in the file's path (within
+ * its app) or the page's address, so "label" and "collaborate" don't count. `shots.notProduct` adds paths or words;
+ * `false` turns it off, for an app where "lab" is a real part of the product.
+ */
+export function notProductRule(setting?: string[] | false | undefined) {
+  const hit = (where: string) => setting !== false && (wordsOf(where).some((w) => NOT_PRODUCT_WORDS.has(w)) || (setting ?? []).some((x) => where.includes(x)));
+  return {
+    file: (appPath: string) => hit(appPath),
+    // A page's path and the first step of its hash route: later steps name records, and a record can be called anything.
+    page: (url: string | null | undefined) => {
+      if (!url) return false;
+      try { const u = new URL(url); return hit(`${u.pathname} ${u.hash.slice(1).split('/').filter(Boolean)[0] ?? ''}`); } catch { return hit(url.split('?')[0]!); }
+    },
+  };
+}
+
+/** One app's uses of the system's components, each with the key a photo of it is stored under ("file:line", as the tagger names the file). */
+export function appUses(root: string, config: Config, t: Target, wanted: Set<string>) {
+  const found = findUses({ dir: t.dir, packages: allDsPackages(config), wanted, exclude: [...defaultExcludes(root), ...(config.exclude ?? []).map((e: string) => path.resolve(root, e)), ...(t.exclude ?? []), ...usageExcludes(t.dir)], aliases: t.aliases });
+  return { files: found.files, unread: found.unread, uses: found.uses.map(u => ({ ...u, shown: displayPath(root, u.file, t.dir), key: `${displayPath(root, u.file, t.dir)}:${u.line}` })) };
 }

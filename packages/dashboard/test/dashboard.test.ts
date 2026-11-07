@@ -163,3 +163,30 @@ test("only this run's photos count: one carried from an older run, or with no st
   assert.equal(f.byApp[app].oldestAt, '2026-10-06T09:00:00.000Z');
   assert.equal(f.byApp[app].oldestHours, 0, 'taken after the run began');
 });
+
+test("a rerun on unchanged code keeps the queue: a photo this run checked and kept counts, with its own age; last run's check doesn't", async () => {
+  const data = tmp();
+  await runPipeline({ root: ROOT, dataDir: data, git: false, now: NOW, readiness: false });
+  const store = await openStore(data);
+  const ids = (await store.all<any>('select id from element_evals order by id limit 2')).map((r: any) => r.id as string);
+  store.close();
+  const [kept, notChecked] = ids as [string, string];
+  const run = { id: 'run-2', ref: 'worktree', at: '2026-10-06T12:00:00.000Z' };
+  const taken = '2026-10-05T12:00:00.000Z';
+  const index = { run, shots: {
+    [kept]: { file: 'a.png', matchScore: 1, page: '/', run: 'run-1', at: taken, confirmed: 'run-2' },
+    [notChecked]: { file: 'b.png', matchScore: 1, page: '/', run: 'run-1', at: taken, confirmed: 'run-1' },
+  }, missing: [] };
+  const runDir = path.join(tmp(), 'run-2');
+  fs.mkdirSync(path.join(runDir, 'shots'), { recursive: true });
+  fs.writeFileSync(path.join(runDir, 'shots', 'index.json'), JSON.stringify(index));
+  for (const f of ['a.png', 'b.png']) fs.writeFileSync(path.join(runDir, 'shots', f), 'png');
+  const out = path.join(tmp(), 'site');
+  await publish(ROOT, loadConfig(ROOT).config, data, ACME_PROFILE, out, null, { runDir });
+  const payload = JSON.parse(fs.readFileSync(path.join(out, 'index.html'), 'utf8').match(/id="dsa-data" type="application\/json">(.*?)<\/script>/s)![1]);
+  const byId = new Map<string, any>(payload.elements.evals.map((e: any) => [e.id, e]));
+  assert.equal(byId.get(kept).shot?.url, 'shots/a.png');
+  assert.equal(byId.get(kept).staleShot, undefined);
+  assert.equal(byId.get(notChecked).shot, null);
+  assert.equal(fs.existsSync(path.join(out, 'shots', 'a.png')), true, 'the picture is published with it');
+});

@@ -92,6 +92,8 @@ test("one item: no code on its face; both images at real size; where it sits; an
   expect(item.querySelector('[data-slot="in-context"] img')?.getAttribute("src")).toBe("shots/ok.ctx.png")
   expect((item.querySelector('[data-slot="in-context"] [data-scale="1"]') as HTMLElement).style.width).toBe("800px")
   const ex = item.querySelectorAll('[data-slot="examples"] [data-slot="example"]')
+  // A photo, said to be one, with the page it's on.
+  expect(ex[0]!.textContent).toContain("Photo, on Orders › Table")
   expect(ex.length).toBeGreaterThanOrEqual(1)
   expect(ex[0]!.querySelector("img")?.getAttribute("src")).toBe("shots/use.png")
   expect(item.querySelector('[data-slot="alternatives"] img')?.getAttribute("src")).toBe("rendered/toggle.png")
