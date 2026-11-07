@@ -260,7 +260,7 @@ export const atWidthOf = (p: any, e: any): any => {
   if (!p?.sizes?.length) return p
   const w = e?.shot?.box?.w
   const s = w ? [...p.sizes].sort((a: any, b: any) => Math.abs(a.for - w) - Math.abs(b.for - w))[0] : p.sizes[0]
-  return { ...p, url: s.url, w: s.w, h: s.h }
+  return { ...p, url: s.url, w: s.w, h: s.h, wider: Boolean(s.wider), cut: Boolean(s.cut) }
 }
 
 /** Is the drawing many times the element, not counting width it only has from its container? (review.ts, the same rule) */
@@ -280,6 +280,10 @@ export const ownSays = (p: any, e: any): string => {
   if (!ownWords(p, e)) return ""
   return wordsOf(e) ? "with its own words" : "with its own content"
 }
+/** Said on a card when a drawing had to be wider than its element for the words to show. */
+export const WIDER = "drawn wider than the element, so its words show"
+/** What an alternative's picture holds. Without this element's own content, it's only an example. */
+export const altSays = (p: any, e: any): string => ownSays(p, e) || "an example of the component, not this element's content"
 /** An element a person can decide: its own photo (or isolated render) and its proposal both real (review.ts). */
 export const decidable = (e: any): boolean => Boolean(e?.shot) && (!e.review || e.review.ready === true)
 /**

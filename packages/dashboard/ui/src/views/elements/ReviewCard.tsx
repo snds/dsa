@@ -8,7 +8,7 @@ import { Code, Disclosure, Pre } from "@/components/bits"
 import { D, short, SYS } from "@/lib/dsa"
 import { stageKey, useStaged } from "@/lib/staged"
 import { AskAgent } from "@/agent/AskAgent"
-import { Conf, ElementRow, NoShot, Reasons, ReviewControls, contentText, decidable, desc, nameOf, ownSays, ownWords, pickText, proposalCheck, proposalFor, revealedText, sourceLabel, sourceTip, useEl, useReviewState } from "./shared"
+import { WIDER, Conf, ElementRow, NoShot, Reasons, ReviewControls, contentText, decidable, desc, nameOf, ownSays, ownWords, pickText, proposalCheck, proposalFor, revealedText, sourceLabel, sourceTip, useEl, useReviewState } from "./shared"
 import { Crop, InContext, Natural, SameScale } from "./SameScale"
 import { useApp } from "@/lib/app"
 import { styleName } from "./units"
@@ -397,6 +397,7 @@ function LookTile({ look, sameAs, group, target, proposal, compare, measure }: {
             {exact && chk && <span className={cn(chk.warn && "text-warning-soft-foreground")}>{chk.text}</span>}
             {!exact && <span className="text-warning-soft-foreground">{proposal?.note ?? (closest ? "The exact props aren't rendered yet" : chk?.text ?? "Not rendered yet")}</span>}
             {ownWords(exact, e) && <span>with this element's own content</span>}
+            {exact?.wider && <span>{WIDER}</span>}
             {exact?.content && <span className="text-warning-soft-foreground" title={exact.content}>{/stand-in|^icon/.test(exact.content) ? "Stand-in icon: the app's own icon wasn't captured" : "The story's sample label, not this element's"}</span>}
           </>
         ) : undefined}

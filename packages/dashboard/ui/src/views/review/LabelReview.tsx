@@ -5,7 +5,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Note } from "@/components/bits"
 import { D, api, say, short, SYS } from "@/lib/dsa"
 import { relayWho } from "@/lib/useScan"
-import { ElCtx, atWidthOf, ownSays, ownWords, pickText, proposalFor, sourceLabel } from "@/views/elements/shared"
+import { ElCtx, WIDER, altSays, atWidthOf, ownSays, ownWords, pickText, proposalFor, sourceLabel } from "@/views/elements/shared"
 import { deltaOf } from "@/views/elements/ReviewCard"
 import { CodeViewer } from "@/views/elements/CodeViewer"
 import { Crop, InContext, Natural } from "@/views/elements/SameScale"
@@ -247,7 +247,7 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
   const differs = plainDifferences(e)
   const alts = (e.alternatives ?? []).filter((a: any) => a?.use && a.use !== pick?.use).slice(0, 3)
   // With no proposal, these stand in its place, each drawn with the element's own content.
-  const candidates = pick?.verdict === "replace" ? [] : alts.filter((a: any) => ownWords(renderOf(a.use, a.props, e), e))
+  const candidates = pick?.verdict === "replace" ? [] : alts.filter((a: any) => { const r = renderOf(a.use, a.props, e); return !r?.cut && ownWords(r, e) })
   const unclear = pick?.verdict !== "replace" && pick?.verdict !== "gap" && pick?.verdict !== "keep"
 
   const label = (truth: any) => ({
@@ -277,13 +277,13 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
         {pick?.verdict === "replace" ? (
           <figure className="m-0 flex max-w-full min-w-0 flex-col gap-1" data-pane="proposed">
             <div className="w-fit max-w-full rounded-md border bg-background p-1">{proposal ? <Natural url={proposal.url} alt={`Proposed: ${SYS} ${proposal.partUse ?? pickText(pick)}${ownSays(proposal, e) ? `, ${ownSays(proposal, e)}` : ""}`} /> : <span className="text-xs">{pickText(pick)}: nothing to draw</span>}</div>
-            <figcaption className="text-xs"><b className="font-medium">Proposed</b> · {SYS} {proposal?.partUse ? <>{proposal.partUse}, the part of {pick.use} this element would be</> : <PickName r={pick} />}{ownSays(proposal, e) ? ` · ${ownSays(proposal, e)}` : ""}</figcaption>
+            <figcaption className="text-xs"><b className="font-medium">Proposed</b> · {SYS} {proposal?.partUse ? <>{proposal.partUse}, the part of {pick.use} this element would be</> : <PickName r={pick} />}{ownSays(proposal, e) ? ` · ${ownSays(proposal, e)}` : ""}{proposal?.wider ? ` · ${WIDER}` : ""}</figcaption>
           </figure>
         ) : (
           <div className="flex max-w-full min-w-0 flex-col gap-1" data-pane="proposed">
             <p className="text-sm">{pick?.verdict === "gap" ? `${SYS} has no such component.` : pick?.verdict === "keep" ? "dsa suggests keeping it as it is." : `dsa isn't sure which ${SYS} component this is. ${candidates.length === 1 ? "Here is the closest one" : "Here are the closest ones"}${candidates.some((a: any) => ownSays(renderOf(a.use, a.props, e), e) === "with its own words") ? ", with its own words" : ""}.`}</p>
             <div className="flex flex-wrap gap-4">{candidates.map((a: any, k: number) => { const r = renderOf(a.use, a.props, e); return (
-              <figure key={k} className="m-0 flex max-w-full min-w-0 flex-col gap-1" data-slot="candidate"><div className="w-fit max-w-full rounded-md border bg-background p-1"><Natural url={r.url} alt={`${pick?.verdict === "gap" ? "Suggested stand-in" : "Candidate"}: ${SYS} ${pickText(a)}, with its own words`} /></div><figcaption className="text-xs"><b className="font-medium">{pick?.verdict === "gap" ? "Suggested stand-in" : "Candidate"}</b> · {SYS} <PickName r={a} /></figcaption></figure>
+              <figure key={k} className="m-0 flex max-w-full min-w-0 flex-col gap-1" data-slot="candidate"><div className="w-fit max-w-full rounded-md border bg-background p-1"><Natural url={r.url} alt={`${pick?.verdict === "gap" ? "Suggested stand-in" : "Candidate"}: ${SYS} ${pickText(a)}, with its own words`} /></div><figcaption className="text-xs"><b className="font-medium">{pick?.verdict === "gap" ? "Suggested stand-in" : "Candidate"}</b> · {SYS} <PickName r={a} />{r.wider ? ` · ${WIDER}` : ""}</figcaption></figure>
             ) })}</div>
           </div>
         )}
@@ -328,8 +328,8 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
       {pick?.verdict === "replace" && alts.length > 0 && (
         <section aria-labelledby={`alt-${e.id}`} className="flex flex-col gap-2" data-slot="alternatives">
           <h4 id={`alt-${e.id}`} className="text-sm font-medium">What else dsa considered</h4>
-          <div className="flex flex-wrap gap-4">{alts.map((a: any, k: number) => { const r = renderOf(a.use, a.props, e); return (
-            <figure key={k} className="m-0 flex max-w-full min-w-0 flex-col gap-1"><div className="w-fit max-w-full rounded-md border bg-background p-1">{r ? <Natural url={r.url} alt={`${SYS} ${pickText(a)}`} /> : <span className="text-xs">Not drawn</span>}</div><figcaption className="text-xs"><PickName r={a} /></figcaption></figure>
+          <div className="flex flex-wrap gap-4">{alts.map((a: any, k: number) => { const found = renderOf(a.use, a.props, e); const r = found && !found.bare && !found.cut ? found : null; return (
+            <figure key={k} className="m-0 flex max-w-full min-w-0 flex-col gap-1" data-slot="alternative"><div className="w-fit max-w-full rounded-md border bg-background p-1">{r ? <Natural url={r.url} alt={`${SYS} ${pickText(a)}, ${altSays(r, e)}`} /> : <span className="text-xs">Not drawn</span>}</div><figcaption className="text-xs"><PickName r={a} />{r ? ` · ${altSays(r, e)}` : ""}{r?.wider ? ` · ${WIDER}` : ""}</figcaption></figure>
           ) })}</div>
         </section>
       )}

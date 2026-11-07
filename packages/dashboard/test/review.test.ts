@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { tmp } from '../../../test/engine/fixture.js';
-import { canDecideNow, evidenceOf, pageName, proposalFor, stepWords, withReview } from '../src/review.js';
+import { canDecideNow, candidatesOf, evidenceOf, pageName, proposalFor, stepWords, withReview } from '../src/review.js';
 import { reviewQueue } from '../src/labels.js';
 import { appendHumanLabels, humanLabelsFile } from '../src/server.js';
 
@@ -306,4 +306,22 @@ test('where the app uses it: only photos are tiles; with none, the page has a li
   assert.equal(near.nearest.label, 'The app uses Button at sm, but dsa has no photo of it yet.');
   assert.equal(item([]).systemExample.url, 'r/b.png');
   assert.equal(item([], { bare: true }).systemExample, null);
+});
+
+test('a drawing whose words are cut off is held out, and no candidate; at a width where they show, it stands', () => {
+  const pick = { verdict: 'replace', use: 'Field', props: {} };
+  const e = (w: number, o: object = {}) => el('name', { ownHash: 'f', use: 'Field', props: {}, shot: shot({ box: { x: 1, y: 1, w, h: 24, cw: 400, ch: 200 }, content: { text: 'Alder', inner: null } }), ...o });
+  const base = { use: 'Field', props: {}, check: 'exact', url: 'rendered/f.png', own: true, text: 'Alder', w: 60, h: 24, fills: true };
+  const cut = reviewed({ proposals: { 'Field#f': { ...base, cut: true } } }, e(60), pick).missing;
+  assert.deepEqual(cut.map((m: any) => m.kind), ['cut-off']);
+  assert.match(cut[0].why, /cut off/);
+  // One width can be cut when another isn't: the one this element gets decides.
+  const sizes = [{ for: 60, url: 'rendered/60.png', w: 90, h: 24, wider: true }, { for: 300, url: 'rendered/300.png', w: 300, h: 24, cut: true }];
+  const E = { proposals: { 'Field#f': { ...base, sizes } } };
+  assert.deepEqual(reviewed(E, e(60), pick).missing, []);
+  assert.equal(proposalFor(E, e(60), pick).wider, true);
+  assert.deepEqual(reviewed(E, e(300), pick).missing.map((m: any) => m.kind), ['cut-off']);
+  const vague = e(60, { verdict: 'unclear', use: null, alternatives: [{ verdict: 'replace', use: 'Field', props: {} }] });
+  assert.equal(candidatesOf({ proposals: { 'Field#f': { ...base, cut: true } } }, vague).length, 0);
+  assert.equal(candidatesOf({ proposals: { 'Field#f': base } }, vague).length, 1);
 });

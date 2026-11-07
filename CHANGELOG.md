@@ -217,6 +217,10 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
   width of each element it's for (the nearest one is shown), so a field 161 px wide compares with a field about
   161 px wide. Its width from the container no longer counts toward "a whole proposed for one small part": a
   real whole, like a sidebar for its trigger, is still caught. A whole structure, like a table, keeps its room.
+- A drawing at an element's width widens as far as its words need, and the card says so. Words are checked
+  where they're drawn, not as recorded: a drawing whose words are still cut off, or don't show at all, is held
+  out with a plain reason.
+- "What else dsa considered" says when an alternative is only an example, and leaves out one with nothing in it.
 - A photo that shows nothing is no longer also called a small part of anything. One only a few pixels across
   says the capture found nothing usable.
 - Pictures wider than the card shrink to fit and say so, instead of giving the page a sideways scroll.

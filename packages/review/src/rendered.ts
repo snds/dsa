@@ -38,7 +38,7 @@ const OPEN_MS = 300_000;
 const CLOSE_MS = 5_000;
 const SAVE_EVERY = 10;
 /** Raised when what a drawing must get right changes, so old drawings are looked at again. */
-const CHECKED = 3;
+const CHECKED = 4;
 /** What a whole structure says when it's drawn empty, or as its story wrote it, instead of with an element's content. */
 const DRAWN_EMPTY = "its rows come from data the scan couldn't read, so it's drawn empty";
 const EXAMPLE = "an example of the component, not this element's content";
@@ -499,7 +499,7 @@ export async function renderProposals(opts: { root: string; config: Config; data
       if (best && best.check === 'none') { srcFailed++; srcFirst ??= best.note; }
       // Done: exact, with the element's own content, or (with none of its own) without a stand-in label.
       // Drawn with its own content and saying which words: one drawn before renders kept their text is drawn again.
-      const done = (b: Proposal | null) => Boolean(b && b.check === 'exact' && b.shot && (p.own ? b.own && typeof b.text === 'string' : !b.content) && !b.unstyled && !b.innerLost);
+      const done = (b: Proposal | null) => Boolean(b && b.check === 'exact' && b.shot && (p.own ? b.own && typeof b.text === 'string' : !b.content) && !b.unstyled && !b.innerLost && !b.cut);
       if (!done(best) && (await storybook())) {
         const sb = sbs!, first = !sb.warm;
         sb.warm = true;
@@ -531,7 +531,7 @@ const picture = (p: Proposal) => (p.shot ? 0 : p.fallback ? 1 : 2);
  */
 function pickBetter(a: Proposal | null, b: Proposal | null): Proposal | null {
   if (!a || !b) return a ?? b;
-  const d = picture(a) - picture(b) || Number(a.content === DRAWN_EMPTY) - Number(b.content === DRAWN_EMPTY) || Number(Boolean(a.unstyled)) - Number(Boolean(b.unstyled)) || Number(Boolean(a.innerLost)) - Number(Boolean(b.innerLost)) || ORDER[a.check] - ORDER[b.check] || Number(Boolean(b.own)) - Number(Boolean(a.own)) || Number(Boolean(a.content)) - Number(Boolean(b.content));
+  const d = picture(a) - picture(b) || Number(a.content === DRAWN_EMPTY) - Number(b.content === DRAWN_EMPTY) || Number(Boolean(a.unstyled)) - Number(Boolean(b.unstyled)) || Number(Boolean(a.innerLost)) - Number(Boolean(b.innerLost)) || Number(Boolean(a.cut)) - Number(Boolean(b.cut)) || ORDER[a.check] - ORDER[b.check] || Number(Boolean(b.own)) - Number(Boolean(a.own)) || Number(Boolean(a.content)) - Number(Boolean(b.content));
   return d > 0 ? b : a;
 }
 
@@ -577,7 +577,7 @@ async function fromSource(page: any, h: Harness, fresh: FreshDraw, s: any, p: Wa
   if (!seen.shows) return { ...noOwn(p), check: 'none', via: 'source', note: `${p.use} drew from the system's source, but ${seen.why}.`, hash };
   if (seen.notOwn) own = { own: false, why: seen.notOwn };
   const content = own && !own.own && own.why ? own.why : undefined;
-  const size = await sizedDrawing(page, sel, p, k, dir, file);
+  const size = await sizedDrawing(page, sel, p, k, dir, file, own);
   return { ...noOwn(p), check, via: 'source', shot: file, ...size, ...(seen.notOwn ? {} : { checked: CHECKED }), styles: top.styles, ...(unstyledLook(top.styles) ? { unstyled: true } : {}), ...innerOf(p, own), ...(own?.own ? { own: true, text: ownText(p.own) } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
 }
 
@@ -612,6 +612,79 @@ const SET_WIDTH = `({ sel, room }) => {
   const r = el.getBoundingClientRect();
   return { w: Math.round(r.width * 10) / 10, h: Math.round(r.height * 10) / 10 };
 }`;
+/**
+ * In the page: are this element's words cut off? What decides is where they are drawn, not what it holds. Text
+ * outside the element or a box that clips it, or squeezed to nothing, is cut off. A line counts as inside when
+ * its middle is, since a line's box is taller than its letters. What's meant not to show doesn't count. With
+ * `words` given, some text has to show.
+ */
+const IS_CUT = `(el, words) => {
+  const NOT_WORDS = 'svg, style, script, select, textarea, [data-slot=icon], [aria-hidden=true], .material-symbols-outlined, .material-symbols-rounded, .material-icons, [data-dsa-mark]';
+  let shown = false;
+  const field = el.matches('input, select, textarea') ? el : el.querySelector('input, select, textarea');
+  if (field && !/^(checkbox|radio|range|color|file|hidden)$/.test(field.type || '')) {
+    const said = field.tagName === 'SELECT' ? (field.selectedOptions[0]?.textContent || '') : (field.value || field.placeholder || '');
+    if (said.trim()) {
+      const cs = getComputedStyle(field), room = field.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      if (field.tagName === 'TEXTAREA') { if (field.value && field.scrollHeight > field.clientHeight + 1) return true; }
+      else {
+        const pen = document.createElement('canvas').getContext('2d');
+        pen.font = cs.font;
+        if (pen.measureText(said).width > room + 0.5) return true;
+      }
+      shown = true;
+    }
+  }
+  const range = document.createRange();
+  const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  while (walk.nextNode()) {
+    const t = walk.currentNode, at = t.parentElement;
+    if (!(t.nodeValue || '').trim() || !at || at.closest(NOT_WORDS)) continue;
+    if (!at.checkVisibility({ visibilityProperty: true })) continue;
+    // A label only for screen readers: one pixel square and clipped, on purpose.
+    let meantHidden = false;
+    for (let n = at; n && n !== el.parentElement; n = n.parentElement) { const cs = getComputedStyle(n); if (cs.position === 'absolute' && cs.overflow !== 'visible' && n.getBoundingClientRect().width <= 1) meantHidden = true; }
+    if (meantHidden) continue;
+    range.selectNodeContents(t);
+    const lines = Array.from(range.getClientRects());
+    const all = range.getBoundingClientRect();
+    if (!lines.length || all.width < 1 || all.height < 1) return true;
+    for (let n = at; n && n !== el.parentElement; n = n.parentElement) {
+      if (n !== el && getComputedStyle(n).overflowX === 'visible' && getComputedStyle(n).overflowY === 'visible') continue;
+      const b = n.getBoundingClientRect();
+      if (!b.width || !b.height) { if (n === el) continue; return true; }
+      if (all.left < b.left - 0.5 || all.right > b.right + 0.5) return true;
+      if (lines.some(l => (l.top + l.bottom) / 2 < b.top || (l.top + l.bottom) / 2 > b.bottom)) return true;
+    }
+    shown = true;
+  }
+  return Boolean(words && words.trim() && !shown);
+}`;
+const CUT_NOW = `({ sel, words }) => { const el = document.querySelector(sel); return Boolean(el) && (${IS_CUT})(el, words); }`;
+/**
+ * Runs in the page: make the element this wide, or as little wider as lets its words show. The room is searched,
+ * since words can need more than they measure (padding, a slot beside them). Cut off even in all the room there
+ * is, it stays there and says so.
+ */
+const FIT_WIDTH = `({ sel, rate, rest, width, words }) => {
+  const el = document.querySelector(sel), root = el && el.closest('#root, #storybook-root');
+  if (!root) return null;
+  const isCut = ${IS_CUT};
+  const at = (w) => { root.style.width = Math.max(1, (w - rest) / rate) + 'px'; };
+  const read = (o) => { const r = el.getBoundingClientRect(); return { w: Math.round(r.width * 10) / 10, h: Math.round(r.height * 10) / 10, ...o }; };
+  at(width);
+  if (!isCut(el, words)) return read({});
+  root.style.width = '';
+  if (isCut(el, words)) return read({ cut: true });
+  let low = width, high = el.getBoundingClientRect().width;
+  for (let i = 0; i < 12 && high - low > 1; i++) {
+    const mid = (low + high) / 2;
+    at(mid);
+    if (isCut(el, words)) low = mid; else high = mid;
+  }
+  at(Math.ceil(high));
+  return read({ wider: true });
+}`;
 /** Runs in the page: a control whose content is its words, with no words and nothing else in it? */
 const BARE = `({ sel }) => {
   const el = document.querySelector(sel);
@@ -623,22 +696,23 @@ const BARE = `({ sel }) => {
  * Drawn again at the width of each element it's for, so a person compares like with like. A whole structure
  * keeps its room: squeezed to one element's width, a table is no longer an example of a table.
  */
-async function sizedDrawing(page: any, sel: string, p: Wanted, k: string, dir: string, file: string): Promise<Pick<Proposal, 'fills' | 'sizes' | 'bare'>> {
+async function sizedDrawing(page: any, sel: string, p: Wanted, k: string, dir: string, file: string, own: { own: boolean } | null): Promise<Pick<Proposal, 'fills' | 'sizes' | 'bare' | 'cut'>> {
   const bare = !p.own && await run<boolean>(page, BARE, { sel }).catch(() => false);
   const out = bare ? { bare: true } : {};
   const f = await run<{ rate: number; rest: number } | null>(page, FILLS, { sel }).catch(() => null);
-  if (!f) return out;
-  if (await run<boolean>(page, HOLDS_STRUCTURE, { sel }).catch(() => false)) return { ...out, fills: true };
+  if (await run<boolean>(page, HOLDS_STRUCTURE, { sel }).catch(() => false)) return f ? { ...out, fills: true } : out;
+  const words = own?.own && p.own ? ownText(p.own) ?? null : null;
+  if (!f) return await run<boolean>(page, CUT_NOW, { sel, words }).catch(() => false) ? { ...out, cut: true } : out;
   const widths = drawWidths(p.widths);
   const sizes: NonNullable<Proposal['sizes']> = [];
   for (const [i, w] of (widths.length ? widths : [PLAIN_WIDTH]).entries()) {
-    const box = await run<{ w: number; h: number } | null>(page, SET_WIDTH, { sel, room: Math.max(1, (w - f.rest) / f.rate) }).catch(() => null);
+    const box = await run<{ w: number; h: number; wider?: boolean; cut?: boolean } | null>(page, FIT_WIDTH, { sel, rate: f.rate, rest: f.rest, width: w, words }).catch(() => null);
     const shot = i === 0 ? file : `proposal-${sha(k).slice(0, 12)}-${w}.png`;
-    if (box && await shoot(page, sel, path.join(dir, shot))) sizes.push({ for: w, shot, w: box.w, h: box.h });
+    if (box && await shoot(page, sel, path.join(dir, shot))) sizes.push({ for: w, shot, ...box });
     else if (i === 0) break; // the main picture stays as it was drawn, so no size may claim otherwise
   }
   await run(page, SET_WIDTH, { sel, room: null }).catch(() => {});
-  return { ...out, fills: true, ...(sizes.length ? { sizes } : {}) };
+  return { ...out, fills: true, ...(sizes.length ? { sizes, ...(sizes[0]!.cut ? { cut: true } : {}) } : {}) };
 }
 
 /**
@@ -776,7 +850,7 @@ async function fromStories(sb: { url: string; stories: any[]; page: any }, s: an
     if (!seen.shows) return false;
     if (seen.notOwn) own = { own: false, why: seen.notOwn };
     const content = own?.own ? undefined : own?.why ? own.why : set ? (iconSize && icon ? `icon from ${icon.story}` : 'story default') : undefined;
-    const size = await sizedDrawing(page, sel, p, k, dir, file);
+    const size = await sizedDrawing(page, sel, p, k, dir, file, own);
     best = { ...noOwn(p), check, via: 'story', shot: file, ...size, ...(seen.notOwn ? {} : { checked: CHECKED }), styles: top.styles, ...(unstyledLook(top.styles) ? { unstyled: true } : {}), ...innerOf(p, own), story: st.id, ...(own?.example ? { example: true } : {}), ...(own?.own ? { own: true, text: ownText(p.own) } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
     return check === 'exact' && (!p.own || Boolean(own?.own) || !seen.notOwn);
   };
@@ -864,7 +938,7 @@ export async function drawFresh(page: any, h: Harness, fresh: FreshDraw, arg: { 
 }
 
 /** For tests: the in-page prop check and the helper that runs it. */
-export const __test = { SCAN, get INJECT_OWN() { return INJECT_OWN; }, run, pickBetter, get SHOWN() { return SHOWN; }, get FILLS() { return FILLS; }, get SET_WIDTH() { return SET_WIDTH; }, get BARE() { return BARE; } };
+export const __test = { SCAN, get INJECT_OWN() { return INJECT_OWN; }, run, pickBetter, get SHOWN() { return SHOWN; }, get FILLS() { return FILLS; }, get SET_WIDTH() { return SET_WIDTH; }, get BARE() { return BARE; }, get CUT_NOW() { return CUT_NOW; }, get FIT_WIDTH() { return FIT_WIDTH; } };
 
 /** A proposal as stored: its component and props; the content it was asked to show isn't kept. */
 const noOwn = (p: Wanted) => ({ use: p.use, props: p.props });

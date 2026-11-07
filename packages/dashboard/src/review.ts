@@ -88,7 +88,7 @@ export function atWidthOf(p: any, e: any): any {
   if (!p?.sizes?.length) return p;
   const w = e?.shot?.box?.w;
   const s = w ? [...p.sizes].sort((a: any, b: any) => Math.abs(a.for - w) - Math.abs(b.for - w))[0] : p.sizes[0];
-  return { ...p, url: s.url, w: s.w, h: s.h };
+  return { ...p, url: s.url, w: s.w, h: s.h, wider: Boolean(s.wider), cut: Boolean(s.cut) };
 }
 
 /**
@@ -119,7 +119,7 @@ export function candidatesOf(E: any, e: any): any[] {
   return (e.alternatives ?? []).filter((a: any) => {
     if (!a?.use) return false;
     const p = proposalFor(E, e, { verdict: 'replace', use: a.use, props: a.props });
-    return Boolean(p?.url) && p.check !== 'none' && !p.unstyled && drawnWithOwnWords(p, e);
+    return Boolean(p?.url) && p.check !== 'none' && !p.unstyled && !p.cut && drawnWithOwnWords(p, e);
   });
 }
 
@@ -157,6 +157,8 @@ export function evidenceOf(E: any, e: any, pick: any): Evidence {
     else if (p.check !== 'exact') missing.push({ kind: 'near-match', group: 'have a proposal drawn only as a near match', why: `The proposal (${what}) is only drawn as a near match, not with these props.`, fix: 'Draw the proposals (dsa render).' });
     // Drawn without the system's stylesheet it looks broken, and would be judged for that, not for the fit.
     else if (p.unstyled) missing.push({ kind: 'unstyled', group: "have a proposal that couldn't be drawn with the system's styles", why: "The proposal couldn't be drawn with the system's styles, so it wouldn't look like the real component.", fix: "Check the system's Storybook preview loads its stylesheet, then draw the proposals again (dsa render)." });
+    // Compared by what shows: a word cut short, or no word at all, can't be judged against the element's.
+    else if (p.cut) missing.push({ kind: 'cut-off', group: 'have a proposal whose words are cut off in its drawing', why: "The proposal's words are cut off in its drawing, even with all the room the page has, so it can't be compared.", fix: "Check how the component handles long words, or propose another component." });
     // A stand-in icon reads as a different control; sample words as a different label: neither is decidable.
     else if (!example && /stand-in|^icon|icon .*couldn't be loaded/.test(p.content ?? '')) missing.push({ kind: 'stand-in-icon', group: "have a proposal drawn with a stand-in icon, not their own", why: "The proposal is drawn with a stand-in icon, not this element's own icon, so it may read as a different control.", fix: "Take the photo again so its icon is recorded, then draw the proposal again (dsa render)." });
     else if (!example && (e.ownHash || p.content) && !drawnWithOwnWords(p, e)) missing.push({ kind: 'not-own-words', group: "have a proposal drawn with other words than their own", why: p.own ? "The proposal's words aren't this element's own." : "The proposal shows the system's sample words, not this element's own.", fix: 'Draw the proposal again once its own words are known (a photo records them).' });

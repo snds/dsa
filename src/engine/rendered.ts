@@ -67,7 +67,9 @@ export interface Proposal {
   /** Its width comes from its container: what a drawing was given to fill says nothing about the component. */
   fills?: boolean | undefined;
   /** A drawing that fills its container, drawn at the widths of the elements it's for. The first is `shot`. */
-  sizes?: { for: number; shot: string; w: number; h: number }[] | undefined;
+  sizes?: { for: number; shot: string; w: number; h: number; wider?: boolean | undefined; cut?: boolean | undefined }[] | undefined;
+  /** Its words don't all show in its picture: wider than their box, or squeezed out of sight. */
+  cut?: boolean | undefined;
   /** A control whose content is its words, drawn with none: it shows nothing of how the system looks. */
   bare?: boolean | undefined;
   /** Drawn from the system's own source (harness.ts), or from one of its stories. */

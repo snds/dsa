@@ -95,6 +95,8 @@ test("one item: no code on its face; both images at real size; where it sits; an
   expect(ex.length).toBeGreaterThanOrEqual(1)
   expect(ex[0]!.querySelector("img")?.getAttribute("src")).toBe("shots/use.png")
   expect(item.querySelector('[data-slot="alternatives"] img')?.getAttribute("src")).toBe("rendered/toggle.png")
+  // Not drawn with this element's content, it says it's only an example.
+  expect(item.querySelector('[data-slot="alternative"] figcaption')?.textContent).toContain("an example of the component, not this element's content")
   // The engineer's way in is there, behind the disclosure.
   expect([...item.querySelectorAll("details button")].some(b => /Open the code/.test(b.textContent ?? ""))).toBe(true)
 })

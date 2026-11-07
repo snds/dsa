@@ -241,3 +241,50 @@ test("a drawing's width: only what follows its container fills it, and it can be
     assert.deepEqual([await bare('wordless'), await bare('worded'), await bare('dot')], [true, false, false]);
   } finally { await page.close(); }
 });
+
+test("words that don't show are cut off, wherever they're recorded; a drawing widens only as far as they need", { timeout: 60_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  const page = await browser!.newPage({ viewport: { width: 1280, height: 900 } });
+  try {
+    await page.setContent(`<!doctype html><body style="margin:0;padding:24px;font:14px sans-serif"><div id="root">
+      <div id="fits" style="width:200px">Walnut</div>
+      <div id="clipped" style="width:20px;overflow:hidden;white-space:nowrap">Walnut and more</div>
+      <div id="spills" style="width:20px;white-space:nowrap">Walnut and more</div>
+      <div id="slot" style="width:100%;display:flex"><span id="gone" style="flex:1;min-width:0;overflow:hidden;width:0"><span style="display:block;width:0;overflow:hidden">W</span></span></div>
+      <div id="squeezed" style="width:60px;display:flex;overflow:hidden"><i style="flex:0 0 60px"></i><span style="flex:1;min-width:0;overflow:hidden">C</span></div>
+      <div id="tall" style="width:80px;height:20px;line-height:20px;overflow:hidden">one two three four five six</div>
+      <div id="sr" style="width:90px">Shown<span style="position:absolute;width:1px;height:1px;overflow:hidden">a much longer hidden label for screen readers</span></div>
+      <div id="tight" style="width:60px;height:12px;line-height:12px;font-size:14px;white-space:nowrap">Ash</div>
+      <div id="none" style="width:60px;height:12px"></div>
+      <input id="long" style="width:40px;padding:0 4px;font:14px sans-serif" value="Materials and more">
+      <input id="short" style="width:200px" placeholder="Name">
+      <input id="ph" style="width:30px;padding:0" placeholder="A long placeholder">
+      <input id="tick" type="checkbox" value="A long value that never shows">
+    </div>`);
+    const cut = (id: string, words: string | null = null) => r.run<boolean>(page, r.CUT_NOW, { sel: `#${id}`, words });
+    for (const id of ['fits', 'sr', 'tight', 'short', 'tick', 'none']) assert.equal(await cut(id), false, id);
+    for (const id of ['clipped', 'spills', 'squeezed', 'tall', 'long', 'ph']) assert.equal(await cut(id), true, id);
+    assert.equal(await cut('none', 'Walnut'), true, 'it has words, and none show');
+    await page.setContent(`<!doctype html><body style="margin:0;padding:24px;font:14px sans-serif"><div id="root">
+      <button id="b" style="width:100%;box-sizing:border-box;padding:0 8px;display:block;white-space:nowrap;overflow:hidden">Materials</button>
+      <input id="i" style="width:100%;box-sizing:border-box;padding:0 8px;font:14px sans-serif" value="Materials">
+      <div id="never" style="width:100%;overflow:hidden;white-space:nowrap">${'Word '.repeat(600)}</div>
+    </div>`);
+    const fit = async (id: string, width: number) => {
+      const f = await r.run<any>(page, r.FILLS, { sel: `#${id}` });
+      const got = await r.run<any>(page, r.FIT_WIDTH, { sel: `#${id}`, rate: f.rate, rest: f.rest, width, words: null });
+      const stillCut = await cut(id);
+      await r.run(page, r.SET_WIDTH, { sel: `#${id}`, room: null });
+      return { ...got, stillCut };
+    };
+    assert.deepEqual(await fit('i', 200), { w: 200, h: (await fit('i', 200)).h, stillCut: false }, 'room enough: the width asked for');
+    for (const id of ['i', 'b']) {
+      const got = await fit(id, 40);
+      assert.equal(got.wider, true, id);
+      assert.equal(got.stillCut, false, `${id}: its words show`);
+      assert.ok(got.w > 40 && got.w < 120, `${id}: no wider than it needs: ${got.w}`);
+    }
+    const never = await fit('never', 40);
+    assert.deepEqual([never.cut, never.wider], [true, undefined], 'all the room there is, still cut: said so');
+  } finally { await page.close(); }
+});

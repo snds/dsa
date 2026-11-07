@@ -340,9 +340,9 @@ test("a component that fills its container is drawn at its elements' widths; one
   assert.ok(s.sizes!.length >= 1 && s.sizes!.every(z => [161, 96].includes(z.for)), JSON.stringify(s.sizes));
   assert.equal(s.sizes![0]!.shot, s.shot, 'its main picture is its first size');
   for (const z of s.sizes!) {
-    assert.equal(z.w, z.for);
+    assert.ok(z.wider ? z.w > z.for : z.w === z.for, JSON.stringify(z));
     // At 2x, with 6 px of room each side.
-    assert.equal(decodePng(fs.readFileSync(path.join(data, 'rendered', z.shot))).width, (z.for + 12) * 2);
+    assert.ok(Math.abs(decodePng(fs.readFileSync(path.join(data, 'rendered', z.shot))).width - (z.w + 12) * 2) <= 2, JSON.stringify(z));
   }
   const fixed = Object.values(p).filter(v => v.use === 'Toggle' && v.shot);
   assert.ok(fixed.length > 0);
