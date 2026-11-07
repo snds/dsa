@@ -50,6 +50,6 @@ test("no photo of the app using it: one line, no tiles", async () => {
   const section = host.querySelector('[data-slot="examples"]')!
   expect(section.querySelectorAll('[data-slot="example"]').length).toBe(0)
   expect(section.querySelectorAll("img").length).toBe(0)
-  expect(section.querySelector('[data-slot="no-photos"]')?.textContent).toBe("The app uses Button in 2 places, but dsa has no photo of them yet.")
+  expect(section.querySelector('[data-slot="no-photos"]')?.textContent).toBe("The app uses Button in 2 places, but dsa has no photo of them: dsa hasn't looked for it yet (take the screenshots again).")
   expect(section.textContent).not.toContain("places in all")
 })

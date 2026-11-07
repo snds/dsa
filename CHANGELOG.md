@@ -213,6 +213,13 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- Review cards show photos of how the app already uses the proposed component. The crawler looked for the
+  scan's list of uses, which doesn't follow a local file that re-exports the system, so it photographed almost
+  none of them. It now looks for the uses the report counts, wherever it goes, then for up to 5 minutes more
+  where the ledger saw their files render. A few of each look are kept, and stand while their file is
+  unchanged. A card shows only its own app's uses, says how a different look differs, and with no photo says why.
+- A word a little past its element's edge still shows whole in the picture, so it's no longer cut off. A
+  drawing held narrow by a wrapper now draws at the element's width, so its words show.
 - A component that fills its container is no longer judged by the page it was drawn on. It's drawn at the
   width of each element it's for (the nearest one is shown), so a field 161 px wide compares with a field about
   161 px wide. Its width from the container no longer counts toward "a whole proposed for one small part": a

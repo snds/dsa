@@ -296,26 +296,25 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
         {differs.length > 0 && <p className="text-sm" data-slot="differences"><span className="text-muted-foreground">How it differs from the proposal: </span>{differs.join("; ")}.</p>}
       </section>
 
-      {pick?.use && <section aria-labelledby={`ex-${e.id}`} className="flex flex-col gap-2" data-slot="examples">
-        <h4 id={`ex-${e.id}`} className="text-sm font-medium">Where the app already uses {pickText(pick)}</h4>
-        {item.examples.length ? (
-          <div className="flex flex-wrap gap-4">{item.examples.map((x: any, k: number) => <Example key={k} x={x} pick={pick} />)}</div>
-        ) : item.usesCount ? (
-          <p className="text-sm text-muted-foreground" data-slot="no-photos">The app uses {pickText(pick)} in {item.usesCount === 1 ? "one place" : `${item.usesCount} places`}, but dsa has no photo of {item.usesCount === 1 ? "it" : "them"} yet.</p>
-        ) : item.nearest ? (
+      {item.about?.use && <section aria-labelledby={`ex-${e.id}`} className="flex flex-col gap-2" data-slot="examples">
+        <h4 id={`ex-${e.id}`} className="text-sm font-medium">Where the app already uses {pickText(item.about)}</h4>
+        {item.examples.length > 0 && <div className="flex flex-wrap gap-4">{item.examples.map((x: any, k: number) => <Example key={k} x={x} pick={item.about} />)}</div>}
+        {item.nearest && (item.nearest.examples.length > 0 || (!item.examples.length && !item.noPhoto)) && (
           <div className="flex flex-col gap-2" data-slot="nearest">
-            <p className="text-sm">{item.nearest.label}</p>
+            {!item.examples.length && <p className="text-sm">{item.nearest.label}</p>}
             {item.nearest.examples.length > 0 && <div className="flex flex-wrap gap-4">{item.nearest.examples.map((x: any, k: number) => <Example key={k} x={x} pick={{ use: x.component, props: x.props }} />)}</div>}
           </div>
-        ) : item.searched?.whole ? (
-          <p className="text-sm text-muted-foreground">The app doesn't use {pick.use} anywhere: dsa read its {item.searched.files} component files.</p>
-        ) : (
-          <p className="text-sm text-muted-foreground">{item.searched ? `dsa could only read ${item.searched.files - item.searched.unread} of the app's ${item.searched.files} component files` : "dsa didn't search the app's code for this"}, so it can't say whether the app uses {pick.use}.</p>
         )}
+        {item.noPhoto ? (
+          <p className="text-sm text-muted-foreground" data-slot="no-photos">{item.noPhoto.line}</p>
+        ) : !item.examples.length && !item.nearest ? (
+          item.searched?.whole ? <p className="text-sm text-muted-foreground">The app doesn't use {item.about.use} anywhere: dsa read its {item.searched.files} component files.</p>
+          : <p className="text-sm text-muted-foreground">{item.searched ? `dsa could only read ${item.searched.files - item.searched.unread} of the app's ${item.searched.files} component files` : "dsa didn't search the app's code for this"}, so it can't say whether the app uses {item.about.use}.</p>
+        ) : null}
         {item.systemExample && (
           <figure className="m-0 flex max-w-full min-w-0 flex-col gap-1" data-slot="system-example">
             <div className="w-fit max-w-full rounded-md border bg-background p-1"><Natural url={item.systemExample.url} alt={`${SYS} ${pickText(pick)}, the system's own example`} /></div>
-            <figcaption className="text-xs">The system's own example of {pickText(pick)}</figcaption>
+            <figcaption className="text-xs">Not a photo: the system's own example of {pickText(pick)}</figcaption>
           </figure>
         )}
         {item.examples.length > 0 && item.usesCount > item.examples.length && <p className="text-xs text-muted-foreground">{item.usesCount} places in all.</p>}
@@ -366,13 +365,13 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
   )
 }
 
-/** A place the app already uses the component with these props: its photo, and where. */
+/** A place the app already uses the component: a photo of the running app, around it, and the page it's on. */
 function Example({ x, pick }: { x: any; pick: any }) {
   return (
-    <figure className="m-0 flex max-w-full min-w-0 flex-col gap-1" data-slot="example">
-      <div className="w-fit max-w-full rounded-md border bg-background p-1"><Crop url={x.shot.url} box={x.shot.box} alt={`${SYS} ${pickText(pick)} on ${x.shot.pageName}`} /></div>
-      <figcaption className="text-xs">On {x.shot.pageName}</figcaption>
-    </figure>
+    <div className="max-w-full min-w-0" data-slot="example">
+      <InContext url={x.shot.url} box={x.shot.box} alt={`Photo of the app: ${SYS} ${pickText(pick)} on ${x.shot.pageName}`} page={x.shot.pageName}
+        caption={<>Photo, on {x.shot.pageName}{x.differs ? ` · a different look: ${x.differs}` : ""}</>} />
+    </div>
   )
 }
 

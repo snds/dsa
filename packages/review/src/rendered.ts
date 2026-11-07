@@ -38,7 +38,7 @@ const OPEN_MS = 300_000;
 const CLOSE_MS = 5_000;
 const SAVE_EVERY = 10;
 /** Raised when what a drawing must get right changes, so old drawings are looked at again. */
-const CHECKED = 4;
+const CHECKED = 5;
 /** What a whole structure says when it's drawn empty, or as its story wrote it, instead of with an element's content. */
 const DRAWN_EMPTY = "its rows come from data the scan couldn't read, so it's drawn empty";
 const EXAMPLE = "an example of the component, not this element's content";
@@ -593,16 +593,28 @@ const HOLDS_STRUCTURE = `({ sel }) => { const el = document.querySelector(sel); 
 /**
  * Runs in the page: does the element's width come from its container? Half the room, and see. Says how the
  * width follows the room, so a width can be asked for. A popup outside the drawing's root has no room to change.
+ * A wrapper with a width of its own (a family's frame, a story's) can hold it back: those are opened, and stay
+ * open if that lets it follow the room.
  */
 const FILLS = `({ sel }) => {
   const el = document.querySelector(sel), root = el && el.closest('#root, #storybook-root');
   if (!root) return null;
-  const room = root.getBoundingClientRect().width, was = el.getBoundingClientRect().width;
-  root.style.width = room / 2 + 'px';
-  const then = el.getBoundingClientRect().width;
-  root.style.width = '';
-  const rate = (was - then) / (room / 2);
-  return rate >= 0.4 ? { rate, rest: was - rate * room } : null;
+  const room = root.getBoundingClientRect().width;
+  const follows = () => {
+    const was = el.getBoundingClientRect().width;
+    root.style.width = room / 2 + 'px';
+    const then = el.getBoundingClientRect().width;
+    root.style.width = '';
+    const rate = (was - then) / (room / 2);
+    return rate >= 0.4 ? { rate, rest: was - rate * room } : null;
+  };
+  const own = follows();
+  if (own) return own;
+  const opened = [];
+  for (let n = el.parentElement; n && n !== root; n = n.parentElement) { opened.push([n, n.style.width, n.style.maxWidth]); n.style.width = '100%'; n.style.maxWidth = 'none'; }
+  const held = opened.length ? follows() : null;
+  if (!held) for (const [n, w, m] of opened) { n.style.width = w; n.style.maxWidth = m; }
+  return held;
 }`;
 /** Runs in the page: give the drawing the room that makes the element this wide (null: back as it was). */
 const SET_WIDTH = `({ sel, room }) => {
@@ -614,13 +626,14 @@ const SET_WIDTH = `({ sel, room }) => {
 }`;
 /**
  * In the page: are this element's words cut off? What decides is where they are drawn, not what it holds. Text
- * outside the element or a box that clips it, or squeezed to nothing, is cut off. A line counts as inside when
- * its middle is, since a line's box is taller than its letters. What's meant not to show doesn't count. With
- * `words` given, some text has to show.
+ * clipped by a box, squeezed to nothing, or further outside the element than `spill` is cut off. A picture
+ * holds a margin around the element, so text a little past its edge still shows whole. A line counts as inside
+ * when its middle is, since a line's box is taller than its letters. What's meant not to show doesn't count. With
+ * `words` given, some text has to show, unless they're a label only for screen readers.
  */
-const IS_CUT = `(el, words) => {
+const IS_CUT = `(el, words, spill) => {
   const NOT_WORDS = 'svg, style, script, select, textarea, [data-slot=icon], [aria-hidden=true], .material-symbols-outlined, .material-symbols-rounded, .material-icons, [data-dsa-mark]';
-  let shown = false;
+  let shown = false, forReaders = false;
   const field = el.matches('input, select, textarea') ? el : el.querySelector('input, select, textarea');
   if (field && !/^(checkbox|radio|range|color|file|hidden)$/.test(field.type || '')) {
     const said = field.tagName === 'SELECT' ? (field.selectedOptions[0]?.textContent || '') : (field.value || field.placeholder || '');
@@ -630,7 +643,7 @@ const IS_CUT = `(el, words) => {
       else {
         const pen = document.createElement('canvas').getContext('2d');
         pen.font = cs.font;
-        if (pen.measureText(said).width > room + 0.5) return true;
+        if (pen.measureText(said).width > room + 1) return true;
       }
       shown = true;
     }
@@ -644,38 +657,43 @@ const IS_CUT = `(el, words) => {
     // A label only for screen readers: one pixel square and clipped, on purpose.
     let meantHidden = false;
     for (let n = at; n && n !== el.parentElement; n = n.parentElement) { const cs = getComputedStyle(n); if (cs.position === 'absolute' && cs.overflow !== 'visible' && n.getBoundingClientRect().width <= 1) meantHidden = true; }
-    if (meantHidden) continue;
+    if (meantHidden) { forReaders = true; continue; }
     range.selectNodeContents(t);
     const lines = Array.from(range.getClientRects());
     const all = range.getBoundingClientRect();
     if (!lines.length || all.width < 1 || all.height < 1) return true;
     for (let n = at; n && n !== el.parentElement; n = n.parentElement) {
-      if (n !== el && getComputedStyle(n).overflowX === 'visible' && getComputedStyle(n).overflowY === 'visible') continue;
+      const clips = getComputedStyle(n).overflowX !== 'visible' || getComputedStyle(n).overflowY !== 'visible';
+      if (n !== el && !clips) continue;
       const b = n.getBoundingClientRect();
       if (!b.width || !b.height) { if (n === el) continue; return true; }
-      if (all.left < b.left - 0.5 || all.right > b.right + 0.5) return true;
-      if (lines.some(l => (l.top + l.bottom) / 2 < b.top || (l.top + l.bottom) / 2 > b.bottom)) return true;
+      const past = clips ? 1 : spill;
+      if (all.left < b.left - past || all.right > b.right + past) return true;
+      if (lines.some(l => (l.top + l.bottom) / 2 < b.top - (clips ? 0 : spill) || (l.top + l.bottom) / 2 > b.bottom + (clips ? 0 : spill))) return true;
     }
     shown = true;
   }
-  return Boolean(words && words.trim() && !shown);
+  return Boolean(words && words.trim() && !shown && !forReaders);
 }`;
-const CUT_NOW = `({ sel, words }) => { const el = document.querySelector(sel); return Boolean(el) && (${IS_CUT})(el, words); }`;
+/** What a picture holds past the element's edge (shoot's margin). */
+const PICTURE_MARGIN = 6;
+const CUT_NOW = `({ sel, words }) => { const el = document.querySelector(sel); return Boolean(el) && (${IS_CUT})(el, words, ${PICTURE_MARGIN}); }`;
 /**
  * Runs in the page: make the element this wide, or as little wider as lets its words show. The room is searched,
- * since words can need more than they measure (padding, a slot beside them). Cut off even in all the room there
- * is, it stays there and says so.
+ * since words can need more than they measure (padding, a slot beside them). With room to spare, words stay
+ * inside the element. Still cut off in all the room there is, it stays there and says so.
  */
 const FIT_WIDTH = `({ sel, rate, rest, width, words }) => {
   const el = document.querySelector(sel), root = el && el.closest('#root, #storybook-root');
   if (!root) return null;
-  const isCut = ${IS_CUT};
+  const check = ${IS_CUT};
+  const isCut = (e, w) => check(e, w, 1);
   const at = (w) => { root.style.width = Math.max(1, (w - rest) / rate) + 'px'; };
   const read = (o) => { const r = el.getBoundingClientRect(); return { w: Math.round(r.width * 10) / 10, h: Math.round(r.height * 10) / 10, ...o }; };
   at(width);
   if (!isCut(el, words)) return read({});
   root.style.width = '';
-  if (isCut(el, words)) return read({ cut: true });
+  if (isCut(el, words)) return check(el, words, ${PICTURE_MARGIN}) ? read({ cut: true }) : read({ wider: true });
   let low = width, high = el.getBoundingClientRect().width;
   for (let i = 0; i < 12 && high - low > 1; i++) {
     const mid = (low + high) / 2;

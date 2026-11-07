@@ -2,7 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parse as babelParse } from '@babel/parser';
 import { readAliases, resolveSpecifier } from './modules.js';
-import { walk } from './paths.js';
+import { allDsPackages, type Config } from './config.js';
+import { defaultExcludes, displayPath, usageExcludes, walk } from './paths.js';
+import type { Target } from './types.js';
 import { visit } from './scanners/features.js';
 
 /**
@@ -149,4 +151,15 @@ export function findUses(o: { dir: string; packages: string[]; wanted?: Set<stri
     });
   }
   return { uses, files: files.length, unread };
+}
+
+/** Props that say what an element does, not how it looks. */
+export const NOT_LOOK = /^(type|form|name|value|disabled|tabIndex|role|href|to|target|rel|htmlFor|placeholder|autoFocus|asChild|render|open|defaultOpen|checked|defaultChecked)$/;
+/** A use's look, as text: the props that change how it looks, in name order. */
+export const useLook = (props: Record<string, unknown> | undefined): string => JSON.stringify(Object.entries(props ?? {}).filter(([k]) => !NOT_LOOK.test(k)).sort((a, b) => (a[0] < b[0] ? -1 : 1)));
+
+/** One app's uses of the system's components, each with the key a photo of it is stored under ("file:line", as the tagger names the file). */
+export function appUses(root: string, config: Config, t: Target, wanted: Set<string>) {
+  const found = findUses({ dir: t.dir, packages: allDsPackages(config), wanted, exclude: [...defaultExcludes(root), ...(config.exclude ?? []).map((e: string) => path.resolve(root, e)), ...(t.exclude ?? []), ...usageExcludes(t.dir)], aliases: t.aliases });
+  return { files: found.files, unread: found.unread, uses: found.uses.map(u => ({ ...u, shown: displayPath(root, u.file, t.dir), key: `${displayPath(root, u.file, t.dir)}:${u.line}` })) };
 }

@@ -2,7 +2,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { proposalsTakenAt, allDsPackages, defaultExcludes, displayPath, findUses, usageExcludes, DEFAULT_THRESHOLD, locate, freshShots, freshnessByApp, readShotIndex, autoPick, contentHash, ownOf, openStore, plainText, withPlain, withMetrics, appSettings, closestRendered, compareRendered, effectiveSettings, familyKey, figmaEnabled, homeOf, loadCatalog, patterns as stylePatterns, pushedThisWeek, questions, readEvents, readProposals, readRendered, renderIssue, renderedFor as composeRendered, resolveTargets, rowToFinding, sourceExcerpts, placeExcerpts, titleOf, type Config } from '@snds/dsa/engine';
+import { proposalsTakenAt, appUses, DEFAULT_THRESHOLD, locate, freshShots, freshnessByApp, readShotIndex, autoPick, contentHash, ownOf, openStore, plainText, withPlain, withMetrics, appSettings, closestRendered, compareRendered, effectiveSettings, familyKey, figmaEnabled, homeOf, loadCatalog, patterns as stylePatterns, pushedThisWeek, questions, readEvents, readProposals, readRendered, renderIssue, renderedFor as composeRendered, resolveTargets, rowToFinding, sourceExcerpts, placeExcerpts, titleOf, type Config } from '@snds/dsa/engine';
 
 import { scanEstimate, type PageActions, type ResolvedProfile } from '@snds/dsa';
 import { buildQueue, PKG_DIR } from './queue.js';
@@ -414,27 +414,26 @@ function precedentsOf(root: string, config: Config, elements: any, shotIdx: any,
   try { targets = resolveTargets(root, config); } catch { return { uses: [], searched: {} }; }
   // Read from each app's source, following its imports: the scan's count of system uses doesn't follow a
   // local file that re-exports a package, and only its own lines are known to be elements of that name.
-  const packages = allDsPackages(config);
-  const excludes = [...defaultExcludes(root), ...(config.exclude ?? []).map((e: string) => path.resolve(root, e))];
   const out: Precedent[] = [];
   const searched: Record<string, { files: number; unread: number }> = {};
   const perComponent = new Map<string, number>();
   for (const t of targets) {
     if (t.role === 'core') continue;
-    let found: ReturnType<typeof findUses>;
-    try { found = findUses({ dir: t.dir, packages, wanted, exclude: [...excludes, ...(t.exclude ?? []), ...usageExcludes(t.dir)], aliases: t.aliases }); }
+    let found: ReturnType<typeof appUses>;
+    try { found = appUses(root, config, t, wanted); }
     catch { continue; }
     searched[t.name] = { files: found.files, unread: found.unread };
     for (const u of found.uses) {
-      // Up to 20 per app, component and props: enough examples for every answer, not a whole index.
+      const s = shotIdx.uses?.[u.key];
+      const photo = s && !s.blank && !s.covered;
+      // Up to 20 per app, component and props without a photo: enough to count from, not a whole index. Every photo is kept.
       const k = `${t.name}\u0001${u.component}\u0001${JSON.stringify(Object.entries(u.props).sort())}\u0001${u.dynamic.join()}`;
       const seen = perComponent.get(k) ?? 0;
       perComponent.set(k, seen + 1);
-      if (seen >= 20) continue;
-      const file = displayPath(root, u.file, t.dir);
-      const s = shotIdx.uses?.[`${file}:${u.line}`];
-      out.push({ app: t.name, file, line: u.line, component: u.component, props: u.props, ...(u.dynamic.length ? { dynamic: u.dynamic } : {}),
-        shot: s && !s.blank && !s.covered ? { url: shotUrl(s.file), box: s.box ?? null, page: s.page, pageName: pageName(s.page), ...(s.context?.file && s.context.box ? { context: { url: shotUrl(s.context.file), box: s.context.box } } : {}) } : null });
+      if (seen >= 20 && !photo) continue;
+      const missed = shotIdx.useMisses?.[u.key]?.why;
+      out.push({ app: t.name, file: u.shown, line: u.line, component: u.component, props: u.props, ...(u.dynamic.length ? { dynamic: u.dynamic } : {}), ...(missed ? { missed } : {}),
+        shot: photo ? { url: shotUrl(s.file), box: s.box ?? null, page: s.page, pageName: pageName(s.page), ...(s.context?.file && s.context.box ? { context: { url: shotUrl(s.context.file), box: s.context.box } } : {}) } : null });
     }
   }
   return { uses: out, searched };

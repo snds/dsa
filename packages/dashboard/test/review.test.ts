@@ -162,7 +162,8 @@ test('a use matches on the system axes, not type="button"; no exact use shows th
   const near = withDrawing([use(3, { variant: 'outline', size: 'sm', type: 'button' }), use(4, { variant: 'default', size: 'default' })]);
   assert.equal(near.usesCount, 0);
   assert.equal(near.nearest.label, "Not at this size, but here's the same variant at sm.");
-  assert.deepEqual(near.nearest.examples.map((x: any) => x.line), [3]);
+  assert.deepEqual(near.nearest.examples.map((x: any) => x.line), [3, 4], 'the most alike first');
+  assert.deepEqual(near.nearest.examples.map((x: any) => x.differs), ['at sm', 'at default, in default']);
   assert.equal(withDrawing([], { ledger: { files: 40, unread: 0 } }).searched.whole, true);
   assert.equal(withDrawing([], { ledger: { files: 40, unread: 2 } }).searched.whole, false);
   assert.equal(withDrawing([]).searched, null, 'no search of its own: no claim');
@@ -324,4 +325,40 @@ test('a drawing whose words are cut off is held out, and no candidate; at a widt
   const vague = e(60, { verdict: 'unclear', use: null, alternatives: [{ verdict: 'replace', use: 'Field', props: {} }] });
   assert.equal(candidatesOf({ proposals: { 'Field#f': { ...base, cut: true } } }, vague).length, 0);
   assert.equal(candidatesOf({ proposals: { 'Field#f': base } }, vague).length, 1);
+});
+
+test("a card's photos are of its own app: the same look first, then the nearest, each saying how it differs; with none, the line says why", () => {
+  const system: any[] = [{ component: 'Button', axes: { variant: ['default', 'outline'], size: ['default', 'sm'] }, defaults: { variant: 'default', size: 'default' } }, { component: 'Toggle', axes: {}, defaults: {} }];
+  const photo = (n: number) => ({ url: `s/${n}.png`, box: null, page: '/a', pageName: 'A' });
+  const use = (line: number, props: object, o: object = {}) => ({ app: 'ledger', file: `ledger/src/U${line}.tsx`, line, component: 'Button', props, shot: null, ...o });
+  const pick = { use: 'Button', props: { variant: 'outline' } };
+  const item = (uses: any[], e: object = { ...pick }) => {
+    const p: any = payload([el('a', { needsHuman: true, ...e })]);
+    p.elements.proposals['Button|variant=outline#own1'] = { use: 'Button', props: pick.props, check: 'exact', url: 'r/o.png', own: true, text: 'Save' };
+    p.elements.proposals['Button#own1'] = { use: 'Button', props: {}, check: 'exact', url: 'r/b.png', own: true, text: 'Save' };
+    const out = withReview(p, { audit: 0, system, precedents: uses });
+    return { it: out.elements.review.items[0], photos: out.elements.review.photos };
+  };
+  const mixed = item([use(1, { variant: 'outline' }, { shot: photo(1) }), use(2, { variant: 'outline', size: 'sm' }, { shot: photo(2) }), use(3, {}, { shot: photo(3) }), use(4, {}, { shot: photo(4) })]);
+  assert.deepEqual(mixed.it.examples.map((x: any) => x.line), [1]);
+  assert.deepEqual(mixed.it.nearest.examples.map((x: any) => [x.line, x.differs]), [[2, 'at sm'], [3, 'in default']]);
+  assert.deepEqual(mixed.photos, { cards: 1, withPhoto: 1, without: {} });
+  // Another app's uses don't stand in, with or without a photo.
+  const elsewhere = item([use(1, { variant: 'outline' }, { app: 'other', shot: photo(1) })]);
+  assert.deepEqual([elsewhere.it.examples, elsewhere.it.usesCount, elsewhere.it.nearest, elsewhere.it.noPhoto], [[], 0, null, null]);
+  // A look set in the code is a real photo, and says that's all it can say.
+  const set = item([use(5, {}, { dynamic: ['variant'], shot: photo(5) })]);
+  assert.equal(set.it.nearest.examples[0].differs, 'its look is set in the code');
+  // No photo at all: why, from what the crawler saw of each.
+  const why = (missed: string[]) => item(missed.map((m, i) => use(i + 1, { variant: 'outline' }, m === '-' ? {} : { missed: m }))).it.noPhoto;
+  assert.equal(why(['not-seen', 'hidden']).why, 'hidden');
+  assert.equal(why(['hidden']).line, 'The app uses Button in one place, but dsa has no photo of it: it was on the page, but hidden behind something closed, such as a menu or a tab.');
+  assert.match(why(['not-seen', 'not-seen']).line, /2 places.*didn't show on any page dsa opened/);
+  assert.match(why(['-']).line, /hasn't looked for it yet/);
+  const none = item([use(1, { variant: 'outline' }, { missed: 'not-seen' })]);
+  assert.deepEqual(none.photos, { cards: 1, withPhoto: 0, without: { 'not-seen': 1 } });
+  // No clear pick: the closest candidate is what its photos are of.
+  const unclear = item([use(1, {}, { shot: photo(1) })], { verdict: 'unclear', use: null, props: null, alternatives: [{ verdict: 'replace', use: 'Button', props: {} }] });
+  assert.equal(unclear.it.about.use, 'Button');
+  assert.deepEqual(unclear.it.examples.map((x: any) => x.line), [1]);
 });

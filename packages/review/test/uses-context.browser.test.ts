@@ -52,3 +52,42 @@ test('each live photo has its page context, and the app\'s own uses of system co
   const use = idx.uses?.['apps/orders/src/App.jsx:4'];
   assert.ok(use && use.component === 'Button' && fs.existsSync(path.join(data, 'shots', use.file)) && use.run === idx.run.id, `${JSON.stringify(idx.uses)}\n${all}`);
 });
+
+test("uses through a local re-export are photographed, a hidden one says so, and a second run retakes nothing", { timeout: 300_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  const kit = path.resolve(import.meta.dirname, '../../dashboard/ui/node_modules');
+  if (!fs.existsSync(path.join(kit, 'vite')) || !fs.existsSync(path.join(kit, 'react'))) skip('no Vite installed');
+  const root = fixtureCopy();
+  const dir = path.join(root, 'apps', 'orders');
+  const files = { ...APP,
+    'src/ui/button.jsx': `export * from '@acme/ds-react';\n`,
+    'src/App.jsx': `import { Button } from './ui/button.jsx';\nexport function App() {\n  return <main><h1>Orders</h1>\n    <Button>Export orders</Button>\n    <div style={{ display: 'none' }}>\n      <Button>Hidden orders</Button>\n    </div>\n    <button className="btn">Archive orders</button>\n  </main>;\n}\n`,
+  };
+  for (const [f, c] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }); fs.writeFileSync(path.join(dir, f), c); }
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'orders', private: true, type: 'module', scripts: { dev: 'vite' }, dependencies: { '@acme/ds-react': '^4.9.0', react: '^18.3.0' } }));
+  fs.symlinkSync(kit, path.join(dir, 'node_modules'), 'dir');
+  const data = path.join(root, '.dsa');
+  await runPipeline({ root, dataDir: data, git: false, now: NOW });
+  const config = loadConfig(root).config as any;
+  config.shots = { ...(config.shots ?? {}), maxMinutes: 1, waitMs: 200, draw: false };
+  const logs: string[] = [];
+  await takeShots({ root, dataDir: data, config, target: 'orders', perGroup: 20, log: m => logs.push(m) });
+  const read = () => JSON.parse(fs.readFileSync(path.join(data, 'shots', 'index.json'), 'utf8'));
+  const idx = read();
+  const seen = logs.join('\n');
+  const use = idx.uses?.['apps/orders/src/App.jsx:4'];
+  assert.ok(use && use.component === 'Button' && use.fileHash && fs.existsSync(path.join(data, 'shots', use.file)), `${JSON.stringify(idx.uses)}\n${seen}`);
+  assert.equal(idx.useMisses?.['apps/orders/src/App.jsx:6']?.why, 'hidden', JSON.stringify(idx.useMisses));
+  assert.match(seen, /the app's own uses: 1 photographed as examples .*1 hidden/);
+  // Nothing has changed: the app isn't even started.
+  const again: string[] = [];
+  await takeShots({ root, dataDir: data, config, target: 'orders', perGroup: 20, log: m => again.push(m) });
+  assert.ok(again.some(l => /not starting the app/.test(l)), again.join('\n'));
+  assert.equal(read().uses['apps/orders/src/App.jsx:4'].file, use.file);
+  // A changed file: looked for again.
+  fs.appendFileSync(path.join(dir, 'src/App.jsx'), '// changed\n');
+  const third: string[] = [];
+  await takeShots({ root, dataDir: data, config, target: 'orders', perGroup: 20, log: m => third.push(m) });
+  assert.match(third.join('\n'), /uses to look for/);
+  assert.ok(read().uses['apps/orders/src/App.jsx:4'].at >= use.at);
+});
