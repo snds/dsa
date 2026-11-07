@@ -49,6 +49,16 @@ export function workflowCrons(root: string, workflow: string): string[] {
   return [];
 }
 
+/** The workflow declares a `shots` input, so a re-scan can say what to do with earlier photos. */
+export function workflowTakesShots(root: string, workflow: string): boolean {
+  try {
+    const doc = parseYaml(fs.readFileSync(path.join(root, ".github/workflows", workflow), "utf8")) as { on?: { workflow_dispatch?: { inputs?: { shots?: unknown } } | null } } | null;
+    return Boolean(doc?.on?.workflow_dispatch?.inputs?.shots);
+  } catch {
+    return false;
+  }
+}
+
 /** "12", "#12" or an issue URL → 12. */
 export function issueNumber(ref: string): number {
   const m = ref.trim().match(/(?:^#?|\/issues\/)(\d+)\/?$/);
@@ -86,12 +96,13 @@ export const githubHost: HostAdapter = {
       return { ...generic, host: "github", rescan: { ...generic.rescan, help: `${generic.rescan.help} The github adapter links the workflow once host.github.repo (or github.defaultRepo) is set.` } };
     }
     const mode = c.host.decisions?.mode ?? "issue";
+    const shots = workflowTakesShots(c.root, s.workflow) ? { shots: true } : {};
     return {
       host: "github",
       rescan: c.host.relay?.url
-        ? { ...relayRescan(c.host.relay.url, c.host.relay.label, c.host.rescan?.estimateSeconds), help: `Starts the ${s.workflow} workflow in ${s.repo} through the scan relay at ${new URL(c.host.relay.url).host} and shows its progress here. You sign in with GitHub first; the new report loads once that run has deployed.` }
+        ? { ...relayRescan(c.host.relay.url, c.host.relay.label, c.host.rescan?.estimateSeconds), ...shots, help: `Starts the ${s.workflow} workflow in ${s.repo} through the scan relay at ${new URL(c.host.relay.url).host} and shows its progress here. You sign in with GitHub first; the new report loads once that run has deployed.` }
         : c.host.rescan
-        ? generic.rescan
+        ? { ...generic.rescan, ...(generic.rescan.kind === "link" ? shots : {}) }
         : { kind: "none", label: "Re-scan", help: NO_RELAY },
       decisions:
         mode === "issue" || mode === "pr"

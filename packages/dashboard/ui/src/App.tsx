@@ -24,8 +24,9 @@ import { AgentProvider, canChat, useAgent } from "@/agent/store"
 import { AgentPanel } from "@/agent/AgentPanel"
 import { cn } from "cn"
 import { ACTIONS, rescan as hostRescan } from "@/lib/host"
-import { NextScan, ScanButton, ScanOverlay, SignInDialog } from "@/components/scan"
-import { canRun, detectRunning } from "@/lib/useScan"
+import { NextScan, ScanButton, ScanOverlay, ShotsMenu, ShotsNote, SignInDialog } from "@/components/scan"
+import { ButtonGroup } from "@/components/ui/button-group"
+import { canRun, detectRunning, offersShots, useScan } from "@/lib/useScan"
 import { replaceRoute, routePath, useApp } from "@/lib/app"
 import { AppSelect } from "@/components/app-select"
 
@@ -78,8 +79,9 @@ function AgentButton() {
  * that opens that page in a new tab (GitHub's Run workflow page, a CI job), or a request sent to a
  * webhook. Under it, where it goes and when this page will change, so it never looks like an in-page scan.
  */
-function StaticRescan({ onPost }: { onPost: () => void }) {
+export function StaticRescan({ onPost }: { onPost: () => void }) {
   const r = ACTIONS!.rescan
+  const { shots } = useScan()
   const target = (r.url ?? "").replace(/^https?:\/\//, "").replace(/\/$/, "")
   // No relay: say how Re-scan gets enabled instead of a button that can't work.
   if (r.kind === "none") return (
@@ -88,17 +90,21 @@ function StaticRescan({ onPost }: { onPost: () => void }) {
       <p className="text-right text-xs text-muted-foreground">{r.help}</p>
     </div>
   )
+  const link = r.kind === "link" && (
+    <a data-slot="button" href={r.url} target="_blank" rel="noopener noreferrer" className={buttonVariants({ variant: "outline" })}>
+      <ArrowSquareOutIcon data-icon="inline-start" />{r.label}
+    </a>
+  )
+  // The page can only open GitHub's form, not fill it in, so it says what to pick there.
+  const split = link && offersShots()
   return (
     <div className="flex max-w-sm flex-col items-end gap-1">
-      {r.kind === "link" ? (
-        <a href={r.url} target="_blank" rel="noopener noreferrer" className={buttonVariants({ variant: "outline" })}>
-          <ArrowSquareOutIcon data-icon="inline-start" />{r.label}
-        </a>
-      ) : (
+      {split ? <><ButtonGroup>{link}<ShotsMenu variant="outline" /></ButtonGroup><ShotsNote /></> : link || (
         <Button variant="outline" onClick={onPost}><PaperPlaneTiltIcon data-icon="inline-start" />{r.label}</Button>
       )}
       <NextScan prefix="Next scheduled scan" className="text-xs text-muted-foreground" />
       <p className="text-right text-xs text-muted-foreground">
+        {split && shots !== "normal" && <><b className="font-medium text-foreground">There, choose {shots} under Photos, then run the workflow.</b> </>}
         {r.help}{target && <> <span className="font-mono break-all" title={r.url}>{r.kind === "link" ? "Opens" : "Sends to"} {target}</span></>}
       </p>
     </div>

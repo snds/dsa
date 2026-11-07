@@ -8,6 +8,11 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- Re-scan is a split button. Its menu sets what the scan does with earlier photos: keep them, retake them
+  all, or try again for the ones not found. The setting stays until changed, and shows under the button when
+  it isn't the default. It reaches `dsa serve` and the scan relay directly. On a published page with a plain
+  link, the page says what to pick on the host's form. `dsa run --shots-mode <normal|fresh|retry-missing>`
+  does the same from the command line, and a GitHub scan workflow takes it as a `shots` input.
 - Label Review: dsa's "ready" answers checked by people, one element at a time, written for a designer
   who never needs to read code. Each item shows the element as the app draws it beside the proposal drawn
   with the element's own words, both at their real size; where it sits on the page, named in plain words;

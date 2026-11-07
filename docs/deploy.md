@@ -365,6 +365,29 @@ adapter names. The page shows the same feedback whatever the runner:
 viewer's). Declare it with `host.schedule`, as cron lines in UTC (`["47 9 * * 1-5"]`). The github
 adapter reads `on.schedule` from its workflow file when that is unset.
 
+**Photos on a re-scan.** Re-scan is a split button. Its menu sets what the scan does with earlier photos:
+keep them (the default), retake them all, or try again for the ones not found. The setting stays for that
+viewer until they change it, and the page shows it under the button when it isn't the default. `dsa serve`
+always offers it. The github adapter offers it when the scan workflow declares a `shots` input, and passes
+it on as `dsa run --shots-mode`:
+
+```yaml
+on:
+  workflow_dispatch:
+    inputs:
+      shots:
+        description: Photos
+        type: choice
+        options: [normal, fresh, retry-missing]
+        default: normal
+# …
+      - env: { SHOTS_MODE: "${{ inputs.shots || 'normal' }}" }
+        run: npx dsa run --shots --shots-mode "$SHOTS_MODE"
+```
+
+Through the relay, the setting goes with the scan. A plain link can't fill in GitHub's Run workflow form, so
+the page says what to pick there.
+
 The estimate is the median of recent successful runs (from GitHub) or of recorded scans
 (`<data>/scan-times.json`, which `dsa run` and `dsa serve` write). For a webhook, set
 `host.rescan.estimateSeconds` if neither knows.

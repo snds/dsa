@@ -2,7 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import { LabelSchema, labelsJsonl } from '@snds/dsa';
 import path from 'node:path';
-import { discoverSources, NotLiveError, recordScanTime, runAfterHooks, type Deploy, type DsaAddon, type EngineContext, type ServeRequest } from '@snds/dsa';
+import { discoverSources, isShotsMode, NotLiveError, recordScanTime, runAfterHooks, type Deploy, type DsaAddon, type EngineContext, type ServeRequest } from '@snds/dsa';
 import { MEASURES, appSettings, expandSources, isGlob, clearEvents, clearMappingCache, computeFit, decideMany, effectiveSettings, figmaToken, githubToken, latestEvals, loadCatalog, logEvent, mapInstance, mask, materializeRemotes, openStore, parseFigmaUrl, readRendered, readSource, resolveTargets, runPipeline, setSetting, targetRelative, undecide, withMetrics, writeSecrets, type AppSettings, type Config } from '@snds/dsa/engine';
 import { toNodeListener } from '@snds/dsa/relay/node';
 import type { RelayHandler } from '@snds/dsa/relay';
@@ -309,6 +309,8 @@ export async function startServer(opts: ServeOptions): Promise<{ url: string; cl
       }
       if (req.method === 'POST' && url.pathname === '/api/run') {
         if (job?.status === 'running') return send(409, { error: 'A scan is already running.', run: jobView(job) });
+        const { shots } = await readBody(req);
+        if (shots !== undefined && !isShotsMode(shots)) return send(400, { error: "That isn't a photo setting dsa knows." });
         const ctx = await loadConfig(root);
         // The same live check as dsa run: a checkout that isn't the live revision isn't scanned.
         const deploy = opts.deploy ? await opts.deploy(ctx) : null;
@@ -330,7 +332,7 @@ export async function startServer(opts: ServeOptions): Promise<{ url: string; cl
             });
             j.done = 2;
             // Screenshots (when shots.auto is on), the report, and the agent snapshot.
-            await runAfterHooks(addons, { kind: 'run', ctx, options: { from: 'serve' }, store: d => openStore(d), notes: r.notes, log: m => j.log.push(m) });
+            await runAfterHooks(addons, { kind: 'run', ctx, options: { from: 'serve', ...(shots && shots !== 'normal' ? { shotsMode: shots } : {}) }, store: d => openStore(d), notes: r.notes, log: m => j.log.push(m) });
             j.done = 3;
             if (saves) { j.log.push(await deploy!.history.push(dataDir, `dsa serve run ${r.runId}`).catch(e => `History not saved: ${errText(e)}`)); j.done = 4; }
             recordScanTime(dataDir, Date.now() - t0);

@@ -3,7 +3,7 @@
 // picks for this page, so this file never knows which host it talks to.
 import * as React from "react"
 import { D, at } from "@/lib/dsa"
-import { ScanError, readSignInReturn, relayRunner, relaySession, reportStamp, runnerFor, signInHref, type RelaySessionInfo, type RunnerSpec, type ScanRun, type ScanRunner } from "@/lib/scan"
+import { ScanError, readSignInReturn, relayRunner, relaySession, reportStamp, runnerFor, signInHref, type RelaySessionInfo, type RunnerSpec, type ScanRun, type ScanRunner, type ShotsMode } from "@/lib/scan"
 
 export type Phase = "idle" | "asking" | "starting" | "running" | "deploying" | "ready" | "failed"
 
@@ -21,13 +21,15 @@ export interface ScanState {
   found: boolean
   /** When this page started following the scan (ms), for elapsed time when the run has no start. */
   since: number | null
+  /** What the next Re-scan does with earlier photos. Kept for this viewer between visits. */
+  shots: ShotsMode
 }
 
 const POLL_MS = 5000
 const PAGE_POLL_MS = 10000
 const PAGE_WAIT_MS = 20 * 60_000
 
-const rescan = (): { kind?: string; url?: string; runner?: RunnerSpec; estimateSeconds?: number | null } | undefined => D.actions?.rescan
+const rescan = (): { kind?: string; url?: string; runner?: RunnerSpec; estimateSeconds?: number | null; shots?: boolean } | undefined => D.actions?.rescan
 /** The scan relay's address when this page re-scans through one. */
 export const relayUrl = () => (!D.serve && rescan()?.kind === "relay" && rescan()?.url) || null
 const storage = () => { try { return window.sessionStorage } catch { return null } }
@@ -36,7 +38,16 @@ const PENDING = "dsa.relay-pending-scan"
 /** In-page runs are possible here: dsa serve, the scan relay, or a webhook runner. */
 export const canRun = () => Boolean(D.serve || relayUrl() || (rescan()?.kind === "run" && rescan()?.runner?.type === "webhook"))
 
-let state: ScanState = { phase: "idle", run: null, estimate: D.actions?.rescan?.estimateSeconds ?? D.scanEstimate ?? null, overlay: false, error: null, signInProblem: null, found: false, since: null }
+/** The page can offer a photo setting: there are earlier photos, and whatever runs the scan takes the setting. */
+export const offersShots = () => Boolean(D.run && (D.serve || rescan()?.shots))
+const SHOTS_KEY = "dsa.scan-shots"
+function savedShots(): ShotsMode {
+  let v: string | null = null
+  try { v = window.localStorage.getItem(SHOTS_KEY) } catch { /* storage off: the default */ }
+  return v === "fresh" || v === "retry-missing" ? v : "normal"
+}
+
+let state: ScanState = { phase: "idle", run: null, estimate: D.actions?.rescan?.estimateSeconds ?? D.scanEstimate ?? null, overlay: false, error: null, signInProblem: null, found: false, since: null, shots: savedShots() }
 const listeners = new Set<() => void>()
 const set = (patch: Partial<ScanState>) => { state = { ...state, ...patch }; listeners.forEach(f => f()) }
 const subscribe = (f: () => void) => { listeners.add(f); return () => { listeners.delete(f) } }
@@ -100,7 +111,7 @@ export async function startScan() {
   set({ phase: "starting", overlay: true, error: null, found: false, run: null, since: Date.now() })
   void learnEstimate(r)
   try {
-    follow(r, await r.trigger())
+    follow(r, await r.trigger(offersShots() && state.shots !== "normal" ? { shots: state.shots } : undefined))
   } catch (e) {
     fail(e)
   }
@@ -142,7 +153,12 @@ function takeSignInReturn(): boolean {
   return false
 }
 
-export const closeAsk = () => set({ phase: state.run ? state.phase : "idle", signInProblem: null })
+export function setShots(shots: ShotsMode) {
+  try { window.localStorage.setItem(SHOTS_KEY, shots) } catch { /* kept for this visit */ }
+  set({ shots })
+}
+
+export const closeAsk = () =>set({ phase: state.run ? state.phase : "idle", signInProblem: null })
 export const showOverlay = (open: boolean) => set({ overlay: open })
 export const dismiss = () => { stop(); set({ phase: "idle", error: null, run: null, overlay: false, since: null }) }
 

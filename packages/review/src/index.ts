@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import type { Command } from 'commander';
-import { defineAddon, liveGate, type AddonApi, type EngineContext } from '@snds/dsa';
+import { SHOTS_MODES, defineAddon, isShotsMode, liveGate, type AddonApi, type EngineContext } from '@snds/dsa';
 import { applyRenderedEvidence, capByEvidence, logEvent, materializeRemotes, openStore, pagePlacementKey, reevaluateElements, resolveTargets, type Config } from '@snds/dsa/engine';
 import { detectApp, ensureBrowser, installAppDeps, linkCoreForChild } from './apps.js';
 import { renderIfStale, renderProposals, renderSignatures, settleProposals } from './rendered.js';
@@ -155,7 +155,8 @@ export default defineAddon({
         const { root, config, dataDir } = ctx;
         if (kind === 'reevaluate') { await applyRenderedEvidence(dataDir, config.review?.threshold ?? 0.9); return; }
         // Screenshots ride along when setup turned them on (or --shots asks); the report then embeds them.
-        if (options.shots === false || !(options.shots || config.shots?.auto)) return;
+        const mode = options.shotsMode;
+        if (options.shots === false || !(options.shots || mode || config.shots?.auto)) return;
         try { await renderIfStale(root, config, dataDir, log); } catch (e) {
           notes.push(`rendered signatures skipped: ${firstLine(e)}`);
           logEvent(dataDir, { level: 'warning', source: 'Rendered signatures', message: 'Storybook measurements were skipped.', detail: firstLine(e) });
@@ -164,7 +165,7 @@ export default defineAddon({
           notes.push(`proposed components not rendered: ${firstLine(e)}`);
           logEvent(dataDir, { level: 'warning', source: 'Rendered signatures', message: 'Proposed components were not rendered with their props.', detail: firstLine(e) });
         }
-        try { printShots(await shotsAndEvidence(ctx, {}, log), ctx.profile.label, log); } catch (e) {
+        try { printShots(await shotsAndEvidence(ctx, { fresh: mode === 'fresh', retryMissing: mode === 'retry-missing' }, log), ctx.profile.label, log); } catch (e) {
           notes.push(`screenshots skipped: ${firstLine(e)}`);
           logEvent(dataDir, { level: 'warning', source: 'Screenshots', message: 'Screenshots were skipped.', detail: firstLine(e) });
         }
@@ -180,6 +181,10 @@ export default defineAddon({
     const run = program.commands.find(c => c.name() === 'run');
     run?.option('--shots', 'take example screenshots after this run');
     run?.option('--no-shots', "don't take screenshots this run (when shots.auto is on)");
+    run?.option('--shots-mode <mode>', `what this run's screenshots do with earlier ones: ${SHOTS_MODES.join(', ')}`, (v: string) => {
+      if (!isShotsMode(v)) throw new Error(`--shots-mode takes ${SHOTS_MODES.join(', ')}, not "${v}".`);
+      return v;
+    });
 
     program
       .command('shots')

@@ -6,7 +6,7 @@ import { FILE_NAME, decisionsFile, downloadDecisions, type Staged } from "@/lib/
 
 export interface PageActions {
   host: string
-  rescan: { kind: "link" | "post" | "none"; url?: string; label: string; help: string }
+  rescan: { kind: "link" | "post" | "none"; url?: string; label: string; help: string; shots?: boolean }
   decisions: { kind: "export" | "post" | "issue"; url?: string; label: string; help: string; title?: string; labels?: string[]; apply: string }
 }
 

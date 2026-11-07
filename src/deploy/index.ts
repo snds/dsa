@@ -12,7 +12,8 @@ export { CI_REVISION_VARS, BUILTIN_REVISION_SOURCES, NotLiveError, authFiles, ch
 export { appSurface, normalizeBase, openSurface, serveStatic } from "./surface.js";
 export { NO_RELAY, decisionsIn, genericHost, hostAdapter, hostOf, relayRescan } from "./host.js";
 export { NEVER_PERSIST, excluded, historyBackend, localHistory } from "./history.js";
-export { githubHost, issueNumber, workflowCrons } from "./adapters/github.js";
+export { githubHost, issueNumber, workflowCrons, workflowTakesShots } from "./adapters/github.js";
+export { SHOTS_MODES, isShotsMode, type ShotsMode } from "../relay/runners.js";
 export { readTimes, recordScanTime, scanEstimate } from "./timing.js";
 export { gitBranchHistory } from "./adapters/git-branch.js";
 export { commandHistory } from "./adapters/command.js";
