@@ -57,7 +57,9 @@ export interface Proposal {
   /** The element holds more than its words, and the drawing holds it too. */
   inner?: boolean | undefined;
   /** Looked at after drawing: it can be seen, and any claim to the element's own words is true of what shows. */
-  checked?: boolean | undefined;
+  checked?: boolean | number | undefined;
+  /** The component as its story wrote it, standing in as an example: this element's content can't go in a whole structure. */
+  example?: boolean | undefined;
   /** The element holds more than its words, and the drawing doesn't show all of it. */
   innerLost?: boolean | undefined;
   /** When it couldn't be drawn with these props: the component's story as its authors wrote it, to show instead. */

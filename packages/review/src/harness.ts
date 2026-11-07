@@ -151,6 +151,13 @@ window.__dsaDraw = async ({ file, name, props, text, icon, slot, empty }) => {
   const fam = Object.keys(mod).filter((k) => k !== name && name.startsWith(k) && /^[A-Z]/.test(k) && typeof mod[k] !== 'string').sort((a, b) => a.length - b.length);
   const wrap = (inner) => {
     if (!fam.length) return inner;
+    // A trigger sits beside what it opens, with that closed. Inside its own open popup, the popup is placed
+    // against the trigger inside it, and that can move it for ever.
+    if (/Trigger$/.test(name)) {
+      let t = inner;
+      for (const f of [...fam].reverse()) t = h(mod[f], null, t);
+      return mod[fam[0] + 'Provider'] ? h(mod[fam[0] + 'Provider'], null, t) : t;
+    }
     const base = fam[0];
     const content = [base + 'Content', base + 'Popup'].find((n) => mod[n] && n !== name && !name.startsWith(n));
     let t = content ? h(mod[content], { forceMount: true }, inner) : inner;

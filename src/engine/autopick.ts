@@ -53,13 +53,18 @@ export interface OwnContent {
   iconName?: string | undefined;
   /** What it holds besides its words and one icon: a copy (null: too large), its marks, text blocks, and pictures that can't be copied. */
   inner?: { html: string | null; marks: number; blocks: number; lost: number } | null | undefined;
+  /** A field's words: what's typed in it (or selected), and its placeholder. A password's value is never recorded. */
+  value?: string | null | undefined; placeholder?: string | null | undefined;
 }
+
+/** The words an element shows: its text, else what's typed in it, else its placeholder. */
+export const ownText = (own: OwnContent | null | undefined): string => own?.text || own?.value || own?.placeholder || '';
 
 /** A short hash of an element's own content; null when it has none to give. */
 export function contentHash(own: OwnContent | null | undefined): string | null {
-  if (!own || (!own.text && !own.ariaLabel && !own.icon && !own.iconName)) return null;
+  if (!own || (!own.text && !own.ariaLabel && !own.icon && !own.iconName && !own.value && !own.placeholder)) return null;
   // An icon named in the source (no markup) hashes as its name, so content without one hashes as before.
-  return crypto.createHash('sha1').update(JSON.stringify([own.text ?? '', own.ariaLabel ?? '', own.icon ?? (own.iconName ? `name:${own.iconName}` : ''), ...(own.inner?.html ? [own.inner.html] : [])])).digest('hex').slice(0, 10);
+  return crypto.createHash('sha1').update(JSON.stringify([own.text ?? '', own.ariaLabel ?? '', own.icon ?? (own.iconName ? `name:${own.iconName}` : ''), ...(own.inner?.html ? [own.inner.html] : []), ...(own.value || own.placeholder ? ['field', own.value ?? '', own.placeholder ?? ''] : [])])).digest('hex').slice(0, 10);
 }
 
 /** The key a proposal drawn with an element's own content is stored under: the proposal's key, then the content's hash. */
@@ -78,7 +83,9 @@ export function ownOf(e: Pick<ElementEval, 'match'> & { source?: string | undefi
   const own: OwnContent = { text: c?.text || e.match?.text || undefined, ariaLabel: c?.ariaLabel || e.match?.ariaLabel || undefined, icon, iconName: icon ? undefined : iconInSource(e) };
   if (!own.iconName) delete own.iconName;
   if (c?.inner) own.inner = c.inner;
-  return own.text || own.ariaLabel || own.icon || own.iconName ? own : null;
+  if (c?.value) own.value = c.value;
+  if (c?.placeholder) own.placeholder = c.placeholder;
+  return own.text || own.ariaLabel || own.icon || own.iconName || own.value || own.placeholder ? own : null;
 }
 
 /** The icon component an element's JSX holds: the first self-closing component inside it (`<PlusIcon className="size-4" />`). */

@@ -5,7 +5,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Note } from "@/components/bits"
 import { D, api, say, short, SYS } from "@/lib/dsa"
 import { relayWho } from "@/lib/useScan"
-import { ElCtx, ownWords, pickText, sourceLabel } from "@/views/elements/shared"
+import { ElCtx, ownSays, ownWords, pickText, proposalFor, sourceLabel } from "@/views/elements/shared"
 import { deltaOf } from "@/views/elements/ReviewCard"
 import { CodeViewer } from "@/views/elements/CodeViewer"
 import { Crop, InContext, Natural } from "@/views/elements/SameScale"
@@ -233,7 +233,8 @@ export function LabelReview() {
 
 function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: any; labeler: string; onAnswer: (row: any) => void; answered: any; onCode: () => void }) {
   const pick = item.pick
-  const proposal = pick?.verdict === "replace" ? renderOf(pick.use, pick.props, e.ownHash) : null
+  const drawn = pick?.verdict === "replace" ? proposalFor(pick, e) : null
+  const proposal = drawn?.url ? drawn : null
   const [verdict, setVerdict] = React.useState<Verdict | null>(null)
   const [note, setNote] = React.useState("")
   const [choice, setChoice] = React.useState<any>(null)
@@ -275,12 +276,12 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
         </figure>
         {pick?.verdict === "replace" ? (
           <figure className="m-0 flex flex-col gap-1" data-pane="proposed">
-            <div className="w-fit rounded-md border bg-background p-1">{proposal ? <Natural url={proposal.url} alt={`Proposed: ${SYS} ${pickText(pick)}, with its own words`} /> : <span className="text-xs">{pickText(pick)}: nothing to draw</span>}</div>
-            <figcaption className="text-xs"><b className="font-medium">Proposed</b> · {SYS} <PickName r={pick} />{ownWords(proposal, e) ? " · with its own words" : ""}</figcaption>
+            <div className="w-fit rounded-md border bg-background p-1">{proposal ? <Natural url={proposal.url} alt={`Proposed: ${SYS} ${proposal.partUse ?? pickText(pick)}${ownSays(proposal, e) ? `, ${ownSays(proposal, e)}` : ""}`} /> : <span className="text-xs">{pickText(pick)}: nothing to draw</span>}</div>
+            <figcaption className="text-xs"><b className="font-medium">Proposed</b> · {SYS} {proposal?.partUse ? <>{proposal.partUse}, the part of {pick.use} this element would be</> : <PickName r={pick} />}{ownSays(proposal, e) ? ` · ${ownSays(proposal, e)}` : ""}</figcaption>
           </figure>
         ) : (
           <div className="flex flex-col gap-1" data-pane="proposed">
-            <p className="text-sm">{pick?.verdict === "gap" ? `${SYS} has no such component.` : pick?.verdict === "keep" ? "dsa suggests keeping it as it is." : `dsa isn't sure which ${SYS} component this is. Here are the closest ones, with its own words.`}</p>
+            <p className="text-sm">{pick?.verdict === "gap" ? `${SYS} has no such component.` : pick?.verdict === "keep" ? "dsa suggests keeping it as it is." : `dsa isn't sure which ${SYS} component this is. ${candidates.length === 1 ? "Here is the closest one" : "Here are the closest ones"}${candidates.some((a: any) => ownSays(renderOf(a.use, a.props, e.ownHash), e) === "with its own words") ? ", with its own words" : ""}.`}</p>
             <div className="flex flex-wrap gap-4">{candidates.map((a: any, k: number) => { const r = renderOf(a.use, a.props, e.ownHash); return (
               <figure key={k} className="m-0 flex flex-col gap-1" data-slot="candidate"><div className="w-fit rounded-md border bg-background p-1"><Natural url={r.url} alt={`${pick?.verdict === "gap" ? "Suggested stand-in" : "Candidate"}: ${SYS} ${pickText(a)}, with its own words`} /></div><figcaption className="text-xs"><b className="font-medium">{pick?.verdict === "gap" ? "Suggested stand-in" : "Candidate"}</b> · {SYS} <PickName r={a} /></figcaption></figure>
             ) })}</div>

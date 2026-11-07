@@ -8,7 +8,7 @@ import { Code, Disclosure, Pre } from "@/components/bits"
 import { D, short, SYS } from "@/lib/dsa"
 import { stageKey, useStaged } from "@/lib/staged"
 import { AskAgent } from "@/agent/AskAgent"
-import { Conf, ElementRow, NoShot, Reasons, ReviewControls, contentText, decidable, desc, nameOf, ownWords, pickText, proposalCheck, proposalFor, revealedText, sourceLabel, sourceTip, useEl, useReviewState } from "./shared"
+import { Conf, ElementRow, NoShot, Reasons, ReviewControls, contentText, decidable, desc, nameOf, ownSays, ownWords, pickText, proposalCheck, proposalFor, revealedText, sourceLabel, sourceTip, useEl, useReviewState } from "./shared"
 import { Crop, InContext, Natural, SameScale } from "./SameScale"
 import { useApp } from "@/lib/app"
 import { styleName } from "./units"
@@ -207,9 +207,9 @@ function NowStrip({ items, pick }: { items: any[]; pick: any }) {
           <figure key={e.id} className="m-0 flex flex-col gap-1">
             <div className="flex items-center gap-2">
               <span className="w-fit rounded-md border bg-background p-0.5" data-pane="now"><Crop url={e.shot.url} box={e.shot.box} alt={`Now: ${nameOf(e)}`} /></span>
-              {p?.url && <><ArrowRightIcon className="shrink-0 text-muted-foreground" aria-label="becomes" /><span className="w-fit rounded-md border bg-background p-0.5" data-pane="now-proposed"><Natural url={p.url} alt={`Proposed: ${SYS} ${pickText(pick)}${ownWords(p, e) ? ", with its own words" : ""}`} /></span></>}
+              {p?.url && <><ArrowRightIcon className="shrink-0 text-muted-foreground" aria-label="becomes" /><span className="w-fit rounded-md border bg-background p-0.5" data-pane="now-proposed"><Natural url={p.url} alt={`Proposed: ${SYS} ${p.partUse ?? pickText(pick)}${ownSays(p, e) ? `, ${ownSays(p, e)}` : ""}`} /></span></>}
             </div>
-            <figcaption className="text-[11px] text-muted-foreground">Now{p?.url ? ` → ${ownWords(p, e) ? "with its own words" : "proposed"}` : ""}</figcaption>
+            <figcaption className="text-[11px] text-muted-foreground">Now{p?.url ? ` → ${ownSays(p, e) || "proposed"}` : ""}</figcaption>
           </figure>
         )
       })}

@@ -291,3 +291,27 @@ test('a story that never returns: the drawing keeps what it had, and the rest of
   assert.ok(buttons.some(v => v.check === 'exact' && v.shot), 'the other stories are still drawn, on a clean page');
   assert.ok(buttons.some(v => v.props.size === 'icon' && v.shot && v.check === 'closest'), 'one that hung on its last story keeps the picture it had');
 });
+
+test('a trigger is drawn beside what it opens, closed: inside its own open popup, it never returned', { timeout: 120_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  if (!hasKit || !fs.existsSync(path.join(KIT, '@base-ui/react'))) skip('no menu library installed');
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-harness-')));
+  const ds = path.join(root, 'kit');
+  fs.mkdirSync(path.join(ds, 'src'), { recursive: true });
+  fs.symlinkSync(KIT, path.join(root, 'node_modules'), 'dir');
+  const file = path.join(ds, 'src/Pick.jsx');
+  fs.writeFileSync(file, `import { createElement as h } from 'react';
+import { Menu } from '@base-ui/react/menu';
+export function Pick(props) { return h(Menu.Root, props); }
+export function PickContent({ children }) { return h(Menu.Portal, null, h(Menu.Positioner, null, h(Menu.Popup, null, children))); }
+export function PickTrigger({ children }) { return h(Menu.Trigger, { 'data-slot': 'pick-trigger', style: { height: 30, width: 120 } }, children); }
+`);
+  const h = await startHarness(root, {} as any, [file], () => {});
+  const page = await browser!.newPage({ viewport: { width: 800, height: 600 } });
+  try {
+    assert.equal(await openHarness(page, h!), true);
+    const res = await Promise.race([page.evaluate((a) => (window as any).__dsaDraw(a), { file: '/@fs' + file, name: 'PickTrigger', props: {}, text: 'Open', slot: 'pick-trigger' } as any), new Promise(r => setTimeout(() => r('never returned'), 20_000))]);
+    assert.deepEqual(res, { ok: true });
+    assert.equal(await page.textContent('[data-slot=pick-trigger]'), 'Open');
+  } finally { await page.close(); await h!.stop(); }
+});

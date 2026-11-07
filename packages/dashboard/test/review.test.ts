@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { tmp } from '../../../test/engine/fixture.js';
-import { canDecideNow, evidenceOf, pageName, stepWords, withReview } from '../src/review.js';
+import { canDecideNow, evidenceOf, pageName, proposalFor, stepWords, withReview } from '../src/review.js';
 import { reviewQueue } from '../src/labels.js';
 import { appendHumanLabels, humanLabelsFile } from '../src/server.js';
 
@@ -211,4 +211,53 @@ test('no clear answer: reviewable only with a candidate drawn with its own conte
   assert.equal(evidenceOf(drawn({}), element([]), unclear).missing[0]!.kind, 'no-candidates');
   assert.equal(evidenceOf(drawn({ text: 'Other' }), element([candidate]), unclear).missing[0]!.kind, 'no-candidates', 'other words');
   assert.equal(evidenceOf(drawn({ url: null }), element([candidate]), unclear).missing[0]!.kind, 'no-candidates', 'not drawn');
+});
+
+const reviewed = (E: object, e: object, pick: object) => evidenceOf({ threshold: 0.9, questions: [], evals: [], ...E } as any, e, pick);
+
+test("a tile, a card, any container: a story's words with none of its own don't go up as its comparison", () => {
+  const pick = { verdict: 'replace', use: 'ToggleGroupItem', props: {} };
+  const proposals = { 'ToggleGroupItem#t': { use: 'ToggleGroupItem', props: {}, check: 'exact', url: 'rendered/t.png', own: false, content: "what it holds couldn't be copied, so the story's sample shows instead" } };
+  const e = el('tile', { role: 'choice-tile', ownHash: 't', use: 'ToggleGroupItem', props: {}, shot: shot({ content: { text: null, inner: { marks: 1, blocks: 0, lost: 0 } } }) });
+  const r = reviewed({ proposals }, e, pick);
+  assert.equal(r.ready, false);
+  assert.match(r.missing.map((m: any) => m.why).join(), /sample words/);
+});
+
+test("a whole structure is shown as an example, said plainly, and that can go up; words equal isn't enough to call it its own", () => {
+  const pick = { verdict: 'replace', use: 'Table', props: {} };
+  const proposals = { 'Table#w': { use: 'Table', props: {}, check: 'exact', url: 'rendered/t.png', own: false, example: true, content: "an example of the component, not this element's content" } };
+  const e = el('table', { role: 'static-table', ownHash: 'w', use: 'Table', props: {}, shot: shot({ content: { text: 'A long table', inner: null } }) });
+  assert.deepEqual(reviewed({ proposals }, e, pick).missing, []);
+});
+
+test("a field's words: drawn with them it's ready; a photo from before they were recorded needs taking again", () => {
+  const pick = { verdict: 'replace', use: 'Input', props: {} };
+  const proposals = { 'Input#f': { use: 'Input', props: {}, check: 'exact', url: 'rendered/i.png', own: true, text: 'Walnut' }, Input: { use: 'Input', props: {}, check: 'exact', url: 'rendered/plain.png', own: false } };
+  const field = (content: object, o: object = {}) => el('field', { role: 'text-input', snippet: '<input defaultValue={value} />', use: 'Input', props: {}, ownHash: 'f', shot: shot({ content: { text: null, inner: null, ...content } }), ...o });
+  assert.deepEqual(reviewed({ proposals }, field({ value: 'Walnut', placeholder: null }), pick).missing, []);
+  // Words that aren't its own are caught like any other.
+  assert.match(reviewed({ proposals }, field({ value: 'Linen', placeholder: null }), pick).missing[0].why, /aren't this element's own/);
+  // An empty field has nothing to compare: the plain drawing is right.
+  assert.deepEqual(reviewed({ proposals }, field({ value: null, placeholder: null }, { ownHash: null }), pick).missing, []);
+  const old = reviewed({ proposals }, field({}, { ownHash: null }), pick);
+  assert.deepEqual(old.missing.map((m: any) => m.kind), ['no-field-words']);
+  assert.match(old.missing[0].fix, /screenshots again/);
+});
+
+test('one small part proposed as the whole it belongs to is compared with that part, or held out', () => {
+  const pick = { verdict: 'replace', use: 'Sidebar', props: {} };
+  const whole = { use: 'Sidebar', props: {}, check: 'exact', url: 'rendered/s.png', own: true, text: '', inner: true, w: 256, h: 900 };
+  const part = { use: 'SidebarTrigger', props: {}, check: 'exact', url: 'rendered/p.png', own: true, text: '', inner: true, w: 28, h: 28 };
+  const e = (o: object = {}) => el('toggle', { role: 'host-copy', ownHash: 'p', use: 'Sidebar', props: {}, alternatives: [{ verdict: 'replace', use: 'SidebarTrigger', props: {} }], shot: shot({ box: { x: 1, y: 1, w: 24, h: 24, cw: 240, ch: 120 }, content: { text: null, inner: { marks: 1, blocks: 0, lost: 0 } } }), ...o });
+  const E = { proposals: { 'Sidebar#p': whole, 'SidebarTrigger#p': part } };
+  const shown = proposalFor(E, e(), pick);
+  assert.deepEqual([shown.url, shown.partUse, shown.partOf], ['rendered/p.png', 'SidebarTrigger', 'Sidebar']);
+  assert.deepEqual(reviewed(E, e(), pick).missing, []);
+  const none = reviewed({ proposals: { 'Sidebar#p': whole } }, e(), pick);
+  assert.deepEqual(none.missing.map((m: any) => m.kind), ['whole-for-part']);
+  assert.match(none.missing[0].why, /one small part/);
+  // About its size: nothing changes.
+  const same = proposalFor({ proposals: { 'Sidebar#p': { ...whole, w: 40, h: 40 } } }, e(), pick);
+  assert.equal(same.url, 'rendered/s.png');
 });

@@ -119,3 +119,95 @@ test('inner content with bare words at its top level is compared, not thrown out
     assert.deepEqual(seen, { shows: true });
   } finally { await page.close(); }
 });
+
+test("a field's words are what's typed in it, or its placeholder; a password's value is never kept", { timeout: 60_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  const page = await browser!.newPage();
+  try {
+    await page.setContent(`<input data-dsa-shot="filled" value="Walnut"><input data-dsa-shot="hint" placeholder="Enter value"><input data-dsa-shot="secret" type="password" value="hunter2" placeholder="Password"><input data-dsa-shot="tick" type="checkbox" value="on"><textarea data-dsa-shot="area">Long note</textarea><select data-dsa-shot="pick"><option>One</option><option selected>Two</option></select><button data-dsa-shot="plain">Save</button>`);
+    const get = (id: string) => page.evaluate(`(${__ownContent})(${JSON.stringify(id)})`) as Promise<any>;
+    assert.deepEqual([(await get('filled')).value, (await get('filled')).placeholder, (await get('filled')).v], ['Walnut', null, 2]);
+    assert.deepEqual([(await get('hint')).value, (await get('hint')).placeholder], [null, 'Enter value']);
+    const secret = await get('secret');
+    assert.deepEqual([secret.value, secret.placeholder], [null, 'Password']);
+    assert.ok(!JSON.stringify(secret).includes('hunter2'), "a password's value isn't in the record");
+    assert.equal((await get('tick')).value, null);
+    assert.equal((await get('area')).value, 'Long note');
+    assert.deepEqual([(await get('pick')).value, (await get('pick')).text], ['Two', null], 'a select says what is selected, not every option');
+    assert.equal('value' in (await get('plain')), false);
+  } finally { await page.close(); }
+});
+
+test("a drawn field holds the element's words, and the check reads them from the box", { timeout: 60_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  const page = await browser!.newPage();
+  try {
+    const sel = '[data-slot=b]';
+    await page.setContent('<div data-slot="b" style="width:200px;height:30px"><input placeholder="Sample"></div>');
+    assert.deepEqual(await r.run<any>(page, r.INJECT_OWN, { sel, own: { value: 'Walnut' } }), { own: true });
+    assert.equal(await page.inputValue('input'), 'Walnut');
+    assert.deepEqual(await r.run<any>(page, r.SHOWN, { sel, words: 'Walnut', inner: null, field: { value: 'Walnut', placeholder: null } }), { shows: true });
+    await page.fill('input', 'Other');
+    assert.match((await r.run<any>(page, r.SHOWN, { sel, words: 'Walnut', inner: null, field: { value: 'Walnut', placeholder: null } })).notOwn, /not its own/);
+    // A placeholder of its own replaces the sample's.
+    await page.setContent('<input data-slot="b" placeholder="Sample">');
+    await r.run(page, r.INJECT_OWN, { sel, own: { placeholder: 'Enter value' } });
+    assert.equal(await page.getAttribute(sel, 'placeholder'), 'Enter value');
+    // With no box in the drawing (a trigger, say), they're its label.
+    await page.setContent('<button data-slot="b"><span>Sample</span></button>');
+    assert.deepEqual(await r.run<any>(page, r.INJECT_OWN, { sel, own: { value: 'Walnut' } }), { own: true });
+    assert.equal(await page.textContent(sel), 'Walnut');
+  } finally { await page.close(); }
+});
+
+test("a whole structure keeps its parts: one line of joined words, or one icon, doesn't go in it", { timeout: 60_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  const page = await browser!.newPage();
+  try {
+    const sel = '[data-slot=b]';
+    const table = '<div data-slot="b"><table><tr><th>Sample</th></tr><tr><td>Row</td></tr></table></div>';
+    for (const [html, own] of [
+      [table, { text: 'AisleShelfPrice' }],
+      ['<aside data-slot="b" style="height:400px"><ul><li>Sample</li></ul></aside>', { ariaLabel: 'Search', inner: { html: '<div data-dsa-mark="16">search</div>', marks: 1, blocks: 0, lost: 0 } }],
+      ['<div data-slot="b"><div role="tablist"><button role="tab">Sample</button></div></div>', { text: 'Overview' }],
+    ] as const) {
+      await page.setContent(html);
+      const before = await page.innerHTML('body');
+      const res = await r.run<any>(page, r.INJECT_OWN, { sel, own });
+      assert.deepEqual([res.own, res.example], [false, true], html);
+      assert.match(res.why, /example of the component/);
+      assert.equal(await page.innerHTML('body'), before, 'left as its story wrote it');
+    }
+    // Something itself made of several blocks, copied whole, does go in: the copy keeps its structure.
+    await page.setContent('<ul data-slot="b"><li>Sample</li></ul>');
+    const whole = await r.run<any>(page, r.INJECT_OWN, { sel, own: { inner: { html: '<div>One</div><div>Two</div>', marks: 0, blocks: 2, lost: 0 } } });
+    assert.equal(whole.own, true);
+    // A button with nothing like that inside still takes its own words.
+    await page.setContent('<button data-slot="b"><span>Sample</span></button>');
+    assert.equal((await r.run<any>(page, r.INJECT_OWN, { sel, own: { text: 'Export' } })).own, true);
+  } finally { await page.close(); }
+});
+
+test("a wordless tile whose picture couldn't be copied says so, and doesn't claim the story's words", { timeout: 60_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  const page = await browser!.newPage();
+  try {
+    await page.setContent('<button data-slot="b">Left</button>');
+    const res = await r.run<any>(page, r.INJECT_OWN, { sel: '[data-slot=b]', own: { ariaLabel: 'Picture 2', inner: { html: null, marks: 1, blocks: 0, lost: 0 } } });
+    assert.equal(res.own, false);
+    assert.match(res.why, /couldn't be copied/);
+  } finally { await page.close(); }
+});
+
+test('what sits on top of something stays on top of it in the copy', { timeout: 60_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  const page = await browser!.newPage();
+  try {
+    await page.setContent(`<button data-dsa-shot="s" style="position:relative;width:32px;height:32px;padding:0;border:0"><span style="display:block;width:32px;height:32px;background:rgb(1,2,3)"></span><span style="position:absolute;right:2px;bottom:2px;width:10px;height:10px;background:rgb(9,9,9)"></span></button><button data-slot="b" style="display:inline-flex;width:32px;height:32px;padding:0;border:0"></button>`);
+    const c: any = await page.evaluate(`(${__ownContent})("s")`);
+    assert.ok(c.inner?.html.includes('position: absolute'), c.inner?.html);
+    await r.run(page, r.INJECT_OWN, { sel: '[data-slot=b]', own: { inner: c.inner } });
+    const at = await page.evaluate(`(() => { const b = document.querySelector('[data-slot=b]'), a = b.querySelector('[style*="position: absolute"]'); const x = b.getBoundingClientRect(), y = a.getBoundingClientRect(); return [y.left >= x.left, y.right <= x.right, y.top >= x.top, y.bottom <= x.bottom]; })()`);
+    assert.deepEqual(at, [true, true, true, true], 'inside the element, not beside it');
+  } finally { await page.close(); }
+});

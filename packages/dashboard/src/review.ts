@@ -1,5 +1,5 @@
 import { canonicalProps, hashText } from '@snds/dsa';
-import { CONTAINER_ROLES, NO_SOURCE, SHOT_MIN, proposalKey } from './trust.js';
+import { NO_SOURCE, SHOT_MIN, proposalKey } from './trust.js';
 
 /**
  * Review for people. A person (a designer first) decides from what they can see, never from code, so an
@@ -71,9 +71,22 @@ export function proposalFor(E: any, e: any, pick: any): any | null {
   if (pick?.verdict !== 'replace' || !pick.use) return null;
   const key = proposalKey(pick.use, pick.props);
   const mine = e.ownHash ? E.proposals?.[`${key}#${e.ownHash}`] : null;
-  if (mine) return mine;
   const plain = E.proposals?.[key];
-  return plain ? { ...plain, own: false } : null;
+  const p = mine ?? (plain ? { ...plain, own: false } : null);
+  if (!p || !wholeForPart(p, e)) return p;
+  // One small part proposed as the whole it belongs to: compared with that part, when one is drawn.
+  for (const a of e.alternatives ?? []) {
+    if (!a?.use || a.use === pick.use) continue;
+    const part = e.ownHash ? E.proposals?.[`${proposalKey(a.use, a.props)}#${e.ownHash}`] : E.proposals?.[proposalKey(a.use, a.props)];
+    if (part?.url && !wholeForPart(part, e)) return { ...part, partOf: pick.use, partUse: a.use };
+  }
+  return { ...p, wholeForPart: true };
+}
+
+/** Is the drawing many times the element? Then it's what the element belongs to, not what it would become. */
+export function wholeForPart(p: any, e: any): boolean {
+  const b = e?.shot?.box;
+  return Boolean(p?.w && p?.h && b?.w && b?.h && p.w * p.h >= 9 * b.w * b.h);
 }
 
 /**
@@ -81,7 +94,7 @@ export function proposalFor(E: any, e: any, pick: any): any | null {
  * source holds: the two a drawing is given. Not its label, which can be an aria-label nobody sees (an icon-only
  * button has no words to draw). With no photo's record, its label is all there is.
  */
-const wordsOf = (e: any): string => String((e.shot?.content ? e.shot.content.text || e.words : e.label) ?? '').replace(/\s+/g, ' ').trim();
+const wordsOf = (e: any): string => String((e.shot?.content ? e.shot.content.text || e.shot.content.value || e.shot.content.placeholder || e.words : e.label) ?? '').replace(/\s+/g, ' ').trim();
 /** A drawing shows the element's own words: drawn with them, and the words it drew are the element's. */
 export function drawnWithOwnWords(p: any, e: any): boolean {
   if (!p?.own) return false;
@@ -114,21 +127,25 @@ export function evidenceOf(E: any, e: any, pick: any): Evidence {
   else if (s.drawn) missing.push({ kind: 'guessed', group: 'were drawn with guessed props, so they may not look like the real thing', why: 'It was drawn from the code with guessed props, so it may not look like the real thing.', fix: 'Reach it in the running app, or record its props so it can be drawn as an isolated render.' });
   else if (!s.tagged && (s.match ?? 0) < SHOT_MIN) missing.push({ kind: 'unsure-photo', group: 'have a photo that may be of a different element', why: 'Its photo may be of a different element that looks like it.', fix: 'Build the app with source tags, so the photo is found by its line.' });
   else current = 'live';
+  // A field's words are what the reviewer compares; a photo from before they were recorded can't show that they match.
+  if (s?.content && !s.drawn && /^<(input|textarea|select)\b/i.test(e.snippet ?? '') && !('value' in s.content)) missing.push({ kind: 'no-field-words', group: "have a photo that didn't record what's typed in them", why: "Its photo didn't record what's typed in it, so the proposal can't be drawn with it.", fix: 'Take the screenshots again.' });
   if (pick?.verdict === 'replace' && pick.use) {
     const p = proposalFor(E, e, pick);
     const what = [pick.use, ...Object.entries(pick.props ?? {}).filter(([k]) => k !== 'render').map(([k, v]) => `${k} ${v}`)].join(', ');
-    const container = CONTAINER_ROLES.has(e.role) || CONTAINER_ROLES.has(pick.role);
-    if (p && p.check === 'none' && !p.url && (p.noSource || NO_SOURCE.test(p.note ?? ''))) missing.push({ kind: 'no-source', group: 'propose a component the system has nothing to draw from', why: `The system has nothing to draw ${pick.use} from.`, fix: `Add a story or source for ${pick.use}, or propose another component.` });
+    // Said plainly to be an example, so it isn't judged as this element's content. Nothing else is let off.
+    const example = Boolean(p?.example);
+    if (p?.wholeForPart) missing.push({ kind: 'whole-for-part', group: 'propose the whole of a component for one small part of it', why: `${pick.use} is the whole component, and this element is one small part of it. No drawing shows that part.`, fix: 'Decide it with the whole component, or draw the part (dsa render).' });
+    else if (p && p.check === 'none' && !p.url && (p.noSource || NO_SOURCE.test(p.note ?? ''))) missing.push({ kind: 'no-source', group: 'propose a component the system has nothing to draw from', why: `The system has nothing to draw ${pick.use} from.`, fix: `Add a story or source for ${pick.use}, or propose another component.` });
     else if (!p?.url) missing.push({ kind: 'not-drawn', group: "have a proposal that isn't drawn yet", why: `The proposal (${what}) isn't drawn yet.`, fix: 'Draw the proposals (dsa render).' });
     else if (p.check !== 'exact') missing.push({ kind: 'near-match', group: 'have a proposal drawn only as a near match', why: `The proposal (${what}) is only drawn as a near match, not with these props.`, fix: 'Draw the proposals (dsa render).' });
     // Drawn without the system's stylesheet it looks broken, and would be judged for that, not for the fit.
     else if (p.unstyled) missing.push({ kind: 'unstyled', group: "have a proposal that couldn't be drawn with the system's styles", why: "The proposal couldn't be drawn with the system's styles, so it wouldn't look like the real component.", fix: "Check the system's Storybook preview loads its stylesheet, then draw the proposals again (dsa render)." });
     // A stand-in icon reads as a different control; sample words as a different label: neither is decidable.
-    else if (!container && /stand-in|^icon|icon .*couldn't be loaded/.test(p.content ?? '')) missing.push({ kind: 'stand-in-icon', group: "have a proposal drawn with a stand-in icon, not their own", why: "The proposal is drawn with a stand-in icon, not this element's own icon, so it may read as a different control.", fix: "Take the photo again so its icon is recorded, then draw the proposal again (dsa render)." });
-    else if (!container && (e.ownHash || p.content) && !drawnWithOwnWords(p, e)) missing.push({ kind: 'not-own-words', group: "have a proposal drawn with other words than their own", why: p.own ? "The proposal's words aren't this element's own." : "The proposal shows the system's sample words, not this element's own.", fix: 'Draw the proposal again once its own words are known (a photo records them).' });
+    else if (!example && /stand-in|^icon|icon .*couldn't be loaded/.test(p.content ?? '')) missing.push({ kind: 'stand-in-icon', group: "have a proposal drawn with a stand-in icon, not their own", why: "The proposal is drawn with a stand-in icon, not this element's own icon, so it may read as a different control.", fix: "Take the photo again so its icon is recorded, then draw the proposal again (dsa render)." });
+    else if (!example && (e.ownHash || p.content) && !drawnWithOwnWords(p, e)) missing.push({ kind: 'not-own-words', group: "have a proposal drawn with other words than their own", why: p.own ? "The proposal's words aren't this element's own." : "The proposal shows the system's sample words, not this element's own.", fix: 'Draw the proposal again once its own words are known (a photo records them).' });
     // A swatch's marker, an icon font's glyph, a second line: the proposal must hold them too, or it reads as another control.
-    else if (!container && s?.content && s.content.inner === undefined) missing.push({ kind: 'no-inner', group: "have a proposal that doesn't show their inner content", why: "The proposal doesn't show this element's inner content.", fix: 'Take the photo again so what it holds is recorded, then draw the proposal again (dsa render).' });
-    else if (!container && s?.content?.inner && !p.inner) missing.push({ kind: 'no-inner', group: "have a proposal that doesn't show their inner content", why: "The proposal doesn't show this element's inner content.", fix: s.content.inner.lost ? 'A picture inside it comes from elsewhere and couldn\'t be copied. Compare the two in the app instead.' : 'Draw the proposal again (dsa render); if it stays missing, the system may not load the icon font it uses.' });
+    else if (!example && s?.content && s.content.inner === undefined) missing.push({ kind: 'no-inner', group: "have a proposal that doesn't show their inner content", why: "The proposal doesn't show this element's inner content.", fix: 'Take the photo again so what it holds is recorded, then draw the proposal again (dsa render).' });
+    else if (!example && s?.content?.inner && !p.inner) missing.push({ kind: 'no-inner', group: "have a proposal that doesn't show their inner content", why: "The proposal doesn't show this element's inner content.", fix: s.content.inner.lost ? 'A picture inside it comes from elsewhere and couldn\'t be copied. Compare the two in the app instead.' : 'Draw the proposal again (dsa render); if it stays missing, the system may not load the icon font it uses.' });
   }
   // Nobody can decide in a vacuum: with no clear answer and no candidate to look at, it's held out.
   if (pick?.verdict === 'unclear' && !candidatesOf(E, e).length) missing.push({ kind: 'no-candidates', group: 'have no clear answer and no candidate drawn to compare', why: 'dsa has no clear answer for it, and none of the candidates is drawn with its own content.', fix: 'Take the photo again and draw the proposals (dsa render), or answer it in Element Review.' });

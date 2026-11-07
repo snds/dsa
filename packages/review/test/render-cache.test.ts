@@ -7,7 +7,7 @@ const assert_ = (a: unknown, b: unknown) => expect(a).toBe(b);
 // own, so the cache draws it again instead of keeping it.
 
 const own = { text: 'Library' };
-const drawn = (o: object = {}) => ({ use: 'Button', props: {}, check: 'exact' as const, shot: 'a.png', checked: true, own: true, hash: 'h', ...o });
+const drawn = (o: object = {}) => ({ use: 'Button', props: {}, check: 'exact' as const, shot: 'a.png', checked: 2, own: true, hash: 'h', ...o });
 
 test('a cached own-content drawing with no recorded words is drawn again', () => {
   expect(reusable(drawn() as any, { use: 'Button', props: {}, own } as any, 'h')).toBe(false);
@@ -23,7 +23,7 @@ test('one that drew the element’s own words, with the same inputs, stands', ()
 });
 
 test('a plain drawing (no own content wanted) stands on its hash alone', () => {
-  expect(reusable({ use: 'Button', props: {}, check: 'exact', shot: 'a.png', checked: true, hash: 'h' } as any, { use: 'Button', props: {} } as any, 'h')).toBe(true);
+  expect(reusable({ use: 'Button', props: {}, check: 'exact', shot: 'a.png', checked: 2, hash: 'h' } as any, { use: 'Button', props: {} } as any, 'h')).toBe(true);
 });
 
 test("a browser's defaults mean the system's stylesheet didn't reach the drawing", () => {
@@ -36,7 +36,7 @@ test('a drawing made before drawings recorded their font, or without the system 
   const p = { use: 'Button', props: {} } as any;
   assert_(reusable({ use: 'Button', props: {}, check: 'exact', hash: 'h', styles: { fontSize: '14px' } } as any, p, 'h'), false);
   assert_(reusable({ use: 'Button', props: {}, check: 'exact', hash: 'h', unstyled: true, styles: { fontFamily: 'Times' } } as any, p, 'h'), false);
-  assert_(reusable({ use: 'Button', props: {}, check: 'exact', shot: 'a.png', checked: true, hash: 'h', styles: { fontFamily: 'Inter' } } as any, p, 'h'), true);
+  assert_(reusable({ use: 'Button', props: {}, check: 'exact', shot: 'a.png', checked: 2, hash: 'h', styles: { fontFamily: 'Inter' } } as any, p, 'h'), true);
 });
 
 test('a render always says how many drawings the styles missed and which elements they are, zero included', () => {
@@ -103,7 +103,7 @@ test('a picture nobody looked at is drawn again, whatever it claims', () => {
   const own = { use: 'Button', props: {}, own: { text: 'Open drawer' } } as any;
   const drawn = { use: 'Button', props: {}, check: 'exact', shot: 'a.png', own: true, text: 'Open drawer', hash: 'h' } as any;
   assert_(reusable(drawn, own, 'h'), false);
-  assert_(reusable({ ...drawn, checked: true }, own, 'h'), true);
+  assert_(reusable({ ...drawn, checked: 2 }, own, 'h'), true);
 });
 
 test('work past its limit counts as stuck; work that finishes or fails in time does not', async () => {
@@ -148,4 +148,15 @@ test('the render log names each drawing that was stopped, zero included', () => 
   expect(log).toContain('Stopped for taking too long: 2 drawings.');
   expect(log).toContain("Menu#a · Menu · from the system's source, after 30 seconds · not drawn · src/A.tsx:4");
   expect(log).toContain('Tabs#b · Tabs · from story tabs--default, after 30 seconds · drawn another way');
+});
+
+test('a drawing from before the check changed is looked at again', () => {
+  const want = { use: 'Button', props: {} } as any;
+  const base = { use: 'Button', props: {}, check: 'exact', shot: 'a.png', hash: 'h', styles: { fontFamily: 'Inter' } } as any;
+  expect(reusable({ ...base, checked: true }, want, 'h')).toBe(false);
+  expect(reusable({ ...base, checked: 2 }, want, 'h')).toBe(true);
+  // A field's words count as its words.
+  const field = { ...want, own: { value: 'Walnut' } };
+  expect(reusable({ ...base, checked: 2, own: true, text: 'Walnut' }, field, 'h')).toBe(true);
+  expect(reusable({ ...base, checked: 2, own: true, text: 'Other' }, field, 'h')).toBe(false);
 });

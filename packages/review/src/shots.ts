@@ -150,7 +150,9 @@ export async function takeShots(given: { root: string; dataDir: string; config: 
   // A shot without placement predates it (crawler 4): take it again once, so every example says where it sits.
   const fresh = (entry: any, e: ElementEval) => !opts.fresh && entry && entry.fileHash === hashOf(e) && Date.now() - Date.parse(entry.at ?? 0) < maxAge && (entry.file ? 'placement' in entry : true)
     // A photo that didn't record what its element holds besides words: taken again once.
-    && !(entry.file && !entry.drawn && entry.content && !('inner' in entry.content));
+    && !(entry.file && !entry.drawn && entry.content && !('inner' in entry.content))
+    // Taken before copies kept what sits on top of what, and before a field's words were recorded: taken again once.
+    && !(entry.file && !entry.drawn && entry.content && entry.content.v !== OWN_CAPTURE && (entry.content.inner || FIELD_TAG.test(e.snippet ?? '')));
   // A "not found" is only worth reusing if nothing about how we'd look for it changed: the crawler
   // itself (CRAWLER) and the reveal steps traced for this element. Otherwise a fix never gets a retry.
   const stepsKey = (e: ElementEval) => (e.reach?.steps ?? []).map(x => x.event + ':' + x.label).join('|');
@@ -2609,12 +2611,21 @@ const FIND_IN_PAGE = `(targets) => {
  * takes the system's colour (currentColor); scripts, foreignObject, event handlers and javascript: URLs
  * are stripped, and a large icon is left out.
  */
+const OWN_CAPTURE = 2;
+/** An element whose words are a field's value, not its text. */
+const FIELD_TAG = /^<(input|textarea|select)\b/i;
 const OWN_CONTENT = `(id) => {
   const el = document.querySelector('[data-dsa-shot="' + CSS.escape(id) + '"]');
   if (!el) return null;
   const c = el.cloneNode(true);
   c.querySelectorAll('svg, [data-slot=icon], .material-symbols-outlined, .material-symbols-rounded, .material-icons, [aria-hidden=true]').forEach(x => x.remove());
-  const text = (c.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 80);
+  const isField = /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
+  const text = el.tagName === 'SELECT' ? '' : (c.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 80);
+  // A field shows its value, or its placeholder; a password's value is never kept, and a tick box has no words.
+  const field = !isField ? null : {
+    value: /^(password|hidden|file|checkbox|radio)$/i.test(el.type || '') ? null : ((el.tagName === 'SELECT' ? (el.selectedOptions[0] ? el.selectedOptions[0].textContent : '') : el.value) || '').trim().slice(0, 200) || null,
+    placeholder: el.getAttribute('placeholder') || null,
+  };
   const svg = el.querySelector('svg');
   let icon = null;
   if (svg) {
@@ -2661,7 +2672,7 @@ const OWN_CONTENT = `(id) => {
         let url = null;
         try {
           if (tag === 'canvas') url = n.toDataURL();
-          else { const k = document.createElement('canvas'); k.width = Math.min(n.naturalWidth || r.width, 256); k.height = Math.min(n.naturalHeight || r.height, 256); k.getContext('2d').drawImage(n, 0, 0, k.width, k.height); url = k.toDataURL('image/png'); }
+          else { const k = document.createElement('canvas'); const most = Math.min(256, Math.ceil(Math.max(r.width, r.height) * 2)); k.width = Math.min(n.naturalWidth || r.width, most); k.height = Math.min(n.naturalHeight || r.height, most); k.getContext('2d').drawImage(n, 0, 0, k.width, k.height); url = k.toDataURL('image/png'); }
         } catch { /* from elsewhere: it can't be copied */ }
         if (!url) { lost++; return null; }
         const i = document.createElement('img');
@@ -2671,7 +2682,10 @@ const OWN_CONTENT = `(id) => {
       const to = document.createElement(cs.display === 'inline' ? 'span' : 'div');
       put(to, cs, [['display', 'display'], ['flexDirection', 'flex-direction'], ['flexWrap', 'flex-wrap'], ['flexGrow', 'flex-grow'], ['alignItems', 'align-items'], ['justifyContent', 'justify-content'], ['columnGap', 'column-gap'], ['rowGap', 'row-gap'], ['marginTop', 'margin-top'], ['marginRight', 'margin-right'], ['marginBottom', 'margin-bottom'], ['marginLeft', 'margin-left'], ['paddingTop', 'padding-top'], ['paddingRight', 'padding-right'], ['paddingBottom', 'padding-bottom'], ['paddingLeft', 'padding-left'], ['borderRadius', 'border-radius'], ['clipPath', 'clip-path'], ['transform', 'transform']]);
       if (!clear(cs.backgroundColor)) to.style.backgroundColor = cs.backgroundColor;
-      if (cs.backgroundImage !== 'none' && !/url\\(/.test(cs.backgroundImage)) to.style.backgroundImage = cs.backgroundImage;
+      if (cs.backgroundImage !== 'none' && !/url\\(/.test(cs.backgroundImage)) { to.style.backgroundImage = cs.backgroundImage; to.style.backgroundSize = cs.backgroundSize; to.style.backgroundPosition = cs.backgroundPosition; }
+      // What sits on top of something stays on top of it.
+      if (cs.position === 'relative') to.style.position = 'relative';
+      if (cs.position === 'absolute') { to.style.position = 'absolute'; for (const side of ['top', 'right', 'bottom', 'left', 'width', 'height', 'zIndex']) to.style[side] = cs[side]; }
       if (cs.opacity !== '1') to.style.opacity = cs.opacity;
       let bordered = false;
       for (const side of ['Top', 'Right', 'Bottom', 'Left']) {
@@ -2697,7 +2711,7 @@ const OWN_CONTENT = `(id) => {
     const html = box.innerHTML;
     return { html: html.length <= 40000 ? html : null, marks, blocks, lost };
   })();
-  return { text: text || null, ariaLabel: el.getAttribute('aria-label'), icon, inner };
+  return { v: ${OWN_CAPTURE}, text: text || null, ariaLabel: el.getAttribute('aria-label'), icon, inner, ...(field || {}) };
 }`;
 /** For tests: the in-page capture of an element's own content. */
 export const __ownContent = OWN_CONTENT;

@@ -213,6 +213,21 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- A whole structure (rows, a list, tabs, a menu) is no longer drawn with one line of joined words or one icon in it,
+  which passed as the element's own because the words matched. It is shown as its story wrote it, labelled as an
+  example of the component and not this element's content.
+- A field's value and placeholder are recorded with its photo, drawn in the proposal and counted in the word check.
+  A password's value is never recorded. A photo from before this needs taking again, and says so.
+- The review gate no longer lets a container through with a story's sample in it. Only a drawing labelled as an
+  example is exempt from the own-words check.
+- One small part proposed as the whole it belongs to is compared with that part when it's drawn, and otherwise held
+  out with a reason. "With its own words" is only said when there are words.
+- A drawing of a trigger no longer hangs. The harness mounted it inside its own open popup, and now mounts it beside
+  what it opens, closed.
+- Copies of what an element holds keep what sits on top of what (a marker over a swatch), and pictures are kept at
+  about twice their size, so they fit. Photos with a copy are taken again once.
+- Every drawing is looked at again on the next render, once.
+
 - `dsa render` can no longer hang on a page that never returns. Each drawing has a time limit (`rendered.drawSeconds`,
   default 30; the first on a page gets five times as long). A drawing past it is stopped, recorded as not drawn
   with a plain reason, and named in the render log with its key and component. The page is replaced, or the

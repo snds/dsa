@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { BLANK_INSET, capByEvidence, cardPicks, decodePng, isBlank, latestEvals, lookProps, ownKey, ownOf, proposalKey, readProposals, readRendered, resolveTargets, type Config, type OwnContent, type Proposal, type RenderedSet, type Styles } from '@snds/dsa/engine';
+import { BLANK_INSET, capByEvidence, cardPicks, decodePng, isBlank, latestEvals, lookProps, ownKey, ownOf, ownText, proposalKey, readProposals, readRendered, resolveTargets, type Config, type OwnContent, type Proposal, type RenderedSet, type Styles } from '@snds/dsa/engine';
 
 import { cookiesFor, openSurface, serveStatic } from '@snds/dsa';
 import { detectApp, ensureBrowser, startApp } from './apps.js';
@@ -37,6 +37,13 @@ const FIRST_DRAW = 5;
 const OPEN_MS = 300_000;
 const CLOSE_MS = 5_000;
 const SAVE_EVERY = 10;
+/** Raised when what a drawing must get right changes, so old drawings are looked at again. */
+const CHECKED = 2;
+/** What a whole structure says when it's drawn empty, or as its story wrote it, instead of with an element's content. */
+const DRAWN_EMPTY = "its rows come from data the scan couldn't read, so it's drawn empty";
+const EXAMPLE = "an example of the component, not this element's content";
+/** A drawing holding these is a whole structure: one element's words or icon can't stand in for what's inside it. */
+const STRUCTURE = 'table, thead, tbody, tr, ul, ol, dl, [role=grid], [role=tree], [role=tablist], [role=menu], [role=listbox]';
 
 /** What `withinLimit` gives back when the work didn't finish in time. */
 export const STUCK = Symbol('stuck');
@@ -284,11 +291,11 @@ export function reusable(c: Proposal, p: Wanted, hash: string): boolean {
   // that isn't in the system's source, where nothing can change until its hash does.
   if (!c.shot && !c.hash.startsWith('none:')) return false;
   // A picture nobody looked at may be blank or hold another element's words: looked at first, by drawing again.
-  if (c.shot && !c.checked) return false;
+  if (c.shot && c.checked !== CHECKED) return false;
   // Drawn before drawings recorded their font, or without the system's styles: drawn again.
   if (c.styles && !c.styles.fontFamily) return false;
   if (c.unstyled || c.innerLost) return false;
-  return !(c.own && p.own && c.text !== (p.own.text ?? ''));
+  return !(c.own && p.own && c.text !== ownText(p.own));
 }
 
 export interface Wanted { /** The elements it's drawn for, as file:line. */ where?: string[] | undefined; use: string; props: Record<string, string>; own?: OwnContent; /** The file the element's icon component comes from (when only its name is known), to draw that icon. */ iconFile?: string | undefined }
@@ -320,8 +327,9 @@ export async function wantedProposals(dataDir: string, threshold?: number, root?
     icon = own?.iconName && root ? iconFile(root, e.file, own.iconName) ?? undefined : undefined;
     for (const p of picks.get(e.id) ?? []) add(p, own);
     // With no clear proposal, its candidates are what a person judges: drawn with its own content too.
+    // So is the part a whole's copy holds: one small button of a host's sidebar is compared with that part.
     const noProposal = e.verdict !== 'replace' || (picks.get(e.id) ?? []).some((p: any) => p?.verdict !== 'replace');
-    for (const r of [e, e.decided?.decision, ...(e.alternatives ?? [])] as any[]) add(r, r === e || r === e.decided?.decision || noProposal ? own : null);
+    for (const r of [e, e.decided?.decision, ...(e.alternatives ?? [])] as any[]) add(r, r === e || r === e.decided?.decision || noProposal || e.role === 'host-copy' ? own : null);
   }
   return out;
 }
@@ -500,7 +508,7 @@ const picture = (p: Proposal) => (p.shot ? 0 : p.fallback ? 1 : 2);
  */
 function pickBetter(a: Proposal | null, b: Proposal | null): Proposal | null {
   if (!a || !b) return a ?? b;
-  const d = picture(a) - picture(b) || Number(Boolean(a.unstyled)) - Number(Boolean(b.unstyled)) || Number(Boolean(a.innerLost)) - Number(Boolean(b.innerLost)) || ORDER[a.check] - ORDER[b.check] || Number(Boolean(b.own)) - Number(Boolean(a.own)) || Number(Boolean(a.content)) - Number(Boolean(b.content));
+  const d = picture(a) - picture(b) || Number(a.content === DRAWN_EMPTY) - Number(b.content === DRAWN_EMPTY) || Number(Boolean(a.unstyled)) - Number(Boolean(b.unstyled)) || Number(Boolean(a.innerLost)) - Number(Boolean(b.innerLost)) || ORDER[a.check] - ORDER[b.check] || Number(Boolean(b.own)) - Number(Boolean(a.own)) || Number(Boolean(a.content)) - Number(Boolean(b.content));
   return d > 0 ? b : a;
 }
 
@@ -512,17 +520,27 @@ async function fromSource(page: any, h: Harness, fresh: FreshDraw, s: any, p: Wa
   const dataTag = DATA_TAGS.test(s.tag ?? '');
   const icon = p.own?.iconName && p.iconFile ? { file: harnessUrlFor(p.iconFile), name: p.own.iconName } : null;
   // With no words of its own, it's drawn with none: that is the element (no stand-in label it doesn't have).
-  const r = await drawFresh(page, h, fresh, { file: harnessUrlFor(s.file), name: s.component, props: p.props, text: dataTag ? null : p.own?.text ?? null, icon, slot: s.slot, empty: true });
+  const draw = (text: string | null) => drawFresh(page, h, fresh, { file: harnessUrlFor(s.file), name: s.component, props: p.props, text, icon, slot: s.slot, empty: true });
+  const scan = (): Promise<Found[]> => run(page, SCAN, { slot: s.slot, want: p.props, classes: s.axisClasses ?? null });
+  const text = dataTag ? null : p.own?.text ?? null;
+  let r = await draw(text);
   if (!r.ok) return { ...noOwn(p), check: 'none', via: 'source', note: `${p.use} couldn't be drawn from the system's source: ${r.why}.`, hash };
-  const found: Found[] = await run(page, SCAN, { slot: s.slot, want: p.props, classes: s.axisClasses ?? null });
+  let found = await scan();
+  // A whole structure holding one line of joined words reads as the element's and isn't: drawn without them.
+  let whole = dataTag;
+  const first = topOf(found);
+  if (first && p.own && !dataTag && !severalBlocks(p) && await run<boolean>(page, HOLDS_STRUCTURE, { sel: `[data-dsa-p="${first.idx}"][data-slot="${s.slot}"]` })) {
+    whole = true;
+    if (text) { r = await draw(null); if (!r.ok) return { ...noOwn(p), check: 'none', via: 'source', note: `${p.use} couldn't be drawn from the system's source: ${r.why}.`, hash }; found = await scan(); }
+  }
   const top = topOf(found);
   if (!top) return { ...noOwn(p), check: 'none', via: 'source', note: `${p.use} drew from the system's source, but nothing showed.`, hash };
   const check: Proposal['check'] = top.contradicted ? 'closest' : top.unknown ? 'unverified' : 'exact';
   const sel = `[data-dsa-p="${top.idx}"][data-slot="${s.slot}"]`;
   let own: { own: boolean; why?: string; inner?: boolean } | null = null;
   if (p.own) {
-    if (dataTag) own = { own: false, why: "its rows come from data the scan couldn't read, so it's drawn empty" };
-    else if (p.own.icon || p.own.inner?.html) own = await run<{ own: boolean; why?: string; inner?: boolean }>(page, INJECT_OWN, { sel, own: p.own }).catch(() => ({ own: false, why: 'its content could not be set' }));
+    if (whole) own = { own: false, why: DRAWN_EMPTY };
+    else if (p.own.icon || p.own.inner?.html || isField(p)) own = await run<{ own: boolean; why?: string; inner?: boolean }>(page, INJECT_OWN, { sel, own: p.own }).catch(() => ({ own: false, why: 'its content could not be set' }));
     else {
       // Its words went in as children; an icon named in the source was imported and drawn beside them.
       const shown = await run<{ text: boolean; icon: boolean }>(page, SHOWN_OWN, { sel, text: p.own.text ?? null, label: p.own.ariaLabel ?? null });
@@ -536,19 +554,24 @@ async function fromSource(page: any, h: Harness, fresh: FreshDraw, s: any, p: Wa
   if (!seen.shows) return { ...noOwn(p), check: 'none', via: 'source', note: `${p.use} drew from the system's source, but ${seen.why}.`, hash };
   if (seen.notOwn) own = { own: false, why: seen.notOwn };
   const content = own && !own.own && own.why ? own.why : undefined;
-  return { ...noOwn(p), check, via: 'source', shot: file, ...(seen.notOwn ? {} : { checked: true }), styles: top.styles, ...(unstyledLook(top.styles) ? { unstyled: true } : {}), ...innerOf(p, own), ...(own?.own ? { own: true, text: p.own?.text ?? '' } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
+  return { ...noOwn(p), check, via: 'source', shot: file, ...(seen.notOwn ? {} : { checked: CHECKED }), styles: top.styles, ...(unstyledLook(top.styles) ? { unstyled: true } : {}), ...innerOf(p, own), ...(own?.own ? { own: true, text: ownText(p.own) } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
 }
 
 /** Runs in the page: did the element's own words and icon show, and set its accessible name. */
 /** What the proposal stores about the element's inner content: drawn with it, or without it. */
-const innerOf = (p: Wanted, own: { own: boolean; inner?: boolean } | null) => (!p.own?.inner ? {} : own?.own && own.inner ? { inner: true } : { innerLost: true });
+const innerOf = (p: Wanted, own: { own: boolean; inner?: boolean; example?: boolean } | null) => (!p.own?.inner || own?.example ? {} : own?.own && own.inner ? { inner: true } : { innerLost: true });
+const isField = (p: Wanted) => p.own?.value != null || p.own?.placeholder != null;
+/** The element is itself several blocks, copied whole: that copy keeps its structure. */
+const severalBlocks = (p: Wanted) => Boolean(p.own?.inner?.html && p.own.inner.blocks > 1);
+/** Runs in the page: does this drawing hold a whole structure, rows or a list? */
+const HOLDS_STRUCTURE = `({ sel }) => { const el = document.querySelector(sel); return Boolean(el && (el.matches(${JSON.stringify(STRUCTURE)}) || el.querySelector(${JSON.stringify(STRUCTURE)}))); }`;
 
 /**
  * Runs in the page, once a drawing is on screen: can it be seen, and do the words that show equal the ones
  * it should hold? Marks and icons aren't words. Inner content is compared with what was put in, whose words
  * are the ones that showed in the app (the photo's own words can include text it kept hidden).
  */
-const SHOWN = `({ sel, words, inner }) => {
+const SHOWN = `({ sel, words, inner, field }) => {
   const el = document.querySelector(sel);
   if (!el) return { shows: false, why: 'it was gone by the time it was looked at' };
   const r = el.getBoundingClientRect();
@@ -559,6 +582,9 @@ const SHOWN = `({ sel, words, inner }) => {
   for (let n = el; n; n = n.parentElement) { const cs = getComputedStyle(n); if (cs.display === 'none') return { shows: false, why: "it's hidden, as an overlay part is when nothing opened it" }; op *= parseFloat(cs.opacity); }
   if (op < 0.1) return { shows: false, why: "it's fully see-through, as an overlay part is before it opens" };
   if (words === null) return { shows: true };
+  // A field's words aren't text in it: what's typed, or its placeholder.
+  const box = field && (el.matches('input, textarea') ? el : el.querySelector('input, textarea'));
+  if (box) return (box.value || '') === (field.value || '') && (box.getAttribute('placeholder') || '') === (field.placeholder || '') ? { shows: true } : { shows: true, notOwn: 'the words in it are not its own' };
   const NOT_WORDS = 'svg, style, script, [data-slot=icon], [aria-hidden=true], .material-symbols-outlined, .material-symbols-rounded, .material-icons, [data-dsa-mark]';
   const seenIn = (root, live) => {
     const out = [];
@@ -605,7 +631,7 @@ const SHOWN = `({ sel, words, inner }) => {
  */
 export async function lookAt(page: any, sel: string, file: string, p: Wanted, own: { own: boolean } | null): Promise<{ shows: boolean; why?: string; notOwn?: string }> {
   const claims = Boolean(p.own && own?.own);
-  const seen = await run<{ shows: boolean; why?: string; notOwn?: string }>(page, SHOWN, { sel, words: claims ? p.own!.text ?? '' : null, inner: claims ? p.own!.inner?.html ?? null : null }).catch(() => ({ shows: false, why: 'it could not be looked at' }));
+  const seen = await run<{ shows: boolean; why?: string; notOwn?: string }>(page, SHOWN, { sel, words: claims ? ownText(p.own) : null, inner: claims ? p.own!.inner?.html ?? null : null, field: claims && isField(p) ? { value: p.own!.value ?? null, placeholder: p.own!.placeholder ?? null } : null }).catch(() => ({ shows: false, why: 'it could not be looked at' }));
   if (!seen.shows) return seen;
   try { if (isBlank(decodePng(fs.readFileSync(file)), null, 2, BLANK_INSET)) return { shows: false, why: 'its picture is blank' }; } catch { /* an image we can't read: keep it */ }
   return seen;
@@ -668,14 +694,14 @@ async function fromStories(sb: { url: string; stories: any[]; page: any }, s: an
     const file = `proposal-${sha(k).slice(0, 12)}.png`;
     // The element's own words, name and icon in place of the story's: then the proposal is this element.
     const sel = `[data-dsa-p="${top.idx}"][data-slot="${s.slot}"]`;
-    let own = p.own ? await run<{ own: boolean; why?: string; inner?: boolean }>(page, INJECT_OWN, { sel, own: p.own }).catch(() => ({ own: false, why: 'its content could not be set' })) : null;
+    let own: { own: boolean; why?: string; inner?: boolean; example?: boolean } | null = p.own ? await run<{ own: boolean; why?: string; inner?: boolean; example?: boolean }>(page, INJECT_OWN, { sel, own: p.own }).catch(() => ({ own: false, why: 'its content could not be set' })) : null;
     if (own?.own) await page.waitForTimeout(120);
     const shot = await shoot(page, sel, path.join(dir, file));
     const seen = shot ? await lookAt(page, sel, path.join(dir, file), p, own) : { shows: false, why: 'no picture could be taken' };
     if (!seen.shows) return false;
     if (seen.notOwn) own = { own: false, why: seen.notOwn };
     const content = own?.own ? undefined : own?.why ? own.why : set ? (iconSize && icon ? `icon from ${icon.story}` : 'story default') : undefined;
-    best = { ...noOwn(p), check, via: 'story', shot: file, ...(seen.notOwn ? {} : { checked: true }), styles: top.styles, ...(unstyledLook(top.styles) ? { unstyled: true } : {}), ...innerOf(p, own), story: st.id, ...(own?.own ? { own: true, text: p.own?.text ?? '' } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
+    best = { ...noOwn(p), check, via: 'story', shot: file, ...(seen.notOwn ? {} : { checked: CHECKED }), styles: top.styles, ...(unstyledLook(top.styles) ? { unstyled: true } : {}), ...innerOf(p, own), story: st.id, ...(own?.example ? { example: true } : {}), ...(own?.own ? { own: true, text: ownText(p.own) } : {}), ...(content ? { content } : {}), ...(top.contradicted ? { actual: top.actual } : {}), hash };
     return check === 'exact' && (!p.own || Boolean(own?.own) || !seen.notOwn);
   };
   let tried = 0;
@@ -782,10 +808,26 @@ async function run<T = any>(page: any, src: string, arg?: unknown): Promise<T> {
 const INJECT_OWN = `({ sel, own }) => {
   const el = document.querySelector(sel);
   if (!el) return { own: false, why: 'the component was not found to set its content' };
+  // A whole structure isn't one element's words or icon: it stays as its story wrote it, called an example.
+  const several = own.inner && own.inner.html && own.inner.blocks > 1;
+  if (!several && (el.matches(${JSON.stringify(STRUCTURE)}) || el.querySelector(${JSON.stringify(STRUCTURE)}))) return { own: false, example: true, why: ${JSON.stringify(EXAMPLE)} };
+  // A field's words go in its box. With no box in the drawing, they're its label.
+  if (own.value != null || own.placeholder != null) {
+    const box = el.matches('input, textarea') ? el : el.querySelector('input, textarea');
+    if (box) {
+      box.value = own.value || '';
+      if (own.placeholder) box.setAttribute('placeholder', own.placeholder); else box.removeAttribute('placeholder');
+      if (own.ariaLabel) el.setAttribute('aria-label', own.ariaLabel);
+      return { own: true };
+    }
+    own = { ...own, text: own.text || own.value || own.placeholder };
+  }
   if (own.inner && own.inner.html) {
     const t = document.createElement('template');
     t.innerHTML = own.inner.html;
     el.replaceChildren(...Array.from(t.content.childNodes));
+    // What sits on top of something inside it is placed against the element itself.
+    if (el.querySelector('[style*="position: absolute"]') && getComputedStyle(el).position === 'static') el.style.position = 'relative';
     if (own.ariaLabel) el.setAttribute('aria-label', own.ariaLabel);
     // Each mark shows, at about the size it had: an icon font that isn't here spells its name out instead.
     const shown = Array.from(el.querySelectorAll('[data-dsa-mark]'));
@@ -796,7 +838,7 @@ const INJECT_OWN = `({ sel, own }) => {
   const iconOnly = !own.text;
   if (iconOnly && !own.icon) {
     if (own.ariaLabel) el.setAttribute('aria-label', own.ariaLabel);
-    return { own: false, why: "stand-in icon: the app's own icon wasn't captured" };
+    return { own: false, why: own.inner && own.inner.marks ? "what it holds couldn't be copied, so the story's sample shows instead" : "stand-in icon: the app's own icon wasn't captured" };
   }
   let svg = null;
   if (own.icon) { const t = document.createElement('template'); t.innerHTML = own.icon; svg = t.content.querySelector('svg'); }
