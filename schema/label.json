@@ -118,6 +118,53 @@
     },
     "notes": {
       "type": "string"
+    },
+    "how": {
+      "description": "How a person gave it: alone (one element, looked at on its own), batch (one answer for several elements), or spot-check (a random check of an answer dsa was already sure of).",
+      "type": "string",
+      "enum": [
+        "alone",
+        "batch",
+        "spot-check"
+      ]
+    },
+    "judgment": {
+      "description": "Shared by every label one answer produced (a batch), so scoring can count that answer once.",
+      "type": "string",
+      "minLength": 1
+    },
+    "proposed": {
+      "description": "What dsa proposed when the person answered, and how sure it was.",
+      "type": "object",
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "minLength": 1
+        },
+        "use": {
+          "type": "string",
+          "minLength": 1
+        },
+        "props": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "required": [
+        "verdict",
+        "confidence"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [

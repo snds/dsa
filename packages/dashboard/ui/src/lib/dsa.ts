@@ -52,6 +52,11 @@ export const BASE: string = D.base || "/"
 /** A server path ("/api/run") under the mount point. */
 export const at = (url: string) => (url.startsWith("/") ? BASE + url.slice(1) : url)
 
+/** The name a reviewer gave in Label Review, sent with every answer so its label says who gave it. */
+export function reviewerName(): string | undefined {
+  try { const v = JSON.parse(window.localStorage.getItem("dsa.reviewer") || "null"); return typeof v === "string" && v.trim() ? v.trim() : undefined } catch { return undefined }
+}
+
 export async function api(url: string, body?: unknown) {
   const r = await fetch(at(url), { method: body ? "POST" : "GET", headers: { "Content-Type": "application/json", "X-DSA": "1" }, body: body ? JSON.stringify(body) : undefined })
   const j: any = await r.json().catch(() => ({}))

@@ -16,6 +16,9 @@ import { z } from "zod";
  */
 export const LABEL_METHODS = ["human", "migrated", "history", "lint", "consensus"] as const;
 
+/** How a person gave a label: on its own, as one answer for several elements, or as a spot check of a sure answer. */
+export const LABEL_HOW = ["alone", "batch", "spot-check"] as const;
+
 export const LabelPickSchema = z.object({
   use: z.string().min(1).describe("The system component."),
   props: z.record(z.string(), z.string()).optional().describe("Props that matter (variant, size…), as strings."),
@@ -39,6 +42,17 @@ export const LabelSchema = z
     method: z.enum(LABEL_METHODS),
     at: z.iso.datetime({ offset: true }).describe("When it was labelled (ISO 8601)."),
     notes: z.string().optional(),
+    how: z.enum(LABEL_HOW).optional().describe("How a person gave it: alone (one element, looked at on its own), batch (one answer for several elements), or spot-check (a random check of an answer dsa was already sure of)."),
+    judgment: z.string().min(1).optional().describe("Shared by every label one answer produced (a batch), so scoring can count that answer once."),
+    proposed: z
+      .object({
+        verdict: z.string().min(1),
+        use: z.string().min(1).optional(),
+        props: z.record(z.string(), z.string()).optional(),
+        confidence: z.number().min(0).max(1),
+      })
+      .optional()
+      .describe("What dsa proposed when the person answered, and how sure it was."),
   })
   .superRefine((l, ctx) => {
     if (l.truth.verdict === "replace" && !l.truth.use) ctx.addIssue({ code: "custom", path: ["truth", "use"], message: "a replace label names the component" });

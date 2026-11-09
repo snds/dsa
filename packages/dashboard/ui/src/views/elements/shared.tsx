@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Code, Pre } from "@/components/bits"
-import { D, api, say, short, SYS } from "@/lib/dsa"
+import { D, api, reviewerName, say, short, SYS } from "@/lib/dsa"
 import { type Staged, setStagedNote, stage, stageKey, unstage, useStaged } from "@/lib/staged"
 
 export interface Ctx {
@@ -371,7 +371,7 @@ export function ReviewControls({ items, auto, pattern, options, label }: { items
   }
   // Live: write to the repo. Static: stage here.
   const decide = (decision: any, done: string) => live
-    ? run(async () => { const r = await api("/api/decide", { ...where, decision, note: note || undefined }); applyLocal(members(), r.decided); say(`${done} for ${r.recorded} element(s)`) })
+    ? run(async () => { const r = await api("/api/decide", { ...where, decision, note: note || undefined, who: reviewerName() }); applyLocal(members(), r.decided); say(`${done} for ${r.recorded} element(s)`) })
     : (stage({ key, target: items[0].target, ids, pattern, decision, note: note || undefined, label }), say(`${done}: staged in this browser. Download it from the bar at the bottom.`))
   const undo = (done: string) => live
     ? run(async () => { const r = await api("/api/undecide", where); applyLocal(r.ids, null); say(done) })

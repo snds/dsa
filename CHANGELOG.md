@@ -8,6 +8,12 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- One answer, saved once and used twice. In `dsa serve`, a decision made in Element Review is also saved
+  as a label for `dsa bench`, one per element it covered. An answer given in Label Review is also recorded
+  as that element's decision, so Element Review doesn't ask it again. Each label now says how it was given
+  (`how`: `alone`, `batch` or `spot-check`), carries the shared `judgment` id when one answer covered
+  several elements, and records what dsa `proposed` and how sure it was at that moment. Element Review
+  sends the reviewer's name with each decision, so its labels say who gave them.
 - Re-scan is a split button. Its menu sets what the scan does with earlier photos: keep them, retake them
   all, or try again for the ones not found. The setting stays until changed, and shows under the button when
   it isn't the default. It reaches `dsa serve` and the scan relay directly. A published page with a plain link

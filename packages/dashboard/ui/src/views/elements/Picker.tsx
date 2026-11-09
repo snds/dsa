@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Code, Note, Pre } from "@/components/bits"
-import { D, api, at, pct100, say, short } from "@/lib/dsa"
+import { D, api, at, pct100, reviewerName, say, short } from "@/lib/dsa"
 import { desc, useEl } from "./shared"
 
 /**
@@ -200,7 +200,7 @@ export function Picker({ target, onClose }: { target: { ids: string[]; pattern?:
   React.useEffect(() => { startSb() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   async function record(decision: any) {
     try {
-      const r = await api("/api/decide", { ...(target.pattern ? { pattern: target.pattern } : { ids: target.ids }), decision, note: note || undefined })
+      const r = await api("/api/decide", { ...(target.pattern ? { pattern: target.pattern } : { ids: target.ids }), decision, note: note || undefined, who: reviewerName() })
       applyLocal(target.pattern ? D.elements.evals.filter((e: any) => e.styleKey === target.pattern || e.styleSig === target.pattern).map((e: any) => e.id) : target.ids, r.decided)
       say(`Recorded for ${r.recorded} element(s): ${desc(decision)}`)
       onClose(); refresh()
