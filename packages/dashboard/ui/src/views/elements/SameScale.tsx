@@ -102,7 +102,7 @@ export function Natural({ url, alt }: { url: string; alt: string }) {
  * The element where it sits, at its real size and ringed, with the page it was on in plain words: the
  * shot's wider context crop (about 800 × 500 CSS px) when the crawler saved one, else the shot itself.
  */
-export function InContext({ url, box, alt, page }: { url: string; box?: Box | null; alt: string; page: string }) {
+export function InContext({ url, box, alt, page, caption }: { url: string; box?: Box | null; alt: string; page: string; caption?: React.ReactNode }) {
   return (
     <figure className="m-0 flex min-w-0 flex-col gap-1" data-slot="in-context">
       <div className="w-fit max-w-full overflow-auto rounded-md border bg-background p-1" style={{ maxHeight: 520 }}>
@@ -111,7 +111,7 @@ export function InContext({ url, box, alt, page }: { url: string; box?: Box | nu
           {box && <span className="pointer-events-none absolute rounded-[3px] outline-2 outline-offset-2 outline-primary" style={{ left: box.x, top: box.y, width: box.w, height: box.h }} />}
         </span>
       </div>
-      <figcaption className="text-[11px] text-muted-foreground">In context, on {page}</figcaption>
+      <figcaption className="text-[11px] text-muted-foreground">{caption ?? <>In context, on {page}</>}</figcaption>
     </figure>
   )
 }

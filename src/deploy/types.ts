@@ -123,6 +123,10 @@ export interface PageActions {
     runner?: RunnerSpec | undefined;
     /** How long a scan usually takes, from earlier runs (the page fills in better when the host knows). */
     estimateSeconds?: number | null | undefined;
+    /** The scan job takes a setting for earlier photos, so the page offers one. */
+    shots?: boolean | undefined;
+    /** link: the terminal command that does the same, for the viewer to copy. */
+    command?: string | undefined;
   };
   decisions: {
     kind: "export" | "post" | "issue";

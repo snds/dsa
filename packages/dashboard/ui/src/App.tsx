@@ -1,5 +1,5 @@
 import * as React from "react"
-import { GearSixIcon, ArrowClockwiseIcon, ArrowSquareOutIcon, PaperPlaneTiltIcon, SparkleIcon, WarningIcon } from "@phosphor-icons/react"
+import { GearSixIcon, ArrowClockwiseIcon, ArrowSquareOutIcon, CopyIcon, PaperPlaneTiltIcon, SparkleIcon, WarningIcon } from "@phosphor-icons/react"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -7,7 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { EvidenceTimes, Pre } from "@/components/bits"
-import { D, SYS, ago, api, fmtD, fmtDT } from "@/lib/dsa"
+import { D, SYS, ago, api, copy, fmtD, fmtDT } from "@/lib/dsa"
 import { Queue } from "@/views/Queue"
 import { Federation } from "@/views/Federation"
 import { Design } from "@/views/Design"
@@ -24,8 +24,9 @@ import { AgentProvider, canChat, useAgent } from "@/agent/store"
 import { AgentPanel } from "@/agent/AgentPanel"
 import { cn } from "cn"
 import { ACTIONS, rescan as hostRescan } from "@/lib/host"
-import { NextScan, ScanButton, ScanOverlay, SignInDialog } from "@/components/scan"
-import { canRun, detectRunning } from "@/lib/useScan"
+import { NextScan, ScanButton, ScanOverlay, ShotsMenu, ShotsNote, SignInDialog } from "@/components/scan"
+import { ButtonGroup } from "@/components/ui/button-group"
+import { canRun, detectRunning, offersShots, useScan } from "@/lib/useScan"
 import { replaceRoute, routePath, useApp } from "@/lib/app"
 import { AppSelect } from "@/components/app-select"
 
@@ -78,8 +79,9 @@ function AgentButton() {
  * that opens that page in a new tab (GitHub's Run workflow page, a CI job), or a request sent to a
  * webhook. Under it, where it goes and when this page will change, so it never looks like an in-page scan.
  */
-function StaticRescan({ onPost }: { onPost: () => void }) {
+export function StaticRescan({ onPost }: { onPost: () => void }) {
   const r = ACTIONS!.rescan
+  const { shots } = useScan()
   const target = (r.url ?? "").replace(/^https?:\/\//, "").replace(/\/$/, "")
   // No relay: say how Re-scan gets enabled instead of a button that can't work.
   if (r.kind === "none") return (
@@ -88,17 +90,31 @@ function StaticRescan({ onPost }: { onPost: () => void }) {
       <p className="text-right text-xs text-muted-foreground">{r.help}</p>
     </div>
   )
+  const link = r.kind === "link" && (
+    <a data-slot="button" href={r.url} target="_blank" rel="noopener noreferrer" className={buttonVariants({ variant: "outline" })}>
+      <ArrowSquareOutIcon data-icon="inline-start" />{r.label}
+    </a>
+  )
+  // The page can only open GitHub's form, not fill it in. The command carries the setting, so it's
+  // the way to start this scan in one step; the form needs the setting picked again.
+  const split = link && offersShots()
+  const setting = split && shots !== "normal"
+  const command = r.command && `${r.command}${setting ? ` -f shots=${shots}` : ""}`
   return (
     <div className="flex max-w-sm flex-col items-end gap-1">
-      {r.kind === "link" ? (
-        <a href={r.url} target="_blank" rel="noopener noreferrer" className={buttonVariants({ variant: "outline" })}>
-          <ArrowSquareOutIcon data-icon="inline-start" />{r.label}
-        </a>
-      ) : (
+      {split ? <><ButtonGroup>{link}<ShotsMenu variant="outline" /></ButtonGroup><ShotsNote /></> : link || (
         <Button variant="outline" onClick={onPost}><PaperPlaneTiltIcon data-icon="inline-start" />{r.label}</Button>
+      )}
+      {command && (
+        <div className="flex w-full items-center gap-1 rounded-md border bg-muted/40 py-1 pr-1 pl-2">
+          <code className="min-w-0 flex-1 text-left font-mono text-xs break-all">{command}</code>
+          <Button size="icon-sm" variant="ghost" aria-label="Copy command" title="Copy command" onClick={() => copy(command, "Command copied. Run it in a terminal.")}><CopyIcon /></Button>
+        </div>
       )}
       <NextScan prefix="Next scheduled scan" className="text-xs text-muted-foreground" />
       <p className="text-right text-xs text-muted-foreground">
+        {command && <>The command starts the scan from a terminal with GitHub's <span className="font-mono">gh</span> tool. </>}
+        {setting && <>On GitHub's page, choose {shots} under Photos. </>}
         {r.help}{target && <> <span className="font-mono break-all" title={r.url}>{r.kind === "link" ? "Opens" : "Sends to"} {target}</span></>}
       </p>
     </div>

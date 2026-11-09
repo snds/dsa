@@ -15,7 +15,7 @@ import type { PageActions, ResolvedProfile } from '@snds/dsa';
 export const siteDir = (dataDir: string) => path.join(dataDir, 'site');
 
 export async function publish(root: string, config: Config, dataDir: string, profile: ResolvedProfile, outDir = siteDir(dataDir), actions: PageActions | null = null, opts: { runDir?: string | undefined } = {}): Promise<{ dir: string; shots: number; rendered: number; bytes: number }> {
-  const html = await renderReport(root, config, dataDir, profile, { site: true, actions, runDir: opts.runDir });
+  const html = await renderReport(root, config, dataDir, profile, { site: true, actions, runDir: opts.runDir, log: (m) => console.error(m) });
   // Start clean so images from an older scan don't linger in the commit.
   for (const sub of ['shots', 'rendered']) fs.rmSync(path.join(outDir, sub), { recursive: true, force: true });
   fs.mkdirSync(outDir, { recursive: true });

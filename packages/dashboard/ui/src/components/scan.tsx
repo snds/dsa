@@ -1,12 +1,14 @@
 import * as React from "react"
-import { ArrowClockwiseIcon, ArrowSquareOutIcon, CheckCircleIcon, CircleNotchIcon, GithubLogoIcon, SignInIcon, WarningIcon } from "@phosphor-icons/react"
+import { ArrowClockwiseIcon, ArrowSquareOutIcon, CaretDownIcon, CheckCircleIcon, CircleNotchIcon, GithubLogoIcon, SignInIcon, WarningIcon } from "@phosphor-icons/react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button, buttonVariants } from "@/components/ui/button"
+import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { D, fmtWhen } from "@/lib/dsa"
 import { nextScheduled } from "@/lib/cron"
-import { aboutTime, progress } from "@/lib/scan"
-import { canRun, closeAsk, dismiss, relayUrl, showOverlay, signIn, startScan, useScan, type ScanState } from "@/lib/useScan"
+import { aboutTime, progress, type ShotsMode } from "@/lib/scan"
+import { canRun, closeAsk, dismiss, offersShots, relayUrl, setShots, showOverlay, signIn, startScan, useScan, type ScanState } from "@/lib/useScan"
 import { cn } from "cn"
 
 /**
@@ -38,17 +40,60 @@ const elapsedOf = (s: ScanState) => {
   return from ? Math.max(0, (Date.now() - from) / 1000) : 0
 }
 
+const SHOT_CHOICES: { mode: ShotsMode; label: string; line: string }[] = [
+  { mode: "normal", label: "Keep photos", line: "Reuses photos that still match and looks only for what's new." },
+  { mode: "fresh", label: "Retake all", line: "Ignores earlier photos. Slowest, and it opens every page again." },
+  { mode: "retry-missing", label: "Retry missing", line: "Keeps photos and tries again for elements not found last time." },
+]
+
+/** The other half of a split Re-scan: what the scan does with earlier photos. It stays set until changed. */
+export function ShotsMenu({ variant }: { variant?: "outline" }) {
+  const s = useScan()
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<Button size="icon" {...(variant ? { variant } : {})} aria-label="Re-scan settings" title="Re-scan settings" />}>
+        <CaretDownIcon />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-72">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Photos on the next scan</DropdownMenuLabel>
+          <DropdownMenuRadioGroup value={s.shots} onValueChange={v => setShots(v as ShotsMode)}>
+            {SHOT_CHOICES.map(c => (
+              <DropdownMenuRadioItem key={c.mode} value={c.mode} closeOnClick>
+                <span className="flex flex-col gap-0.5">
+                  <span>{c.label}</span>
+                  <span className="text-xs text-muted-foreground">{c.line}</span>
+                </span>
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+/** Says when the setting isn't the default, because it stays set and a retake takes much longer. */
+export function ShotsNote() {
+  const s = useScan()
+  if (s.shots === "normal") return null
+  return <span className="text-xs text-muted-foreground">Photos: {SHOT_CHOICES.find(c => c.mode === s.shots)!.label.toLowerCase()}</span>
+}
+
 /** Re-scan, or while a scan is going (or just ended), a pill that reopens the overlay. */
 export function ScanButton() {
   const s = useScan()
   if (!canRun()) return null
   if (ACTIVE.has(s.phase)) return <ScanPill />
+  const go = (
+    <Button onClick={() => startScan()} title={D.actions?.rescan?.help}>
+      <ArrowClockwiseIcon data-icon="inline-start" />
+      {D.run ? (D.serve ? "Re-run scan" : "Re-scan") : "Run first scan"}
+    </Button>
+  )
   return (
     <span className="flex flex-col items-end gap-1">
-      <Button onClick={() => startScan()} title={D.actions?.rescan?.help}>
-        <ArrowClockwiseIcon data-icon="inline-start" />
-        {D.run ? (D.serve ? "Re-run scan" : "Re-scan") : "Run first scan"}
-      </Button>
+      {offersShots() ? <><ButtonGroup>{go}<ButtonGroupSeparator className="bg-primary-foreground/30" /><ShotsMenu /></ButtonGroup><ShotsNote /></> : go}
       <NextScan prefix="Next scheduled scan" className="text-xs text-muted-foreground" />
     </span>
   )

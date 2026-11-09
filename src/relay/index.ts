@@ -18,7 +18,7 @@
 // and then dropped.
 
 import type { RunnerSpec } from "../deploy/types.js";
-import { RunnerError, runnerFor, type ScanRun, type ScanRunner } from "./runners.js";
+import { RunnerError, isShotsMode, runnerFor, type ScanRun, type ScanRunner } from "./runners.js";
 
 export * from "./runners.js";
 
@@ -315,12 +315,15 @@ export function createRelay(o: RelayOptions): RelayHandler {
           const wait = Math.ceil((recent[0]! + limit.windowSeconds * 1000 - now()) / 1000);
           return json(req, 429, { error: `You've started ${limit.max} scans in the last ${Math.round(limit.windowSeconds / 60)} minutes. Try again in ${Math.ceil(wait / 60)} minute${Math.ceil(wait / 60) === 1 ? "" : "s"}.` }, { "Retry-After": String(wait) });
         }
+        // Only a value from the list reaches the runner: this request comes from a browser.
+        const { shots } = (await req.json().catch(() => ({}))) as { shots?: unknown };
+        if (shots !== undefined && !isShotsMode(shots)) return json(req, 400, { error: "That isn't a photo setting this relay knows." });
         // One scan at a time: a second press, a teammate or a scheduled run gets the one going.
         if (starting) return json(req, 409, { error: "A scan is starting. Try again in a moment.", run: null });
         const go = (async () => {
           const [running] = await o.runner.listActive();
           if (running) return { running };
-          const run = await o.runner.trigger();
+          const run = await o.runner.trigger(shots ? { shots } : undefined);
           return { run };
         })();
         starting = go;

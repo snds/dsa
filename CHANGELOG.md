@@ -8,6 +8,11 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- Re-scan is a split button. Its menu sets what the scan does with earlier photos: keep them, retake them
+  all, or try again for the ones not found. The setting stays until changed, and shows under the button when
+  it isn't the default. It reaches `dsa serve` and the scan relay directly. A published page with a plain link
+  to GitHub also shows a `gh workflow run` command that carries the setting, with a Copy button. `dsa run --shots-mode <normal|fresh|retry-missing>`
+  does the same from the command line, and a GitHub scan workflow takes it as a `shots` input.
 - Label Review: dsa's "ready" answers checked by people, one element at a time, written for a designer
   who never needs to read code. Each item shows the element as the app draws it beside the proposal drawn
   with the element's own words, both at their real size; where it sits on the page, named in plain words;
@@ -213,6 +218,40 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- Photos from lab, specimen and demo pages no longer pass as how the product uses a component. Product pages are
+  opened and shown first, and a lab photo appears only when the product has none of that look, captioned "From a
+  lab page, not the product". They don't use up a look's photos, and `review.photos.labOnly` counts them apart from
+  `sameLook`. Told from words in the file path or address; `shots.notProduct` adds to them or turns this off.
+- A normal rerun on unchanged code now gives the same review as the run before it. Drawings count on a
+  rerun as photos do (they were dropped because they have no page position to check). A photo the last run
+  set aside as old stays set aside, so it can't change the queue. Rendered evidence counts once, not once more
+  each run.
+- The pass over the app's own uses remembers the pages it has looked at, so a rerun opens only pages nobody has
+  opened. When none are left, what it couldn't find stands and the app isn't started for it. A new use, a changed
+  file, a changed setup, `--fresh` or `--retry-missing` opens every page again.
+- Review cards show the look they propose far more often. The photo pass matched looks by a different rule from
+  the cards, so `variant="link"` never matched a card's `variant link, size default`, and `disabled={busy}` made
+  a use's look "unknown". It also walked pages by how many files they held, and a limit per component let any
+  look use up a component's photos. Both now share one rule (the system's axes with defaults filled in), pages
+  are chosen by how many cards they can help, nearest the use's own line, and a look a card asks for has no
+  component limit. Any other look gets one photo, and the same look on one page gets one.
+- `elements.review.photos` and the log now count cards with a photo in the same look, cards with only another
+  look, cards with none, and how many different photos they use. Cards vary their photos: least shown first,
+  other pages before a repeat.
+- A photo of another look says what it is. The heading speaks for every tile under it. With no real axis in
+  common (two looks both at the default size don't count), a card shows one tile, as how the app uses that
+  component elsewhere. Variants read "the dark variant", not "in dark", which read as dark mode. Cards no
+  longer advise taking the screenshots again when that wouldn't help.
+- A rerun on unchanged code no longer empties the review. Every run stamped a new id, so a photo it kept was
+  called "from an older run", and with nothing to capture no element kept a photo. A photo this run checks and
+  keeps now counts as this run's, with its own age. A photo it didn't check still doesn't count.
+- Review cards show photos of how the app already uses the proposed component. The crawler looked for the
+  scan's list of uses, which doesn't follow a local file that re-exports the system, so it photographed almost
+  none of them. It now looks for the uses the report counts, wherever it goes, then for up to 5 minutes more
+  where the ledger saw their files render. A few of each look are kept, and stand while their file is
+  unchanged. A card shows only its own app's uses, says how a different look differs, and with no photo says why.
+- A word a little past its element's edge still shows whole in the picture, so it's no longer cut off. A
+  drawing held narrow by a wrapper now draws at the element's width, so its words show.
 - A component that fills its container is no longer judged by the page it was drawn on. It's drawn at the
   width of each element it's for (the nearest one is shown), so a field 161 px wide compares with a field about
   161 px wide. Its width from the container no longer counts toward "a whole proposed for one small part": a

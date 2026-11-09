@@ -22,11 +22,14 @@ export interface ScanRun {
   error?: string | null
 }
 
+/** What a scan does with earlier photos: reuse them, retake them all, or try again for the ones not found. */
+export type ShotsMode = "normal" | "fresh" | "retry-missing"
+
 export interface ScanRunner {
   type: string
   /** Kept false: no runner asks the viewer for a credential (the relay holds it). */
   needsToken: boolean
-  trigger(): Promise<ScanRun>
+  trigger(o?: { shots?: ShotsMode }): Promise<ScanRun>
   status(id: string): Promise<ScanRun>
   listActive(): Promise<ScanRun[]>
   /** Median seconds of recent successful scans, when the host can tell. */
@@ -132,8 +135,8 @@ export function webhookRunner(spec: Extract<RunnerSpec, { type: "webhook" }>, f:
 // ── dsa serve: the server runs the scan itself ──────────────────────────────────────────────────
 
 export function serveRunner(at: (p: string) => string, f: Fetch = fetch): ScanRunner {
-  const call = async (method: string, p: string) => {
-    const r = await f(at(p), { method, headers: { "Content-Type": "application/json", "X-DSA": "1" } })
+  const call = async (method: string, p: string, body?: unknown) => {
+    const r = await f(at(p), { method, headers: { "Content-Type": "application/json", "X-DSA": "1" }, ...(body ? { body: JSON.stringify(body) } : {}) })
     const j: any = await r.json().catch(() => ({}))
     if (r.status === 409 && j.run) return j.run
     if (!r.ok) throw new ScanError(j.error ?? `The server answered ${r.status}.`, "other")
@@ -142,7 +145,7 @@ export function serveRunner(at: (p: string) => string, f: Fetch = fetch): ScanRu
   return {
     type: "serve",
     needsToken: false,
-    trigger: async () => normalize(await call("POST", "/api/run?async=1")),
+    trigger: async o => normalize(await call("POST", "/api/run?async=1", o?.shots ? { shots: o.shots } : undefined)),
     status: async id => normalize(await call("GET", `/api/run/status?id=${encodeURIComponent(id)}`), id),
     listActive: async () => ((await call("GET", "/api/run/active")).runs ?? []).map((x: any) => normalize(x)),
   }
@@ -182,11 +185,11 @@ export interface RelaySessionInfo { signedIn: boolean; login: string | null; per
 
 export function relayRunner(relay: string, session: () => string | null, f: Fetch = fetch): ScanRunner & { session(): Promise<RelaySessionInfo>; signOut(): Promise<void> } {
   const host = new URL(relay).host
-  const call = async (method: string, p: string) => {
+  const call = async (method: string, p: string, body?: unknown) => {
     let r: Response
     const t = session()
     try {
-      r = await f(`${relay}${p}`, { method, credentials: "include", headers: { Accept: "application/json", "X-DSA-Relay": "1", ...(t ? { Authorization: `Bearer ${t}` } : {}) } })
+      r = await f(`${relay}${p}`, { method, credentials: "include", headers: { Accept: "application/json", "X-DSA-Relay": "1", ...(body ? { "Content-Type": "application/json" } : {}), ...(t ? { Authorization: `Bearer ${t}` } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) })
     } catch {
       throw new ScanError(`Couldn't reach the scan relay at ${host}.`, "network")
     }
@@ -202,7 +205,7 @@ export function relayRunner(relay: string, session: () => string | null, f: Fetc
   return {
     type: "relay",
     needsToken: false,
-    trigger: async () => normalize((await call("POST", "scan")).run),
+    trigger: async o => normalize((await call("POST", "scan", o?.shots ? { shots: o.shots } : undefined)).run),
     status: async id => normalize((await call("GET", `scan/status?id=${encodeURIComponent(id)}`)).run, id),
     listActive: async () => { const j = await call("GET", "scan/active"); estimate = j.estimate ?? null; return (j.runs ?? []).map((x: any) => normalize(x)) },
     estimate: async () => estimate ?? (await call("GET", "scan/active")).estimate ?? null,

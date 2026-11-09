@@ -1030,6 +1030,21 @@
             }
           ]
         },
+        "notProduct": {
+          "description": "Paths or words that mark a page as not the product, besides lab, specimen, demo, playground, sandbox, showcase and styleguide. Its photos come last and say so. false turns this off.",
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "boolean",
+              "const": false
+            }
+          ]
+        },
         "perGroup": {
           "type": "integer",
           "minimum": 0,

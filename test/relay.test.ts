@@ -211,6 +211,19 @@ describe("starting a scan", () => {
     expect((await j(r)).error).toBe("ada has read access to acme/site. Re-scan needs write access.");
   });
 
+  it("passes on a photo setting it knows, and starts nothing for one it doesn't", async () => {
+    const gh = fakeGithub();
+    const { handler } = relay({}, gh);
+    const { session } = await signIn(handler, "ada");
+    const h = { Origin: PAGE, "X-DSA-Relay": "1", Authorization: `Bearer ${session}`, "Content-Type": "application/json" };
+    const send = (shots: unknown) => handler(new Request(new URL("scan", RELAY), { method: "POST", headers: h, body: JSON.stringify({ shots }) }));
+    const bad = await send("fresh --allow-unreleased");
+    expect(bad.status).toBe(400);
+    expect(gh.calls.filter((c) => c.url.endsWith("/dispatches"))).toHaveLength(0);
+    expect((await send("fresh")).status).toBe(202);
+    expect(gh.calls.filter((c) => c.url.endsWith("/dispatches"))).toHaveLength(1);
+  });
+
   it("starts the workflow, refuses a second while one runs (answering with it), and rate-limits", async () => {
     let t = Date.parse("2026-11-01T12:00:00Z");
     const gh = fakeGithub();

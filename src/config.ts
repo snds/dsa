@@ -347,6 +347,7 @@ export const ConfigSchema = z
           .union([z.boolean(), z.object({ maxMinutes: z.number().min(0).optional(), include: z.array(z.string()).optional() })])
           .optional()
           .describe("Before the crawl, run the app's own component tests (Vitest) with source tags and the evidence ledger on, so what they render is recorded for drawing. Off by default; DSA_RENDER_TESTS=1 turns it on."),
+        notProduct: z.union([z.array(z.string()), z.literal(false)]).optional().describe("Paths or words that mark a page as not the product, besides lab, specimen, demo, playground, sandbox, showcase and styleguide. Its photos come last and say so. false turns this off."),
         perGroup: z.number().int().min(0).optional(),
         perQuestion: z.number().int().min(0).optional(),
         maxPages: z.number().int().min(1).optional(),

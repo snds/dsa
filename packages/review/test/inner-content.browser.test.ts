@@ -288,3 +288,30 @@ test("words that don't show are cut off, wherever they're recorded; a drawing wi
     assert.deepEqual([never.cut, never.wider], [true, undefined], 'all the room there is, still cut: said so');
   } finally { await page.close(); }
 });
+
+test("cut off means it can't be read: a small spill stays in the picture, a wrapper's width can be opened, a screen reader's label needs no room", { timeout: 60_000 }, async ({ skip }) => {
+  if (!browser) skip('no headless browser (run dsa setup)');
+  const page = await browser!.newPage({ viewport: { width: 1280, height: 900 } });
+  try {
+    await page.setContent(`<!doctype html><body style="margin:0;padding:24px;font:14px sans-serif"><div id="root">
+      <div id="spill" style="width:28px;white-space:nowrap">100%</div>
+      <div id="hair" style="width:fit-content;max-width:100%;overflow:hidden;white-space:nowrap"><span style="margin-right:-0.6px;display:inline-block">100%</span></div>
+      <div id="frame" style="width:120px"><button id="inner" style="display:flex;width:100%;overflow:hidden;white-space:nowrap;padding:0"><span>Every record page</span><span style="margin-left:auto;padding-left:40px">4 actions and more</span></button></div>
+      <button id="fixed" style="width:40px;overflow:hidden;white-space:nowrap;padding:0;display:block">Every record page</button>
+      <button id="icon" style="width:26px;padding:0;display:block"><svg width="16" height="16"></svg><span style="position:absolute;width:1px;height:1px;overflow:hidden">Choose a record</span></button>
+    </div>`);
+    const cut = (id: string, words: string | null = null) => r.run<boolean>(page, r.CUT_NOW, { sel: `#${id}`, words });
+    await page.evaluate(`(() => { const d = document.getElementById('spill'), g = document.createRange(); g.selectNodeContents(d); d.style.width = (g.getBoundingClientRect().width - 4) + 'px'; })()`);
+    assert.equal(await cut('spill'), false, 'a little past its edge, inside the picture');
+    assert.equal(await cut('hair'), false, 'under a pixel past a box that clips: rounding');
+    assert.equal(await cut('icon', 'Choose a record'), false, 'it never showed its label');
+    assert.equal(await cut('fixed'), true);
+    assert.equal(await cut('inner'), true, 'held to 120 px by its frame');
+    assert.equal(await r.run(page, r.FILLS, { sel: '#fixed' }), null, 'its width is its own');
+    const f = await r.run<any>(page, r.FILLS, { sel: '#inner' });
+    assert.ok(f, 'the frame opens');
+    const got = await r.run<any>(page, r.FIT_WIDTH, { sel: '#inner', rate: f.rate, rest: f.rest, width: 900, words: null });
+    assert.equal(got.w, 900);
+    assert.equal(await cut('inner'), false, 'at the width of the element, all of it shows');
+  } finally { await page.close(); }
+});

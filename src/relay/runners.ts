@@ -23,9 +23,14 @@ export interface ScanRun {
   error?: string | null;
 }
 
+/** What a scan does with earlier photos: reuse them, retake them all, or try again for the ones not found. */
+export const SHOTS_MODES = ["normal", "fresh", "retry-missing"] as const;
+export type ShotsMode = (typeof SHOTS_MODES)[number];
+export const isShotsMode = (v: unknown): v is ShotsMode => SHOTS_MODES.includes(v as ShotsMode);
+
 export interface ScanRunner {
   type: string;
-  trigger(): Promise<ScanRun>;
+  trigger(o?: { shots?: ShotsMode | undefined }): Promise<ScanRun>;
   status(id: string): Promise<ScanRun>;
   listActive(): Promise<ScanRun[]>;
   /** Median seconds of recent successful scans, when the host can tell. */
@@ -116,16 +121,18 @@ export function githubRunner(spec: GithubSpec, token: string, f: Fetch = fetch, 
 
   const runner: ScanRunner = {
     type: "github",
-    async trigger() {
+    async trigger(o) {
       const on = await branch();
       const before = new Set((await recent("event=workflow_dispatch&per_page=10")).map((r: any) => r.id));
+      // Only when it changes something: a workflow that declares no such input refuses the whole request.
+      const inputs = o?.shots && o.shots !== "normal" ? { inputs: { shots: o.shots } } : {};
       let res: any;
       try {
         // Newer GitHub answers with the run it started; older ones answer 204 and the run is looked up.
-        res = await call("POST", `${wf}/dispatches`, { ref: on, return_run_details: true });
+        res = await call("POST", `${wf}/dispatches`, { ref: on, ...inputs, return_run_details: true });
       } catch (e: any) {
         if (!(e instanceof RunnerError && e.kind === "other" && /return_run_details/i.test(JSON.stringify(e.detail ?? "")))) throw e;
-        res = await call("POST", `${wf}/dispatches`, { ref: on });
+        res = await call("POST", `${wf}/dispatches`, { ref: on, ...inputs });
       }
       const id = res?.workflow_run_id ?? res?.id;
       if (id) return runner.status(String(id));
