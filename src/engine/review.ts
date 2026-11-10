@@ -265,7 +265,8 @@ export function judgmentFor(q: { ids?: string[] | undefined; pattern?: string | 
   return ids.length > 1 ? `card:${crypto.createHash('sha1').update([...ids].sort().join(' ')).digest('hex').slice(0, 10)}` : undefined;
 }
 
-export async function decideMany(root: string, config: Config, dataDir: string, q: { ids?: string[]; pattern?: string | undefined }, decision: Recommendation, who?: string, note?: string) {
+/** `notes`: a note per element (by id), each over the shared `note`; one answer still, with one judgment. */
+export async function decideMany(root: string, config: Config, dataDir: string, q: { ids?: string[]; pattern?: string | undefined }, decision: Recommendation, who?: string, note?: string, notes?: Record<string, string>) {
   const opt: Record<string, any> = { decision };
   if (who) opt.who = who;
   if (note) opt.note = note;
@@ -282,8 +283,10 @@ export async function decideMany(root: string, config: Config, dataDir: string, 
   const ids = q.ids ?? [];
   const judgment = judgmentFor(q);
   if (judgment && !q.pattern) opt.judgment = judgment;
-  for (const id of ids) out.push(await decide(root, config, dataDir, id, opt));
-  await patchLatest(dataDir, out.map(r => r.e!.id), decided, threshold);
+  const own = (id: string) => (typeof notes?.[id] === 'string' && notes[id]!.trim() ? notes[id]!.trim() : undefined);
+  for (const id of ids) out.push(await decide(root, config, dataDir, id, own(id) ? { ...opt, note: own(id) } : opt));
+  if (!notes || !ids.some(own)) await patchLatest(dataDir, out.map(r => r.e!.id), decided, threshold);
+  else for (const id of ids) await patchLatest(dataDir, [id], { ...decided, note: own(id) ?? note }, threshold);
   return out;
 }
 

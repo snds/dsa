@@ -11,12 +11,18 @@ import { Code, Pre } from "@/components/bits"
 import { D, api, reviewerName, say, short, SYS } from "@/lib/dsa"
 import { type Staged, setStagedNote, stage, stageKey, unstage, useStaged } from "@/lib/staged"
 
+/**
+ * What the answer dialog decides: some elements, or a pattern. `notes`: a note per element, sent with the
+ * answer. `onDone`: told the answer once it is saved (to offer undo).
+ */
+export interface PickerTarget { ids: string[]; pattern?: string | null; notes?: Record<string, string>; onDone?: (r: any, ids: string[], decision: any) => void }
+
 export interface Ctx {
   th: number
   byId: Map<string, any>
   applyLocal: (ids: string[], decided: any) => void
   refresh: () => void
-  openPicker: (t: { ids: string[]; pattern?: string | null }) => void
+  openPicker: (t: PickerTarget) => void
   /** `decision`: the answer the card shows, so the zoom view proposes the same thing. */
   openLightbox: (ids: string[], i: number, decision?: any) => void
   openCode: (id: string) => void

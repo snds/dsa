@@ -4,17 +4,22 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Note } from "@/components/bits"
-import { D, short, SYS } from "@/lib/dsa"
+import { D, api, reviewerName, say, short, SYS } from "@/lib/dsa"
 import { Crop, Natural } from "./SameScale"
 import { Conf, decidable, decideNow, nameOf, pickText, proposalFor, useEl } from "./shared"
 import { KEEP, NO_HOME } from "./units"
-import { byComponent, shows, statusOf, type Batch, type ComponentGroup, type Counts, type LookGroup, type PlaceStatus } from "./structure"
+import { byComponent, pickOf, shows, statusOf, type Batch, type ComponentGroup, type Counts, type LookGroup, type PlaceStatus } from "./structure"
 
 /**
- * Element Review by component. The rail lists where places go (a component, No fit yet, Keep as is),
+ * Element Review by component. The rail lists where places go (a component, No home yet, Keep native),
  * each with how much is left. The selected one shows its batches (one per set of settings) and, inside
  * each, places that share a style. Every place shows the element as the app draws it beside the proposal,
- * at real size. Answer one place, a look group, or a whole batch; an answer moves a place to where it now goes.
+ * at real size.
+ *
+ * Answering many at once: tick places (a look group or a whole batch at once, shift-click for a range),
+ * give any of them its own note, and answer them together from the bar at the bottom. Only places a
+ * person can see (a photo and a drawn proposal) can be ticked. A spot check (a random check of an answer
+ * dsa was already sure of) is answered on its own, never in a batch. The last answer can be undone.
  */
 
 const VIEW_KEY = "dsa.elements.component"
@@ -23,16 +28,38 @@ const write = (k: string, v: string) => { try { window.localStorage.setItem(k, v
 
 const NAMES = { noHome: NO_HOME, keep: KEEP, ignored: "Set aside", unclear: "Unclear" }
 const FILTERS: [PlaceStatus | "all", string][] = [["todo", "To decide"], ["evidence", "Needs evidence"], ["proposed", "Proposed"], ["decided", "Decided"], ["all", "All"]]
-const STATUS: Record<PlaceStatus, { text: string; cls: string }> = {
+const STATUS: Record<PlaceStatus | "check", { text: string; cls: string }> = {
   todo: { text: "To decide", cls: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300" },
   evidence: { text: "Needs evidence", cls: "text-muted-foreground" },
   proposed: { text: "Proposed", cls: "border-primary/40 bg-primary/10 text-primary" },
   decided: { text: "Decided", cls: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" },
+  check: { text: "Spot check", cls: "border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300" },
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+const left = (c: Counts) => c.todo + c.evidence
 
-/** Progress for one component: decided, proposed, to decide, waiting on evidence. */
+/** Places dsa was sure of, drawn at random for a person to check: answered one at a time. */
+const spotChecks = (): Set<string> => new Set((D.elements?.review?.items ?? []).filter((i: any) => i.why === "audit").map((i: any) => i.id))
+
+/** Why a place can't be ticked for a batch answer, or null when it can. */
+function whyNot(e: any, checks: Set<string>): string | null {
+  if (!D.serve) return "Answers need dsa serve"
+  if (e.decided) return "Already decided: use Change… on its row"
+  if (checks.has(e.id)) return "A spot check is answered on its own"
+  if (!decidable(e)) return "No photo or drawn proposal yet, so it can't be answered in a batch"
+  return null
+}
+
+/** The decision "Confirm" records for a place: dsa's pick for it, as is. */
+const confirmOf = (e: any) => { const r = pickOf(e); return { verdict: r.verdict, role: r.role ?? e.role, ...(r.use ? { use: r.use } : {}), ...(r.from ? { from: r.from } : {}), ...(r.props ? { props: r.props } : {}), ...(r.gap ? { gap: r.gap } : {}), ...(r.content ? { content: r.content } : {}) } }
+
+interface Sel { selected: Set<string>; toggle: (ids: string[], on: boolean) => void; click: (id: string, shift: boolean) => void; notes: Record<string, string>; setNote: (id: string, v: string) => void; checks: Set<string>; see: (e: any) => boolean }
+const SelCtx = React.createContext<Sel>(null as any)
+
+/** One saved answer, kept so it can be undone: its elements and the moment its labels were written. */
+interface Done { text: string; parts: { ids: string[]; labelsAt?: string }[] }
+
 function Bar({ c }: { c: Counts }) {
   const w = (n: number) => `${c.total ? (n / c.total) * 100 : 0}%`
   return (
@@ -44,42 +71,141 @@ function Bar({ c }: { c: Counts }) {
   )
 }
 
-const left = (c: Counts) => c.todo + c.evidence
-
-/** The undecided places a batch answer covers: only those a person can see (a photo and a drawn proposal), never blind. */
-const seen = (items: any[]) => items.filter(e => !e.decided && decidable(e)).map(e => e.id)
-
 export function ByComponent({ evals }: { evals: any[] }) {
+  const { byId, applyLocal, refresh, openPicker } = useEl()
   const groups = byComponent(evals, NAMES, decideNow)
   const [sel, setSel] = React.useState<string>(() => { const k = read(VIEW_KEY); return k && groups.some(g => g.key === k) ? k : groups.find(g => g.counts.todo)?.key ?? groups[0]?.key ?? "" })
   const g = groups.find(x => x.key === sel) ?? groups[0]
   const [show, setShow] = React.useState<PlaceStatus | "all">(() => (g?.counts.todo ? "todo" : "all"))
-  const choose = (k: string) => { setSel(k); write(VIEW_KEY, k); const next = groups.find(x => x.key === k); setShow(next?.counts.todo ? "todo" : "all") }
+  const [selected, setSelected] = React.useState<Set<string>>(new Set())
+  const [notes, setNotes] = React.useState<Record<string, string>>({})
+  const [batchNote, setBatchNote] = React.useState("")
+  const [busy, setBusy] = React.useState(false)
+  const [done, setDone] = React.useState<Done | null>(null)
+  // Places answered here stay where they were until the filter or component changes, so an answer
+  // (and its note) doesn't vanish mid-review.
+  const [stay, setStay] = React.useState<Set<string>>(new Set())
+  const keep = (ids: string[]) => setStay(s => new Set([...s, ...ids]))
+  const filter = (v: PlaceStatus | "all") => { setShow(v); setStay(new Set()) }
+  const see = (e: any) => shows(e, show, decideNow) || stay.has(e.id)
+  const anchor = React.useRef<string | null>(null)
+  const checks = React.useMemo(spotChecks, [])
+
+  const choose = (k: string) => { setSel(k); write(VIEW_KEY, k); setSelected(new Set()); const next = groups.find(x => x.key === k); filter(next?.counts.todo ? "todo" : "all") }
   if (!g) return <Note>No elements to place yet.</Note>
   const components = groups.filter(x => x.kind === "component"), others = groups.filter(x => x.kind !== "component")
 
-  return (
-    <div className="grid gap-4 md:grid-cols-[15rem_minmax(0,1fr)]" data-slot="by-component">
-      <nav aria-label="Where places go" className="flex flex-col gap-1 md:sticky md:top-2 md:max-h-[calc(100vh-1rem)] md:self-start md:overflow-y-auto">
-        <RailHead>Components</RailHead>
-        {components.map(x => <RailItem key={x.key} g={x} on={x.key === g.key} onClick={() => choose(x.key)} />)}
-        {others.length > 0 && <RailHead>Other answers</RailHead>}
-        {others.map(x => <RailItem key={x.key} g={x} on={x.key === g.key} onClick={() => choose(x.key)} />)}
-      </nav>
+  // The order places are listed in, for shift-click ranges.
+  const visible = g.batches.flatMap(b => b.looks.flatMap(l => l.items)).filter(see)
+  const toggle = (ids: string[], on: boolean) => setSelected(s => { const n = new Set(s); for (const id of ids) if (on) n.add(id); else n.delete(id); return n })
+  const click = (id: string, shift: boolean) => {
+    const on = !selected.has(id)
+    if (shift && anchor.current) {
+      const a = visible.findIndex(e => e.id === anchor.current), b = visible.findIndex(e => e.id === id)
+      if (a >= 0 && b >= 0) { toggle(visible.slice(Math.min(a, b), Math.max(a, b) + 1).filter(e => !whyNot(e, checks)).map(e => e.id), on); anchor.current = id; return }
+    }
+    toggle([id], on); anchor.current = id
+  }
+  const setNote = (id: string, v: string) => setNotes(n => ({ ...n, [id]: v }))
+  const chosen = [...selected].map(id => byId.get(id)).filter(Boolean)
+  const rowNotes = (ids: string[]) => { const o: Record<string, string> = {}; for (const id of ids) if (notes[id]?.trim()) o[id] = notes[id]!.trim(); return Object.keys(o).length ? o : undefined }
 
-      <section className="flex min-w-0 flex-col gap-4" aria-labelledby="bc-title">
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h2 id="bc-title" className="font-heading text-lg font-semibold">{g.kind === "component" ? `${SYS} ${g.name}` : g.name}</h2>
-          <span className="text-sm text-muted-foreground">{plural(g.counts.total, "place")} · {plural(g.batches.length, "batch", "batches")} · {g.counts.todo} to decide</span>
+  const clear = () => { setSelected(new Set()); setNotes(n => Object.fromEntries(Object.entries(n).filter(([id]) => !selected.has(id)))); setBatchNote("") }
+
+  /** Save one answer for the ticked places: grouped so each call carries one decision, all sharing the batch note. */
+  async function answer(kind: "confirm" | "gap" | "keep") {
+    const parts = new Map<string, { decision: any; ids: string[] }>()
+    for (const e of chosen) {
+      const decision = kind === "confirm" ? confirmOf(e) : kind === "gap" ? { verdict: "gap", role: e.role, ...(e.gap ? { gap: e.gap } : {}) } : { verdict: "keep", role: e.role }
+      const k = JSON.stringify(decision)
+      parts.set(k, { decision, ids: [...(parts.get(k)?.ids ?? []), e.id] })
+    }
+    setBusy(true)
+    const saved: Done["parts"] = []
+    try {
+      for (const { decision, ids } of parts.values()) {
+        const r = await api("/api/decide", { ids, decision, note: batchNote.trim() || undefined, notes: rowNotes(ids), who: reviewerName() })
+        applyLocal(ids, r.decided)
+        for (const id of ids) { const n = notes[id]?.trim(); const e = n ? byId.get(id) : null; if (e?.decided) e.decided = { ...e.decided, note: n } }
+        saved.push({ ids, labelsAt: r.labelsAt })
+        keep(ids)
+      }
+      const n = saved.reduce((a, p) => a + p.ids.length, 0)
+      const text = `${kind === "confirm" ? "Confirmed" : kind === "gap" ? `Marked ${NO_HOME.toLowerCase()}` : "Kept native"}: ${plural(n, "place")}`
+      setDone({ text, parts: saved }); say(text); clear()
+    } catch (x: any) {
+      say(saved.length ? `${x.message} (${saved.reduce((a, p) => a + p.ids.length, 0)} saved before it stopped; undo them below)` : x.message, true)
+      if (saved.length) setDone({ text: "Saved before the error", parts: saved })
+    }
+    setBusy(false); refresh()
+  }
+
+  function change() {
+    const ids = chosen.map(e => e.id)
+    const merged: Record<string, string> = {}
+    for (const id of ids) { const n = notes[id]?.trim() || batchNote.trim(); if (n) merged[id] = n }
+    openPicker({ ids, ...(Object.keys(merged).length ? { notes: merged } : {}), onDone: (r, saved) => { keep(saved); setDone({ text: `Changed: ${plural(saved.length, "place")}`, parts: [{ ids: saved, labelsAt: r.labelsAt }] }); clear() } })
+  }
+
+  async function undo() {
+    if (!done) return
+    setBusy(true)
+    try {
+      let n = 0
+      for (const p of done.parts) { const r = await api("/api/undecide", { ids: p.ids, ...(p.labelsAt ? { labelsAt: p.labelsAt } : {}) }); applyLocal(r.ids, null); n += r.ids.length }
+      say(`Undone: ${plural(n, "place")}`); setDone(null)
+    } catch (x: any) { say(x.message, true) }
+    setBusy(false); refresh()
+  }
+
+  return (
+    <SelCtx.Provider value={{ selected, toggle, click, notes, setNote, checks, see }}>
+      <div className="grid gap-4 md:grid-cols-[15rem_minmax(0,1fr)]" data-slot="by-component">
+        <nav aria-label="Where places go" className="flex flex-col gap-1 md:sticky md:top-2 md:max-h-[calc(100vh-1rem)] md:self-start md:overflow-y-auto">
+          <RailHead>Components</RailHead>
+          {components.map(x => <RailItem key={x.key} g={x} on={x.key === g.key} onClick={() => choose(x.key)} />)}
+          {others.length > 0 && <RailHead>Other answers</RailHead>}
+          {others.map(x => <RailItem key={x.key} g={x} on={x.key === g.key} onClick={() => choose(x.key)} />)}
+        </nav>
+
+        <section className="flex min-w-0 flex-col gap-4" aria-labelledby="bc-title">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h2 id="bc-title" className="font-heading text-lg font-semibold">{g.kind === "component" ? `${SYS} ${g.name}` : g.name}</h2>
+            <span className="text-sm text-muted-foreground">{plural(g.counts.total, "place")} · {plural(g.batches.length, "batch", "batches")} · {g.counts.todo} to decide</span>
+          </div>
+          <ToggleGroup aria-label="Show" value={[show]} onValueChange={(v: string[]) => v[0] && filter(v[0] as any)} variant="outline" size="sm" className="flex-wrap">
+            {FILTERS.map(([v, l]) => <ToggleGroupItem key={v} value={v}>{l} <span className="tabular-nums text-muted-foreground">{v === "all" ? g.counts.total : g.counts[v]}</span></ToggleGroupItem>)}
+          </ToggleGroup>
+          {D.serve ? <p className="text-xs text-muted-foreground">Tick places to answer them together; shift-click ticks a range. A note on a row stays with that place.</p>
+            : <Note className="text-xs">Read-only snapshot: answer from the "By question" view, which stages decisions in this browser.</Note>}
+          {done && (
+            <div role="status" className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+              <span>{done.text}.</span>
+              <Button variant="outline" size="sm" onClick={undo} disabled={busy}>Undo</Button>
+              <Button variant="ghost" size="sm" className="ml-auto" onClick={() => setDone(null)}>Dismiss</Button>
+            </div>
+          )}
+          {g.batches.map(b => <BatchCard key={b.key} b={b} />)}
+          {!g.batches.some(b => b.items.some(see)) && <Note>Nothing here matches this filter.</Note>}
+        </section>
+      </div>
+
+      {selected.size > 0 && (
+        <div role="region" aria-label="Answer the ticked places" className="sticky bottom-0 z-20 mt-4 flex flex-wrap items-center gap-2 border-t bg-background/95 px-3 py-2.5 backdrop-blur" data-slot="action-bar">
+          <span className="mr-1 text-sm font-semibold tabular-nums" aria-live="polite">{selected.size} selected</span>
+          <Button size="sm" onClick={() => answer("confirm")} disabled={busy} title="Each place gets the answer its row proposes">Confirm</Button>
+          <Button variant="outline" size="sm" onClick={change} disabled={busy}>Change to…</Button>
+          <Button variant="outline" size="sm" onClick={() => answer("gap")} disabled={busy}>{NO_HOME}</Button>
+          <Button variant="outline" size="sm" onClick={() => answer("keep")} disabled={busy}>{KEEP}</Button>
+          <Button variant="ghost" size="sm" onClick={clear} disabled={busy}>Clear</Button>
+          <label className="flex min-w-[12rem] flex-1 items-center gap-2 text-xs">
+            <span className="sr-only">Note for all ticked places</span>
+            <input id="bc-batch-note" value={batchNote} onChange={ev => setBatchNote(ev.target.value)} placeholder="Note for all ticked places (a row's own note wins)"
+              className="h-8 w-full rounded-md border bg-background px-2 text-sm focus-visible:outline-2 focus-visible:outline-ring" />
+          </label>
         </div>
-        <ToggleGroup aria-label="Show" value={[show]} onValueChange={(v: string[]) => v[0] && setShow(v[0] as any)} variant="outline" size="sm" className="flex-wrap">
-          {FILTERS.map(([v, l]) => <ToggleGroupItem key={v} value={v}>{l} <span className="tabular-nums text-muted-foreground">{v === "all" ? g.counts.total : g.counts[v]}</span></ToggleGroupItem>)}
-        </ToggleGroup>
-        {!D.serve && <Note className="text-xs">Read-only snapshot: answer from the "By question" view, which stages decisions in this browser.</Note>}
-        {g.batches.map(b => <BatchCard key={b.key} b={b} show={show} />)}
-        {!g.batches.some(b => b.items.some(e => shows(e, show, decideNow))) && <Note>Nothing here matches this filter.</Note>}
-      </section>
-    </div>
+      )}
+    </SelCtx.Provider>
   )
 }
 
@@ -96,22 +222,33 @@ function RailItem({ g, on, onClick }: { g: ComponentGroup; on: boolean; onClick:
   )
 }
 
-function Answer({ ids, children, variant = "outline" }: { ids: string[]; children: React.ReactNode; variant?: "outline" | "ghost" }) {
-  const { openPicker } = useEl()
-  if (!D.serve) return null
-  return <Button variant={variant} size="sm" onClick={() => openPicker({ ids })}>{children}</Button>
+/** A tick box for several places: all of those that can be ticked, with a mixed state when some are. */
+function TickAll({ items, label }: { items: any[]; label: string }) {
+  const { selected, toggle, checks } = React.useContext(SelCtx)
+  const ok = items.filter(e => !whyNot(e, checks)).map(e => e.id)
+  const ref = React.useRef<HTMLInputElement>(null)
+  const n = ok.filter(id => selected.has(id)).length
+  React.useEffect(() => { if (ref.current) ref.current.indeterminate = n > 0 && n < ok.length }, [n, ok.length])
+  // One place is ticked on its own row.
+  if (!D.serve || ok.length < 2) return null
+  return (
+    <label className="flex items-center gap-1.5 text-xs">
+      <input ref={ref} type="checkbox" checked={n === ok.length} onChange={ev => toggle(ok, ev.target.checked)} className="size-4 accent-primary" />
+      {label.replace("{n}", String(ok.length))}
+    </label>
+  )
 }
 
-function BatchCard({ b, show }: { b: Batch; show: PlaceStatus | "all" }) {
-  const looks = b.looks.map(l => ({ l, items: l.items.filter(e => shows(e, show, decideNow)) })).filter(x => x.items.length)
+function BatchCard({ b }: { b: Batch }) {
+  const { see } = React.useContext(SelCtx)
+  const looks = b.looks.map(l => ({ l, items: l.items.filter(see) })).filter(x => x.items.length)
   if (!looks.length) return null
-  const open = seen(b.items)
   return (
     <article className="rounded-lg border bg-card" data-slot="batch">
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-2.5">
         <h3 className="text-sm font-semibold">{pickText(b.pick)}</h3>
         <span className="text-xs text-muted-foreground">{plural(b.items.length, "place")} · {b.counts.todo} to decide{b.counts.decided ? ` · ${b.counts.decided} decided` : ""}</span>
-        {open.length > 1 && <span className="ml-auto"><Answer ids={open}>Answer all {open.length}…</Answer></span>}
+        <span className="ml-auto"><TickAll items={b.items} label="Select all {n}" /></span>
       </header>
       <div className="flex flex-col divide-y">
         {looks.map(({ l, items }) => <Look key={l.key} l={l} items={items} single={b.looks.length === 1} />)}
@@ -127,14 +264,13 @@ function lookTitle(l: LookGroup) {
 }
 
 function Look({ l, items, single }: { l: LookGroup; items: any[]; single: boolean }) {
-  const open = seen(l.items)
   return (
     <div className="flex flex-col" data-slot="look">
       {!single && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 bg-muted/40 px-4 py-1.5">
           <span className="text-xs font-medium">{lookTitle(l)}</span>
           <span className="text-xs text-muted-foreground">{l.kind === "one-off" ? "each looks different: check one by one" : `${plural(l.items.length, "place")}, usually one answer`}</span>
-          {l.kind !== "one-off" && open.length > 1 && <span className="ml-auto"><Answer ids={open} variant="ghost">Answer these {open.length}…</Answer></span>}
+          {l.kind !== "one-off" && <span className="ml-auto"><TickAll items={l.items} label="Select these {n}" /></span>}
         </div>
       )}
       <ul className="flex flex-col divide-y" role="list">
@@ -145,14 +281,25 @@ function Look({ l, items, single }: { l: LookGroup; items: any[]; single: boolea
 }
 
 function Place({ e, group }: { e: any; group: string[] }) {
-  const { openLightbox, openCode, byId } = useEl()
+  const { openLightbox, openCode, openPicker, byId } = useEl()
+  const { selected, click, notes, setNote, checks } = React.useContext(SelCtx)
+  const check = !e.decided && checks.has(e.id)
   const st = statusOf(e, decideNow)
+  const chip = check ? STATUS.check : STATUS[st]
   const pick = e.decided ? e.decided.decision : e
   const drawn = proposalFor(pick, e)
+  const why = whyNot(e, checks)
+  const on = selected.has(e.id)
   // The zoom view steps through this look group's photos.
   const openShot = () => { const ids = group.filter(id => byId.get(id)?.shot); openLightbox(ids, Math.max(0, ids.indexOf(e.id))) }
   return (
-    <li className="grid gap-3 px-4 py-2.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,14rem)_auto] sm:items-center" data-slot="place" data-status={st}>
+    <li className={cn("grid gap-3 px-4 py-2.5 sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,14rem)_auto] sm:items-center", on && "bg-primary/5")} data-slot="place" data-status={check ? "check" : st}>
+      <span className="flex sm:self-center">
+        {D.serve && (
+          <input type="checkbox" checked={on} disabled={Boolean(why)} title={why ?? "Tick to answer with others"} aria-label={`Select ${nameOf(e)}`}
+            onChange={ev => { if (!why) click(e.id, Boolean((ev.nativeEvent as MouseEvent).shiftKey)) }} className="size-4 accent-primary disabled:opacity-40" />
+        )}
+      </span>
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         {e.shot ? (
           <button type="button" onClick={openShot} className="max-w-[12rem] cursor-zoom-in rounded border bg-background p-0.5" aria-label={`Open the screenshot of ${nameOf(e)}`}>
@@ -163,16 +310,18 @@ function Place({ e, group }: { e: any; group: string[] }) {
         {drawn?.url ? <span className="max-w-[12rem] rounded border bg-background p-0.5"><Natural url={drawn.url} alt={`Proposed: ${pickText(pick)}`} /></span>
           : <span className="text-xs text-muted-foreground">{pick.verdict === "replace" ? "not drawn yet" : pickText(pick)}</span>}
       </div>
-      <div className="flex min-w-0 flex-col text-sm">
+      <div className="flex min-w-0 flex-col gap-1 text-sm">
         <span className="truncate font-medium">{nameOf(e)}</span>
         <span className="truncate text-xs text-muted-foreground">{e.review?.pageName ?? e.target}</span>
-        <button type="button" onClick={() => openCode(e.id)} className="w-fit truncate font-mono text-[11px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" title="Open the code">{short(e.file)}:{e.line}</button>
-        {e.decided?.note && <span className="text-xs text-muted-foreground">Note: {e.decided.note}</span>}
+        <button type="button" onClick={() => openCode(e.id)} className="w-fit max-w-full truncate text-left font-mono text-[11px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" title="Open the code">{short(e.file)}:{e.line}</button>
+        {e.decided ? (e.decided.note && <span className="text-xs text-muted-foreground">Note: {e.decided.note}</span>)
+          : D.serve && !why && <input id={`note-${e.id}`} value={notes[e.id] ?? ""} onChange={ev => setNote(e.id, ev.target.value)} placeholder="Note for this place" aria-label={`Note for ${nameOf(e)}`}
+              className="h-7 w-full rounded border bg-background px-2 text-xs focus-visible:outline-2 focus-visible:outline-ring" />}
       </div>
       <div className="flex flex-wrap items-center gap-2 sm:justify-end">
         <Conf c={e.confidence} cap={e.evidenceCap} />
-        <Badge variant="outline" className={cn("text-[11px] font-normal", STATUS[st].cls)}>{STATUS[st].text}</Badge>
-        <Answer ids={[e.id]} variant="ghost">{e.decided ? "Change…" : "Answer…"}</Answer>
+        <Badge variant="outline" className={cn("text-[11px] font-normal", chip.cls)}>{chip.text}</Badge>
+        {D.serve && <Button variant="ghost" size="sm" onClick={() => openPicker({ ids: [e.id], ...(notes[e.id]?.trim() ? { notes: { [e.id]: notes[e.id]!.trim() } } : {}) })}>{e.decided ? "Change…" : "Answer…"}</Button>}
       </div>
     </li>
   )
