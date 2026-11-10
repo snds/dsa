@@ -8,6 +8,14 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- Element Review by component, its new default view in `dsa serve`. A rail lists where places go (each
+  component, then no home yet, keep native and unclear), with how many are left and a progress bar. The
+  selected one shows a batch per set of settings and, inside each, places that share a style, so places
+  that almost always get the same answer sit together. Every place shows the element as the app draws it
+  beside the proposal, at real size, with its page, its code and its status. Answer one place, a look group
+  or a whole batch. A batch answer covers only places with a photo and a drawn proposal, never blind ones.
+  An answer moves a place to the component it now goes to. "By question" keeps the earlier cards, and
+  stays the default on a published snapshot, where decisions are staged.
 - One answer, saved once and used twice. In `dsa serve`, a decision made in Element Review is also saved
   as a label for `dsa bench`, one per element it covered. An answer given in Label Review is also recorded
   as that element's decision, so Element Review doesn't ask it again. Each label now says how it was given

@@ -13,8 +13,11 @@ import { Picker } from "./Picker"
 import { Lightbox } from "./Lightbox"
 import { CodeViewer } from "./CodeViewer"
 import { Destination } from "./Destination"
+import { ByComponent } from "./ByComponent"
 import { NO_HOME, destinations, matches as byStatus, styleName, unitsFor, type Unit } from "./units"
 import { useApp } from "@/lib/app"
+
+const VIEW = "dsa.elements.view"
 
 /** Below this, the crawler's best on-page match may be a different element (shared classes, no shared label). */
 export const SHOT_MIN = 0.8
@@ -42,6 +45,10 @@ export function Elements() {
   const [picker, setPicker] = React.useState<{ ids: string[]; pattern?: string | null } | null>(null)
   const [lb, setLb] = React.useState<{ ids: string[]; i: number; decision?: any } | null>(null)
   const [code, setCode] = React.useState<string | null>(null)
+  // By component (where each place goes) or by question (the cards dsa asks). Remembered per browser.
+  // A published snapshot opens by question, where decisions are staged.
+  const [view, setView] = React.useState<"component" | "question">(() => { let v: string | null = null; try { v = window.localStorage.getItem(VIEW) } catch { /* none */ } return v === "component" || v === "question" ? v : D.serve ? "component" : "question" })
+  const chooseView = (v: "component" | "question") => { setView(v); try { window.localStorage.setItem(VIEW, v) } catch { /* kept for this visit */ } }
   const applyLocal = (ids: string[], decided: any) => { for (const id of ids) { const e = byId.get(id); if (!e) continue; if (decided) e.decided = decided; else delete e.decided; e.needsHuman = !e.decided && e.confidence < th } }
   const ctx = { th, byId, applyLocal, refresh, openPicker: setPicker, openLightbox: (ids: string[], i: number, decision?: any) => setLb({ ids, i, decision }), openCode: setCode }
 
@@ -89,9 +96,34 @@ export function Elements() {
   const gaps = units.filter(u => u.home === NO_HOME && u.status !== "decided")
   const filters = [["open", "Needs you"], ["evidence", "Needs evidence"], ...(!D.serve && count("staged") ? [["staged", "Staged"]] : []), ["ready", "Ready"], ["decided", "Decided"], ["all", "All"]] as [string, string][]
 
+  const viewSwitch = (
+    <ToggleGroup aria-label="Group by" value={[view]} onValueChange={(v: string[]) => v[0] && chooseView(v[0] as "component" | "question")} variant="outline" size="sm">
+      <ToggleGroupItem value="component">By component</ToggleGroupItem>
+      <ToggleGroupItem value="question">By question</ToggleGroupItem>
+    </ToggleGroup>
+  )
+  const dialogs = (
+    <>
+      {picker && <Picker target={picker} onClose={() => setPicker(null)} />}
+      {lb && <Lightbox ids={lb.ids} start={lb.i} decision={lb.decision} onClose={() => setLb(null)} />}
+      {code && <CodeViewer id={code} onClose={() => setCode(null)} />}
+    </>
+  )
+  if (view === "component") return (
+    <ElCtx.Provider value={ctx}>
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center gap-3">{viewSwitch}<span className="text-xs text-muted-foreground">Every place in the app, by the component it goes to, then its settings, then shared styles.</span></div>
+        <ByComponent evals={mine} />
+        <Housekeeping unused={unused} mine={mine} />
+      </div>
+      {dialogs}
+    </ElCtx.Provider>
+  )
+
   return (
     <ElCtx.Provider value={ctx}>
       <div className="flex flex-col">
+        <div className="mb-4">{viewSwitch}</div>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
           <Stat label="Need a decision" value={decidableIn.length} detail={`${decideNowCount} element${decideNowCount === 1 ? "" : "s"} you can decide now`} active={show === "open"} onClick={() => pick(["open"])} />
           <Stat label="Needs evidence" value={waiting} detail="elements no one can decide yet: each card says what's missing" active={show === "evidence"} onClick={() => pick(["evidence"])} />
@@ -119,9 +151,7 @@ export function Elements() {
         <Note className="mt-8 text-xs">How these are made: each element is read from the code and matched to {SYS}. Confidence is the scanner’s score, adjusted by what reviewers decided before; below {Math.round(th * 100)}% a person decides. {E.shotsTaken ? `Screenshots from ${fmtDT(E.shotsTaken)}; matches under ${Math.round(SHOT_MIN * 100)}% aren’t shown.` : "No screenshots yet (dsa setup turns them on)."} {E.rendered ? `${SYS} rendered from ${E.rendered.source}.` : ""}{deferred ? ` ${deferred} elements sit in temporary or allowed exceptions and aren’t listed.` : ""}{lab ? ` ${lab} elements are on lab pages (specimens, not product UI) and aren’t listed.` : ""}</Note>
         {!D.serve && <StagedBar />}
       </div>
-      {picker && <Picker target={picker} onClose={() => setPicker(null)} />}
-      {lb && <Lightbox ids={lb.ids} start={lb.i} decision={lb.decision} onClose={() => setLb(null)} />}
-      {code && <CodeViewer id={code} onClose={() => setCode(null)} />}
+      {dialogs}
     </ElCtx.Provider>
   )
 }
