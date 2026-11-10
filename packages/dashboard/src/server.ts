@@ -170,7 +170,12 @@ export async function startServer(opts: ServeOptions): Promise<{ url: string; cl
       if (req.method === 'POST' && url.pathname === '/api/undecide') {
         const body = await readBody(req);
         const { config } = await loadConfig(root);
-        try { return send(200, await undecide(root, config, dataDir, { ids: body.ids, pattern: body.pattern })); }
+        try {
+          const r = await undecide(root, config, dataDir, { ids: body.ids, pattern: body.pattern });
+          // Undoing an answer given here also takes back the labels it made (same elements, same moment).
+          const unlabeled = typeof body.labelsAt === 'string' ? removeHumanLabels(dataDir, r.ids, body.labelsAt) : 0;
+          return send(200, { ...r, unlabeled });
+        }
         catch (e: any) { return send(400, { error: errText(e) }); }
       }
       // Component picker: every component the core exports, its variant/size axes, and rendered thumbnails.
@@ -270,10 +275,13 @@ export async function startServer(opts: ServeOptions): Promise<{ url: string; cl
         const body = await readBody(req);
         const { config } = await loadConfig(root);
         try {
-          const r = await decideMany(root, config, dataDir, { ids: body.ids, pattern: body.pattern }, body.decision, body.who, body.note);
+          const notes = notesOf(body.notes);
+          const r = await decideMany(root, config, dataDir, { ids: body.ids, pattern: body.pattern }, body.decision, body.who, body.note, notes);
           // The same answer is a label too (one per element, sharing the answer's judgment), so the bench counts it.
-          const labeled = await labelDecision(dataDir, { ids: body.ids, pattern: body.pattern }, body.decision, body.who, body.note);
-          return send(200, { recorded: r.reduce((a: number, x: any) => a + (x.count ?? 1), 0), files: [...new Set(r.map((x: any) => x.file))], decided: { by: body.pattern ? 'policy' : 'human', decision: body.decision, note: body.note }, labeled });
+          const at = new Date();
+          const labeled = await labelDecision(dataDir, { ids: body.ids, pattern: body.pattern }, body.decision, body.who, body.note, notes, at);
+          // labelsAt: hand it back with /api/undecide, and undo removes this answer's labels too.
+          return send(200, { recorded: r.reduce((a: number, x: any) => a + (x.count ?? 1), 0), files: [...new Set(r.map((x: any) => x.file))], decided: { by: body.pattern ? 'policy' : 'human', decision: body.decision, note: body.note }, ...(notes ? { notes } : {}), labeled, labelsAt: at.toISOString() });
         } catch (e: any) { return send(400, { error: errText(e) }); }
       }
       if (req.method === 'POST' && url.pathname === '/api/labels') {
@@ -591,11 +599,30 @@ export function appendHumanLabels(dataDir: string, rows: unknown[]): { saved: nu
  * batch (with the answer's shared judgment) or was given alone. A label that can't be made (a set-aside
  * decision, an element gone from the latest run) is skipped; the decision itself is already saved.
  */
-export async function labelDecision(dataDir: string, q: { ids?: string[] | undefined; pattern?: string | undefined }, decision: Recommendation, who?: string, note?: string): Promise<number> {
+export async function labelDecision(dataDir: string, q: { ids?: string[] | undefined; pattern?: string | undefined }, decision: Recommendation, who?: string, note?: string, notes?: Record<string, string>, at?: Date): Promise<number> {
   const { evals } = await latestEvals(dataDir);
   const ids = q.pattern ? evals.filter(e => e.styleKey === q.pattern || e.styleSig === q.pattern).map(e => e.id) : (q.ids ?? []);
-  const labels = labelsForDecision(evals, decision, { ids, who, note, judgment: judgmentFor(q) });
+  const labels = labelsForDecision(evals, decision, { ids, who, note, notes, judgment: judgmentFor(q), at });
   return labels.length ? appendHumanLabels(dataDir, labels).saved : 0;
+}
+
+/** A note per element from a request body: only string notes, by id; none when empty. */
+export function notesOf(x: unknown): Record<string, string> | undefined {
+  if (!x || typeof x !== 'object') return undefined;
+  const out = Object.fromEntries(Object.entries(x as Record<string, unknown>).filter(([, v]) => typeof v === 'string' && v.trim()).map(([k, v]) => [k, (v as string).trim()]));
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** Take back the labels one answer made: these elements' human labels written at exactly that moment. */
+export function removeHumanLabels(dataDir: string, ids: string[], at: string): number {
+  const file = humanLabelsFile(dataDir);
+  let rows: any[] = [];
+  try { rows = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)); } catch { return 0; }
+  const drop = new Set(ids);
+  const keep = rows.filter(l => !(drop.has(l.id) && l.at === at));
+  if (keep.length === rows.length) return 0;
+  fs.writeFileSync(file, labelsJsonl(keep));
+  return rows.length - keep.length;
 }
 
 /**

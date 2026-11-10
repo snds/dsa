@@ -42,12 +42,13 @@ export function labelForDecision(e: ElementEval, decision: Recommendation, o: { 
 }
 
 /** The labels one decision makes: one per element it covered, sharing the answer's judgment when it covered several. */
-export function labelsForDecision(evals: ElementEval[], decision: Recommendation, o: { ids: string[]; who?: string | undefined; note?: string | undefined; judgment?: string | undefined; at?: Date | undefined }): Label[] {
+export function labelsForDecision(evals: ElementEval[], decision: Recommendation, o: { ids: string[]; who?: string | undefined; note?: string | undefined; notes?: Record<string, string> | undefined; judgment?: string | undefined; at?: Date | undefined }): Label[] {
   const byId = new Map(evals.map((e) => [e.id, e]));
   const how: How = o.ids.length > 1 ? 'batch' : 'alone';
   return o.ids.flatMap((id) => {
     const e = byId.get(id);
-    const l = e ? labelForDecision(e, decision, { ...o, how, judgment: how === 'batch' ? o.judgment : undefined }) : null;
+    const note = o.notes?.[id]?.trim() || o.note;
+    const l = e ? labelForDecision(e, decision, { ...o, note, how, judgment: how === 'batch' ? o.judgment : undefined }) : null;
     return l ? [l] : [];
   });
 }

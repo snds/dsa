@@ -12,7 +12,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Code, Note, Pre } from "@/components/bits"
 import { D, api, at, pct100, reviewerName, say, short } from "@/lib/dsa"
-import { desc, useEl } from "./shared"
+import { desc, useEl, type PickerTarget } from "./shared"
 
 /**
  * Component picker: any system component, every prop it has (variant axes with how well each option fits
@@ -33,7 +33,7 @@ export function warmStorybook(): Promise<any> {
 }
 type Content = { label: string; leading: string; trailing: string; iconSize: string }
 
-export function Picker({ target, onClose }: { target: { ids: string[]; pattern?: string | null }; onClose: () => void }) {
+export function Picker({ target, onClose }: { target: PickerTarget; onClose: () => void }) {
   const { byId, applyLocal, refresh } = useEl()
   const items = target.ids.map(id => byId.get(id)).filter(Boolean)
   const first = items[0]
@@ -200,8 +200,12 @@ export function Picker({ target, onClose }: { target: { ids: string[]; pattern?:
   React.useEffect(() => { startSb() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   async function record(decision: any) {
     try {
-      const r = await api("/api/decide", { ...(target.pattern ? { pattern: target.pattern } : { ids: target.ids }), decision, note: note || undefined, who: reviewerName() })
-      applyLocal(target.pattern ? D.elements.evals.filter((e: any) => e.styleKey === target.pattern || e.styleSig === target.pattern).map((e: any) => e.id) : target.ids, r.decided)
+      const r = await api("/api/decide", { ...(target.pattern ? { pattern: target.pattern } : { ids: target.ids }), decision, note: note || undefined, ...(target.notes ? { notes: target.notes } : {}), who: reviewerName() })
+      const ids = target.pattern ? D.elements.evals.filter((e: any) => e.styleKey === target.pattern || e.styleSig === target.pattern).map((e: any) => e.id) : target.ids
+      applyLocal(ids, r.decided)
+      // Each element keeps its own note (shown on its row), over the dialog's shared one.
+      if (target.notes) for (const id of ids) { const n = target.notes[id]; const e = n ? byId.get(id) : null; if (e?.decided) e.decided = { ...e.decided, note: n } }
+      target.onDone?.(r, ids, decision)
       say(`Recorded for ${r.recorded} element(s): ${desc(decision)}`)
       onClose(); refresh()
     } catch (e: any) { say(e.message, true) }

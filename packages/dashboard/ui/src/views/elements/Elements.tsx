@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Note, SectionTitle, Stat } from "@/components/bits"
 import { D, fmtDT, short, SYS } from "@/lib/dsa"
 import { unstage, useStaged } from "@/lib/staged"
-import { decideNow, ElCtx, ElementRow, sameDecision } from "./shared"
+import { decideNow, ElCtx, ElementRow, sameDecision, type PickerTarget } from "./shared"
 import { StagedBar } from "./StagedBar"
 import { Picker } from "./Picker"
 import { Lightbox } from "./Lightbox"
@@ -42,7 +42,7 @@ export function Elements() {
   // The app chosen in the header. All apps: every question at once, since one question can cover the
   // same pattern in several apps and one answer settles it everywhere; splitting it per app would ask twice.
   const target = useApp()
-  const [picker, setPicker] = React.useState<{ ids: string[]; pattern?: string | null } | null>(null)
+  const [picker, setPicker] = React.useState<PickerTarget | null>(null)
   const [lb, setLb] = React.useState<{ ids: string[]; i: number; decision?: any } | null>(null)
   const [code, setCode] = React.useState<string | null>(null)
   // By component (where each place goes) or by question (the cards dsa asks). Remembered per browser.

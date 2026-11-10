@@ -60,29 +60,78 @@ let Elements: any
 beforeAll(async () => {
   const data = document.createElement("script")
   data.id = "dsa-data"; data.type = "application/json"
-  data.textContent = JSON.stringify({ serve: true, label: "Acme", targets: [{ name: "ledger", role: "consumer" }], elements: { threshold: 0.9, patterns: [], shotsTaken: null, rendered: null, sources: {}, evals, questions: [], proposals: {} } })
+  // "sure" was drawn as a spot check: answered on its own, never ticked for a batch.
+  data.textContent = JSON.stringify({ serve: true, label: "Acme", targets: [{ name: "ledger", role: "consumer" }], elements: { threshold: 0.9, patterns: [], shotsTaken: null, rendered: null, sources: {}, evals, questions: [], proposals: {}, review: { items: [{ id: "sure", why: "audit" }] } } })
   document.head.append(data)
   Elements = (await import("@/views/elements/Elements")).Elements
 })
-afterEach(async () => { if (root) await act(async () => root.unmount()); document.body.innerHTML = "" })
+afterEach(async () => { if (root) await act(async () => root.unmount()); document.body.innerHTML = ""; mem.delete("dsa.elements.component") })
 
-test("in dsa serve, Element Review opens by component, with answers for a place, a look group and a batch", async () => {
+async function mount() {
   const host = document.createElement("div")
   document.body.append(host)
   root = createRoot(host)
   await act(async () => root.render(<Elements />))
+  return host
+}
+const label = (host: Element, text: string) => [...host.querySelectorAll("label")].find(l => l.textContent === text)!.querySelector("input") as HTMLInputElement
+const button = (host: Element, text: string) => [...host.querySelectorAll("button")].find(b => b.textContent === text) as HTMLButtonElement
+const type = async (input: HTMLInputElement, value: string) => {
+  const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!
+  await act(async () => { set.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })) })
+}
+
+test("in dsa serve, Element Review opens by component, with tick boxes for a look group and a batch", async () => {
+  const host = await mount()
   const nav = host.querySelector('nav[aria-label="Where places go"]')!
   expect([...nav.querySelectorAll("button")].map(b => b.textContent)).toEqual(["Button6 / 7", "DropdownMenuItem1 / 1", "Toggle1", "No Acme home yet1 / 1"])
   expect(host.querySelector("h2")!.textContent).toMatch(/Button$/)
   const batch = host.querySelector('[data-slot="batch"]')!
-  // A batch answer covers only places a person can see: "wait" has no evidence yet, so it isn't included.
-  expect(batch.textContent).toContain("Answer all 5…")
+  // Only places a person can see can be ticked: "wait" has no evidence yet, and "sure" is a spot check.
+  expect(batch.textContent).toContain("Select all 4")
   expect(batch.textContent).toContain("Shared style TOOLBAR_ACTION")
-  expect(batch.textContent).toContain("Answer these 3…")
+  expect(batch.textContent).toContain("Select these 3")
   // The "To decide" filter shows only places a person can decide now.
   expect([...host.querySelectorAll('[data-slot="place"]')].map(p => p.getAttribute("data-status"))).toEqual(["todo", "todo", "todo", "todo", "todo"])
   // Choosing another component shows its places and is remembered.
   await act(async () => (nav.querySelectorAll("button")[2] as HTMLButtonElement).click())
   expect(host.querySelector("h2")!.textContent).toMatch(/Toggle$/)
   expect(mem.get("dsa.elements.component")).toBe("c:Toggle")
+})
+
+test("tick a look group, give one place its own note, confirm them together, then undo", async () => {
+  const calls: { url: string; body: any }[] = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    const body = init?.body ? JSON.parse(String(init.body)) : null
+    calls.push({ url: String(url), body })
+    const json = String(url).includes("/api/undecide") ? { ids: body.ids, removed: body.ids.length, unlabeled: body.ids.length }
+      : { recorded: body.ids.length, decided: { by: "human", decision: body.decision, note: body.note }, labelsAt: "2026-11-09T12:00:00.000Z" }
+    return new Response(JSON.stringify(json), { status: 200, headers: { "Content-Type": "application/json" } })
+  }) as any
+  try {
+    const host = await mount()
+    await act(async () => label(host, "Select these 3").click())
+    const bar = host.querySelector('[data-slot="action-bar"]')!
+    expect(bar.textContent).toContain("3 selected")
+    // The spot check can't be ticked, and says why.
+    const sure = host.querySelector('input[aria-label="Select sure"]') as HTMLInputElement | null
+    if (sure) expect(sure.disabled).toBe(true)
+    await type(host.querySelector("#note-tb1") as HTMLInputElement, "opens a menu")
+    await type(host.querySelector("#bc-batch-note") as HTMLInputElement, "toolbar actions")
+    await act(async () => button(host, "Confirm").click())
+    const decide = calls.find(c => c.url.includes("/api/decide"))!
+    expect(decide.body.ids.sort()).toEqual(["tb1", "tb2", "tb3"])
+    expect(decide.body.decision).toMatchObject({ verdict: "replace", use: "Button", props: { variant: "ghost" } })
+    expect(decide.body.note).toBe("toolbar actions")
+    expect(decide.body.notes).toEqual({ tb1: "opens a menu" })
+    expect(host.querySelector('[data-slot="action-bar"]')).toBeNull()
+    expect(host.textContent).toContain("Confirmed: 3 places.")
+    expect(host.textContent).toContain("Note: opens a menu")
+    // Undo takes back the decisions and the labels written at that moment.
+    await act(async () => button(host, "Undo").click())
+    const undo = calls.find(c => c.url.includes("/api/undecide"))!
+    expect(undo.body).toEqual({ ids: ["tb3", "tb1", "tb2"], labelsAt: "2026-11-09T12:00:00.000Z" })
+    expect(host.textContent).not.toContain("Confirmed: 3 places.")
+  } finally { globalThis.fetch = realFetch }
 })

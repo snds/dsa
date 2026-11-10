@@ -8,6 +8,14 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- Element Review by component: answer many places at once. Tick places one by one, a look group or a
+  whole batch at a time, or shift-click a range. Give any ticked place its own note. A bar at the bottom
+  answers them together: Confirm (each place gets the answer its row proposes), Change to…, No home yet,
+  or Keep native, with a note for all of them. A place's own note wins over the shared one, and it is kept
+  on both the decision and the label. Only places with a photo and a drawn proposal can be ticked, and a
+  spot check is answered on its own. Answered places stay in view until the filter changes. The last
+  answer can be undone: undo removes its decisions and the labels it wrote. `/api/decide` takes `notes`
+  (a note per element) and returns `labelsAt`; `/api/undecide` takes `labelsAt` to remove those labels.
 - Element Review by component, its new default view in `dsa serve`. A rail lists where places go (each
   component, then no home yet, keep native and unclear), with how many are left and a progress bar. The
   selected one shows a batch per set of settings and, inside each, places that share a style, so places

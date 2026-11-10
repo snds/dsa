@@ -6,7 +6,7 @@ import { LabelSchema } from '@snds/dsa';
 import { decideMany, judgmentFor, latestEvals, type ElementEval } from '@snds/dsa/engine';
 import { fixtureCopy, loadConfig, NOW, runPipeline } from '../../../test/engine/fixture.js';
 import { decisionForLabel, labelsForDecision } from '../src/answers.js';
-import { appendHumanLabels, decideLabels, humanLabelsFile, labelDecision } from '../src/server.js';
+import { appendHumanLabels, decideLabels, humanLabelsFile, labelDecision, notesOf, removeHumanLabels } from '../src/server.js';
 
 // One answer, saved once and used twice: a decision in Element Review is also a label for the bench, and
 // a label in Label Review is also the element's decision. Each label says how it was given.
@@ -77,4 +77,32 @@ test('in dsa serve, either screen writes both records: decisions become labels, 
 
   // A label about an element the latest run no longer has stays a label only.
   assert.deepEqual((await decideLabels(root, config, data, [{ ...label!, id: 'E-gone' }])).notDecided, ['E-gone']);
+});
+
+test('one batch answer keeps a note per place, and undoing it takes back exactly its labels', async () => {
+  const root = fixtureCopy();
+  const data = path.join(root, '.dsa');
+  await runPipeline({ root, dataDir: data, git: false, now: NOW });
+  const { config } = loadConfig(root);
+  const { evals } = await latestEvals(data);
+  const pick = evals.filter(e => e.verdict === 'replace' && e.use && !e.exception).slice(0, 3);
+  const ids = pick.map(e => e.id);
+  const decision = { verdict: 'replace' as const, role: pick[0]!.role, use: pick[0]!.use, props: pick[0]!.props ?? {} };
+  const notes = notesOf({ [ids[0]!]: '  opens a menu  ', [ids[1]!]: '', junk: 3 })!;
+  assert.deepEqual(notes, { [ids[0]!]: 'opens a menu' }, 'only real notes, trimmed');
+
+  // An earlier answer for the third element, from another moment: undo must leave it alone.
+  appendHumanLabels(data, labelsForDecision(evals, { verdict: 'keep', role: pick[2]!.role }, { ids: [ids[2]!], who: 'Pat', at: new Date('2026-11-01T00:00:00Z') }));
+  await decideMany(root, config, data, { ids }, decision, 'Sean', 'toolbar', notes);
+  const at = new Date('2026-11-09T12:00:00Z');
+  assert.equal(await labelDecision(data, { ids }, decision, 'Sean', 'toolbar', notes, at), 3);
+
+  const after = (await latestEvals(data)).evals.filter(e => ids.includes(e.id));
+  assert.deepEqual(after.map(e => e.decided?.note), ['opens a menu', 'toolbar', 'toolbar'], 'a place keeps its own note over the shared one');
+  const rows = () => fs.readFileSync(humanLabelsFile(data), 'utf8').trim().split('\n').map(l => JSON.parse(l));
+  assert.deepEqual(rows().filter(r => r.at === at.toISOString()).map(r => r.notes), ['opens a menu', 'toolbar', 'toolbar']);
+
+  assert.equal(removeHumanLabels(data, ids, at.toISOString()), 3);
+  assert.deepEqual(rows().map(r => [r.id, r.labeler]), [[ids[2], 'Pat']], "the earlier answer's label stays");
+  assert.equal(removeHumanLabels(data, ids, at.toISOString()), 0, 'nothing left to take back');
 });
