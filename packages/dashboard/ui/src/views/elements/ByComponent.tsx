@@ -11,6 +11,7 @@ import { KEEP, NO_HOME } from "./units"
 import { Focus } from "./Focus"
 import { KEYS, keyAction } from "./keys"
 import { Kbd } from "@/components/ui/kbd"
+import { Checkbox } from "@/components/ui/checkbox"
 import { byComponent, neighboursOf, pickOf, shows, statusOf, withApart, type Batch, type ComponentGroup, type Counts, type LookGroup, type PlaceStatus } from "./structure"
 
 /**
@@ -299,16 +300,18 @@ function RailItem({ g, on, onClick }: { g: ComponentGroup; on: boolean; onClick:
 function TickAll({ items, label }: { items: any[]; label: string }) {
   const { selected, toggle, checks } = React.useContext(SelCtx)
   const ok = items.filter(e => !whyNot(e, checks)).map(e => e.id)
-  const ref = React.useRef<HTMLInputElement>(null)
   const n = ok.filter(id => selected.has(id)).length
-  React.useEffect(() => { if (ref.current) ref.current.indeterminate = n > 0 && n < ok.length }, [n, ok.length])
   // One place is ticked on its own row.
   if (!D.serve || ok.length < 2) return null
+  const text = label.replace("{n}", String(ok.length))
+  // The system's Checkbox, so it follows the theme; part-ticked when only some of these are. Not wrapped
+  // in a <label>: the label would pass the click on to the Checkbox's hidden input and undo it.
+  const all = n === ok.length
   return (
-    <label className="flex items-center gap-1.5 text-xs">
-      <input ref={ref} type="checkbox" checked={n === ok.length} onChange={ev => toggle(ok, ev.target.checked)} className="size-4 accent-primary" />
-      {label.replace("{n}", String(ok.length))}
-    </label>
+    <span className="flex items-center gap-1.5 text-xs" data-slot="tick-all">
+      <Checkbox checked={all} indeterminate={n > 0 && !all} onCheckedChange={on => toggle(ok, Boolean(on))} aria-label={text} />
+      <span className="cursor-default select-none" onClick={() => toggle(ok, !all)}>{text}</span>
+    </span>
   )
 }
 
@@ -414,8 +417,8 @@ function Place({ e, group }: { e: any; group: string[] }) {
       data-slot="place" data-place={e.id} data-status={check ? "check" : st} aria-current={here ? "true" : undefined}>
       <span className="flex sm:self-center">
         {D.serve && (
-          <input type="checkbox" checked={on} disabled={Boolean(why)} title={why ?? "Tick to answer with others"} aria-label={`Select ${nameOf(e)}`}
-            onChange={ev => { if (!why) click(e.id, Boolean((ev.nativeEvent as MouseEvent).shiftKey)) }} className="size-4 accent-primary disabled:opacity-40" />
+          <Checkbox checked={on} disabled={Boolean(why)} title={why ?? "Tick to answer with others"} aria-label={`Select ${nameOf(e)}`}
+            onCheckedChange={(_, d) => { if (!why) click(e.id, Boolean((d?.event as MouseEvent | undefined)?.shiftKey)) }} />
         )}
       </span>
       <div className="flex min-w-0 flex-wrap items-center gap-2">

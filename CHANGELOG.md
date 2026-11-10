@@ -6,6 +6,12 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Element Review by component: the tick boxes are the dashboard's own Checkbox, so they follow the dark
+  theme. They were the browser's checkboxes, drawn light on the dark page. Group boxes still show a
+  part-ticked state, and shift-click still ticks a range.
+
 ### Added
 
 - Keyboard review in Element Review by component (`dsa serve`):
