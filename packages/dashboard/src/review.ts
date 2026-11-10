@@ -262,6 +262,16 @@ export function canDecideNow(e: any): boolean {
   return Boolean(e?.review?.ready) && !e.exception && e.reach?.status !== 'unused' && e.verdict !== 'ignore' && !e.decided && Boolean(e.needsHuman);
 }
 
+/**
+ * Which element a label is about: its app, file and line, the source revision, and a hash of its source
+ * text. The same for a report's element (srcHash) and the engine's (source), so an answer given on either
+ * side names the same element.
+ */
+export function labelIdentity(e: any, sourceRef?: string): { app: string; file: string; line: number; sourceRef: string; elementHash: string } {
+  const elementHash = e.srcHash ?? (typeof e.source === 'string' ? hashText(e.source) : hashText(String(e.snippet ?? e.id)));
+  return { app: e.target, file: e.file, line: e.line, sourceRef: sourceRef ?? 'worktree', elementHash };
+}
+
 /** One place the app already uses a system component, with its props and, when the crawler has one, its photo. */
 export interface Precedent { /** From a lab, specimen or demo page, not the product. */ lab?: boolean | undefined; app: string; file: string; line: number; component: string; props: Record<string, string>; /** Why it has no photo, as the crawler saw it. */ missed?: string | undefined; /** Props set from the code, so their value isn't known. */ dynamic?: string[] | undefined; shot?: { url: string; box: any; page?: string | undefined; pageName: string } | null }
 
@@ -374,7 +384,7 @@ export function withReview(payload: any, o: {
     const noPhoto = about && !examples.length && !labExamples.length && !nearest?.examples.length && everyUse.length ? noPhotoLine(about.use, everyUse) : null;
     return {
       ...q, pick, about,
-      label: { app: e.target, file: e.file, line: e.line, sourceRef: o.sourceRef?.(e) ?? 'worktree', elementHash: e.srcHash ?? hashText(String(e.snippet ?? e.id)) },
+      label: labelIdentity(e, o.sourceRef?.(e)),
       examples, labExamples, altExamples: altEx, usesCount: mine.filter((u) => !u.lab).length,
       nearest, noPhoto, systemExample: !mine.length && own?.url && own.check === 'exact' && !own.unstyled && !own.bare ? { url: own.url } : null,
       // Said as "doesn't use it" only when the search read the whole app.

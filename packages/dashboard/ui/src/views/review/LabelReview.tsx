@@ -195,9 +195,12 @@ export function LabelReview() {
 
   const record = async (row: any) => {
     const next = [...saved.filter(s => s.id !== row.id), row]
-    if (D.serve && row.label) await api("/api/labels", { labels: [row.label] })
+    // In dsa serve one answer is saved twice: as a label for the bench, and as the element's decision.
+    const r = D.serve && row.label ? await api("/api/labels", { labels: [row.label] }) : null
+    const decided = r?.decided?.find((d: any) => d.id === row.id)?.decided
+    if (decided) { const ev = byId.get(row.id); if (ev) { ev.decided = decided; ev.needsHuman = false } }
     setSaved(next); write(SAVED, next)
-    say(row.label ? (D.serve ? "Saved as a label." : "Saved in this browser: download the labels when you're done.") : "Marked not sure.")
+    say(row.label ? (D.serve ? (decided ? "Saved as the decision and as a label." : "Saved as a label. This element isn't in the latest scan, so no decision was recorded.") : "Saved in this browser: download the labels when you're done.") : "Marked not sure.")
     setI(x => Math.min(items.length - 1, x + 1))
   }
 
@@ -253,6 +256,9 @@ function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: 
   const label = (truth: any) => ({
     id: e.id, ...item.label, truth: truth.verdict === "replace" ? { verdict: "replace", use: truth.use, props: Object.fromEntries(Object.entries(truth.props ?? {}).map(([k, v]) => [k, String(v)])) } : { verdict: truth.verdict },
     acceptableAlts: [], labeler, method: "human", at: new Date().toISOString(), ...(note.trim() ? { notes: note.trim() } : {}),
+    // One element looked at on its own; a spot check when dsa was already sure of it.
+    how: item.why === "audit" ? "spot-check" : "alone",
+    proposed: { verdict: e.verdict, ...(e.use ? { use: e.use } : {}), ...(e.props && Object.keys(e.props).length ? { props: Object.fromEntries(Object.entries(e.props).map(([k, v]) => [k, String(v)])) } : {}), confidence: Math.max(0, Math.min(1, e.confidence)) },
   })
   const save = () => {
     if (!labeler) { say("Add your name first, so the answer says who gave it.", true); return }

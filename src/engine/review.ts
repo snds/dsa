@@ -254,6 +254,17 @@ export function writePlan(file: string, md: string) {
 export { questions, type Question, type QuestionPart } from './questions.js';
 
 /** Decide several elements (a question's members) the same way; one policy when they share a style. */
+/**
+ * The id one answer shares across every element it covers (none for a single element). A pattern answer is
+ * "pattern:<name>"; a card's is "card:<hash of its ids>". Decisions and labels carry the same id, so both
+ * calibration and the bench count that answer once.
+ */
+export function judgmentFor(q: { ids?: string[] | undefined; pattern?: string | undefined }): string | undefined {
+  if (q.pattern) return `pattern:${q.pattern}`;
+  const ids = q.ids ?? [];
+  return ids.length > 1 ? `card:${crypto.createHash('sha1').update([...ids].sort().join(' ')).digest('hex').slice(0, 10)}` : undefined;
+}
+
 export async function decideMany(root: string, config: Config, dataDir: string, q: { ids?: string[]; pattern?: string | undefined }, decision: Recommendation, who?: string, note?: string) {
   const opt: Record<string, any> = { decision };
   if (who) opt.who = who;
@@ -269,7 +280,8 @@ export async function decideMany(root: string, config: Config, dataDir: string, 
   const out = [];
   // One answer for a whole card is one judgment, however many elements it covers.
   const ids = q.ids ?? [];
-  if (ids.length > 1) opt.judgment = `card:${crypto.createHash('sha1').update([...ids].sort().join(' ')).digest('hex').slice(0, 10)}`;
+  const judgment = judgmentFor(q);
+  if (judgment && !q.pattern) opt.judgment = judgment;
   for (const id of ids) out.push(await decide(root, config, dataDir, id, opt));
   await patchLatest(dataDir, out.map(r => r.e!.id), decided, threshold);
   return out;

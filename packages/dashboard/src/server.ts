@@ -1,9 +1,10 @@
 import http from 'node:http';
 import fs from 'node:fs';
-import { LabelSchema, labelsJsonl } from '@snds/dsa';
+import { LabelSchema, labelsJsonl, type Label } from '@snds/dsa';
+import { decisionForLabel, labelsForDecision } from './answers.js';
 import path from 'node:path';
 import { discoverSources, isShotsMode, NotLiveError, recordScanTime, runAfterHooks, type Deploy, type DsaAddon, type EngineContext, type ServeRequest } from '@snds/dsa';
-import { MEASURES, appSettings, expandSources, isGlob, clearEvents, clearMappingCache, computeFit, decideMany, effectiveSettings, figmaToken, githubToken, latestEvals, loadCatalog, logEvent, mapInstance, mask, materializeRemotes, openStore, parseFigmaUrl, readRendered, readSource, resolveTargets, runPipeline, setSetting, targetRelative, undecide, withMetrics, writeSecrets, type AppSettings, type Config } from '@snds/dsa/engine';
+import { MEASURES, appSettings, expandSources, isGlob, clearEvents, clearMappingCache, computeFit, decideMany, judgmentFor, effectiveSettings, figmaToken, githubToken, latestEvals, loadCatalog, logEvent, mapInstance, mask, materializeRemotes, openStore, parseFigmaUrl, readRendered, readSource, resolveTargets, runPipeline, setSetting, targetRelative, undecide, withMetrics, writeSecrets, type AppSettings, type Config, type Recommendation } from '@snds/dsa/engine';
 import { toNodeListener } from '@snds/dsa/relay/node';
 import type { RelayHandler } from '@snds/dsa/relay';
 import { renderReport } from './report.js';
@@ -270,14 +271,20 @@ export async function startServer(opts: ServeOptions): Promise<{ url: string; cl
         const { config } = await loadConfig(root);
         try {
           const r = await decideMany(root, config, dataDir, { ids: body.ids, pattern: body.pattern }, body.decision, body.who, body.note);
-          return send(200, { recorded: r.reduce((a: number, x: any) => a + (x.count ?? 1), 0), files: [...new Set(r.map((x: any) => x.file))], decided: { by: body.pattern ? 'policy' : 'human', decision: body.decision, note: body.note } });
+          // The same answer is a label too (one per element, sharing the answer's judgment), so the bench counts it.
+          const labeled = await labelDecision(dataDir, { ids: body.ids, pattern: body.pattern }, body.decision, body.who, body.note);
+          return send(200, { recorded: r.reduce((a: number, x: any) => a + (x.count ?? 1), 0), files: [...new Set(r.map((x: any) => x.file))], decided: { by: body.pattern ? 'policy' : 'human', decision: body.decision, note: body.note }, labeled });
         } catch (e: any) { return send(400, { error: errText(e) }); }
       }
       if (req.method === 'POST' && url.pathname === '/api/labels') {
         // A reviewer's answers, as labels.jsonl rows (method "human"), checked against the schema.
         const body = await readBody(req);
         const r = appendHumanLabels(dataDir, Array.isArray(body?.labels) ? body.labels : []);
-        return send(r.errors.length ? 400 : 200, r);
+        if (r.errors.length) return send(400, r);
+        // The same answer is the element's decision too, so Element Review doesn't ask it again.
+        const { config } = await loadConfig(root);
+        const d = await decideLabels(root, config, dataDir, r.labels);
+        return send(200, { saved: r.saved, errors: r.errors, file: r.file, decided: d.decided, notDecided: d.notDecided });
       }
       if (req.method === 'POST' && url.pathname === '/api/settings') {
         const body = await readBody(req);
@@ -561,7 +568,7 @@ function appList(root: string, config: Config) {
 export const humanLabelsFile = (dataDir: string) => path.join(dataDir, 'labels', 'human.jsonl');
 
 /** Append reviewers' labels (human only, schema-checked); a later answer for the same element replaces the earlier one. */
-export function appendHumanLabels(dataDir: string, rows: unknown[]): { saved: number; errors: string[]; file: string } {
+export function appendHumanLabels(dataDir: string, rows: unknown[]): { saved: number; errors: string[]; file: string; labels: Label[] } {
   const file = humanLabelsFile(dataDir);
   const errors: string[] = [];
   const ok = rows.flatMap((x, i) => {
@@ -570,11 +577,44 @@ export function appendHumanLabels(dataDir: string, rows: unknown[]): { saved: nu
     if (r.data.method !== 'human') { errors.push(`label ${i + 1}: method must be "human"`); return []; }
     return [r.data];
   });
-  if (errors.length) return { saved: 0, errors, file };
+  if (errors.length) return { saved: 0, errors, file, labels: [] };
   let old: any[] = [];
   try { old = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)); } catch { /* first answer */ }
   const ids = new Set(ok.map(l => `${l.id}\u0001${l.labeler}`));
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, labelsJsonl([...old.filter(l => !ids.has(`${l.id}\u0001${l.labeler}`)), ...ok]));
-  return { saved: ok.length, errors, file };
+  return { saved: ok.length, errors, file, labels: ok };
+}
+
+/**
+ * Element Review's answer, saved as labels too: one per element it covered, each saying it came from a
+ * batch (with the answer's shared judgment) or was given alone. A label that can't be made (a set-aside
+ * decision, an element gone from the latest run) is skipped; the decision itself is already saved.
+ */
+export async function labelDecision(dataDir: string, q: { ids?: string[] | undefined; pattern?: string | undefined }, decision: Recommendation, who?: string, note?: string): Promise<number> {
+  const { evals } = await latestEvals(dataDir);
+  const ids = q.pattern ? evals.filter(e => e.styleKey === q.pattern || e.styleSig === q.pattern).map(e => e.id) : (q.ids ?? []);
+  const labels = labelsForDecision(evals, decision, { ids, who, note, judgment: judgmentFor(q) });
+  return labels.length ? appendHumanLabels(dataDir, labels).saved : 0;
+}
+
+/**
+ * Label Review's answers, recorded as decisions too, one element each, so Element Review stops asking them.
+ * An answer about an element the latest run no longer has stays a label only, and is listed as not decided.
+ */
+export async function decideLabels(root: string, config: Config, dataDir: string, labels: Label[]): Promise<{ decided: { id: string; decided: { by: 'human'; decision: Recommendation; note?: string | undefined; who: string } }[]; notDecided: string[] }> {
+  const { evals } = await latestEvals(dataDir);
+  const byId = new Map(evals.map(e => [e.id, e]));
+  const decided: { id: string; decided: { by: 'human'; decision: Recommendation; note?: string | undefined; who: string } }[] = [];
+  const notDecided: string[] = [];
+  for (const l of labels) {
+    const e = byId.get(l.id);
+    if (!e) { notDecided.push(l.id); continue; }
+    const decision = decisionForLabel(e, l.truth);
+    try {
+      await decideMany(root, config, dataDir, { ids: [l.id] }, decision, l.labeler, l.notes);
+      decided.push({ id: l.id, decided: { by: 'human', decision, note: l.notes, who: l.labeler } });
+    } catch { notDecided.push(l.id); }
+  }
+  return { decided, notDecided };
 }
