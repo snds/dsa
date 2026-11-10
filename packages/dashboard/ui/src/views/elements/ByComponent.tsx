@@ -6,9 +6,9 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Note } from "@/components/bits"
 import { D, api, reviewerName, say, short, SYS } from "@/lib/dsa"
 import { Crop, Natural } from "./SameScale"
-import { Conf, decidable, decideNow, nameOf, pickText, proposalFor, useEl } from "./shared"
+import { Conf, decidable, decideNow, nameOf, ownWords, pickText, proposalFor, useEl } from "./shared"
 import { KEEP, NO_HOME } from "./units"
-import { byComponent, pickOf, shows, statusOf, type Batch, type ComponentGroup, type Counts, type LookGroup, type PlaceStatus } from "./structure"
+import { byComponent, neighboursOf, pickOf, shows, statusOf, withApart, type Batch, type ComponentGroup, type Counts, type LookGroup, type PlaceStatus } from "./structure"
 
 /**
  * Element Review by component. The rail lists where places go (a component, No home yet, Keep native),
@@ -54,7 +54,18 @@ function whyNot(e: any, checks: Set<string>): string | null {
 /** The decision "Confirm" records for a place: dsa's pick for it, as is. */
 const confirmOf = (e: any) => { const r = pickOf(e); return { verdict: r.verdict, role: r.role ?? e.role, ...(r.use ? { use: r.use } : {}), ...(r.from ? { from: r.from } : {}), ...(r.props ? { props: r.props } : {}), ...(r.gap ? { gap: r.gap } : {}), ...(r.content ? { content: r.content } : {}) } }
 
-interface Sel { selected: Set<string>; toggle: (ids: string[], on: boolean) => void; click: (id: string, shift: boolean) => void; notes: Record<string, string>; setNote: (id: string, v: string) => void; checks: Set<string>; see: (e: any) => boolean }
+interface Sel {
+  selected: Set<string>; toggle: (ids: string[], on: boolean) => void; click: (id: string, shift: boolean) => void
+  notes: Record<string, string>; setNote: (id: string, v: string) => void; checks: Set<string>; see: (e: any) => boolean
+  /** Answer the ticked places in `ids` with another component from the strip. */
+  useFor: (pick: any, ids: string[]) => void
+  busy: boolean
+  /** Places set apart from their look group in this browser. */
+  apart: Set<string>
+}
+
+const APART_KEY = "dsa.elements.apart"
+const readApart = (): Set<string> => { try { const v = JSON.parse(window.localStorage.getItem(APART_KEY) || "[]"); return new Set(Array.isArray(v) ? v.filter((x: unknown) => typeof x === "string") : []) } catch { return new Set() } }
 const SelCtx = React.createContext<Sel>(null as any)
 
 /** One saved answer, kept so it can be undone: its elements and the moment its labels were written. */
@@ -88,6 +99,9 @@ export function ByComponent({ evals }: { evals: any[] }) {
   const keep = (ids: string[]) => setStay(s => new Set([...s, ...ids]))
   const filter = (v: PlaceStatus | "all") => { setShow(v); setStay(new Set()) }
   const see = (e: any) => shows(e, show, decideNow) || stay.has(e.id)
+  // Places that look like their group but need another answer: pulled into their own group, remembered here.
+  const [apart, setApart] = React.useState<Set<string>>(readApart)
+  const setApartIds = (ids: string[], on: boolean) => setApart(a => { const n = new Set(a); for (const id of ids) if (on) n.add(id); else n.delete(id); write(APART_KEY, JSON.stringify([...n])); return n })
   const anchor = React.useRef<string | null>(null)
   const checks = React.useMemo(spotChecks, [])
 
@@ -113,10 +127,12 @@ export function ByComponent({ evals }: { evals: any[] }) {
   const clear = () => { setSelected(new Set()); setNotes(n => Object.fromEntries(Object.entries(n).filter(([id]) => !selected.has(id)))); setBatchNote("") }
 
   /** Save one answer for the ticked places: grouped so each call carries one decision, all sharing the batch note. */
-  async function answer(kind: "confirm" | "gap" | "keep") {
+  async function answer(kind: "confirm" | "gap" | "keep" | { pick: any }, only?: string[]) {
     const parts = new Map<string, { decision: any; ids: string[] }>()
-    for (const e of chosen) {
-      const decision = kind === "confirm" ? confirmOf(e) : kind === "gap" ? { verdict: "gap", role: e.role, ...(e.gap ? { gap: e.gap } : {}) } : { verdict: "keep", role: e.role }
+    const use = typeof kind === "object" ? kind.pick : null
+    for (const e of only ? chosen.filter(x => only.includes(x.id)) : chosen) {
+      const decision = use ? { verdict: "replace", role: e.role, use: use.use, props: use.props ?? {} }
+        : kind === "confirm" ? confirmOf(e) : kind === "gap" ? { verdict: "gap", role: e.role, ...(e.gap ? { gap: e.gap } : {}) } : { verdict: "keep", role: e.role }
       const k = JSON.stringify(decision)
       parts.set(k, { decision, ids: [...(parts.get(k)?.ids ?? []), e.id] })
     }
@@ -131,8 +147,9 @@ export function ByComponent({ evals }: { evals: any[] }) {
         keep(ids)
       }
       const n = saved.reduce((a, p) => a + p.ids.length, 0)
-      const text = `${kind === "confirm" ? "Confirmed" : kind === "gap" ? `Marked ${NO_HOME.toLowerCase()}` : "Kept native"}: ${plural(n, "place")}`
-      setDone({ text, parts: saved }); say(text); clear()
+      const text = `${use ? `Changed to ${pickText(use)}` : kind === "confirm" ? "Confirmed" : kind === "gap" ? `Marked ${NO_HOME.toLowerCase()}` : "Kept native"}: ${plural(n, "place")}`
+      setDone({ text, parts: saved }); say(text)
+      if (only) { toggle(only, false); setNotes(x => Object.fromEntries(Object.entries(x).filter(([id]) => !only.includes(id)))) } else clear()
     } catch (x: any) {
       say(saved.length ? `${x.message} (${saved.reduce((a, p) => a + p.ids.length, 0)} saved before it stopped; undo them below)` : x.message, true)
       if (saved.length) setDone({ text: "Saved before the error", parts: saved })
@@ -159,7 +176,7 @@ export function ByComponent({ evals }: { evals: any[] }) {
   }
 
   return (
-    <SelCtx.Provider value={{ selected, toggle, click, notes, setNote, checks, see }}>
+    <SelCtx.Provider value={{ selected, toggle, click, notes, setNote, checks, see, useFor: (pick, ids) => answer({ pick }, ids), busy, apart }}>
       <div className="grid gap-4 md:grid-cols-[15rem_minmax(0,1fr)]" data-slot="by-component">
         <nav aria-label="Where places go" className="flex flex-col gap-1 md:sticky md:top-2 md:max-h-[calc(100vh-1rem)] md:self-start md:overflow-y-auto">
           <RailHead>Components</RailHead>
@@ -197,6 +214,10 @@ export function ByComponent({ evals }: { evals: any[] }) {
           <Button variant="outline" size="sm" onClick={change} disabled={busy}>Change to…</Button>
           <Button variant="outline" size="sm" onClick={() => answer("gap")} disabled={busy}>{NO_HOME}</Button>
           <Button variant="outline" size="sm" onClick={() => answer("keep")} disabled={busy}>{KEEP}</Button>
+          {(() => { const ids = [...selected], back = ids.every(id => apart.has(id)); return (
+            <Button variant="ghost" size="sm" disabled={busy}
+              onClick={() => { setApartIds(ids, !back); setSelected(new Set()) }}>{back ? "Put back" : "Set apart"}</Button>
+          ) })()}
           <Button variant="ghost" size="sm" onClick={clear} disabled={busy}>Clear</Button>
           <label className="flex min-w-[12rem] flex-1 items-center gap-2 text-xs">
             <span className="sr-only">Note for all ticked places</span>
@@ -239,9 +260,49 @@ function TickAll({ items, label }: { items: any[]; label: string }) {
   )
 }
 
+/**
+ * The related components for a batch, drawn with one of its own places' words, side by side, so the
+ * choice is made by job and not by look. With places ticked here, one click answers them with any of them.
+ */
+function Neighbours({ b }: { b: Batch }) {
+  const { selected, useFor, busy } = React.useContext(SelCtx)
+  const list = neighboursOf(b)
+  if (list.length < 2) return null
+  // Drawn with a place a person can see, when there is one.
+  const rep = b.items.find(e => decidable(e)) ?? b.items[0]
+  const ticked = b.items.filter(e => selected.has(e.id)).map(e => e.id)
+  return (
+    <div className="flex flex-col gap-1.5 border-b px-4 py-2.5" data-slot="neighbours">
+      <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Related components</span>
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {list.map(n => {
+          const drawn = proposalFor(n.pick, rep)
+          return (
+            <figure key={`${n.pick.use}|${JSON.stringify(n.pick.props)}`} className={cn("m-0 flex min-w-[9rem] flex-none flex-col gap-1.5 rounded-md border bg-background p-2", n.mine && "border-primary ring-1 ring-primary")} data-slot="neighbour">
+              <div className="grid min-h-10 place-items-start">{drawn?.url ? <Natural url={drawn.url} alt={`${SYS} ${pickText(n.pick)}`} /> : <span className="text-xs text-muted-foreground">Not drawn yet</span>}</div>
+              <figcaption className="text-xs">
+                <b className="font-medium">{pickText(n.pick)}</b>
+                <span className="block text-muted-foreground">{n.mine ? "dsa's pick for this batch" : `weighed for ${plural(n.places, "place")}`}</span>
+                {/* Say whose words a drawing shows: this place's own, or the component's example. */}
+                {drawn?.url && <span className="block text-[11px] text-muted-foreground">{ownWords(drawn, rep) ? `with “${rep.label ?? nameOf(rep)}”'s own words` : "example content, not this place's"}</span>}
+              </figcaption>
+              {D.serve && !n.mine && (
+                <Button variant="outline" size="sm" disabled={busy || !ticked.length} onClick={() => useFor(n.pick, ticked)} title={ticked.length ? undefined : "Tick places in this batch first"}>
+                  {ticked.length ? `Use for ${ticked.length} ticked` : "Tick places to use"}
+                </Button>
+              )}
+            </figure>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function BatchCard({ b }: { b: Batch }) {
-  const { see } = React.useContext(SelCtx)
-  const looks = b.looks.map(l => ({ l, items: l.items.filter(see) })).filter(x => x.items.length)
+  const { see, apart } = React.useContext(SelCtx)
+  const grouped = withApart(b.looks, apart, decideNow)
+  const looks = grouped.map(l => ({ l, items: l.items.filter(see) })).filter(x => x.items.length)
   if (!looks.length) return null
   return (
     <article className="rounded-lg border bg-card" data-slot="batch">
@@ -250,8 +311,9 @@ function BatchCard({ b }: { b: Batch }) {
         <span className="text-xs text-muted-foreground">{plural(b.items.length, "place")} · {b.counts.todo} to decide{b.counts.decided ? ` · ${b.counts.decided} decided` : ""}</span>
         <span className="ml-auto"><TickAll items={b.items} label="Select all {n}" /></span>
       </header>
+      <Neighbours b={b} />
       <div className="flex flex-col divide-y">
-        {looks.map(({ l, items }) => <Look key={l.key} l={l} items={items} single={b.looks.length === 1} />)}
+        {looks.map(({ l, items }) => <Look key={l.key} l={l} items={items} single={grouped.length === 1} />)}
       </div>
     </article>
   )
@@ -260,6 +322,7 @@ function BatchCard({ b }: { b: Batch }) {
 function lookTitle(l: LookGroup) {
   if (l.kind === "shared") return <>Shared style <code className="font-mono text-xs">{l.name}</code></>
   if (l.kind === "same-classes") return "Same classes"
+  if (l.kind === "apart") return "Set apart"
   return "One-off styles"
 }
 
@@ -269,7 +332,7 @@ function Look({ l, items, single }: { l: LookGroup; items: any[]; single: boolea
       {!single && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 bg-muted/40 px-4 py-1.5">
           <span className="text-xs font-medium">{lookTitle(l)}</span>
-          <span className="text-xs text-muted-foreground">{l.kind === "one-off" ? "each looks different: check one by one" : `${plural(l.items.length, "place")}, usually one answer`}</span>
+          <span className="text-xs text-muted-foreground">{l.kind === "one-off" ? "each looks different: check one by one" : l.kind === "apart" ? "you set these apart from their group: answer them on their own (saved in this browser)" : `${plural(l.items.length, "place")}, usually one answer`}</span>
           {l.kind !== "one-off" && <span className="ml-auto"><TickAll items={l.items} label="Select these {n}" /></span>}
         </div>
       )}

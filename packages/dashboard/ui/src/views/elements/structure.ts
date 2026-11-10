@@ -10,7 +10,7 @@
 
 export type PlaceStatus = "todo" | "evidence" | "proposed" | "decided"
 export interface Counts { todo: number; evidence: number; proposed: number; decided: number; total: number }
-export interface LookGroup { key: string; kind: "shared" | "same-classes" | "one-off"; name: string | null; items: any[]; counts: Counts }
+export interface LookGroup { key: string; kind: "shared" | "same-classes" | "one-off" | "apart"; name: string | null; items: any[]; counts: Counts }
 export interface Batch { key: string; pick: any; items: any[]; looks: LookGroup[]; counts: Counts }
 export interface ComponentGroup { key: string; name: string; kind: "component" | "gap" | "keep" | "ignored" | "unclear"; batches: Batch[]; counts: Counts }
 
@@ -95,6 +95,43 @@ export function byComponent(evals: any[], names: Names, decideNow: (e: any) => b
     return { key: g.key, name: g.name, kind: g.kind, batches, counts: count(batches.flatMap(b => b.items), decideNow) }
   })
   return out.sort((a, b) => LAST.indexOf(a.kind) - LAST.indexOf(b.kind) || b.counts.todo - a.counts.todo || b.counts.total - a.counts.total || a.name.localeCompare(b.name))
+}
+
+/**
+ * The related components for a batch, to compare side by side: the batch's own pick first, then the
+ * alternatives dsa weighed for its places, most often first (by how many places list each). Components
+ * only: a gap or keep is an answer, not something to draw.
+ */
+export function neighboursOf(b: Batch, max = 5): { pick: any; mine: boolean; places: number }[] {
+  const out: { pick: any; mine: boolean; places: number }[] = []
+  const key = (r: any) => `${r.use}|${propsKey(r.props)}`
+  if (b.pick?.verdict === "replace" && b.pick.use) out.push({ pick: { verdict: "replace", use: b.pick.use, props: b.pick.props ?? {} }, mine: true, places: b.items.length })
+  const seen = new Map<string, { pick: any; places: Set<string> }>()
+  for (const e of b.items) for (const a of e.alternatives ?? []) {
+    if (!a?.use || (a.verdict && a.verdict !== "replace")) continue
+    const k = key(a)
+    if (out.some(o => key(o.pick) === k)) continue
+    const s = seen.get(k) ?? { pick: { verdict: "replace", use: a.use, props: a.props ?? {} }, places: new Set<string>() }
+    s.places.add(e.id)
+    seen.set(k, s)
+  }
+  const alts = [...seen.values()].sort((a, b) => b.places.size - a.places.size || key(a.pick).localeCompare(key(b.pick)))
+  for (const a of alts) out.push({ pick: a.pick, mine: false, places: a.places.size })
+  return out.slice(0, max)
+}
+
+/**
+ * A batch's look groups with the places a reviewer set apart pulled out into their own group, listed
+ * first: places that look like their group but need a different answer. Groups left empty are dropped.
+ */
+export function withApart(looks: LookGroup[], apart: Set<string>, decideNow: (e: any) => boolean): LookGroup[] {
+  const pulled = looks.flatMap(l => l.items.filter(e => apart.has(e.id)))
+  if (!pulled.length) return looks
+  const rest = looks.map(l => {
+    const items = l.items.filter(e => !apart.has(e.id))
+    return { ...l, items, counts: count(items, decideNow) }
+  }).filter(l => l.items.length)
+  return [{ key: "apart", kind: "apart", name: null, items: pulled, counts: count(pulled, decideNow) }, ...rest]
 }
 
 /** The places a filter shows. */
