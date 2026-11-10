@@ -228,3 +228,45 @@ test("a place opens on its own in Element Review; Right saves it as the decision
     expect(document.body.textContent).toContain("Answered “small”.")
   } finally { globalThis.fetch = realFetch }
 })
+
+test("the key map: one key per action, never while typing, in a dialog, or with Ctrl, Cmd or Alt", async () => {
+  const { keyAction } = await import("@/views/elements/keys")
+  const body = document.body, input = document.createElement("input")
+  expect(["j", "K", "x", "c", "e", "n", "o", "u", "Escape", "q"].map(key => keyAction({ key, target: body }))).toEqual(["next", "prev", "tick", "confirm", "change", "note", "open", "undo", "clear", null])
+  expect(keyAction({ key: "j", target: input })).toBeNull()
+  expect(keyAction({ key: "c", target: body, metaKey: true })).toBeNull()
+  expect(keyAction({ key: "j", target: body }, true)).toBeNull()
+})
+
+test("J moves through the places on screen, X ticks, C confirms what's ticked; keys in a note box stay there", async () => {
+  const calls: any[] = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    const body = init?.body ? JSON.parse(String(init.body)) : null
+    calls.push({ url: String(url), body })
+    return new Response(JSON.stringify({ recorded: body.ids.length, decided: { by: "human", decision: body.decision }, labelsAt: "2026-11-09T14:00:00.000Z" }), { status: 200, headers: { "Content-Type": "application/json" } })
+  }) as any
+  const key = (k: string, target: EventTarget = window) => act(async () => { target.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true })) })
+  try {
+    const host = await mount()
+    expect(host.querySelector('[data-slot="keys"]')!.textContent).toContain("J next place")
+    const cur = () => host.querySelector('[data-slot="place"][aria-current="true"]')?.getAttribute("data-place")
+    const order = [...host.querySelectorAll('[data-slot="place"]')].map(p => p.getAttribute("data-place"))
+    await key("j")
+    expect(cur()).toBe(order[0])
+    await key("j")
+    expect(cur()).toBe(order[1])
+    await key("k")
+    expect(cur()).toBe(order[0])
+    // Typing a note doesn't move the cursor.
+    const note = host.querySelector(`#note-${order[0]}`) as HTMLInputElement
+    await key("j", note)
+    expect(cur()).toBe(order[0])
+    await key("x")
+    expect(host.querySelector('[data-slot="action-bar"]')!.textContent).toContain("1 selected")
+    await key("c")
+    const decide = calls.find(c => c.url.includes("/api/decide"))!
+    expect(decide.body.ids).toEqual([order[0]])
+    expect(host.textContent).toContain("Confirmed: 1 place.")
+  } finally { globalThis.fetch = realFetch }
+})

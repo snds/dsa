@@ -6,6 +6,7 @@ import { D, api, reviewerName, say } from "@/lib/dsa"
 import { relayWho } from "@/lib/useScan"
 import { ReviewItem } from "@/views/review/LabelReview"
 import { nameOf, useEl } from "./shared"
+import { typingIn } from "./keys"
 
 /**
  * One place at a time, inside Element Review: what Label Review was. The element beside the proposal
@@ -33,6 +34,17 @@ export function Focus({ ids, start, onClose, onSaved }: {
   const item = items.get(id)
   const labeler = signedIn ?? name.trim()
   const next = () => setI(x => Math.min(ids.length - 1, x + 1))
+  // J and K step through the places here too (not while typing a name or a comment).
+  React.useEffect(() => {
+    const f = (ev: KeyboardEvent) => {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey || typingIn(ev.target)) return
+      const k = ev.key.toLowerCase()
+      if (k === "j") { setI(x => Math.min(ids.length - 1, x + 1)); ev.preventDefault() }
+      else if (k === "k") { setI(x => Math.max(0, x - 1)); ev.preventDefault() }
+    }
+    window.addEventListener("keydown", f)
+    return () => window.removeEventListener("keydown", f)
+  }, [ids.length])
 
   async function answer(row: any) {
     setAnswers(a => ({ ...a, [row.id]: row }))
@@ -52,7 +64,7 @@ export function Focus({ ids, start, onClose, onSaved }: {
         <DialogHeader className="flex-row flex-wrap items-center justify-between gap-3 pr-10">
           <div className="flex min-w-0 flex-col gap-0.5">
             <DialogTitle className="text-base">{e ? nameOf(e) : id}</DialogTitle>
-            <DialogDescription>Place {i + 1} of {ids.length}{item?.why === "audit" ? " · a spot check of an answer dsa was sure of" : ""}</DialogDescription>
+            <DialogDescription>Place {i + 1} of {ids.length}{item?.why === "audit" ? " · a spot check of an answer dsa was sure of" : ""} · J and K move</DialogDescription>
           </div>
           <span className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => setI(x => Math.max(0, x - 1))} disabled={i === 0}>Previous</Button>
