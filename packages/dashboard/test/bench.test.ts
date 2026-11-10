@@ -43,6 +43,22 @@ test('precision, recall, abstention and errors are kept apart', () => {
   assert.deepEqual(c.byMethod, { human: 6 });
 });
 
+test('answers are scored by how they were given, and a batch answer counts as one judgment', () => {
+  const labels = [
+    label('a', 'Button', {}, { how: 'batch', judgment: 'card:1' }),
+    label('b', 'Button', {}, { how: 'batch', judgment: 'card:1' }),
+    label('c', 'Toggle', {}, { how: 'spot-check' }),
+    label('d', 'Button', {}, { how: 'alone' }),
+    label('e', 'Button'),
+  ];
+  const preds = [pred('a', 'Button', 0.95), pred('b', 'Button', 0.95), pred('c', 'Button', 0.96), pred('d', 'Button', 0.5), pred('e', 'Button', 0.97)];
+  const c = correctness(labels, preds, 0.9);
+  assert.equal(c.judgments, 4, 'the two batch labels are one answer');
+  assert.deepEqual(Object.fromEntries(Object.entries(c.byHow).map(([k, v]) => [k, [v.labels, v.precision.k, v.precision.n]])), {
+    batch: [2, 2, 2], 'spot-check': [1, 0, 1], alone: [1, 0, 0], unmarked: [1, 1, 1],
+  });
+});
+
 test('an acceptable alternative is right; matching falls back to app, file and line', () => {
   const l = label('x', 'Toggle', {}, { id: 'L-x', acceptableAlts: [{ use: 'Button', props: { variant: 'ghost' } }] });
   assert.equal(correctness([l], [pred('E-1', 'Button', 0.95, { variant: 'ghost' }, { file: 'ledger/src/x.tsx' })]).right, 1);

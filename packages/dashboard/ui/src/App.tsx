@@ -39,7 +39,9 @@ const VIEWS: { id: ViewId; label: string; hint: string }[] = [
   { id: "system", label: "System", hint: "Every component: kind, variants, parts, tokens, use, and how it was found" },
   { id: "federation", label: "Apps", hint: "Child libraries and the apps that use the system" },
   ...(D.elements ? [{ id: "elements" as const, label: "Element Review", hint: D.elements.questions.length ? `${D.elements.questions.length} questions for a human` : `Native elements vs ${SYS}` }] : []),
-  ...(D.elements?.review ? [{ id: "review" as const, label: "Label Review", hint: `${D.elements.review.items.length} elements to check one at a time` }] : []),
+  // In dsa serve, Element Review answers everything (each answer is the decision and the label) and opens
+  // any place on its own, so Label Review is only kept on a published snapshot, where labels are downloaded.
+  ...(D.elements?.review && !D.serve ? [{ id: "review" as const, label: "Label Review", hint: `${D.elements.review.items.length} elements to check one at a time` }] : []),
   ...(D.usage ? [{ id: "usage" as const, label: "System Usage", hint: `Where ${SYS} tokens and components are used, per library` }] : []),
   ...(D.readiness?.length || D.bench?.length ? [{ id: "readiness" as const, label: "Agents & Benchmarks", hint: "Agent readiness per repo, the usage checker, and bench runs" }] : []),
   ...(D.modules?.figma ? [{ id: "design" as const, label: "Design Files", hint: "Figma crawl" }] : []),
@@ -51,8 +53,8 @@ const titleCase = (s: string) => s.split(/\s+/).map((w, i) => (i > 0 && /^(a|an|
 
 function readHash(): { view: ViewId; section: SectionId } {
   const [v0, s] = routePath().split("/")
-  // Older links: #components is the System view now.
-  const v = v0 === "components" ? "system" : v0
+  // Older links: #components is the System view now; in dsa serve, #review is part of Element Review.
+  const v = v0 === "components" ? "system" : v0 === "review" && D.serve && D.elements ? "elements" : v0
   const view = (v === "settings" || VIEWS.some(x => x.id === v) ? v : D.run ? "overview" : "settings") as ViewId
   // The old Rules tab lives in Settings now.
   if (v === "rules") return { view: "settings", section: "rules" }
