@@ -8,6 +8,13 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- Element Review by component: related components side by side. Each batch opens with a strip of the
+  components that could take its places: dsa's pick, then the alternatives it weighed, most-weighed
+  first, each drawn for one of the batch's places. Each drawing says whether it shows that place's own
+  words or the component's example content. Tick places in the batch and "Use for N ticked" answers them
+  with that component, moving them under it. Places that look like their group but need another answer
+  can be set apart: they leave their look group and form their own, listed first, remembered in this
+  browser, until put back.
 - Element Review by component: answer many places at once. Tick places one by one, a look group or a
   whole batch at a time, or shift-click a range. Give any ticked place its own note. A bar at the bottom
   answers them together: Confirm (each place gets the answer its row proposes), Change to…, No home yet,

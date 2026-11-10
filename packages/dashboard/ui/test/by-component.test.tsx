@@ -3,7 +3,7 @@ import { afterEach, beforeAll, expect, test } from "vitest"
 import * as React from "react"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { byComponent, statusOf } from "@/views/elements/structure"
+import { byComponent, neighboursOf, statusOf, withApart } from "@/views/elements/structure"
 
 // Element Review by component: places grouped by the component they go to, then the settings they get
 // (a batch), then shared styles (a look group). An answer moves a place to where it now goes.
@@ -23,7 +23,9 @@ const NAMES = { noHome: "No fit yet", keep: "Keep as is", ignored: "Set aside", 
 const now = (e: any) => Boolean(e.review?.decideNow) && !e.decided
 
 const evals = [
-  el("tb1", { styleKey: "TOOLBAR_ACTION" }), el("tb2", { styleKey: "TOOLBAR_ACTION" }), el("tb3", { styleKey: "TOOLBAR_ACTION", confidence: 0.4 }),
+  el("tb1", { styleKey: "TOOLBAR_ACTION", alternatives: [{ verdict: "replace", use: "Toggle", props: {}, confidence: 0.3 }] }),
+  el("tb2", { styleKey: "TOOLBAR_ACTION", alternatives: [{ verdict: "replace", use: "Toggle", props: {}, confidence: 0.3 }] }),
+  el("tb3", { styleKey: "TOOLBAR_ACTION", confidence: 0.4, alternatives: [{ verdict: "replace", use: "Toggle", props: {}, confidence: 0.2 }, { verdict: "replace", use: "Button", props: { variant: "outline" }, confidence: 0.2 }, { verdict: "keep", role: "button", confidence: 0.1 }] }),
   el("solo", { styleSig: "a1b2c3d4" }),
   el("small", { props: { variant: "ghost", size: "sm" } }),
   el("sure", { needsHuman: false, confidence: 0.95 }),
@@ -50,6 +52,26 @@ test("places group by component, then settings, then shared style; components wi
   expect(g.flatMap(x => x.batches.flatMap(b => b.items)).some(e => e.id === "lab")).toBe(false)
 })
 
+test("a batch's related components: its own pick first, then the alternatives weighed for the most places", () => {
+  const button = byComponent(evals, NAMES, now)[0]!.batches[0]!
+  expect(neighboursOf(button).map(n => [n.pick.use, n.pick.props, n.mine, n.places])).toEqual([
+    ["Button", { variant: "ghost" }, true, 6],
+    ["Toggle", {}, false, 3],
+    ["Button", { variant: "outline" }, false, 1],
+  ])
+})
+
+test("places set apart leave their look group and form their own, listed first", () => {
+  const looks = byComponent(evals, NAMES, now)[0]!.batches[0]!.looks
+  const split = withApart(looks, new Set(["tb2", "solo"]), now)
+  expect(split.map(l => [l.kind, l.items.map(e => e.id)])).toEqual([
+    ["apart", ["tb2", "solo"]],
+    ["shared", ["tb3", "tb1"]],
+    ["one-off", ["wait", "sure"]],
+  ])
+  expect(withApart(looks, new Set(), now)).toBe(looks)
+})
+
 test("a place is to decide, waiting on evidence, proposed (dsa is sure), or decided", () => {
   const by = Object.fromEntries(evals.map(e => [e.id, statusOf(e, now)]))
   expect([by.tb1, by.wait, by.sure, by.moved]).toEqual(["todo", "evidence", "proposed", "decided"])
@@ -61,7 +83,7 @@ beforeAll(async () => {
   const data = document.createElement("script")
   data.id = "dsa-data"; data.type = "application/json"
   // "sure" was drawn as a spot check: answered on its own, never ticked for a batch.
-  data.textContent = JSON.stringify({ serve: true, label: "Acme", targets: [{ name: "ledger", role: "consumer" }], elements: { threshold: 0.9, patterns: [], shotsTaken: null, rendered: null, sources: {}, evals, questions: [], proposals: {}, review: { items: [{ id: "sure", why: "audit" }] } } })
+  data.textContent = JSON.stringify({ serve: true, label: "Acme", targets: [{ name: "ledger", role: "consumer" }], elements: { threshold: 0.9, patterns: [], shotsTaken: null, rendered: null, sources: {}, evals, questions: [], proposals: { Toggle: { use: "Toggle", props: {}, check: "exact", url: "rendered/toggle.png", own: false } }, review: { items: [{ id: "sure", why: "audit" }] } } })
   document.head.append(data)
   Elements = (await import("@/views/elements/Elements")).Elements
 })
@@ -134,4 +156,47 @@ test("tick a look group, give one place its own note, confirm them together, the
     expect(undo.body).toEqual({ ids: ["tb3", "tb1", "tb2"], labelsAt: "2026-11-09T12:00:00.000Z" })
     expect(host.textContent).not.toContain("Confirmed: 3 places.")
   } finally { globalThis.fetch = realFetch }
+})
+
+const tick = async (host: Element, id: string) => act(async () => (host.querySelector(`input[aria-label="Select “${id}”"]`) as HTMLInputElement).click())
+
+test("the related-components strip answers ticked places with another component", async () => {
+  const calls: any[] = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    const body = init?.body ? JSON.parse(String(init.body)) : null
+    calls.push({ url: String(url), body })
+    return new Response(JSON.stringify({ recorded: body.ids.length, decided: { by: "human", decision: body.decision }, labelsAt: "2026-11-09T13:00:00.000Z" }), { status: 200, headers: { "Content-Type": "application/json" } })
+  }) as any
+  try {
+    const host = await mount()
+    const strip = host.querySelector('[data-slot="neighbours"]')!
+    expect([...strip.querySelectorAll("figcaption")].map(f => f.textContent)).toEqual([
+      "Button · variant ghostdsa's pick for this batch", "Toggleweighed for 3 placesexample content, not this place's", "Button · variant outlineweighed for 1 place",
+    ])
+    expect(button(host, "Tick places to use").disabled).toBe(true)
+    await tick(host, "tb1")
+    await tick(host, "tb2")
+    const use = [...strip.querySelectorAll("figure")][1]!.querySelector("button")!
+    expect(use.textContent).toBe("Use for 2 ticked")
+    await act(async () => use.click())
+    const decide = calls.find(c => c.url.includes("/api/decide"))!
+    expect(decide.body.ids.sort()).toEqual(["tb1", "tb2"])
+    expect(decide.body.decision).toEqual({ verdict: "replace", role: "button", use: "Toggle", props: {} })
+    expect(host.textContent).toContain("Changed to Toggle: 2 places.")
+  } finally { globalThis.fetch = realFetch }
+})
+
+test("set apart pulls ticked places into their own group, remembered in this browser, and puts them back", async () => {
+  mem.delete("dsa.elements.apart")
+  const host = await mount()
+  await tick(host, "tb3")
+  await act(async () => button(host, "Set apart").click())
+  const looks = () => [...host.querySelectorAll('[data-slot="look"]')].map(l => [l.querySelector("span")?.textContent, [...l.querySelectorAll('[data-slot="place"]')].length])
+  expect(looks()[0]).toEqual(["Set apart", 1])
+  expect(JSON.parse(mem.get("dsa.elements.apart")!)).toEqual(["tb3"])
+  await tick(host, "tb3")
+  await act(async () => button(host, "Put back").click())
+  expect(looks().some(([t]) => t === "Set apart")).toBe(false)
+  expect(JSON.parse(mem.get("dsa.elements.apart")!)).toEqual([])
 })
