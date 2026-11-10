@@ -7,6 +7,7 @@ import { bench, benchText, defaultsFrom, repeatability, sealedOf, splitLabels, t
 import { PROBE_CARDS, type CardFacts } from './card-dom.js';
 import { historyLabels, migratedLabels, reviewQueue, stripTargets } from './labels.js';
 import { renderReport } from './report.js';
+import { humanLabelsFile } from './server.js';
 
 /** The data a page carries (the report payload), from a published folder or a report file. */
 export function payloadOf(siteOrFile: string): any {
@@ -44,7 +45,7 @@ export function benchCommands(program: Command, api: AddonApi) {
     .action(async (o: { labels?: string; site?: string[]; cards: boolean; ready?: string; folds?: string; foldSite?: string[]; signatures?: string }, cmd: Command) => {
       // --json is the CLI's own option (dsa --json bench, or dsa bench --json).
       const json = Boolean((cmd.optsWithGlobals() as { json?: boolean }).json);
-      const labels = o.labels ? loadLabels(path.resolve(api.cwd, o.labels), api.out) : null;
+      let labels = o.labels ? loadLabels(path.resolve(api.cwd, o.labels), api.out) : null;
       const threshold = o.ready ? Number(o.ready) : undefined;
       let payloads: any[], dirs: (string | undefined)[], cards: (CardFacts[] | null)[];
       let sigFile = o.signatures ? path.resolve(api.cwd, o.signatures) : undefined;
@@ -56,6 +57,9 @@ export function benchCommands(program: Command, api: AddonApi) {
       } else {
         const ctx = await api.context(cmd);
         await api.requireStore('bench');
+        // No --labels: the answers people gave in dsa serve (Element Review), when there are any.
+        const answers = humanLabelsFile(ctx.dataDir);
+        if (!labels && fs.existsSync(answers)) { labels = loadLabels(answers, api.out); if (!json) api.out(`Labels: the ${labels.length} answers given in dsa serve (${answers}).`); }
         payloads = [payloadOf(await writeTemp(await renderReport(ctx.root, ctx.config, ctx.dataDir, ctx.profile)))];
         sigFile ??= path.join(ctx.dataDir, 'signatures.json');
         dirs = [undefined]; cards = [null];

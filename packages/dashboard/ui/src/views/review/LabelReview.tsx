@@ -234,6 +234,15 @@ export function LabelReview() {
   )
 }
 
+/**
+ * One place, looked at on its own: the element beside the proposal at real size, where it is, why dsa
+ * thinks so, where the app already uses the proposal, and Right, Wrong (pick the right answer) or Not sure.
+ * Label Review steps through these; Element Review opens one from any place that has its evidence.
+ */
+export function ReviewItem(props: { item: any; e: any; labeler: string; onAnswer: (row: any) => void; answered: any; onCode: () => void }) {
+  return <Item {...props} />
+}
+
 function Item({ item, e, labeler, onAnswer, answered, onCode }: { item: any; e: any; labeler: string; onAnswer: (row: any) => void; answered: any; onCode: () => void }) {
   const pick = item.pick
   const drawn = pick?.verdict === "replace" ? proposalFor(pick, e) : null

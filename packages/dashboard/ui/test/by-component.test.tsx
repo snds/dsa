@@ -83,7 +83,7 @@ beforeAll(async () => {
   const data = document.createElement("script")
   data.id = "dsa-data"; data.type = "application/json"
   // "sure" was drawn as a spot check: answered on its own, never ticked for a batch.
-  data.textContent = JSON.stringify({ serve: true, label: "Acme", targets: [{ name: "ledger", role: "consumer" }], elements: { threshold: 0.9, patterns: [], shotsTaken: null, rendered: null, sources: {}, evals, questions: [], proposals: { Toggle: { use: "Toggle", props: {}, check: "exact", url: "rendered/toggle.png", own: false } }, review: { items: [{ id: "sure", why: "audit" }] } } })
+  data.textContent = JSON.stringify({ serve: true, label: "Acme", targets: [{ name: "ledger", role: "consumer" }], elements: { threshold: 0.9, patterns: [], shotsTaken: null, rendered: null, sources: {}, evals, questions: [], proposals: { Toggle: { use: "Toggle", props: {}, check: "exact", url: "rendered/toggle.png", own: false } }, review: { items: [{ id: "sure", why: "audit" }, { id: "small", why: "decide", pick: { verdict: "replace", role: "button", use: "Button", props: { variant: "ghost", size: "sm" } }, about: null, label: { app: "ledger", file: "ledger/src/small.tsx", line: 4, sourceRef: "worktree", elementHash: "h-small" }, examples: [], labExamples: [], altExamples: [], usesCount: 0, nearest: null, noPhoto: null, systemExample: null, searched: true }] } } })
   document.head.append(data)
   Elements = (await import("@/views/elements/Elements")).Elements
 })
@@ -199,4 +199,32 @@ test("set apart pulls ticked places into their own group, remembered in this bro
   await act(async () => button(host, "Put back").click())
   expect(looks().some(([t]) => t === "Set apart")).toBe(false)
   expect(JSON.parse(mem.get("dsa.elements.apart")!)).toEqual([])
+})
+
+test("a place opens on its own in Element Review; Right saves it as the decision and the label", async () => {
+  mem.set("dsa.reviewer", JSON.stringify("Sean"))
+  const calls: any[] = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    const body = init?.body ? JSON.parse(String(init.body)) : null
+    calls.push({ url: String(url), body })
+    if (String(url).includes("/api/labels")) {
+      const l = body.labels[0]
+      return new Response(JSON.stringify({ saved: 1, errors: [], decided: [{ id: l.id, decided: { by: "human", decision: { verdict: "replace", role: "button", use: l.truth.use, props: l.truth.props }, who: l.labeler } }], notDecided: [] }), { status: 200, headers: { "Content-Type": "application/json" } })
+    }
+    return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } })
+  }) as any
+  try {
+    const host = await mount()
+    const name = [...host.querySelectorAll("button")].find(b => b.textContent === "“small”" && b.title === "Look at this place on its own")!
+    await act(async () => name.click())
+    const panel = document.querySelector('[data-slot="focus"]')!
+    expect(panel.textContent).toMatch(/Place \d+ of \d+/)
+    expect(panel.textContent).toContain("Is Button · variant ghost · size sm the right answer?")
+    await act(async () => ([...panel.querySelectorAll("button")].find(b => b.textContent?.startsWith("Right")) as HTMLButtonElement).click())
+    await act(async () => ([...panel.querySelectorAll("button")].find(b => b.textContent === "Save answer") as HTMLButtonElement).click())
+    const sent = calls.find(c => c.url.includes("/api/labels"))!.body.labels[0]
+    expect([sent.id, sent.how, sent.labeler, sent.truth.use]).toEqual(["small", "alone", "Sean", "Button"])
+    expect(document.body.textContent).toContain("Answered “small”.")
+  } finally { globalThis.fetch = realFetch }
 })

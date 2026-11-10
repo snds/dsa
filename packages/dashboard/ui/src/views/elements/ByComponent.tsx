@@ -8,6 +8,7 @@ import { D, api, reviewerName, say, short, SYS } from "@/lib/dsa"
 import { Crop, Natural } from "./SameScale"
 import { Conf, decidable, decideNow, nameOf, ownWords, pickText, proposalFor, useEl } from "./shared"
 import { KEEP, NO_HOME } from "./units"
+import { Focus } from "./Focus"
 import { byComponent, neighboursOf, pickOf, shows, statusOf, withApart, type Batch, type ComponentGroup, type Counts, type LookGroup, type PlaceStatus } from "./structure"
 
 /**
@@ -60,6 +61,10 @@ interface Sel {
   /** Answer the ticked places in `ids` with another component from the strip. */
   useFor: (pick: any, ids: string[]) => void
   busy: boolean
+  /** Open the one-place view at this place, stepping through the places on screen. */
+  look: (id: string) => void
+  /** Places with their evidence, as Label Review offers them: they open side by side. */
+  reviewable: Set<string>
   /** Places set apart from their look group in this browser. */
   apart: Set<string>
 }
@@ -104,13 +109,16 @@ export function ByComponent({ evals }: { evals: any[] }) {
   const setApartIds = (ids: string[], on: boolean) => setApart(a => { const n = new Set(a); for (const id of ids) if (on) n.add(id); else n.delete(id); write(APART_KEY, JSON.stringify([...n])); return n })
   const anchor = React.useRef<string | null>(null)
   const checks = React.useMemo(spotChecks, [])
+  // Places Label Review would offer (a photo and a drawn proposal): they open in the one-place view.
+  const reviewable = React.useMemo(() => new Set<string>((D.elements?.review?.items ?? []).map((x: any) => x.id)), [])
+  const [focus, setFocus] = React.useState<{ ids: string[]; i: number } | null>(null)
 
   const choose = (k: string) => { setSel(k); write(VIEW_KEY, k); setSelected(new Set()); const next = groups.find(x => x.key === k); filter(next?.counts.todo ? "todo" : "all") }
   if (!g) return <Note>No elements to place yet.</Note>
   const components = groups.filter(x => x.kind === "component"), others = groups.filter(x => x.kind !== "component")
 
   // The order places are listed in, for shift-click ranges.
-  const visible = g.batches.flatMap(b => b.looks.flatMap(l => l.items)).filter(see)
+  const visible = g.batches.flatMap(b => withApart(b.looks, apart, decideNow).flatMap(l => l.items)).filter(see)
   const toggle = (ids: string[], on: boolean) => setSelected(s => { const n = new Set(s); for (const id of ids) if (on) n.add(id); else n.delete(id); return n })
   const click = (id: string, shift: boolean) => {
     const on = !selected.has(id)
@@ -176,7 +184,8 @@ export function ByComponent({ evals }: { evals: any[] }) {
   }
 
   return (
-    <SelCtx.Provider value={{ selected, toggle, click, notes, setNote, checks, see, useFor: (pick, ids) => answer({ pick }, ids), busy, apart }}>
+    <SelCtx.Provider value={{ selected, toggle, click, notes, setNote, checks, see, useFor: (pick, ids) => answer({ pick }, ids), busy, apart, reviewable,
+      look: (id: string) => { const ids = visible.map(e => e.id); setFocus({ ids, i: Math.max(0, ids.indexOf(id)) }) } }}>
       <div className="grid gap-4 md:grid-cols-[15rem_minmax(0,1fr)]" data-slot="by-component">
         <nav aria-label="Where places go" className="flex flex-col gap-1 md:sticky md:top-2 md:max-h-[calc(100vh-1rem)] md:self-start md:overflow-y-auto">
           <RailHead>Components</RailHead>
@@ -226,6 +235,8 @@ export function ByComponent({ evals }: { evals: any[] }) {
           </label>
         </div>
       )}
+      {focus && <Focus ids={focus.ids} start={focus.i} onClose={() => setFocus(null)}
+        onSaved={(id, labelsAt, text) => { keep([id]); setDone({ text, parts: [{ ids: [id], labelsAt }] }) }} />}
     </SelCtx.Provider>
   )
 }
@@ -345,7 +356,8 @@ function Look({ l, items, single }: { l: LookGroup; items: any[]; single: boolea
 
 function Place({ e, group }: { e: any; group: string[] }) {
   const { openLightbox, openCode, openPicker, byId } = useEl()
-  const { selected, click, notes, setNote, checks } = React.useContext(SelCtx)
+  const { selected, click, notes, setNote, checks, look, reviewable } = React.useContext(SelCtx)
+  const canLook = reviewable.has(e.id)
   const check = !e.decided && checks.has(e.id)
   const st = statusOf(e, decideNow)
   const chip = check ? STATUS.check : STATUS[st]
@@ -374,7 +386,8 @@ function Place({ e, group }: { e: any; group: string[] }) {
           : <span className="text-xs text-muted-foreground">{pick.verdict === "replace" ? "not drawn yet" : pickText(pick)}</span>}
       </div>
       <div className="flex min-w-0 flex-col gap-1 text-sm">
-        <span className="truncate font-medium">{nameOf(e)}</span>
+        {canLook ? <button type="button" onClick={() => look(e.id)} className="w-fit max-w-full truncate text-left font-medium underline-offset-4 hover:underline" title="Look at this place on its own">{nameOf(e)}</button>
+          : <span className="truncate font-medium">{nameOf(e)}</span>}
         <span className="truncate text-xs text-muted-foreground">{e.review?.pageName ?? e.target}</span>
         <button type="button" onClick={() => openCode(e.id)} className="w-fit max-w-full truncate text-left font-mono text-[11px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" title="Open the code">{short(e.file)}:{e.line}</button>
         {e.decided ? (e.decided.note && <span className="text-xs text-muted-foreground">Note: {e.decided.note}</span>)
@@ -384,7 +397,8 @@ function Place({ e, group }: { e: any; group: string[] }) {
       <div className="flex flex-wrap items-center gap-2 sm:justify-end">
         <Conf c={e.confidence} cap={e.evidenceCap} />
         <Badge variant="outline" className={cn("text-[11px] font-normal", chip.cls)}>{chip.text}</Badge>
-        {D.serve && <Button variant="ghost" size="sm" onClick={() => openPicker({ ids: [e.id], ...(notes[e.id]?.trim() ? { notes: { [e.id]: notes[e.id]!.trim() } } : {}) })}>{e.decided ? "Change…" : "Answer…"}</Button>}
+        {/* Undecided places with their evidence open on their own (a spot check always does); the rest use the full dialog. */}
+        {D.serve && <Button variant="ghost" size="sm" onClick={() => !e.decided && canLook ? look(e.id) : openPicker({ ids: [e.id], ...(notes[e.id]?.trim() ? { notes: { [e.id]: notes[e.id]!.trim() } } : {}) })}>{e.decided ? "Change…" : "Answer…"}</Button>}
       </div>
     </li>
   )

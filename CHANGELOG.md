@@ -8,6 +8,15 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- One review screen. In `dsa serve` the Label Review tab is gone: Element Review answers everything, and
+  any place with its evidence opens on its own (click its name, or Answer…) in what Label Review showed.
+  That means the element beside the proposal at real size, where it is, why dsa thinks so, and Right,
+  Wrong or Not sure, with Previous and Next through the places on screen. A spot check always opens
+  there. Old `#review` links open Element Review. A published snapshot keeps Label Review, where labels are
+  downloaded. `dsa bench` with no `--labels` reads the answers given in `dsa serve`
+  (`<data>/labels/human.jsonl`). Its correctness now reports labels by how they were given (alone, batch,
+  spot check, or unmarked), with spot checks named as the fair test of the ready bar, and how many
+  separate judgments are behind them (a batch answer counts once).
 - Element Review by component: related components side by side. Each batch opens with a strip of the
   components that could take its places: dsa's pick, then the alternatives it weighed, most-weighed
   first, each drawn for one of the batch's places. Each drawing says whether it shows that place's own

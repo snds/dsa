@@ -52,7 +52,7 @@ export const BASE: string = D.base || "/"
 /** A server path ("/api/run") under the mount point. */
 export const at = (url: string) => (url.startsWith("/") ? BASE + url.slice(1) : url)
 
-/** The name a reviewer gave in Label Review, sent with every answer so its label says who gave it. */
+/** The name a reviewer gave (asked where answers are given one place at a time), sent with every answer so its label says who gave it. */
 export function reviewerName(): string | undefined {
   try { const v = JSON.parse(window.localStorage.getItem("dsa.reviewer") || "null"); return typeof v === "string" && v.trim() ? v.trim() : undefined } catch { return undefined }
 }

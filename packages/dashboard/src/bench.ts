@@ -124,6 +124,14 @@ export interface Correctness {
   bySource: Record<string, { precision: RateCI; accuracy: RateCI }>;
   /** Labels per method, so a reader sees how much is migrated or history and how much a person checked. */
   byMethod: Record<string, number>;
+  /**
+   * How people gave their labels: alone (looked at on its own), batch (one answer for several places) or
+   * spot-check (a random check of an answer dsa was sure of); "unmarked" for labels from before or from
+   * elsewhere. Spot checks are the fair test of the ready bar.
+   */
+  byHow: Record<string, { labels: number; precision: RateCI; accuracy: RateCI }>;
+  /** Separate judgments behind the labels: a batch answer counts once, however many places it covered. */
+  judgments: number;
 }
 
 /** Score predictions against labels. */
@@ -159,6 +167,11 @@ export function correctness(labels: Label[], preds: Prediction[], threshold = 0.
   };
   const byMethod: Record<string, number> = {};
   for (const l of labels) byMethod[l.method] = (byMethod[l.method] ?? 0) + 1;
+  const howOf = (l: Label) => l.how ?? 'unmarked';
+  const byHow: Correctness['byHow'] = {};
+  for (const [g, v] of Object.entries(group((r) => howOf(r.label)))) byHow[g] = { labels: labels.filter((l) => howOf(l) === g).length, ...v };
+  for (const l of labels) byHow[howOf(l)] ??= { labels: labels.filter((x) => howOf(x) === howOf(l)).length, precision: rateCI(0, 0), accuracy: rateCI(0, 0) };
+  const judgments = new Set(labels.map((l, i) => l.judgment ?? `one:${i}`)).size;
   return {
     threshold, labels: N, unmatched: N - seen.length, matched: seen.length,
     claimed: claimed.length, abstained: rows.length - claimed.length, right, wrong: claimed.length - right,
@@ -171,6 +184,8 @@ export function correctness(labels: Label[], preds: Prediction[], threshold = 0.
     byApp: group((r) => r.pred.target),
     bySource: group((r) => r.pred.source),
     byMethod,
+    byHow,
+    judgments,
   };
 }
 
@@ -289,7 +304,7 @@ export function benchText(b: BenchResult, rep?: ReturnType<typeof repeatability>
     `  Pictures: ${Object.entries(P.sources).map(([k, v]) => `${k} ${v}`).join(', ')}. Left out: ${Object.entries(P.excluded).map(([k, v]) => `${k} ${v}`).join(', ')}.`,
   ];
   if (P.freshness?.byApp) for (const [app, f] of Object.entries<any>(P.freshness.byApp)) lines.push(`  ${app}: ${f.kept} photos count; ${f.olderRun} from an older run and ${f.unstamped} unstamped set aside; oldest that counts ${f.oldestHours ?? '—'} h before the run.`);
-  if (!C) lines.push('Correctness: no labels (pass --labels).');
+  if (!C) lines.push('Correctness: no labels (answer places in Element Review in dsa serve, or pass --labels).');
   else {
     lines.push(
       `Correctness (is it the right answer), at the ${C.threshold} ready bar, over ${C.labels} labels (${Object.entries(C.byMethod).map(([k, v]) => `${k} ${v}`).join(', ')}):`,
@@ -297,6 +312,8 @@ export function benchText(b: BenchResult, rep?: ReturnType<typeof repeatability>
       `  At 99% precision dsa could claim ${C.coverageAt99.claimed} (${pct(C.coverageAt99.coverage)}) from confidence ${C.coverageAt99.from ?? '—'}. ECE ${C.ece ?? '—'}.`,
       ...Object.entries(C.byApp).map(([k, v]) => `  ${k}: precision ${pct(v.precision.rate)} [${pct(v.precision.ci[0])}, ${pct(v.precision.ci[1])}] of ${v.precision.n}; accuracy ${pct(v.accuracy.rate)} of ${v.accuracy.n}.`),
       ...Object.entries(C.bySource).map(([k, v]) => `  ${k} pictures: precision ${pct(v.precision.rate)} [${pct(v.precision.ci[0])}, ${pct(v.precision.ci[1])}] of ${v.precision.n}; accuracy ${pct(v.accuracy.rate)} of ${v.accuracy.n}.`),
+      `  ${C.judgments} separate judgment${C.judgments === 1 ? '' : 's'} behind the ${C.labels} labels (a batch answer counts once).`,
+      ...Object.entries(C.byHow).map(([k, v]) => `  given ${k === 'unmarked' ? 'without a how (older or imported)' : k === 'spot-check' ? 'as spot checks (the fair test of the ready bar)' : k}: ${v.labels} label${v.labels === 1 ? '' : 's'}; precision ${pct(v.precision.rate)} of ${v.precision.n} claims; accuracy ${pct(v.accuracy.rate)} of ${v.accuracy.n}.`),
     );
   }
   const H = b.heldOut;
