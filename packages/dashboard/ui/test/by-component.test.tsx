@@ -96,7 +96,7 @@ async function mount() {
   await act(async () => root.render(<Elements />))
   return host
 }
-const label = (host: Element, text: string) => [...host.querySelectorAll("label")].find(l => l.textContent === text)!.querySelector("input") as HTMLInputElement
+const label = (host: Element, text: string) => host.querySelector(`[role="checkbox"][aria-label="${text}"]`) as HTMLElement
 const button = (host: Element, text: string) => [...host.querySelectorAll("button")].find(b => b.textContent === text) as HTMLButtonElement
 const type = async (input: HTMLInputElement, value: string) => {
   const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!
@@ -137,8 +137,8 @@ test("tick a look group, give one place its own note, confirm them together, the
     const bar = host.querySelector('[data-slot="action-bar"]')!
     expect(bar.textContent).toContain("3 selected")
     // The spot check can't be ticked, and says why.
-    const sure = host.querySelector('input[aria-label="Select sure"]') as HTMLInputElement | null
-    if (sure) expect(sure.disabled).toBe(true)
+    const sure = host.querySelector('[role="checkbox"][aria-label="Select “sure”"]')
+    if (sure) expect(sure.hasAttribute("data-disabled")).toBe(true)
     await type(host.querySelector("#note-tb1") as HTMLInputElement, "opens a menu")
     await type(host.querySelector("#bc-batch-note") as HTMLInputElement, "toolbar actions")
     await act(async () => button(host, "Confirm").click())
@@ -158,7 +158,7 @@ test("tick a look group, give one place its own note, confirm them together, the
   } finally { globalThis.fetch = realFetch }
 })
 
-const tick = async (host: Element, id: string) => act(async () => (host.querySelector(`input[aria-label="Select “${id}”"]`) as HTMLInputElement).click())
+const tick = async (host: Element, id: string) => act(async () => (host.querySelector(`[role="checkbox"][aria-label="Select “${id}”"]`) as HTMLElement).click())
 
 test("the related-components strip answers ticked places with another component", async () => {
   const calls: any[] = []
@@ -269,4 +269,22 @@ test("J moves through the places on screen, X ticks, C confirms what's ticked; k
     expect(decide.body.ids).toEqual([order[0]])
     expect(host.textContent).toContain("Confirmed: 1 place.")
   } finally { globalThis.fetch = realFetch }
+})
+
+test("tick boxes are the system's Checkbox, and shift-click still ticks a range through it", async () => {
+  // Earlier tests answered most example places in the shared page data: open them again.
+  const { D } = await import("@/lib/dsa")
+  for (const e of D.elements.evals) if (["tb1", "tb2", "tb3", "solo"].includes(e.id)) { delete e.decided; e.needsHuman = true }
+  mem.delete("dsa.elements.apart")
+  const host = await mount()
+  const boxes = [...host.querySelectorAll('[data-slot="place"] [role="checkbox"]')] as HTMLElement[]
+  expect(boxes.length).toBeGreaterThan(1)
+  expect(boxes.every(b => b.getAttribute("data-slot") === "checkbox")).toBe(true)
+  expect(host.querySelector('[data-slot="place"] input[type="checkbox"]:not([aria-hidden="true"])')).toBeNull()
+  const open = boxes.filter(b => !b.hasAttribute("data-disabled"))
+  await act(async () => open[0]!.click())
+  await act(async () => { open[open.length - 1]!.dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: true })) })
+  const ticked = open.filter(b => b.getAttribute("aria-checked") === "true").length
+  expect(ticked).toBe(open.length)
+  expect(host.querySelector('[data-slot="action-bar"]')!.textContent).toContain(`${open.length} selected`)
 })
