@@ -8,6 +8,14 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- Keyboard review in Element Review by component (`dsa serve`):
+  - J and K move through the places on screen, and the current one is outlined.
+  - X ticks it. C confirms what's ticked (or the current place when nothing is). E opens Change to….
+  - N goes to the place's note, and Enter or Esc leaves it.
+  - O opens the place on its own, where J and K move too. U undoes the last answer. Esc clears the ticks.
+
+  The keys are listed under the filters. They never act while typing, while a dialog is open, or with
+  Ctrl, Cmd or Alt held.
 - One review screen. In `dsa serve` the Label Review tab is gone: Element Review answers everything, and
   any place with its evidence opens on its own (click its name, or Answer…) in what Label Review showed.
   That means the element beside the proposal at real size, where it is, why dsa thinks so, and Right,

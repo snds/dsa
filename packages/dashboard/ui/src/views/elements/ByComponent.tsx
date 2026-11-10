@@ -9,6 +9,8 @@ import { Crop, Natural } from "./SameScale"
 import { Conf, decidable, decideNow, nameOf, ownWords, pickText, proposalFor, useEl } from "./shared"
 import { KEEP, NO_HOME } from "./units"
 import { Focus } from "./Focus"
+import { KEYS, keyAction } from "./keys"
+import { Kbd } from "@/components/ui/kbd"
 import { byComponent, neighboursOf, pickOf, shows, statusOf, withApart, type Batch, type ComponentGroup, type Counts, type LookGroup, type PlaceStatus } from "./structure"
 
 /**
@@ -65,6 +67,8 @@ interface Sel {
   look: (id: string) => void
   /** Places with their evidence, as Label Review offers them: they open side by side. */
   reviewable: Set<string>
+  /** The place the keyboard is on. */
+  cursor: string | null
   /** Places set apart from their look group in this browser. */
   apart: Set<string>
 }
@@ -112,6 +116,10 @@ export function ByComponent({ evals }: { evals: any[] }) {
   // Places Label Review would offer (a photo and a drawn proposal): they open in the one-place view.
   const reviewable = React.useMemo(() => new Set<string>((D.elements?.review?.items ?? []).map((x: any) => x.id)), [])
   const [focus, setFocus] = React.useState<{ ids: string[]; i: number } | null>(null)
+  // Keyboard review: the place the keys act on, and the handler (set each render, so it sees current state).
+  const [cursor, setCursor] = React.useState<string | null>(null)
+  const onKey = React.useRef<(ev: KeyboardEvent) => void>(() => {})
+  React.useEffect(() => { const f = (ev: KeyboardEvent) => onKey.current(ev); window.addEventListener("keydown", f); return () => window.removeEventListener("keydown", f) }, [])
 
   const choose = (k: string) => { setSel(k); write(VIEW_KEY, k); setSelected(new Set()); const next = groups.find(x => x.key === k); filter(next?.counts.todo ? "todo" : "all") }
   if (!g) return <Note>No elements to place yet.</Note>
@@ -138,7 +146,7 @@ export function ByComponent({ evals }: { evals: any[] }) {
   async function answer(kind: "confirm" | "gap" | "keep" | { pick: any }, only?: string[]) {
     const parts = new Map<string, { decision: any; ids: string[] }>()
     const use = typeof kind === "object" ? kind.pick : null
-    for (const e of only ? chosen.filter(x => only.includes(x.id)) : chosen) {
+    for (const e of only ? only.map(id => byId.get(id)).filter(Boolean) : chosen) {
       const decision = use ? { verdict: "replace", role: e.role, use: use.use, props: use.props ?? {} }
         : kind === "confirm" ? confirmOf(e) : kind === "gap" ? { verdict: "gap", role: e.role, ...(e.gap ? { gap: e.gap } : {}) } : { verdict: "keep", role: e.role }
       const k = JSON.stringify(decision)
@@ -172,6 +180,32 @@ export function ByComponent({ evals }: { evals: any[] }) {
     openPicker({ ids, ...(Object.keys(merged).length ? { notes: merged } : {}), onDone: (r, saved) => { keep(saved); setDone({ text: `Changed: ${plural(saved.length, "place")}`, parts: [{ ids: saved, labelsAt: r.labelsAt }] }); clear() } })
   }
 
+  // The keys (keys.ts). Only in dsa serve, where answers can be saved.
+  onKey.current = (ev: KeyboardEvent) => {
+    if (!D.serve) return
+    const act = keyAction(ev, Boolean(document.querySelector('[role="dialog"]')))
+    if (!act) return
+    const at = cursor ? visible.findIndex(e => e.id === cursor) : -1
+    const move = (i: number) => {
+      const e = visible[Math.max(0, Math.min(visible.length - 1, i))]
+      if (!e) return
+      setCursor(e.id)
+      document.querySelector(`[data-place="${CSS.escape(e.id)}"]`)?.scrollIntoView?.({ block: "nearest" })
+    }
+    const here = at >= 0 ? visible[at] : null
+    if (act === "next") move(at + 1)
+    else if (act === "prev") move(at < 0 ? 0 : at - 1)
+    else if (act === "tick") { if (here && !whyNot(here, checks)) click(here.id, false) }
+    else if (act === "confirm") { if (selected.size) answer("confirm"); else if (here && !whyNot(here, checks)) answer("confirm", [here.id]) }
+    else if (act === "change") { if (selected.size) change(); else if (here) openPicker({ ids: [here.id] }) }
+    else if (act === "note") { const n = here && document.getElementById(`note-${here.id}`); if (!n) return; (n as HTMLInputElement).focus() }
+    else if (act === "open") { if (here && reviewable.has(here.id)) setFocus({ ids: visible.map(e => e.id), i: at }) }
+    else if (act === "undo") { if (done && !busy) undo() }
+    else if (act === "clear") { if (!selected.size) return; clear() }
+    else return
+    ev.preventDefault()
+  }
+
   async function undo() {
     if (!done) return
     setBusy(true)
@@ -184,7 +218,7 @@ export function ByComponent({ evals }: { evals: any[] }) {
   }
 
   return (
-    <SelCtx.Provider value={{ selected, toggle, click, notes, setNote, checks, see, useFor: (pick, ids) => answer({ pick }, ids), busy, apart, reviewable,
+    <SelCtx.Provider value={{ selected, toggle, click, notes, setNote, checks, see, useFor: (pick, ids) => answer({ pick }, ids), busy, apart, reviewable, cursor,
       look: (id: string) => { const ids = visible.map(e => e.id); setFocus({ ids, i: Math.max(0, ids.indexOf(id)) }) } }}>
       <div className="grid gap-4 md:grid-cols-[15rem_minmax(0,1fr)]" data-slot="by-component">
         <nav aria-label="Where places go" className="flex flex-col gap-1 md:sticky md:top-2 md:max-h-[calc(100vh-1rem)] md:self-start md:overflow-y-auto">
@@ -202,7 +236,14 @@ export function ByComponent({ evals }: { evals: any[] }) {
           <ToggleGroup aria-label="Show" value={[show]} onValueChange={(v: string[]) => v[0] && filter(v[0] as any)} variant="outline" size="sm" className="flex-wrap">
             {FILTERS.map(([v, l]) => <ToggleGroupItem key={v} value={v}>{l} <span className="tabular-nums text-muted-foreground">{v === "all" ? g.counts.total : g.counts[v]}</span></ToggleGroupItem>)}
           </ToggleGroup>
-          {D.serve ? <p className="text-xs text-muted-foreground">Tick places to answer them together; shift-click ticks a range. A note on a row stays with that place.</p>
+          {D.serve ? (
+            <div className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+              <p>Tick places to answer them together; shift-click ticks a range. A note on a row stays with that place.</p>
+              <p className="flex flex-wrap items-center gap-x-3 gap-y-1" aria-label="Keyboard shortcuts" data-slot="keys">
+                {KEYS.map(k => <span key={k.action} className="flex items-center gap-1">{k.keys.map(x => <Kbd key={x}>{x}</Kbd>)} {k.says}</span>)}
+              </p>
+            </div>
+          )
             : <Note className="text-xs">Read-only snapshot: answer from the "By question" view, which stages decisions in this browser.</Note>}
           {done && (
             <div role="status" className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 px-3 py-2 text-sm">
@@ -356,7 +397,8 @@ function Look({ l, items, single }: { l: LookGroup; items: any[]; single: boolea
 
 function Place({ e, group }: { e: any; group: string[] }) {
   const { openLightbox, openCode, openPicker, byId } = useEl()
-  const { selected, click, notes, setNote, checks, look, reviewable } = React.useContext(SelCtx)
+  const { selected, click, notes, setNote, checks, look, reviewable, cursor } = React.useContext(SelCtx)
+  const here = cursor === e.id
   const canLook = reviewable.has(e.id)
   const check = !e.decided && checks.has(e.id)
   const st = statusOf(e, decideNow)
@@ -368,7 +410,8 @@ function Place({ e, group }: { e: any; group: string[] }) {
   // The zoom view steps through this look group's photos.
   const openShot = () => { const ids = group.filter(id => byId.get(id)?.shot); openLightbox(ids, Math.max(0, ids.indexOf(e.id))) }
   return (
-    <li className={cn("grid gap-3 px-4 py-2.5 sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,14rem)_auto] sm:items-center", on && "bg-primary/5")} data-slot="place" data-status={check ? "check" : st}>
+    <li className={cn("grid gap-3 px-4 py-2.5 sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,14rem)_auto] sm:items-center", on && "bg-primary/5", here && "shadow-[inset_3px_0_0_var(--color-primary)] ring-1 ring-primary/40 ring-inset")}
+      data-slot="place" data-place={e.id} data-status={check ? "check" : st} aria-current={here ? "true" : undefined}>
       <span className="flex sm:self-center">
         {D.serve && (
           <input type="checkbox" checked={on} disabled={Boolean(why)} title={why ?? "Tick to answer with others"} aria-label={`Select ${nameOf(e)}`}
@@ -391,7 +434,7 @@ function Place({ e, group }: { e: any; group: string[] }) {
         <span className="truncate text-xs text-muted-foreground">{e.review?.pageName ?? e.target}</span>
         <button type="button" onClick={() => openCode(e.id)} className="w-fit max-w-full truncate text-left font-mono text-[11px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" title="Open the code">{short(e.file)}:{e.line}</button>
         {e.decided ? (e.decided.note && <span className="text-xs text-muted-foreground">Note: {e.decided.note}</span>)
-          : D.serve && !why && <input id={`note-${e.id}`} value={notes[e.id] ?? ""} onChange={ev => setNote(e.id, ev.target.value)} placeholder="Note for this place" aria-label={`Note for ${nameOf(e)}`}
+          : D.serve && !why && <input id={`note-${e.id}`} value={notes[e.id] ?? ""} onChange={ev => setNote(e.id, ev.target.value)} onKeyDown={ev => { if (ev.key === "Escape" || ev.key === "Enter") (ev.target as HTMLInputElement).blur() }} placeholder="Note for this place" aria-label={`Note for ${nameOf(e)}`}
               className="h-7 w-full rounded border bg-background px-2 text-xs focus-visible:outline-2 focus-visible:outline-ring" />}
       </div>
       <div className="flex flex-wrap items-center gap-2 sm:justify-end">
