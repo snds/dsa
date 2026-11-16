@@ -16,6 +16,13 @@ charts. Names are made up (`app-a`, `app-b`, `app-c`).
   `npx vite build --configLoader runner --config wireframes/vite.config.ts`. Nothing in the app
   imports it.
 
+## The Figma file
+
+The full design lives in Figma: <https://www.figma.com/design/8oUdMeweXlHGS48PgsMkOK>.
+It has the tokens in Light and Dark, the components with every state, the serve and published
+screens, the narrow-screen thread, the Apps and Settings pages, motion, and the D1–D6 options.
+It is private to Sean's Figma team.
+
 ## The screens
 
 1. **Inbox** (`#inbox`). Home. Issues grouped by component. Filters for *Waiting on you*, *Needs a

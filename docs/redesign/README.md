@@ -1,6 +1,6 @@
 # DSA dashboard redesign: proposal
 
-**Status:** proposal for Sean's review. No app code changes yet.
+**Status:** approved by Sean on 2026-11-16, decisions D1–D6 included. No app code changes yet; the build follows the [plan](06-build-plan.md).
 
 ## The answer in five lines
 
@@ -19,14 +19,16 @@
 
 ## Decisions for Sean
 
-| # | Decision | Recommendation |
+All six were approved as recommended on 2026-11-16.
+
+| # | Decision | Outcome |
 | --- | --- | --- |
-| D1 | Replace ten tabs with five pages: Inbox, Components, Apps, Health, Settings | Yes |
-| D2 | One certainty scale everywhere: *Measured*, *Inferred*, *Needs a person* | Yes |
-| D3 | One thread per anchor, with *New thread* for a fresh start | Yes |
-| D4 | The agent may open a **draft** PR after a person's click, with that person's own GitHub sign-in | Yes |
-| D5 | Published pages: GitHub routes first, hosted service later | Yes |
-| D6 | Thread transcripts on published pages: summaries and outcomes only, full text opt-in | Yes |
+| D1 | Replace ten tabs with five pages: Inbox, Components, Apps, Health, Settings | Approved |
+| D2 | One certainty scale everywhere: *Measured*, *Inferred*, *Needs a person* | Approved |
+| D3 | One thread per anchor, with *New thread* for a fresh start | Approved |
+| D4 | The agent may open a **draft** PR after a person's click, with that person's own GitHub sign-in | Approved |
+| D5 | Published pages: GitHub routes first, hosted service later | Approved |
+| D6 | Thread transcripts on published pages: summaries and outcomes only, full text opt-in | Approved |
 
 ## The parts
 
@@ -36,7 +38,7 @@
 4. [The pinned agent thread](04-pinned-chat.md). Anchors, context, actions, state, persistence.
 5. [Where the agent can run](05-hosting.md). `dsa serve`, published pages, GitHub routes, a service.
 6. [Build plan](06-build-plan.md). Nine stages, one PR each.
-7. [Layouts](layouts.md). Five low-fidelity screens built from the dashboard's UI kit.
+7. [Layouts](layouts.md). Five low-fidelity screens built from the dashboard's UI kit, and the full Figma build.
 
 ## What this assumes from other work
 
