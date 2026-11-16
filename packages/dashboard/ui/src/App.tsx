@@ -23,7 +23,7 @@ import { Usage } from "@/views/Usage"
 import { AgentProvider, canChat, useAgent } from "@/agent/store"
 import { AgentPanel } from "@/agent/AgentPanel"
 import { cn } from "cn"
-import { ACTIONS, rescan as hostRescan } from "@/lib/host"
+import { ACTIONS, rescan as hostRescan, rescanIssueUrl } from "@/lib/host"
 import { NextScan, ScanButton, ScanOverlay, ShotsMenu, ShotsNote, SignInDialog } from "@/components/scan"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { canRun, detectRunning, offersShots, useScan } from "@/lib/useScan"
@@ -39,9 +39,7 @@ const VIEWS: { id: ViewId; label: string; hint: string }[] = [
   { id: "system", label: "System", hint: "Every component: kind, variants, parts, tokens, use, and how it was found" },
   { id: "federation", label: "Apps", hint: "Child libraries and the apps that use the system" },
   ...(D.elements ? [{ id: "elements" as const, label: "Element Review", hint: D.elements.questions.length ? `${D.elements.questions.length} questions for a human` : `Native elements vs ${SYS}` }] : []),
-  // In dsa serve, Element Review answers everything (each answer is the decision and the label) and opens
-  // any place on its own, so Label Review is only kept on a published snapshot, where labels are downloaded.
-  ...(D.elements?.review && !D.serve ? [{ id: "review" as const, label: "Label Review", hint: `${D.elements.review.items.length} elements to check one at a time` }] : []),
+  // Label Review is part of Element Review everywhere now: one answer is the decision and the label.
   ...(D.usage ? [{ id: "usage" as const, label: "System Usage", hint: `Where ${SYS} tokens and components are used, per library` }] : []),
   ...(D.readiness?.length || D.bench?.length ? [{ id: "readiness" as const, label: "Agents & Benchmarks", hint: "Agent readiness per repo, the usage checker, and bench runs" }] : []),
   ...(D.modules?.figma ? [{ id: "design" as const, label: "Design Files", hint: "Figma crawl" }] : []),
@@ -53,8 +51,8 @@ const titleCase = (s: string) => s.split(/\s+/).map((w, i) => (i > 0 && /^(a|an|
 
 function readHash(): { view: ViewId; section: SectionId } {
   const [v0, s] = routePath().split("/")
-  // Older links: #components is the System view now; in dsa serve, #review is part of Element Review.
-  const v = v0 === "components" ? "system" : v0 === "review" && D.serve && D.elements ? "elements" : v0
+  // Older links: #components is the System view now; #review is part of Element Review.
+  const v = v0 === "components" ? "system" : v0 === "review" && D.elements ? "elements" : v0
   const view = (v === "settings" || VIEWS.some(x => x.id === v) ? v : D.run ? "overview" : "settings") as ViewId
   // The old Rules tab lives in Settings now.
   if (v === "rules") return { view: "settings", section: "rules" }
@@ -77,48 +75,51 @@ function AgentButton() {
 }
 
 /**
- * A published page can't scan. Its Re-scan hands off to the host adapter's target, and says so: a link
- * that opens that page in a new tab (GitHub's Run workflow page, a CI job), or a request sent to a
- * webhook. Under it, where it goes and when this page will change, so it never looks like an in-page scan.
+ * A published page can't scan. Its Re-scan hands off to where the host adapter says, and says so in one
+ * line: a filled-in GitHub issue that a workflow turns into a scan (no service, no token), a page that
+ * opens in a new tab, or a request sent to a webhook. The terminal command, when there is one, waits
+ * behind "Run it from a terminal" so the header stays a button and a time.
  */
 export function StaticRescan({ onPost }: { onPost: () => void }) {
   const r = ACTIONS!.rescan
   const { shots } = useScan()
   const target = (r.url ?? "").replace(/^https?:\/\//, "").replace(/\/$/, "")
-  // No relay: say how Re-scan gets enabled instead of a button that can't work.
+  // Nothing can start a scan from here: say when the next one runs and how to enable the button.
   if (r.kind === "none") return (
     <div className="flex max-w-sm flex-col items-end gap-1">
-      <NextScan prefix="Next scheduled scan" className="text-xs text-muted-foreground" />
+      <NextScan prefix="Next scan" className="text-xs text-muted-foreground" />
       <p className="text-right text-xs text-muted-foreground">{r.help}</p>
     </div>
   )
-  const link = r.kind === "link" && (
-    <a data-slot="button" href={r.url} target="_blank" rel="noopener noreferrer" className={buttonVariants({ variant: "outline" })}>
+  const setting = offersShots() && shots !== "normal"
+  const href = r.kind === "issue" ? rescanIssueUrl(r, shots) : r.url
+  const opens = r.kind === "issue" || r.kind === "link"
+  const button = opens ? (
+    <a data-slot="button" href={href} target="_blank" rel="noopener noreferrer" className={buttonVariants({ variant: "outline" })} title={r.help}>
       <ArrowSquareOutIcon data-icon="inline-start" />{r.label}
     </a>
+  ) : (
+    <Button variant="outline" onClick={onPost} title={r.help}><PaperPlaneTiltIcon data-icon="inline-start" />{r.label}</Button>
   )
-  // The page can only open GitHub's form, not fill it in. The command carries the setting, so it's
-  // the way to start this scan in one step; the form needs the setting picked again.
-  const split = link && offersShots()
-  const setting = split && shots !== "normal"
-  const command = r.command && `${r.command}${setting ? ` -f shots=${shots}` : ""}`
+  // A link can't fill in GitHub's Run workflow form; the command can, so it carries the setting.
+  const command = r.kind === "link" && r.command ? `${r.command}${setting ? ` -f shots=${shots}` : ""}` : null
+  const where = r.kind === "issue" ? "Opens a filled-in GitHub issue: submit it to start the scan." : opens ? `Opens ${target.split("/")[0]} in a new tab.` : `Sends a request to ${target.split("/")[0]}.`
   return (
-    <div className="flex max-w-sm flex-col items-end gap-1">
-      {split ? <><ButtonGroup>{link}<ShotsMenu variant="outline" /></ButtonGroup><ShotsNote /></> : link || (
-        <Button variant="outline" onClick={onPost}><PaperPlaneTiltIcon data-icon="inline-start" />{r.label}</Button>
-      )}
-      {command && (
-        <div className="flex w-full items-center gap-1 rounded-md border bg-muted/40 py-1 pr-1 pl-2">
-          <code className="min-w-0 flex-1 text-left font-mono text-xs break-all">{command}</code>
-          <Button size="icon-sm" variant="ghost" aria-label="Copy command" title="Copy command" onClick={() => copy(command, "Command copied. Run it in a terminal.")}><CopyIcon /></Button>
-        </div>
-      )}
-      <NextScan prefix="Next scheduled scan" className="text-xs text-muted-foreground" />
-      <p className="text-right text-xs text-muted-foreground">
-        {command && <>The command starts the scan from a terminal with GitHub's <span className="font-mono">gh</span> tool. </>}
-        {setting && <>On GitHub's page, choose {shots} under Photos. </>}
-        {r.help}{target && <> <span className="font-mono break-all" title={r.url}>{r.kind === "link" ? "Opens" : "Sends to"} {target}</span></>}
+    <div className="flex max-w-sm flex-col items-end gap-1" data-slot="static-rescan">
+      {offersShots() && opens ? <ButtonGroup>{button}<ShotsMenu variant="outline" /></ButtonGroup> : button}
+      {offersShots() && <ShotsNote />}
+      <p className="flex flex-wrap justify-end gap-x-2 text-right text-xs text-muted-foreground">
+        <NextScan prefix="Next scan" /><span>{where}{setting && r.kind === "link" ? ` On GitHub's page, choose ${shots} under Photos.` : ""}</span>
       </p>
+      {command && (
+        <details className="w-full text-right text-xs text-muted-foreground">
+          <summary className="cursor-pointer select-none hover:text-foreground">Run it from a terminal</summary>
+          <div className="mt-1 flex items-center gap-1 rounded-md border bg-muted/40 py-1 pr-1 pl-2 text-left">
+            <code className="min-w-0 flex-1 font-mono break-all">{command}</code>
+            <Button size="icon-sm" variant="ghost" aria-label="Copy command" title="Copy command" onClick={() => copy(command, "Command copied. Run it in a terminal.")}><CopyIcon /></Button>
+          </div>
+        </details>
+      )}
     </div>
   )
 }

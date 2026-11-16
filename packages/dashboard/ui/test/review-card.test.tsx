@@ -68,7 +68,7 @@ beforeAll(async () => {
   m = { Elements: (await import("@/views/elements/Elements")).Elements, app: await import("@/lib/app"), probe: await import("../../src/card-dom"), trust: await import("../../src/trust") }
 })
 
-beforeEach(() => m.app.setApp(null))
+beforeEach(() => { m.app.setApp(null); history.replaceState(null, "", "#elements/question") })
 afterEach(async () => {
   if (root) await act(async () => root.unmount())
   document.body.innerHTML = ""

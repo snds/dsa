@@ -4,7 +4,7 @@ import { defineAddon, deployOf, normalizeBase, type AddonApi } from '@snds/dsa';
 import { createRelay, relayEnvProblems, relayOptionsFromEnv } from '@snds/dsa/relay';
 import { buildReport } from './report.js';
 import { publish } from './publish.js';
-import { serve } from './server.js';
+import { labelDecision, serve } from './server.js';
 import { benchCommands } from './bench-cli.js';
 
 export { buildReport, renderReport, type ReportOptions } from './report.js';
@@ -28,6 +28,14 @@ function noReport(program: Command, name: string) {
 
 export default defineAddon({
   name: '@snds/dsa-dashboard',
+  // Answers sent from a published dashboard are labels too, as when they're made in dsa serve.
+  async afterDecisions({ ctx, decisions, log }) {
+    let n = 0;
+    for (const d of decisions) {
+      n += await labelDecision(ctx.dataDir, { ids: d.ids, pattern: d.pattern }, d.decision as any, d.who, d.note, d.notes, d.at ? new Date(d.at) : undefined);
+    }
+    if (n) log(`Labels: saved ${n} for the confidence benchmark`);
+  },
   afterRun: [
     {
       id: 'Report',

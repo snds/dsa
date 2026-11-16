@@ -170,8 +170,8 @@ const HostSchema = z
       .describe('When scans run by themselves, as cron lines in UTC ("47 9 * * 1-5"), so the dashboard can show the next one. The github adapter reads them from the workflow file when this is unset.'),
     rescan: z
       .object({
-        url: z.string().describe("Where Re-scan goes: a page that starts the scan job (opened in a new tab), or a webhook (POSTed to)."),
-        method: z.enum(["link", "post"]).default("link"),
+        url: z.string().optional().describe("Where Re-scan goes: a page that starts the scan job (opened in a new tab), or a webhook (POSTed to). Not used with method \"issue\"."),
+        method: z.enum(["link", "post", "issue"]).default("link").describe('link: open url; post: send a request to url; issue (github adapter): open a filled-in issue that a workflow turns into a scan, so no service or token is needed.'),
         label: z.string().optional(),
         status: z.string().optional().describe('With method "post": a URL that reports one run ({id} is filled in), so the page can show its progress. Answers { status: "queued"|"running"|"done"|"failed", steps?: { done, total, current }, url?, startedAt?, error? }.'),
         active: z.string().optional().describe('With method "post": a URL that lists the runs going now ({ runs: [...] }, same shape), so the page can show a scan that started elsewhere.'),
@@ -200,6 +200,7 @@ const HostSchema = z
         dispatch: z.boolean().optional().describe("No longer used: Re-scan goes through the scan relay (host.relay). Kept so older configs still load."),
         ref: z.string().optional().describe("The branch the workflow runs on (default: the repo's default branch)."),
         label: z.string().default("dsa-decisions").describe("The label on decision issues, which the apply workflow listens for."),
+        rescanLabel: z.string().default("dsa-rescan").describe('The label on re-scan issues (host.rescan.method "issue"), which the scan workflow listens for.'),
         server: z.string().default("https://github.com").describe("GitHub's web address (GitHub Enterprise Server: your host)."),
         api: z.string().optional().describe("GitHub's API address (default https://api.github.com, or <server>/api/v3 for a server)."),
       })

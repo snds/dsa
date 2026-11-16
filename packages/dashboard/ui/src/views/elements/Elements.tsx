@@ -6,7 +6,8 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Note, SectionTitle, Stat } from "@/components/bits"
 import { D, fmtDT, short, SYS } from "@/lib/dsa"
-import { unstage, useStaged } from "@/lib/staged"
+import { readStaged, unstage, useStaged } from "@/lib/staged"
+import { stagedDecided } from "@/lib/answer"
 import { decideNow, ElCtx, ElementRow, sameDecision, type PickerTarget } from "./shared"
 import { StagedBar } from "./StagedBar"
 import { Picker } from "./Picker"
@@ -15,7 +16,7 @@ import { CodeViewer } from "./CodeViewer"
 import { Destination } from "./Destination"
 import { ByComponent } from "./ByComponent"
 import { NO_HOME, destinations, matches as byStatus, styleName, unitsFor, type Unit } from "./units"
-import { useApp } from "@/lib/app"
+import { useApp, routePath } from "@/lib/app"
 
 const VIEW = "dsa.elements.view"
 
@@ -45,11 +46,13 @@ export function Elements() {
   const [picker, setPicker] = React.useState<PickerTarget | null>(null)
   const [lb, setLb] = React.useState<{ ids: string[]; i: number; decision?: any } | null>(null)
   const [code, setCode] = React.useState<string | null>(null)
-  // By component (where each place goes) or by question (the cards dsa asks). Remembered per browser.
-  // A published snapshot opens by question, where decisions are staged.
-  const [view, setView] = React.useState<"component" | "question">(() => { let v: string | null = null; try { v = window.localStorage.getItem(VIEW) } catch { /* none */ } return v === "component" || v === "question" ? v : D.serve ? "component" : "question" })
-  const chooseView = (v: "component" | "question") => { setView(v); try { window.localStorage.setItem(VIEW, v) } catch { /* kept for this visit */ } }
+  // One review screen, by component, in dsa serve and on a published copy alike. The older "by question"
+  // cards stay reachable with #elements/question while the redesign replaces them.
+  const [view, setView] = React.useState<"component" | "question">(() => (routePath().endsWith("/question") ? "question" : "component"))
+  const chooseView = (v: "component" | "question") => setView(v)
   const applyLocal = (ids: string[], decided: any) => { for (const id of ids) { const e = byId.get(id); if (!e) continue; if (decided) e.decided = decided; else delete e.decided; e.needsHuman = !e.decided && e.confidence < th } }
+  // A published copy: answers staged in this browser show on their places until a scan holds them.
+  React.useState(() => { if (!D.serve) for (const x of readStaged()) if (!x.pattern) applyLocal(x.ids.filter(id => !byId.get(id)?.decided), stagedDecided(x.decision, x.note)) })
   const ctx = { th, byId, applyLocal, refresh, openPicker: setPicker, openLightbox: (ids: string[], i: number, decision?: any) => setLb({ ids, i, decision }), openCode: setCode }
 
   const mine = E.evals.filter((e: any) => !target || e.target === target)
@@ -112,9 +115,10 @@ export function Elements() {
   if (view === "component") return (
     <ElCtx.Provider value={ctx}>
       <div className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-center gap-3">{viewSwitch}<span className="text-xs text-muted-foreground">Every place in the app, by the component it goes to, then its settings, then shared styles.</span></div>
+        <p className="text-xs text-muted-foreground">Every place in the app, by the component it goes to, then its settings, then shared styles.</p>
         <ByComponent evals={mine} />
         <Housekeeping unused={unused} mine={mine} />
+        {!D.serve && <StagedBar />}
       </div>
       {dialogs}
     </ElCtx.Provider>

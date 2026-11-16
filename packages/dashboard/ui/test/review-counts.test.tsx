@@ -49,6 +49,8 @@ afterEach(async () => {
 })
 
 async function mount(node: React.ReactNode) {
+  // These cover the older by-question cards.
+  history.replaceState(null, "", "#elements/question")
   const host = document.createElement("div")
   document.body.append(host)
   root = createRoot(host)

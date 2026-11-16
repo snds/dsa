@@ -137,6 +137,7 @@ test("Apps, System, Trends and Readiness show only the chosen app's numbers", as
 })
 
 test("Element Review has no selector of its own; all apps lists every app's elements, one app its own", async () => {
+  history.replaceState(null, "", "#elements/question")
   await mount(<><m.sel.AppSelect /><m.Elements key="all" /></>)
   expect(document.querySelectorAll('select[aria-label="App"]').length).toBe(1)
   const ready = () => [...document.querySelectorAll("button, div")].find(e => e.textContent?.startsWith("Ready to migrate"))?.textContent

@@ -1,4 +1,5 @@
 import * as React from "react"
+import { saveAnswer } from "@/lib/answer"
 import { cn } from "cn"
 import { MagnifyingGlassIcon, StarIcon, WarningIcon } from "@phosphor-icons/react"
 import { Badge } from "@/components/ui/badge"
@@ -12,7 +13,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Code, Note, Pre } from "@/components/bits"
 import { D, api, at, pct100, reviewerName, say, short } from "@/lib/dsa"
-import { desc, useEl, type PickerTarget } from "./shared"
+import { desc, nameOf, useEl, type PickerTarget } from "./shared"
 
 /**
  * Component picker: any system component, every prop it has (variant axes with how well each option fits
@@ -200,13 +201,13 @@ export function Picker({ target, onClose }: { target: PickerTarget; onClose: () 
   React.useEffect(() => { startSb() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   async function record(decision: any) {
     try {
-      const r = await api("/api/decide", { ...(target.pattern ? { pattern: target.pattern } : { ids: target.ids }), decision, note: note || undefined, ...(target.notes ? { notes: target.notes } : {}), who: reviewerName() })
       const ids = target.pattern ? D.elements.evals.filter((e: any) => e.styleKey === target.pattern || e.styleSig === target.pattern).map((e: any) => e.id) : target.ids
+      const r = await saveAnswer({ ids, pattern: target.pattern ?? null, decision, note: note || undefined, ...(target.notes ? { notes: target.notes } : {}), label: `${nameOf(first)}${ids.length > 1 ? ` ×${ids.length}` : ""}`, target: first?.target })
       applyLocal(ids, r.decided)
       // Each element keeps its own note (shown on its row), over the dialog's shared one.
       if (target.notes) for (const id of ids) { const n = target.notes[id]; const e = n ? byId.get(id) : null; if (e?.decided) e.decided = { ...e.decided, note: n } }
       target.onDone?.(r, ids, decision)
-      say(`Recorded for ${r.recorded} element(s): ${desc(decision)}`)
+      say(`${D.serve ? "Recorded" : "Staged"} for ${r.recorded} element(s): ${desc(decision)}${D.serve ? "" : ". Send it from the bar at the bottom."}`)
       onClose(); refresh()
     } catch (e: any) { say(e.message, true) }
   }

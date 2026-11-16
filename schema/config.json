@@ -1539,15 +1539,17 @@
           "type": "object",
           "properties": {
             "url": {
-              "type": "string",
-              "description": "Where Re-scan goes: a page that starts the scan job (opened in a new tab), or a webhook (POSTed to)."
+              "description": "Where Re-scan goes: a page that starts the scan job (opened in a new tab), or a webhook (POSTed to). Not used with method \"issue\".",
+              "type": "string"
             },
             "method": {
               "default": "link",
+              "description": "link: open url; post: send a request to url; issue (github adapter): open a filled-in issue that a workflow turns into a scan, so no service or token is needed.",
               "type": "string",
               "enum": [
                 "link",
-                "post"
+                "post",
+                "issue"
               ]
             },
             "label": {
@@ -1568,7 +1570,6 @@
             }
           },
           "required": [
-            "url",
             "method"
           ],
           "additionalProperties": false
@@ -1636,6 +1637,11 @@
               "description": "The label on decision issues, which the apply workflow listens for.",
               "type": "string"
             },
+            "rescanLabel": {
+              "default": "dsa-rescan",
+              "description": "The label on re-scan issues (host.rescan.method \"issue\"), which the scan workflow listens for.",
+              "type": "string"
+            },
             "server": {
               "default": "https://github.com",
               "description": "GitHub's web address (GitHub Enterprise Server: your host).",
@@ -1649,6 +1655,7 @@
           "required": [
             "workflow",
             "label",
+            "rescanLabel",
             "server"
           ],
           "additionalProperties": false

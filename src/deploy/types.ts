@@ -114,9 +114,10 @@ export interface PageActions {
     /**
      * relay: the page signs the viewer in at the scan relay (`url`), which starts the scan and reports its progress;
      * run: the page calls a webhook runner itself (`runner`); link: opens a page; post: sends a request and can't
-     * follow it; none: no button (`help` says how to enable one).
+     * follow it; issue: opens a filled-in issue (`url` is the new-issue page) that a workflow turns into a scan;
+     * none: no button (`help` says how to enable one).
      */
-    kind: "relay" | "run" | "link" | "post" | "none";
+    kind: "relay" | "run" | "link" | "post" | "issue" | "none";
     url?: string | undefined;
     label: string;
     help: string;
@@ -127,6 +128,9 @@ export interface PageActions {
     shots?: boolean | undefined;
     /** link: the terminal command that does the same, for the viewer to copy. */
     command?: string | undefined;
+    /** issue: the issue's title and labels (the page adds the body with the chosen setting). */
+    title?: string | undefined;
+    labels?: string[] | undefined;
   };
   decisions: {
     kind: "export" | "post" | "issue";

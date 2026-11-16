@@ -6,7 +6,7 @@ import { FILE_NAME, decisionsFile, downloadDecisions, type Staged } from "@/lib/
 
 export interface PageActions {
   host: string
-  rescan: { kind: "link" | "post" | "none"; url?: string; label: string; help: string; shots?: boolean; command?: string }
+  rescan: { kind: "link" | "post" | "issue" | "none"; url?: string; label: string; help: string; shots?: boolean; command?: string; title?: string; labels?: string[] }
   decisions: { kind: "export" | "post" | "issue"; url?: string; label: string; help: string; title?: string; labels?: string[]; apply: string }
 }
 
@@ -59,4 +59,18 @@ export async function sendDecisions(list: Staged[]): Promise<string> {
   try { await navigator.clipboard.writeText(body) } catch { downloadDecisions(list); window.open(u.toString(), "_blank", "noopener"); return `Too many to put in a link: saved ${FILE_NAME}. Paste its contents into the issue in a \`\`\`json block.` }
   window.open(u.toString(), "_blank", "noopener")
   return "Opened a new issue. The decisions are on your clipboard: paste them as the issue's body."
+}
+
+/** The new-issue link for Re-scan by issue: title, label, and the setting as a block the workflow reads. */
+export function rescanIssueUrl(r: { url?: string | undefined; title?: string | undefined; labels?: string[] | undefined }, shots: string): string {
+  const body = [
+    "Re-scan requested from the dsa dashboard. Submit this issue to start the scan; it closes when the dashboard is updated.",
+    "",
+    "<!-- dsa:rescan -->",
+    "```json",
+    JSON.stringify({ dsa: "rescan", shots }),
+    "```",
+  ].join("\n")
+  const q = new URLSearchParams({ title: r.title ?? "Re-scan the dsa dashboard", body, ...(r.labels?.length ? { labels: r.labels.join(",") } : {}) })
+  return `${r.url}?${q.toString()}`
 }

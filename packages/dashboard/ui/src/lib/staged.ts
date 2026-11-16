@@ -12,6 +12,10 @@ export interface Staged {
   pattern?: string | null
   decision: any
   note?: string
+  /** A note per element, by id (Element Review's own-row notes). */
+  notes?: Record<string, string>
+  /** Who answered, if the reviewer gave a name. */
+  who?: string
   /** Which card it came from, for the export list: `<button> ×12 (btnGhost)`. */
   label: string
   at: string
@@ -43,6 +47,8 @@ export const stage = (s: Omit<Staged, "at">) => write([...read().filter(x => x.k
 export const unstage = (key: string) => write(read().filter(x => x.key !== key))
 export const clearStaged = () => write([])
 export const setStagedNote = (key: string, note: string) => write(read().map(x => (x.key === key ? { ...x, note: note || undefined } : x)))
+/** The staged answers now, outside React. */
+export const readStaged = () => read()
 export const useStaged = () => React.useSyncExternalStore(subscribe, read, read)
 
 /** The file `dsa decide --file` reads. */
@@ -51,7 +57,7 @@ export function decisionsFile(list: Staged[]) {
     dsa: "decisions",
     version: 1,
     exportedAt: new Date().toISOString(),
-    decisions: list.map(s => ({ ...(s.pattern ? { pattern: s.pattern } : { ids: s.ids }), decision: s.decision, ...(s.note ? { note: s.note } : {}), label: s.label })),
+    decisions: list.map(s => ({ ...(s.pattern ? { pattern: s.pattern } : { ids: s.ids }), decision: s.decision, ...(s.note ? { note: s.note } : {}), ...(s.notes ? { notes: s.notes } : {}), ...(s.who ? { who: s.who } : {}), at: s.at, label: s.label })),
   }
 }
 

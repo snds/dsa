@@ -138,6 +138,7 @@ test("no accessibility violations axe can find in the review view", async () => 
 })
 
 test("on a card, every element has its own tile; one without evidence says so instead of offering a decision", async () => {
+  history.replaceState(null, "", "#elements/question")
   const host = await mount(<m.Elements />)
   const tiles = [...host.querySelectorAll("figure[data-element-id]")].map(f => f.getAttribute("data-element-id"))
   expect(tiles).toContain("ok")

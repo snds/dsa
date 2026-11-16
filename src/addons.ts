@@ -30,6 +30,11 @@ export interface DsaAddon {
   commands?: (program: Command, api: AddonApi) => void;
   /** Steps after a run (or a re-evaluation) finishes: screenshots, the report, the agent snapshot. */
   afterRun?: AfterRunHook[];
+  /**
+   * After `dsa apply-decisions` records decisions sent from a published dashboard: the same follow-up
+   * `dsa serve` does when a person answers there (the dashboard saves each answer as a label too).
+   */
+  afterDecisions?: (a: AfterDecisionsContext) => Promise<void> | void;
   /** Routes the dashboard's `dsa serve` mounts (the agent workbench's API). */
   routes?: ServeRoute;
   /** Host adapters (what a static dashboard's buttons do, where decisions come from), picked by host.adapter. */
@@ -72,6 +77,36 @@ export interface AfterRunContext {
   store: StoreFactory;
   notes: string[];
   log: (msg: string) => void;
+}
+
+/** Decisions `dsa apply-decisions` just recorded, as each was sent. */
+export interface AppliedDecision {
+  ids?: string[] | undefined;
+  pattern?: string | undefined;
+  decision: Record<string, unknown>;
+  who?: string | undefined;
+  note?: string | undefined;
+  notes?: Record<string, string> | undefined;
+  /** When it was decided on the page, if the file says. */
+  at?: string | undefined;
+}
+
+export interface AfterDecisionsContext {
+  ctx: EngineContext;
+  decisions: AppliedDecision[];
+  log: (msg: string) => void;
+}
+
+/** Run every add-on's after-decisions step; a failing one is reported, never fatal. */
+export async function runAfterDecisions(addons: DsaAddon[], a: AfterDecisionsContext, notes: string[]): Promise<void> {
+  for (const x of addons) {
+    if (!x.afterDecisions) continue;
+    try {
+      await x.afterDecisions(a);
+    } catch (e) {
+      notes.push(`${x.name} skipped after decisions: ${String((e as Error)?.message ?? e).split("\n")[0]!.slice(0, 200)}`);
+    }
+  }
 }
 
 /** Run every add-on's after-run hooks in order. */
