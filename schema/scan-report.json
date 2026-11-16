@@ -2298,6 +2298,46 @@
         "counts"
       ],
       "additionalProperties": false
+    },
+    "styleValues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "column": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "value": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "color",
+              "length"
+            ]
+          }
+        },
+        "required": [
+          "file",
+          "line",
+          "column",
+          "value",
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "description": "Colours and pixel sizes written straight into consumer code where a token belongs, by line. Not counted by the ratchet."
     }
   },
   "required": [
@@ -2308,7 +2348,8 @@
     "dsSourceFiles",
     "adoption",
     "inventory",
-    "correctUse"
+    "correctUse",
+    "styleValues"
   ],
   "additionalProperties": false,
   "description": "Output of `dsa scan`: inventory, adoption (definition 1: imports) and correct-use findings."

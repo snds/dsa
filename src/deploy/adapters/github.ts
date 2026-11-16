@@ -145,6 +145,33 @@ export const githubHost: HostAdapter = {
     await gh(c, "POST", `/repos/${s.repo}/issues/${n}/comments`, { body: summary });
     await gh(c, "PATCH", `/repos/${s.repo}/issues/${n}`, { state: "closed", state_reason: "completed" });
   },
+  async prComment(pr, comment, c) {
+    const repo = pr.repo ?? settings(c).repo;
+    if (!repo) throw new Error("The github adapter needs a repo to comment on a pull request: pass --repo, or set GITHUB_REPOSITORY or host.github.repo.");
+    if (!comment.body.includes(comment.marker)) throw new Error("The comment body must carry its marker.");
+    // A pull request's conversation is its issue comments. Look through every page for ours.
+    let existing: any = null;
+    for (let page = 1; page <= 30 && !existing; page++) {
+      const list: any[] = (await gh(c, "GET", `/repos/${repo}/issues/${pr.number}/comments?per_page=100&page=${page}`)) ?? [];
+      existing = list.find((x) => String(x.body ?? "").includes(comment.marker)) ?? null;
+      if (list.length < 100) break;
+    }
+    if (existing) {
+      if (String(existing.body ?? "") === comment.body) return { action: "unchanged", url: existing.html_url };
+      const done = await gh(c, "PATCH", `/repos/${repo}/issues/comments/${existing.id}`, { body: comment.body });
+      return { action: "updated", url: done?.html_url ?? existing.html_url };
+    }
+    if (comment.create === false) return { action: "skipped" };
+    const made = await gh(c, "POST", `/repos/${repo}/issues/${pr.number}/comments`, { body: comment.body });
+    return { action: "created", url: made?.html_url };
+  },
+  fileUrl(f, c) {
+    const s = settings(c);
+    const repo = f.repo ?? s.repo;
+    if (!repo) return undefined;
+    const file = f.path.replace(/\\/g, "/").split("/").map(encodeURIComponent).join("/");
+    return `${s.server}/${repo}/blob/${f.sha}/${file}${f.line ? `#L${f.line}` : ""}`;
+  },
   revisionSources: (c) => [deploymentSource(c)],
   // The workflow's own schedule (on.schedule[].cron, always UTC on GitHub), unless the config says otherwise.
   schedule: (c) => c.host.schedule ?? workflowCrons(c.root, settings(c).workflow),

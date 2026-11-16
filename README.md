@@ -257,6 +257,15 @@ rawElements                0        0      0
 wrote <repo>/test/fixtures/app/.dsa/ratchet.json
 ```
 
+### `dsa pr-comment [dir] [--base <ref>] [--post] [--quiet-when-clean]`
+
+Says what a pull request does to design-system use, in one comment on it. It scans the pull
+request's head and its base, then lists each new hard-coded style value, custom look-alike and
+component used against its guidelines, with its file and line, and what the change fixed. It
+writes Markdown to stdout (or `--out`). With `--post` it creates or updates one comment, found again
+by a hidden marker. In GitHub Actions it reads the pull request from the environment. Options and
+the workflow to add: [docs/pr-comments.md](docs/pr-comments.md).
+
 ### `dsa checklist [dir] [--answers <file>] [--markdown [file]]`
 
 Scores the system against a 78-item health checklist in 13 areas: the usual design-system

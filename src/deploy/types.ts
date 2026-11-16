@@ -167,6 +167,33 @@ export interface HostAdapter {
   schedule?(c: HostContext): string[];
   /** Ways to learn the live revision this host offers, for this run's settings (a deployments API). */
   revisionSources?(c: HostContext): RevisionSource[];
+  /**
+   * Create or update the one comment on a pull request that carries `comment.marker` (a hidden
+   * line in its body), so a rerun edits it instead of adding another. Optional.
+   */
+  prComment?(pr: PullRequestRef, comment: PrCommentBody, c: HostContext): Promise<PrCommentResult>;
+  /** A web link to a file (repo-relative path) at a commit, at a line. Optional. */
+  fileUrl?(f: { repo?: string | undefined; sha: string; path: string; line?: number | undefined }, c: HostContext): string | undefined;
+}
+
+/** A pull request: its number, and the repo when it isn't the adapter's default. */
+export interface PullRequestRef {
+  number: number;
+  repo?: string | undefined;
+}
+
+export interface PrCommentBody {
+  /** The full Markdown body; it must contain `marker`. */
+  body: string;
+  /** The hidden line that finds this comment again, e.g. `<!-- dsa:pr-comment -->`. */
+  marker: string;
+  /** False: update an existing comment, but don't start one (a clean change with nothing to say). */
+  create?: boolean | undefined;
+}
+
+export interface PrCommentResult {
+  action: "created" | "updated" | "unchanged" | "skipped";
+  url?: string | undefined;
 }
 
 /** Where the data folder (run history, screenshots, renderings) persists between runs. */
