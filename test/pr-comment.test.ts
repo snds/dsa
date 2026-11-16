@@ -173,7 +173,7 @@ describe("pullRequestFromEnv", () => {
 function fakeGitHub(existing: { id: number; body: string }[]) {
   const calls: { method: string; url: string; body?: any }[] = [];
   const comments = [...existing];
-  const fetch = (async (url: string, init?: RequestInit) => {
+  const fake = (async (url: string, init?: RequestInit) => {
     const method = init?.method ?? "GET";
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     calls.push({ method, url, body });
@@ -182,8 +182,8 @@ function fakeGitHub(existing: { id: number; body: string }[]) {
     if (method === "PATCH") return json(200, { id: Number(url.split("/").pop()), html_url: `https://github.com/o/r/pull/7#issuecomment-${url.split("/").pop()}` });
     if (method === "POST") return json(201, { id: 99, html_url: "https://github.com/o/r/pull/7#issuecomment-99" });
     return json(404, {});
-  }) as typeof fetch;
-  return { calls, fetch };
+  }) as typeof globalThis.fetch;
+  return { calls, fetch: fake };
 }
 
 const ctx = (f: typeof fetch): HostContext => ({ root: "/x", host: { adapter: "github" } as HostContext["host"], config: {}, env: { GITHUB_REPOSITORY: "o/r", GITHUB_TOKEN: "t" }, fetch: f });
