@@ -10,7 +10,9 @@ export { ratchet, type RatchetOptions, type RatchetReport, type Baseline, type R
 export { createRunContext, loadRunContext, type RunOptions, type RunContext, type ReportMeta } from "./run.js";
 export { scanFromContext } from "./scan.js";
 export { patternsFromContext } from "./patterns.js";
-export { ratchetFromContext } from "./ratchet.js";
+export { ratchetFromContext, compareCounts, type CountComparison } from "./ratchet.js";
+export { compareScans, scanItems, prCommentMarkdown, isClean, pullRequestFromEnv, scanAtRef, PR_COMMENT_MARKER, type ScanDelta, type DeltaItem, type DeltaCategory, type ComparableScan, type MarkdownOptions, type PullRequestEnv } from "./pr-comment.js";
+export { styleValuesInText, styleValuesFromReading, type StyleValueFinding } from "./metrics/style-values.js";
 export { migrateSuiteConfig, isSuiteConfig, CONFIG_SCHEMA_URL, type MigrateResult, type MigrateOptions } from "./migrate.js";
 export { ConfigSchema, loadConfig, findConfigFile, parseConfig, CONFIG_FILENAME, type DsaConfig, type DsaConfigInput, type LoadedConfig } from "./config.js";
 export { buildGraph, listSourceFiles, reactAdapter, adapterFor, type CompositionGraph, type FileGraph, type Framework, type ElementNode, type ElementKind, type Location, type LocalComponentDecl, type ImportBinding, type SourceAdapter, type ReaderContext, type FileReader } from "./graph/index.js";

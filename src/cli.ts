@@ -14,9 +14,10 @@ import { scanFromContext } from "./scan.js";
 import { loadConfig } from "./config.js";
 import { buildSystemModel, discoverSources, type SourceDiscovery, type SystemModel } from "./model/index.js";
 import { dsaVersion } from "./version.js";
-import { addAddonCommands, addEngineCommands } from "./cli-engine.js";
+import { addAddonCommands, addEngineCommands, useAddons } from "./cli-engine.js";
 import { checklistFromContext } from "./checklist/index.js";
 import { checklistMarkdown, formatChecklist } from "./report/checklist.js";
+import { PR_COMMENT_MARKER, compareScans, defaultBase, gitTop, headCommit, isClean, prCommentMarkdown, prHost, pullRequestFromEnv, scanAtRef, type ComparableScan } from "./pr-comment.js";
 
 export interface CliIo {
   out: (text: string) => void;
@@ -151,6 +152,68 @@ export function createProgram(io: CliIo = { out: console.log, err: console.error
       const report = ratchetFromContext(ctx, extra);
       emit(io, g.json, path.join(ctx.outputDir, "ratchet.json"), report, formatRatchet(report));
       if (!report.ok) process.exitCode = 1;
+    });
+
+  program
+    .command("pr-comment")
+    .argument("[dir]", "directory to scan (the pull request's head)", ".")
+    .option("--base <ref>", "git ref to compare against (default: the pull request's base, from the checkout and GITHUB_EVENT_PATH)")
+    .option("--base-scan <file>", "a scan.json of the base to compare against, instead of scanning --base")
+    .option("--head-scan <file>", "a scan.json of the head, instead of scanning [dir] now")
+    .option("--out <file>", "write the Markdown to this file instead of stdout")
+    .option("--post", "create or update the pull request's one dsa comment (found by its hidden marker)")
+    .option("--pr <number>", "the pull request's number (default: from GITHUB_EVENT_PATH)", (v) => parseInt(v, 10))
+    .option("--repo <owner/name>", "the repo the pull request is in (default: GITHUB_REPOSITORY)")
+    .option("--host <adapter>", "the host adapter that posts (default: host.adapter, or github when GITHUB_REPOSITORY is set)")
+    .option("--quiet-when-clean", "when nothing changed, don't start a comment (an earlier one is still updated)")
+    .option("--limit <n>", "items listed per section before \"and N more\" (default 10)", (v) => parseInt(v, 10))
+    .description("what a pull request does to design-system use, as Markdown for one pull-request comment")
+    .action(async (dir: string, opts: { base?: string; baseScan?: string; headScan?: string; out?: string; post?: boolean; pr?: number; repo?: string; host?: string; quietWhenClean?: boolean; limit?: number }, cmd: Command) => {
+      const g = cmd.optsWithGlobals<GlobalOpts>();
+      const env = process.env;
+      const pr = pullRequestFromEnv(env);
+      const head = await loadRunContext(runOptions(dir, g, io));
+      const readScan = (f: string) => JSON.parse(fs.readFileSync(path.resolve(io.cwd, f), "utf8")) as ComparableScan;
+      const headScan: ComparableScan = opts.headScan ? readScan(opts.headScan) : scanFromContext(head);
+      let base: ComparableScan;
+      let baseLabel: string;
+      if (opts.baseScan) {
+        base = readScan(opts.baseScan);
+        baseLabel = `the base scan in ${path.basename(opts.baseScan)}`;
+      } else {
+        const ref = opts.base ?? defaultBase(head.scanDir, pr);
+        if (!ref) throw new Error("Nothing to compare against. Pass --base <ref> (for example origin/main) or --base-scan <scan.json>.");
+        base = await scanAtRef(ref, head);
+        const short = /^[0-9a-f]{40}$/.test(ref) ? ref.slice(0, 7) : ref;
+        baseLabel = opts.base ? short : pr.baseRef ? `${pr.baseRef} (${short})` : short;
+      }
+      const delta = compareScans(base, headScan);
+      const repo = opts.repo ?? pr.repo;
+      const hosts = (await useAddons(io.cwd)).addons.flatMap((a) => a.hosts ?? []);
+      const { host, context } = prHost({ root: head.root, config: head.loaded.config, env, id: opts.host, hosts });
+      const top = gitTop(head.root);
+      const sha = top ? headCommit(top) : null;
+      const prefix = top ? path.relative(fs.realpathSync(top), fs.realpathSync(head.root)).replace(/\\/g, "/") : "";
+      const link = sha && host.fileUrl ? (file: string, line?: number) => host.fileUrl!({ repo, sha, path: prefix ? `${prefix}/${file}` : file, line }, context) : undefined;
+      const markdown = prCommentMarkdown(delta, { link, baseLabel, ...(opts.limit ? { limit: opts.limit } : {}) });
+      const clean = isClean(delta);
+
+      if (g.json) io.out(JSON.stringify({ clean, delta, markdown }, null, 2));
+      else if (opts.out) {
+        const file = path.resolve(io.cwd, opts.out);
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, markdown);
+        io.err(pc.dim(`wrote ${file}`));
+      } else io.out(markdown.trimEnd());
+
+      if (!opts.post) return;
+      const number = opts.pr ?? pr.number;
+      if (!number) throw new Error("No pull request to comment on. Run in a pull_request workflow, or pass --pr <number>.");
+      if (!host.prComment) throw new Error(`The ${host.id} host adapter can't comment on pull requests. Pass --host github, or set host.adapter.`);
+      const create = !(clean && opts.quietWhenClean);
+      const result = await host.prComment({ number, repo }, { body: markdown, marker: PR_COMMENT_MARKER, create }, context);
+      const said = { created: "posted a new comment", updated: "updated the comment", unchanged: "the comment already says this", skipped: "nothing changed, so no comment was posted" }[result.action];
+      io.err(`dsa pr-comment: ${said} on #${number}${result.url ? ` (${result.url})` : ""}.`);
     });
 
   program

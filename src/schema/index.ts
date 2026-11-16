@@ -106,6 +106,9 @@ export const ScanReportSchema = z
       rawElements: z.array(LocationSchema.extend({ element: z.string() })),
       counts: ViolationCountsSchema,
     }),
+    styleValues: z
+      .array(LocationSchema.extend({ value: z.string(), kind: z.enum(["color", "length"]) }))
+      .describe("Colours and pixel sizes written straight into consumer code where a token belongs, by line. Not counted by the ratchet."),
   })
   .describe("Output of `dsa scan`: inventory, adoption (definition 1: imports) and correct-use findings.");
 

@@ -25,7 +25,7 @@ export interface BuildModelOptions {
   extraDirs?: string[] | undefined;
 }
 
-const DEFAULT_EXCLUDE = ["**/node_modules/**", "**/dist/**", "**/build/**", "**/.git/**", "**/coverage/**", "**/*.min.js", "**/*.d.ts"];
+export const DEFAULT_EXCLUDE = ["**/node_modules/**", "**/dist/**", "**/build/**", "**/.git/**", "**/coverage/**", "**/*.min.js", "**/*.d.ts"];
 const NOT_INTERNAL = /(\.stories\.|\.story\.|\/stories\/|\/examples?\/|\/demos?\/|\/docs?\/|\.test\.|\.spec\.|__tests__)/;
 
 /** One file as the model reads it: its elements with their uses, and the components it declares. */

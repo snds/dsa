@@ -14,6 +14,15 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Added
 
+- `dsa pr-comment`: one comment on a pull request that says what it does to design-system use. It
+  leads with a headline, then lists new hard-coded style values, new custom look-alikes and
+  components used against their guidelines, each with its file and line, and what the change fixed.
+  It compares a scan of the head with a scan of the base (read from git, or a saved `scan.json`),
+  using the ratchet's count comparison. `--post` creates or updates the comment through the host
+  adapter, found again by a hidden marker; the github adapter does it. `--quiet-when-clean` starts
+  no comment when nothing changed. The workflow to add is in `docs/pr-comments.md`.
+- The scan reports hard-coded style values by line (`styleValues` in `scan.json`): colours and pixel
+  sizes written where a token belongs. `dsa scan` shows their count. The ratchet doesn't count them.
 - Keyboard review in Element Review by component (`dsa serve`):
   - J and K move through the places on screen, and the current one is outlined.
   - X ticks it. C confirms what's ticked (or the current place when nothing is). E opens Change to….

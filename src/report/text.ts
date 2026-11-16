@@ -56,6 +56,7 @@ export function formatScan(report: ScanReport): string {
         ["spread props on DS", String(cu.spreadProps)],
         ["local look-alikes", String(cu.lookAlikes)],
         ["raw HTML controls", String(cu.rawElements)],
+        ["hard-coded style values", String((report.styleValues ?? []).length)],
       ],
       ["left", "right"],
     ),

@@ -46,6 +46,40 @@ export function readBaseline(file: string): Baseline | null {
   return { dsaVersion: raw.dsaVersion ?? "unknown", updatedAt: raw.updatedAt ?? "unknown", counts: raw.counts };
 }
 
+export interface CountComparison {
+  /** current - before per metric (0 when there was nothing to compare against). */
+  deltas: ViolationCounts;
+  /** Metrics that grew. */
+  grew: (keyof ViolationCounts)[];
+  /** Metrics that went down. */
+  shrank: (keyof ViolationCounts)[];
+  /** Metrics `before` doesn't have (added in a later dsa): not compared. */
+  untracked: (keyof ViolationCounts)[];
+}
+
+/**
+ * Compare correct-use counts: a baseline against today (the ratchet), or a pull request's base
+ * scan against its head (`dsa pr-comment`). `before` null compares nothing.
+ */
+export function compareCounts(before: Partial<ViolationCounts> | null, current: ViolationCounts): CountComparison {
+  const deltas: ViolationCounts = { classNameOverrides: 0, styleOverrides: 0, spreadProps: 0, lookAlikes: 0, rawElements: 0 };
+  const grew: (keyof ViolationCounts)[] = [];
+  const shrank: (keyof ViolationCounts)[] = [];
+  const untracked: (keyof ViolationCounts)[] = [];
+  if (!before) return { deltas, grew, shrank, untracked };
+  for (const key of VIOLATION_KEYS) {
+    const was = before[key];
+    if (typeof was !== "number") {
+      untracked.push(key);
+      continue;
+    }
+    deltas[key] = current[key] - was;
+    if (deltas[key] > 0) grew.push(key);
+    if (deltas[key] < 0) shrank.push(key);
+  }
+  return { deltas, grew, shrank, untracked };
+}
+
 export function ratchetFromContext(ctx: RunContext, options: Pick<RatchetOptions, "init" | "update"> = {}): RatchetReport {
   const baselinePath = path.resolve(ctx.root, ctx.loaded.config.ratchet.baseline);
   const current = adoptionFromReading(ctx.reading, ctx.loaded.config).correctUse.counts;
@@ -58,20 +92,7 @@ export function ratchetFromContext(ctx: RunContext, options: Pick<RatchetOptions
     throw new Error(`No baseline at ${baselinePath}. Run "dsa ratchet --init" to freeze today's counts.`);
   }
 
-  const deltas: ViolationCounts = { classNameOverrides: 0, styleOverrides: 0, spreadProps: 0, lookAlikes: 0, rawElements: 0 };
-  const grew: (keyof ViolationCounts)[] = [];
-  const untracked: (keyof ViolationCounts)[] = [];
-  if (existing) {
-    for (const key of VIOLATION_KEYS) {
-      const was = existing.counts[key];
-      if (typeof was !== "number") {
-        untracked.push(key);
-        continue;
-      }
-      deltas[key] = current[key] - was;
-      if (deltas[key] > 0) grew.push(key);
-    }
-  }
+  const { deltas, grew, untracked } = compareCounts(existing?.counts ?? null, current);
 
   let action: RatchetAction = "compared";
   if (options.init && !existing) action = "initialized";
