@@ -49,7 +49,7 @@ export interface Deploy {
 export function deployFor(o: DeployOptions): Deploy {
   const env = o.env ?? process.env;
   const get = o.fetch ?? fetch;
-  const hostCfg = o.config.host ?? { adapter: "generic", github: { workflow: "dsa.yml", label: "dsa-decisions", server: "https://github.com" } };
+  const hostCfg = o.config.host ?? { adapter: "generic", github: { workflow: "dsa.yml", label: "dsa-decisions", rescanLabel: "dsa-rescan", server: "https://github.com" } };
   const host = hostAdapter(hostCfg.adapter, [...BUILTIN_HOSTS, ...(o.hosts ?? [])]);
   const hostContext: HostContext = { root: o.root, host: hostCfg, config: { github: o.config.github }, env, fetch: get };
   const scheduleOf = () => { try { return host.schedule?.(hostContext) ?? hostCfg.schedule ?? []; } catch { return hostCfg.schedule ?? []; } };
