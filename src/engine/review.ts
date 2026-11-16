@@ -312,10 +312,12 @@ export async function applyDecisionFile(root: string, config: Config, dataDir: s
     if (!where) throw new Error(`Decision ${i + 1}: needs "ids" or a "pattern".`);
     if (!VERDICTS.includes(v)) throw new Error(`Decision ${i + 1}: verdict must be one of ${VERDICTS.join(', ')}.`);
     if (v === 'replace' && typeof d.decision.use !== 'string') throw new Error(`Decision ${i + 1}: a replace decision needs "use" (the ${system().label} component).`);
-    return { where, decision: d.decision as Recommendation, note: typeof d.note === 'string' && d.note ? d.note : undefined, who: typeof d.who === 'string' ? d.who : who };
+    // A note per element (by id), as Element Review sends them; anything else in it is dropped.
+    const notes = d?.notes && typeof d.notes === 'object' ? Object.fromEntries(Object.entries(d.notes).filter(([, v]) => typeof v === 'string' && (v as string).trim()).map(([k, v]) => [k, (v as string).trim()])) as Record<string, string> : undefined;
+    return { where, decision: d.decision as Recommendation, note: typeof d.note === 'string' && d.note ? d.note : undefined, notes: notes && Object.keys(notes).length ? notes : undefined, who: typeof d.who === 'string' ? d.who : who, at: typeof d.at === 'string' ? d.at : undefined };
   });
   const applied = [];
-  for (const p of plan) applied.push({ ...p.where, elements: (await decideMany(root, config, dataDir, p.where, p.decision, p.who, p.note)).reduce((n, r: any) => n + (r.count ?? 1), 0) });
+  for (const p of plan) applied.push({ ...p.where, decision: p.decision, who: p.who, note: p.note, notes: p.notes, at: p.at, elements: (await decideMany(root, config, dataDir, p.where, p.decision, p.who, p.note, p.notes)).reduce((n, r: any) => n + (r.count ?? 1), 0) });
   return applied;
 }
 

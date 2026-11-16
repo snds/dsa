@@ -4,7 +4,7 @@ import path from "node:path";
 import type { Command } from "commander";
 import pc from "picocolors";
 import type { CliIo } from "./cli.js";
-import { loadAddons, runAfterHooks, type DsaAddon } from "./addons.js";
+import { loadAddons, runAfterDecisions, runAfterHooks, type AppliedDecision, type DsaAddon } from "./addons.js";
 import { findConfigFile, CONFIG_FILENAME } from "./config.js";
 import { loadEngineContext, requirePackages, type EngineContext } from "./engine/from-dsa.js";
 import { APP_DIR, resolveHostRoot, targetRelative } from "./engine/paths.js";
@@ -295,6 +295,11 @@ export function addEngineCommands(program: Command, io: CliIo): void {
         fs.rmSync(path.dirname(tmp), { recursive: true, force: true });
       }
       for (const a of applied) io.out(`Recorded for ${a.elements} element(s): ${a.pattern ? `pattern ${a.pattern}` : `${a.ids?.length} id(s)`}`);
+      // The add-ons' follow-up, as in dsa serve: the dashboard saves each answer as a label too.
+      const { addons } = await useAddons(io.cwd);
+      const notes: string[] = [];
+      await runAfterDecisions(addons, { ctx, decisions: applied as AppliedDecision[], log: (m) => io.out(m) }, notes);
+      for (const n of notes) io.out(`note: ${n}`);
       const summary = `Applied ${applied.length} decision(s) covering ${applied.reduce((n, a) => n + a.elements, 0)} element(s). They take effect on the next scan.`;
       io.out(summary);
       if (o.close && deploy.host.applied) await deploy.host.applied(ref, summary, deploy.hostContext);

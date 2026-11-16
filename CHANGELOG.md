@@ -6,6 +6,23 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- One review screen on a published dashboard too. Element Review opens by component everywhere. On a
+  published copy, answers (with each place's own note) wait in this browser and go out from the bar at
+  the bottom, as an issue the repo's workflow applies. Label Review is no longer a separate tab: the
+  older by-question cards stay at `#elements/question`.
+- `dsa apply-decisions` records each place's own note, and the dashboard add-on saves every applied
+  answer as a label too (`afterDecisions`), as `dsa serve` does. Published answers count for `dsa bench`.
+- The published Re-scan is a button and one line: when the next scan runs and where the button goes.
+  The terminal command sits behind "Run it from a terminal".
+
+### Added
+
+- Re-scan by issue (`host.rescan.method: "issue"`, github adapter): Re-scan opens a filled-in issue
+  that a workflow turns into a scan, with the photo setting. No service and no token. See
+  docs/deploy.md, "Re-scan by issue".
+
 ### Fixed
 
 - Element Review by component: the tick boxes are the dashboard's own Checkbox, so they follow the dark

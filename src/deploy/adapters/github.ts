@@ -18,7 +18,7 @@ function settings(c: Pick<HostContext, "host" | "config" | "env">) {
   const server = (g?.server ?? "https://github.com").replace(/\/+$/, "");
   const api = (g?.api ?? (server === "https://github.com" ? "https://api.github.com" : `${server}/api/v3`)).replace(/\/+$/, "");
   const repo = g?.repo ?? c.config.github?.defaultRepo ?? c.env.GITHUB_REPOSITORY;
-  return { server, api, repo, workflow: g?.workflow ?? "dsa.yml", ref: g?.ref, label: g?.label ?? "dsa-decisions" };
+  return { server, api, repo, workflow: g?.workflow ?? "dsa.yml", ref: g?.ref, label: g?.label ?? "dsa-decisions", rescanLabel: g?.rescanLabel ?? "dsa-rescan" };
 }
 
 async function gh(c: HostContext, method: string, pathname: string, body?: unknown): Promise<any> {
@@ -107,6 +107,17 @@ export const githubHost: HostAdapter = {
       host: "github",
       rescan: c.host.relay?.url
         ? { ...relayRescan(c.host.relay.url, c.host.relay.label, c.host.rescan?.estimateSeconds), ...shots, help: `Starts the ${s.workflow} workflow in ${s.repo} through the scan relay at ${new URL(c.host.relay.url).host} and shows its progress here. You sign in with GitHub first; the new report loads once that run has deployed.` }
+        : c.host.rescan?.method === "issue"
+        ? {
+            kind: "issue",
+            url: `${s.server}/${s.repo}/issues/new`,
+            label: c.host.rescan.label ?? "Re-scan",
+            title: "Re-scan the dsa dashboard",
+            labels: [s.rescanLabel],
+            ...shots,
+            help: `Opens a filled-in issue on ${s.repo}. Submit it and the scan starts; the issue shows its progress and closes when this page is updated.`,
+            estimateSeconds: c.host.rescan.estimateSeconds ?? null,
+          }
         : c.host.rescan
         ? { ...generic.rescan, ...(generic.rescan.kind === "link" ? { ...shots, command: runCommand(s) } : {}) }
         : { kind: "none", label: "Re-scan", help: NO_RELAY },

@@ -343,9 +343,62 @@ says:
 
 | | `generic` adapter | `github` adapter |
 |---|---|---|
-| Re-scan | `host.relay.url` (either adapter): the [scan relay](relay.md) signs the viewer in, starts the scan with its own credential and reports progress. Without a relay: `host.rescan.url`, a page that starts the scan job (`method: "link"`) or a webhook dsa POSTs to (`"post"`; add `status` and `active` URLs and the page follows the run). Neither: no button, and the page says how to add one. | Through the scan relay, which starts the scan workflow (`host.github.workflow`) with `workflow_dispatch`. No relay: no button, and the page says how to add one. |
+| Re-scan | `host.relay.url` (either adapter): the [scan relay](relay.md) signs the viewer in, starts the scan with its own credential and reports progress. Without a relay: `host.rescan.url`, a page that starts the scan job (`method: "link"`) or a webhook dsa POSTs to (`"post"`; add `status` and `active` URLs and the page follows the run). Neither: no button, and the page says how to add one. | Through the scan relay, which starts the scan workflow (`host.github.workflow`) with `workflow_dispatch`. Or `host.rescan.method: "issue"`: a filled-in issue a workflow turns into a scan, with no service. No relay: no button, and the page says how to add one. |
 | Decisions | `host.decisions.mode`: `export` downloads a file; `post` sends it to `host.decisions.url`. | `issue` (default) opens a new issue with the decisions in a `json` block and a label. A workflow applies it and commits. `pr` is the same, but the workflow opens a pull request. |
 | Applying | `dsa apply-decisions --file <file>` (or `--url`, or `-` for stdin) | `dsa apply-decisions --issue <n> --close` |
+
+### Re-scan by issue (GitHub, no service)
+
+A published page has no server, so it can't start a workflow by itself. With the github adapter it can
+still offer Re-scan without a relay: set `host.rescan` to `{ "method": "issue" }`. Re-scan then opens a
+new issue on the repo, already filled in. The viewer submits it with their own GitHub sign-in. A
+workflow in the repo picks the issue up, starts the scan, and closes the issue when the new dashboard
+is published. Nobody handles a token.
+
+The issue carries the label `host.github.rescanLabel` (default `dsa-rescan`) and the photo setting in a
+block the workflow reads:
+
+````markdown
+<!-- dsa:rescan -->
+```json
+{"dsa":"rescan","shots":"fresh"}
+```
+````
+
+A workflow that turns it into a scan. It starts the scan workflow with `workflow_dispatch`, which the
+built-in `GITHUB_TOKEN` is allowed to do:
+
+```yaml
+name: dsa re-scan
+on:
+  issues:
+    types: [opened, labeled]
+permissions:
+  actions: write   # start the scan workflow
+  issues: write    # comment on and close the request
+jobs:
+  rescan:
+    if: >-
+      contains(github.event.issue.labels.*.name, 'dsa-rescan') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ISSUE: ${{ github.event.issue.number }}
+      BODY: ${{ github.event.issue.body }}
+    steps:
+      - name: Start the scan
+        run: |
+          # Only the three known values pass; anything else is "normal".
+          shots=$(printf '%s' "$BODY" | grep -o '"shots":"[a-z-]*"' | head -1 | cut -d'"' -f4)
+          case "$shots" in normal|fresh|retry-missing) ;; *) shots=normal ;; esac
+          gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main -f shots="$shots"
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "Scan started (photos: $shots). Follow it under Actions; this issue closes when the dashboard is updated."
+```
+
+The scan workflow closes open `dsa-rescan` issues once it has published, for example
+`gh issue list --label dsa-rescan --state open --json number -q '.[].number' | xargs -I{} gh issue close {} --comment "Done: the dashboard is updated."`.
+Labels in a new-issue link only apply for people who can triage the repo; members can.
 
 ### Re-scan from the page
 
