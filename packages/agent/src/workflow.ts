@@ -1,5 +1,7 @@
+import { questions } from '@snds/dsa/engine';
 import { readSession } from './sessions.js';
-import { readThreadIndex } from './threads.js';
+import { readSnapshot, type Snapshot } from './snapshot.js';
+import { idsKey, readThreadIndex } from './threads.js';
 import type { Subject } from './context.js';
 
 /**
@@ -10,8 +12,25 @@ import type { Subject } from './context.js';
  * draft pull request, never a merge.
  */
 
-/** The subject an anchor key stands for: the thread's own subject when there is one, else read from the key. */
-export function subjectForAnchor(dataDir: string, key: string): Subject {
+/**
+ * A review batch's key is a hash of its ids, so it can't be read back. Recompute it over the groups the
+ * page builds from the same scan (its review questions and their parts, then single places) and take
+ * the one that matches. This needs only the scan data, not the thread index a published copy lacks.
+ */
+export function batchForKey(snap: Pick<Snapshot, 'evals' | 'threshold'>, key: string): { ids: string[]; title?: string } | null {
+  for (const answered of [true, false]) {
+    for (const q of questions(snap.evals as any[], { answered, threshold: snap.threshold })) {
+      const ids = q.items.map(e => e.id);
+      if (idsKey(ids) === key) return { ids, title: q.title };
+      for (const p of q.parts ?? []) { const pids = p.items.map(e => e.id); if (idsKey(pids) === key) return { ids: pids, title: q.title }; }
+    }
+  }
+  for (const e of snap.evals) if (idsKey([e.id]) === key) return { ids: [e.id] };
+  return null;
+}
+
+/** The subject an anchor key stands for: the thread's own subject when there is one, else read from the key and the scan. */
+export function subjectForAnchor(dataDir: string, key: string, snap: Pick<Snapshot, 'evals' | 'threshold'> | null = readSnapshot(dataDir)): Subject {
   const t = readThreadIndex(dataDir)[key];
   const own = t ? readSession(dataDir, t.session)?.subject : null;
   if (own) return own;
@@ -21,7 +40,11 @@ export function subjectForAnchor(dataDir: string, key: string): Subject {
   if (kind === 'group' && (a === 'component' || a === 'app') && b) return a === 'app' ? { kind: 'readiness', subject: b } : { kind: 'group', by: 'component', value: b };
   // A batch's key is a hash; written out as its ids (elements:E-1,E-2) it can still be briefed.
   if (kind === 'elements' && a && !/^E-[0-9A-F]{8}$/.test(a)) return { kind: 'review', ids: a.split(',') };
-  if (kind === 'elements') throw new Error(`No thread for ${key} in this checkout's data. Give the ids instead: elements:E-1,E-2.`);
+  if (kind === 'elements') {
+    const b = snap ? batchForKey(snap, a) : null;
+    if (b) return { kind: 'review', ids: b.ids, ...(b.title ? { title: b.title } : {}) };
+    throw new Error(`No review group in this scan has the key ${a}: the scan changed since the page was published, or the data is missing. Give the ids instead: elements:E-1,E-2.`);
+  }
   if (key === 'scan') return { kind: 'scan' };
   throw new Error(`Not an anchor: ${key}. Use issue:<key>, component:<name>, group:component:<name>, group:app:<name>, elements:<ids> or scan.`);
 }
