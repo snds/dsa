@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import fg from "fast-glob";
+import { dropGitIgnored } from "../git-ignored.js";
 import type { DsaConfig } from "../config.js";
 import type { Location } from "../graph/types.js";
 import { DEFAULT_EXCLUDE, type RepoReading } from "../model/index.js";
@@ -180,8 +181,8 @@ export function styleValuesFromReading(root: string, reading: RepoReading, confi
     return f === d || f.startsWith(d + path.sep);
   });
   const scripts = reading.files.filter((f) => !f.inSource).map((f) => f.file);
-  const sheets = fg
-    .sync(["**/*.{css,scss,sass,less}"], { cwd: within ?? absRoot, absolute: true, ignore: [...DEFAULT_EXCLUDE, ...config.scan.exclude] })
+  const cwd = within ?? absRoot;
+  const sheets = dropGitIgnored(cwd, fg.sync(["**/*.{css,scss,sass,less}"], { cwd, absolute: true, ignore: [...DEFAULT_EXCLUDE, ...config.scan.exclude] }))
     .map((f) => path.relative(absRoot, f))
     .filter((f) => !inSource(f));
   const out: StyleValueFinding[] = [];

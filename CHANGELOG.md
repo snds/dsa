@@ -6,6 +6,13 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Scans leave out files git ignores. Build output such as a built Storybook (`storybook-static/`) was
+  read as authored code, so a scan run after a build counted its hard-coded colours and sizes, and
+  `dsa pr-comment` reported them as new. Files git tracks still count, and outside a git checkout
+  nothing changes.
+
 ### Changed
 
 - One review screen on a published dashboard too. Element Review opens by component everywhere. On a

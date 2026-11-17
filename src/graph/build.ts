@@ -1,5 +1,6 @@
 import path from "node:path";
 import fg from "fast-glob";
+import { dropGitIgnored } from "../git-ignored.js";
 import { Node, Project, SyntaxKind, ts, type JsxAttribute, type SourceFile } from "ts-morph";
 import type { DsaConfig } from "../config.js";
 import { adapterFor, type FileReader, type ReaderContext, type SourceAdapter } from "./adapter.js";
@@ -29,7 +30,7 @@ export function listSourceFiles(root: string, config: DsaConfig, within?: string
     followSymbolicLinks: false,
   });
   const scope = within ? path.resolve(within) : null;
-  return files
+  return dropGitIgnored(root, files)
     .filter((f) => !scope || f === scope || f.startsWith(scope + path.sep))
     .sort();
 }
