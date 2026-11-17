@@ -8,7 +8,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { EvidenceTimes, Pre } from "@/components/bits"
 import { D, SYS, ago, api, copy, fmtD, fmtDT } from "@/lib/dsa"
-import { Queue } from "@/views/Queue"
+import { Inbox } from "@/views/Inbox"
 import { Federation } from "@/views/Federation"
 import { Design } from "@/views/Design"
 import { Trends } from "@/views/Trends"
@@ -31,12 +31,12 @@ import { canRun, detectRunning, offersShots, useScan } from "@/lib/useScan"
 import { replaceRoute, routePath, useApp } from "@/lib/app"
 import { AppSelect } from "@/components/app-select"
 
-type ViewId = "overview" | "queue" | "system" | "federation" | "elements" | "review" | "usage" | "readiness" | "design" | "trends" | "settings"
+type ViewId = "inbox" | "overview" | "system" | "federation" | "elements" | "review" | "usage" | "readiness" | "design" | "trends" | "settings"
 
 // Ordered by the questions people bring: how are we doing, what do we do, what is the system, who uses it.
 const VIEWS: { id: ViewId; label: string; hint: string }[] = [
-  { id: "overview", label: "Overview", hint: "Health, what to do next, and how sure this scan is" },
-  { id: "queue", label: "Actions", hint: "Definite fixes and recommendations to decide, by who acts" },
+  { id: "inbox", label: "Inbox", hint: "Every issue in one list: what needs whom, grouped by component" },
+  { id: "overview", label: "Overview", hint: "Health and how sure this scan is" },
   { id: "system", label: "System", hint: "Every component: kind, variants, parts, tokens, use, and how it was found" },
   { id: "federation", label: "Apps", hint: "Child libraries and the apps that use the system" },
   ...(D.elements ? [{ id: "elements" as const, label: "Element Review", hint: D.elements.questions.length ? `${D.elements.questions.length} questions for a human` : `Native elements vs ${SYS}` }] : []),
@@ -53,8 +53,9 @@ const titleCase = (s: string) => s.split(/\s+/).map((w, i) => (i > 0 && /^(a|an|
 function readHash(): { view: ViewId; section: SectionId } {
   const [v0, s] = routePath().split("/")
   // Older links: #components is the System view now; #review is part of Element Review.
-  const v = v0 === "components" ? "system" : v0 === "review" && D.elements ? "elements" : v0
-  const view = (v === "settings" || VIEWS.some(x => x.id === v) ? v : D.run ? "overview" : "settings") as ViewId
+  // Actions folded into the Inbox (redesign stage 4): #queue and #queue/<id> land on the same issue there.
+  const v = v0 === "components" ? "system" : v0 === "review" && D.elements ? "elements" : v0 === "queue" ? "inbox" : v0
+  const view = (v === "settings" || VIEWS.some(x => x.id === v) ? v : D.run ? "inbox" : "settings") as ViewId
   // The old Rules tab lives in Settings now.
   if (v === "rules") return { view: "settings", section: "rules" }
   return { view, section: (SECTIONS.some(x => x.id === s) ? s : "general") as SectionId }
@@ -241,7 +242,7 @@ function Shell() {
         ) : !D.run ? (
           <Empty className="border"><EmptyHeader><EmptyTitle>Nothing scanned yet</EmptyTitle><EmptyDescription>Open Settings to check sources and tokens, then run the first scan.</EmptyDescription></EmptyHeader></Empty>
         ) : view === "overview" ? <Overview go={(v: string) => go(v as ViewId)} />
-          : view === "queue" ? <Queue key={routePath()} />
+          : view === "inbox" ? <Inbox key={routePath().split("/")[0]} />
           : view === "system" ? <System />
           : view === "federation" ? <Federation />
           : view === "elements" ? <Elements key={app ?? ""} />
