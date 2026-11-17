@@ -157,7 +157,7 @@ jobs:
           jq -n --arg anchor "$ANCHOR" '{mcpServers: {dsa: {command: "npx", args: ["dsa", "mcp", "--anchor", $anchor]}}}' > "$RUNNER_TEMP/mcp.json"
           dsa_tools="${READ_TOOLS.map(t => `mcp__dsa__${t}`).join(',')}"
           tools="Read,Grep,Glob,$dsa_tools"
-          ask="Answer the latest message in the thread below (the issue's description when it has no comments yet), in plain words, citing evidence. If you would change something, say so as a proposal for a person; never decide."
+          ask="Answer the latest message in the thread below (the issue's description when it has no comments yet), in plain words, citing evidence. If you would change something, say so as a proposal for a person; never decide. The propose_* tools are not available here, so don't offer to record one."
           if [ "$MODE" = fix ]; then
             tools="Read,Grep,Glob,Edit,Write,$dsa_tools"
             ask="Make the smallest change in this checkout that fixes what the thread asks, then say what you changed and how to verify it."

@@ -26,6 +26,7 @@ test('the workflow agent gets dsa\'s read-only tools for the thread\'s anchor, n
   assert.deepEqual(list.split(','), READ_TOOLS.map(t => `mcp__dsa__${t}`));
   assert.match(agent.run, /tools="Read,Grep,Glob,\$dsa_tools"/);
   assert.match(agent.run, /tools="Read,Grep,Glob,Edit,Write,\$dsa_tools"/, 'draft-fix keeps them too');
+  assert.match(agent.run, /propose_\* tools are not available here, so don't offer to record one/);
 });
 
 test('on the fixture: dsa mcp --anchor answers get_subject for the thread, and a role-map component has an entry', async () => {
