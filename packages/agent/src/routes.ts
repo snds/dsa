@@ -12,6 +12,7 @@ import { evidenceOf, whatTheAgentKnows } from './knows.js';
 import { addFeedback, readFeedback, readProposals, setStatus } from './proposals.js';
 import { addDismissal, readDismissals, undoDismissal } from './dismissals.js';
 import { githubWho, openDraftPr } from './draft-pr.js';
+import { readComponentChecks, setComponentCheck } from './component-checks.js';
 
 import { detectProviders, type Mode, type ProviderId, type ProviderStatus } from './providers.js';
 import { beforeAfter, diffHash, isVisualRunning, visualFile } from './visual.js';
@@ -184,6 +185,20 @@ export const agentRoutes: ServeRoute = async ({ req, res, url, body, send, conte
     if (GET && p === '/api/agent/threads') return send(200, { threads: threads(dataDir) }), true;
     // Who a draft PR would open as: the person's own gh sign-in, read before the click.
     if (GET && p === '/api/agent/github') return send(200, githubWho(root)), true;
+    if (GET && p === '/api/agent/component-checks') return send(200, { checks: readComponentChecks(dataDir) }), true;
+    // Confirm or Correct a component that "needs a check" (stage 8). A correction says what it really is.
+    if (POST && p === '/api/agent/component-check') {
+      const b = await body();
+      const name = String(b.name ?? '').trim().slice(0, 200);
+      if (!name) return send(400, { error: 'Which component?' }), true;
+      if (b.verdict === 'undo') { setComponentCheck(dataDir, name, null); return send(200, { check: null }), true; }
+      if (b.verdict !== 'confirmed' && b.verdict !== 'corrected') return send(400, { error: 'Confirm or correct.' }), true;
+      const note = String(b.note ?? '').trim().slice(0, 600);
+      if (b.verdict === 'corrected' && !note) return send(400, { error: 'Say what it really is, so the next scan can learn it.' }), true;
+      const check = { verdict: b.verdict, ...(note ? { note } : {}), who: String(b.who ?? '').trim() || reviewer(root), date: new Date().toISOString().slice(0, 10) } as const;
+      setComponentCheck(dataDir, name, check);
+      return send(200, { check }), true;
+    }
     if (GET && p === '/api/agent/dismissals') return send(200, { dismissals: readDismissals(dataDir) }), true;
     if (POST && p === '/api/agent/dismissal/undo') { const ok = undoDismissal(dataDir, String((await body()).key)); return send(ok ? 200 : 404, ok ? { undone: true } : { error: 'Not dismissed.' }), true; }
     if (POST && p === '/api/agent/thread/settle') {

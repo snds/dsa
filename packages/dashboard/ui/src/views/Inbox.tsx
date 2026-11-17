@@ -17,6 +17,7 @@ import { anchorKeyOf, canChat, useAgent, type Subject } from "@/agent/store"
 import { Detail, useQueue } from "./Queue"
 import { AnswerPlaces } from "./elements/Elements"
 import { PinnedThread } from "@/agent/PinnedThread"
+import { CheckAnswer } from "./ComponentCase"
 
 /**
  * The Inbox: every issue in one list (the report's `issues`, redesign stage 4). One problem is one row,
@@ -139,6 +140,7 @@ export function Inbox() {
       <p className="text-sm text-muted-foreground">
         {plural(count("open"), "open issue")}{app ? ` in ${app}` : ""}. {count("needs-person") ? `${count("needs-person")} need a person.` : "None need a person."}
         {canChat() && count("waiting") ? ` ${count("waiting")} waiting on you.` : ""}
+        {D.elements && <> <a href={hashFor("elements")} className="whitespace-nowrap underline underline-offset-4 hover:text-foreground">Review elements by component</a></>}
       </p>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <ToggleGroup value={[filter]} onValueChange={(v: any) => { const f = Array.isArray(v) ? v[0] : v; if (f) setFilter(f) }} variant="outline" size="sm" aria-label="Show">
@@ -203,7 +205,7 @@ export function Inbox() {
   )
 }
 
-function CertaintyWord({ c }: { c: Issue["certainty"] }) {
+export function CertaintyWord({ c }: { c: Issue["certainty"] }) {
   const w = CERTAINTY_WORD[c]
   const Icon = w.icon
   return <Badge variant="outline" className={w.tone} title={w.hint}><Icon />{w.label}</Badge>
@@ -248,9 +250,9 @@ function IssueDetail({ i, q, creating, create }: { i: Issue; q: any; creating: b
   }
   const where: Record<string, [string, string]> = {
     question: ["Answer it in Element Review", "elements"],
-    "component-check": ["Confirm or correct it in System", "system"],
-    "component-unused": ["See it in System", "system"],
-    readiness: ["See the checks in Agents & Benchmarks", "readiness"],
+    "component-check": ["See it in Components", "system/check"],
+    "component-unused": ["See it in Components", "system/unused"],
+    readiness: ["See the checks on Health", "readiness"],
   }
   const [label, route] = where[i.kind] ?? ["", ""]
   const say: Record<string, string> = {
@@ -269,6 +271,7 @@ function IssueDetail({ i, q, creating, create }: { i: Issue; q: any; creating: b
           {i.apps.length > 0 && <><dt className="text-muted-foreground">Apps</dt><dd>{i.apps.join(", ")}</dd></>}
           <dt className="text-muted-foreground">Issue</dt><dd className="font-mono text-xs">{i.key}</dd>
         </dl>
+        {i.kind === "component-check" && i.component && <CheckAnswer name={i.component} />}
         <div className="flex flex-wrap items-center gap-2">
           {route && <Button variant="outline" nativeButton={false} render={<a href={hashFor(route)} />}><ArrowSquareOutIcon data-icon="inline-start" />{label}</Button>}
           <AskAgent subject={subject} label="Ask the agent" />

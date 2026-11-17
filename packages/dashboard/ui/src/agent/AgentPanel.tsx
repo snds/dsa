@@ -171,7 +171,7 @@ function KeptBranch() {
   React.useEffect(() => {
     if (s.pr) return
     let live = true
-    fetch("/api/agent/github").then(r => r.json()).then(w => { if (live) setWho(w) }).catch(() => { if (live) setWho({ login: null, why: "Couldn't ask gh who you are." }) })
+    api("/api/agent/github").then(w => { if (live) setWho(w) }).catch(() => { if (live) setWho({ login: null, why: "Couldn't ask gh who you are." }) })
     return () => { live = false }
   }, [s.id, s.pr])
   const open = async () => { setBusy(true); await a.changesAction("pr"); setBusy(false) }

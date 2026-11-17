@@ -8,7 +8,7 @@ import { scanEstimate, type PageActions, type ResolvedProfile } from '@snds/dsa'
 import { buildQueue, PKG_DIR } from './queue.js';
 import { hashText, propsAt } from '@snds/dsa';
 import { pageName, photosLine, withReview, type Precedent, type ReviewQueueEntry } from './review.js';
-import { buildIssues, readDismissedIssues } from './issues.js';
+import { buildIssues, readComponentChecks, readDismissedIssues } from './issues.js';
 
 /**
  * Builds a single self-contained HTML report from the store: no server, opens from disk,
@@ -296,7 +296,8 @@ how: e.how ?? null, parent: e.parent ?? null, recipe: e.recipe ?? null,
       // What the system is (inventory, kinds, facets, tokens, where its code was found), from this scan.
       model,
       // One list of issues across Actions, Element Review, System and readiness (docs/redesign stage 1).
-      issues: buildIssues({ queue, elements: reviewed.elements ?? elements, model, readiness, dismissed: readDismissedIssues(dataDir) }),
+      componentChecks: readComponentChecks(dataDir) ?? {},
+      issues: buildIssues({ queue, elements: reviewed.elements ?? elements, model, readiness, dismissed: readDismissedIssues(dataDir), checked: readComponentChecks(dataDir) }),
       ...displayOpts(root, config, profile, opts.serve),
       published: Boolean(opts.site),
       // What the scan read: the live revision and when it went live, or why it isn't the live one.
