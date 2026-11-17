@@ -14,7 +14,39 @@ export type Subject =
   | { kind: 'review'; ids: string[]; title?: string; pattern?: string | null }
   | { kind: 'queue'; id: string }
   | { kind: 'readiness'; subject: string }
-  | { kind: 'scan' };
+  | { kind: 'scan' }
+  /** One issue from the dashboard's issue list (stage 1); `source` says where its detail lives. */
+  | { kind: 'issue'; key: string; title?: string; source?: IssueSource }
+  /** A system component as a whole. */
+  | { kind: 'component'; name: string }
+  /** Several issues together: all of one component's, or all of one app's. */
+  | { kind: 'group'; by: 'component' | 'app'; value: string; title?: string };
+
+/** Where an issue's detail lives in the scan (mirrors the dashboard's Issue.source; questions carry their element ids). */
+export type IssueSource =
+  | { type: 'queue'; id: string }
+  | { type: 'question'; ids: string[] }
+  | { type: 'readiness'; subject: string }
+  | { type: 'component'; name: string };
+
+/** The subject today's brief bodies understand, for an issue, component or group subject. */
+export function legacyOf(s: Subject): Exclude<Subject, { kind: 'issue' } | { kind: 'component' } | { kind: 'group' }> | null {
+  if (s.kind === 'issue') {
+    const src = s.source;
+    if (src?.type === 'queue') return { kind: 'queue', id: src.id };
+    if (src?.type === 'question' && src.ids.length) return { kind: 'review', ids: src.ids, title: s.title };
+    if (src?.type === 'readiness') return { kind: 'readiness', subject: src.subject };
+    if (/^[FA]-/.test(s.key)) return { kind: 'queue', id: s.key };
+    return null;
+  }
+  if (s.kind === 'group' && s.by === 'app') return { kind: 'readiness', subject: s.value };
+  if (s.kind === 'component' || s.kind === 'group') return null;
+  return s;
+}
+
+/** The component a component, group or component-issue subject is about. */
+const componentOfSubject = (s: Subject): string | null =>
+  s.kind === 'component' ? s.name : s.kind === 'group' && s.by === 'component' ? s.value : s.kind === 'issue' && s.source?.type === 'component' ? s.source.name : null;
 
 export interface Brief { key: string; title: string; markdown: string; file: string; starters: Starter[]; repo: { name: string; dir: string }; ids: string[] }
 export interface Starter { label: string; prompt: string; mode?: 'try' }
@@ -50,6 +82,10 @@ function componentBlock(name: string): string {
 }
 
 export function subjectKey(s: Subject): string {
+  const slug = (x: string) => x.replace(/[^\w.-]+/g, '-');
+  if (s.kind === 'issue') return `issue-${slug(s.key)}`;
+  if (s.kind === 'component') return `component-${slug(s.name)}`;
+  if (s.kind === 'group') return `group-${s.by}-${slug(s.value)}`;
   if (s.kind === 'review') return `review-${s.ids.length === 1 ? s.ids[0] : `${s.ids[0]}+${s.ids.length - 1}`}`;
   if (s.kind === 'queue') return `queue-${s.id}`;
   if (s.kind === 'readiness') return `readiness-${s.subject.replace(/[^\w.-]+/g, '-')}`;
@@ -57,7 +93,8 @@ export function subjectKey(s: Subject): string {
 }
 
 /** The repo a session's sandbox copies: the app the elements live in, the finding's owner, or the core. */
-export function repoFor(snap: Snapshot, s: Subject): { name: string; dir: string } {
+export function repoFor(snap: Snapshot, s0: Subject): { name: string; dir: string } {
+  const s = legacyOf(s0) ?? { kind: 'scan' as const };
   const core = { name: snap.targets.find(t => t.role === 'core')?.name ?? path.basename(snap.root), dir: snap.root };
   const byName = (n?: string) => { const t = snap.targets.find(x => x.name === n); return t ? { name: t.name, dir: t.dir } : null; };
   if (s.kind === 'review') return byName(snap.evals.find(e => e.id === s.ids[0])?.target) ?? core;
@@ -70,7 +107,9 @@ export function buildBrief(snap: Snapshot, s: Subject): Brief {
   const key = subjectKey(s);
   const repo = repoFor(snap, s);
   const head = [`# Brief: ${titleOf(snap, s)}`, '', `Scan of **${snap.title}**${snap.run ? `, run ${snap.run.id} (${snap.run.takenAt})` : ''}. Review threshold ${pct(snap.threshold)}: below it, a human decides.`, `Repo for this session: ${repo.name} (${repo.dir}).`, ''];
-  const body = s.kind === 'review' ? reviewBody(snap, s) : s.kind === 'queue' ? queueBody(snap, s) : s.kind === 'readiness' ? readinessBody(snap, s) : scanBody(snap);
+  const comp = componentOfSubject(s);
+  const l = legacyOf(s);
+  const body = comp ? componentBody(snap, comp) : !l ? scanBody(snap) : l.kind === 'review' ? reviewBody(snap, l) : l.kind === 'queue' ? queueBody(snap, l) : l.kind === 'readiness' ? readinessBody(snap, l) : scanBody(snap);
   const markdown = [...head, ...body.lines, '', ...intent(snap, repo), '', toolsSection()].join('\n');
   const dir = path.join(agentDir(snap.dataDir), 'context');
   fs.mkdirSync(dir, { recursive: true });
@@ -79,7 +118,13 @@ export function buildBrief(snap: Snapshot, s: Subject): Brief {
   return { key, title: titleOf(snap, s), markdown, file, starters: body.starters, repo, ids: body.ids };
 }
 
-export function titleOf(snap: Snapshot, s: Subject): string {
+export function titleOf(snap: Snapshot, s0: Subject): string {
+  if (s0.kind === 'issue' && s0.title) return s0.title;
+  if (s0.kind === 'group' && s0.title) return s0.title;
+  if (s0.kind === 'component') return `Component: ${s0.name}`;
+  if (s0.kind === 'group') return s0.by === 'component' ? `Everything about ${s0.value}` : `Everything in ${s0.value}`;
+  const s = legacyOf(s0);
+  if (!s) return s0.kind === 'issue' ? s0.key : `The ${snap.title} scan`;
   if (s.kind === 'review') {
     if (s.title) return s.title;
     const e = snap.evals.find(x => x.id === s.ids[0]);
@@ -173,6 +218,21 @@ function readinessBody(snap: Snapshot, s: Extract<Subject, { kind: 'readiness' }
     { label: 'Walk the errors', prompt: 'Walk me through the usage checker\'s errors by kind: what each means, an example, and the fix.' },
     { label: 'Why the counts differ', prompt: "Explain why the usage checker's raw-element count and the scan's look-alike count differ, using the numbers in the brief." },
   ] as Starter[] };
+}
+
+/** A component as a whole: the system's entry for it, the open findings about it, and the elements proposed to become it. */
+function componentBody(snap: Snapshot, name: string) {
+  const lc = name.toLowerCase();
+  const findings = snap.queue.filter((q: any) => String(q.subject ?? '').toLowerCase() === lc || String(q.decision?.use ?? '').toLowerCase() === lc);
+  const evals = snap.evals.filter((e: any) => String(e.use ?? '').toLowerCase() === lc);
+  const lines = ['## The component', '', componentBlock(name), '',
+    `## Open work about ${name}`, '', ...(findings.length ? findings.slice(0, 20).map((q: any) => `- ${q.id}: ${q.title}`) : ['- No open findings or approvals name it.']), '',
+    `## Elements proposed to become ${name}`, '', evals.length ? `${evals.length} element(s) in ${new Set(evals.map((e: any) => e.target)).size} app(s). Use find_elements or get_element for detail. First ids: ${evals.slice(0, 12).map((e: any) => e.id).join(', ')}.` : 'None in this scan.'];
+  const starters: Starter[] = [
+    { label: `What is open about ${name}?`, prompt: `Summarise everything open about ${name}: what each item is, how sure the scan is, and what you would do first.` },
+    { label: 'Is it used as intended?', prompt: `Check how apps use ${name} against its guidelines and variants. Cite places.` },
+  ];
+  return { lines, starters, ids: evals.map((e: any) => e.id) };
 }
 
 function scanBody(snap: Snapshot) {

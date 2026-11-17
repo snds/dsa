@@ -8,6 +8,7 @@ import { DSA_CLI, label, tools } from './system.js';
 import { agentDir, type Snapshot } from './snapshot.js';
 import { buildBrief, PERSONA, type Starter, type Subject } from './context.js';
 import { readProposals, type Proposal } from './proposals.js';
+import { anchorOf, type Anchor } from './threads.js';
 
 import { startTurn, type AgentEvent, type Mode, type ProviderId, type RunningTurn } from './providers.js';
 
@@ -34,6 +35,14 @@ export interface Session {
   createdAt: string;
   updatedAt: string;
   kept?: { branch: string; commit: string; at: string };
+  /** What the thread is pinned to (threads.ts). Sessions from before threads have none; anchorOf(subject) gives it. */
+  anchor?: Anchor;
+  /** The scan the session started on, to tell when newer evidence makes it out of date. */
+  scanId?: string | null;
+  /** The draft pull request opened from its kept branch, if any. */
+  pr?: { url: string; number?: number } | null;
+  /** The person marked the thread done. */
+  settledAt?: string | null;
   /** The last before/after screenshot run (visual.ts). */
   visual?: import('./visual.js').VisualRun;
 }
@@ -67,6 +76,7 @@ export function createSession(snap: Snapshot, subject: Subject, opts: { provider
     id: 'S-' + crypto.randomBytes(4).toString('hex'), subject, title: brief.title, provider: opts.provider, model: opts.model, mode: opts.mode,
     repo: { name: brief.repo.name, dir: brief.repo.dir, top, sub: path.relative(top, brief.repo.dir) }, sandbox: null,
     brief: brief.file, starters: brief.starters, messages: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    anchor: anchorOf(subject), scanId: snap.run?.id ?? null,
   };
   writeSession(snap.dataDir, s);
   return s;
