@@ -89,3 +89,11 @@ test('a dismissed issue is Done and keeps its label (stage 7)', () => {
   assert.equal(issues.find(i => i.key === 'F-BBBBBB')!.status, 'open');
   assert.equal(issues.find(i => i.key === 'F-BBBBBB')!.dismissed, undefined);
 });
+
+test('a component a person confirmed or corrected has its Confirm issue Done (stage 8)', () => {
+  const model = { components: [{ name: 'Chip', inferred: true, evidence: { tier: 'convention' }, uses: { consumer: 1 } }, { name: 'Tag', inferred: true, evidence: { tier: 'convention' }, uses: { consumer: 1 } }] };
+  const issues = buildIssues({ model, checked: { Chip: { verdict: 'corrected', note: 'An app-only wrapper.', date: '2026-11-16' } } });
+  const check = (c: string) => issues.find(i => i.kind === 'component-check' && i.component === c)!;
+  assert.equal(check('Chip').status, 'done');
+  assert.equal(check('Tag').status, 'open');
+});

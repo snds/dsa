@@ -15,6 +15,7 @@ export { propose, readProposals, setStatus, recommendationProblems, readFeedback
 export { claudeArgs, cursorArgs, detectProviders, startTurn, toolSummary, type AgentEvent, type Mode, type ProviderId } from './providers.js';
 export { agentRoutes } from './routes.js';
 export { addDismissal, readDismissals, undoDismissal, DISMISS_LABELS, type Dismissal, type DismissLabel } from './dismissals.js';
+export { readComponentChecks, setComponentCheck, type ComponentCheck } from './component-checks.js';
 export { githubWho, openDraftPr, prText, type PrContext, type Run } from './draft-pr.js';
 export { createSession, readSession, writeSession, listSessions, deleteSession, discardSandbox, keepChanges, sandboxChanges, mcpConfig, addWorktree, excludes, depLinks, runTurn, SANDBOXES, VITE_WRAPPER, type Session } from './sessions.js';
 export { readSnapshot, writeSnapshot, agentDir, revealedOf, type Snapshot } from './snapshot.js';

@@ -76,6 +76,8 @@ export interface IssueInputs {
   model?: { components?: any[] } | null;
   /** readiness rows, one per repo. */
   readiness?: any[] | null;
+  /** Components a person confirmed or corrected from "Needs a check", by name (agent/component-checks.json). */
+  checked?: Record<string, { verdict: string; note?: string; who?: string; date: string }> | null;
   /** Issues people dismissed, by key (the agent's dismissals.json). */
   dismissed?: Record<string, { label: string; reason: string; who?: string; date: string }> | null;
 }
@@ -138,7 +140,14 @@ export function buildIssues(p: IssueInputs): Issue[] {
 
   // ---- Dismissed with a reason: Done, with the label kept so the list can say why.
   for (const i of out) { const d = p.dismissed?.[i.key]; if (d) { i.status = 'done'; i.dismissed = d; } }
+  // ---- Confirmed or corrected by a person: the Confirm issue is answered.
+  for (const i of out) if (i.kind === 'component-check' && i.component && p.checked?.[i.component]) i.status = 'done';
   return out;
+}
+
+/** The components a person confirmed or corrected (agent/component-checks.json in the data folder), or none. */
+export function readComponentChecks(dataDir: string): IssueInputs['checked'] {
+  try { return JSON.parse(fs.readFileSync(path.join(dataDir, 'agent', 'component-checks.json'), 'utf8')).components ?? null; } catch { return null; }
 }
 
 /** The agent's record of dismissed issues (agent/dismissals.json in the data folder), or none. */

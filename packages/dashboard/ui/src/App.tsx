@@ -11,13 +11,11 @@ import { D, SYS, ago, api, copy, fmtD, fmtDT } from "@/lib/dsa"
 import { Inbox } from "@/views/Inbox"
 import { Federation } from "@/views/Federation"
 import { Design } from "@/views/Design"
-import { Trends } from "@/views/Trends"
 import { Elements } from "@/views/elements/Elements"
 import { LabelReview } from "@/views/review/LabelReview"
 import { preloadIconFont, warmStorybook } from "@/views/elements/Picker"
 import { SettingsPage, SECTIONS, type SectionId } from "@/views/settings/SettingsPage"
-import { Readiness } from "@/views/Readiness"
-import { Overview } from "@/views/Overview"
+import { Health } from "@/views/Health"
 import { System } from "@/views/System"
 import { Usage } from "@/views/Usage"
 import { AgentProvider, canChat, useAgent } from "@/agent/store"
@@ -28,37 +26,52 @@ import { ACTIONS, rescan as hostRescan, rescanIssueUrl } from "@/lib/host"
 import { NextScan, ScanButton, ScanOverlay, ShotsMenu, ShotsNote, SignInDialog } from "@/components/scan"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { canRun, detectRunning, offersShots, useScan } from "@/lib/useScan"
-import { replaceRoute, routePath, useApp } from "@/lib/app"
+import { hashFor, replaceRoute, routePath, useApp } from "@/lib/app"
 import { AppSelect } from "@/components/app-select"
 
-type ViewId = "inbox" | "overview" | "system" | "federation" | "elements" | "review" | "usage" | "readiness" | "design" | "trends" | "settings"
+type ViewId = "inbox" | "system" | "federation" | "health" | "elements" | "review" | "usage" | "design" | "settings"
 
-// Ordered by the questions people bring: how are we doing, what do we do, what is the system, who uses it.
+// Five pages (redesign stage 8, decision D1): what needs doing, what the system is, how each app is
+// doing, and whether we are getting better; Settings is the gear. Element Review, System Usage and
+// Design Files are still pages, reached from the Inbox and Components, and old links still open them.
 const VIEWS: { id: ViewId; label: string; hint: string }[] = [
   { id: "inbox", label: "Inbox", hint: "Every issue in one list: what needs whom, grouped by component" },
-  { id: "overview", label: "Overview", hint: "Health and how sure this scan is" },
-  { id: "system", label: "System", hint: "Every component: kind, variants, parts, tokens, use, and how it was found" },
+  { id: "system", label: "Components", hint: "What the system is, and how each part is used" },
   { id: "federation", label: "Apps", hint: "Child libraries and the apps that use the system" },
-  ...(D.elements ? [{ id: "elements" as const, label: "Element Review", hint: D.elements.questions.length ? `${D.elements.questions.length} questions for a human` : `Native elements vs ${SYS}` }] : []),
-  // Label Review is part of Element Review everywhere now: one answer is the decision and the label.
-  ...(D.usage ? [{ id: "usage" as const, label: "System Usage", hint: `Where ${SYS} tokens and components are used, per library` }] : []),
-  ...(D.readiness?.length || D.bench?.length ? [{ id: "readiness" as const, label: "Agents & Benchmarks", hint: "Agent readiness per repo, the usage checker, and bench runs" }] : []),
-  ...(D.modules?.figma ? [{ id: "design" as const, label: "Design Files", hint: "Figma crawl" }] : []),
-  { id: "trends", label: "Trends", hint: `${D.runs.length} run${D.runs.length === 1 ? "" : "s"}` },
+  { id: "health", label: "Health", hint: "Measures over time, how sure this scan is, agent readiness and bench runs" },
 ]
+/** The routes that aren't tabs, and the tab that holds them. */
+const HOME: Partial<Record<ViewId, ViewId>> = { elements: "inbox", review: "inbox", usage: "system", design: "system" }
+const ROUTES: ViewId[] = [...VIEWS.map(v => v.id), ...(D.elements ? (["elements"] as ViewId[]) : []), ...(D.usage ? (["usage"] as ViewId[]) : []), ...(D.modules?.figma ? (["design"] as ViewId[]) : [])]
 
 /** Title Case for the page heading, keeping short words lower and acronyms as written. */
 const titleCase = (s: string) => s.split(/\s+/).map((w, i) => (i > 0 && /^(a|an|and|of|the|for|to|in|on|or|vs)$/i.test(w) ? w.toLowerCase() : /[A-Z]{2,}/.test(w) ? w : w.charAt(0).toUpperCase() + w.slice(1))).join(" ")
 
-function readHash(): { view: ViewId; section: SectionId } {
+function readHash(): { view: ViewId; section: SectionId; part?: string } {
   const [v0, s] = routePath().split("/")
+  // Overview, Trends and Agents & Benchmarks are sections of Health now (stage 8).
+  if (v0 === "overview" || v0 === "trends" || v0 === "readiness") return { view: "health", section: "general", part: v0 }
   // Older links: #components is the System view now; #review is part of Element Review.
   // Actions folded into the Inbox (redesign stage 4): #queue and #queue/<id> land on the same issue there.
   const v = v0 === "components" ? "system" : v0 === "review" && D.elements ? "elements" : v0 === "queue" ? "inbox" : v0
-  const view = (v === "settings" || VIEWS.some(x => x.id === v) ? v : D.run ? "inbox" : "settings") as ViewId
+  const view = (v === "settings" || ROUTES.includes(v as ViewId) ? v : D.run ? "inbox" : "settings") as ViewId
   // The old Rules tab lives in Settings now.
   if (v === "rules") return { view: "settings", section: "rules" }
   return { view, section: (SECTIONS.some(x => x.id === s) ? s : "general") as SectionId }
+}
+
+/** Components holds what System, System Usage and Design Files showed: one page, three parts. */
+function ComponentsNav({ view }: { view: ViewId }) {
+  const parts = [["system", "Inventory"], ...(D.usage ? [["usage", "Usage by library"]] : []), ...(D.modules?.figma ? [["design", "Design files"]] : [])] as [ViewId, string][]
+  if (parts.length < 2) return null
+  return (
+    <nav aria-label="Components" className="mb-4 flex flex-wrap gap-1 text-sm">
+      {parts.map(([id, label]) => (
+        <a key={id} href={hashFor(id)} aria-current={view === id ? "page" : undefined}
+          className={cn("rounded-md px-2.5 py-1", view === id ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground")}>{label}</a>
+      ))}
+    </nav>
+  )
 }
 
 export function App() {
@@ -142,7 +155,7 @@ function LiveRevision() {
 function Shell() {
   const agent = useAgent()
   const app = useApp()
-  const [{ view, section }, setRoute] = React.useState(readHash)
+  const [{ view, section, part }, setRoute] = React.useState(readHash)
   const [, tick] = React.useState(0)
   const [title, setTitle] = React.useState<string>(D.title || D.root)
   const [scan, setScan] = React.useState<{ busy: boolean; error?: string; log?: string[] }>({ busy: false })
@@ -204,7 +217,7 @@ function Shell() {
         <div className="mx-auto mt-3 max-w-[1400px] px-4 sm:px-6">
           {/* Settings leads the tab row as an icon tab, set apart from the views by a divider. No
               overflow wrapper: it clipped the active underline and showed a stray scrollbar. */}
-          <Tabs value={view} onValueChange={(v: any) => go(v, v === "settings" ? section : "general")}>
+          <Tabs value={HOME[view] ?? view} onValueChange={(v: any) => go(v, v === "settings" ? section : "general")}>
             <TabsList variant="line" className="h-10 flex-wrap">
               <Tooltip>
                 <TooltipTrigger render={<TabsTrigger value="settings" aria-label="Settings" className="flex-none px-2" />}>
@@ -241,16 +254,15 @@ function Shell() {
           <SettingsPage section={section} onSection={s => go("settings", s)} onTitle={setTitle} />
         ) : !D.run ? (
           <Empty className="border"><EmptyHeader><EmptyTitle>Nothing scanned yet</EmptyTitle><EmptyDescription>Open Settings to check sources and tokens, then run the first scan.</EmptyDescription></EmptyHeader></Empty>
-        ) : view === "overview" ? <Overview go={(v: string) => go(v as ViewId)} />
+        ) : view === "health" ? <Health go={(v: string) => go((v === "queue" ? "inbox" : v) as ViewId)} section={part} />
           : view === "inbox" ? <Inbox key={routePath().split("/")[0]} />
-          : view === "system" ? <System />
+          : view === "system" ? <><ComponentsNav view={view} /><System /></>
           : view === "federation" ? <Federation />
           : view === "elements" ? <Elements key={app ?? ""} />
           : view === "review" ? <LabelReview />
-          : view === "readiness" ? <Readiness />
-          : view === "usage" ? <Usage />
-          : view === "design" ? <Design onSettings={() => go("settings", "general")} />
-          : <Trends />}
+          : view === "usage" ? <><ComponentsNav view={view} /><Usage /></>
+          : view === "design" ? <><ComponentsNav view={view} /><Design onSettings={() => go("settings", "general")} /></>
+          : <Inbox />}
       </main>
       <AgentPanel />
     </div>

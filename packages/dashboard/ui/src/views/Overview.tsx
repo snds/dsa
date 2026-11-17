@@ -10,13 +10,18 @@ import { D, SYS, band, fmt, fmtDT, num, ratio, threshold, type Band } from "@/li
 import { CERTAINTY, classify, type Certainty } from "@/lib/insight"
 import { hashFor, inApp, openRoute, useApp } from "@/lib/app"
 import { AllAppsNote } from "@/components/app-select"
+import { needsCheck, useChecks } from "@/lib/checks"
 
 /**
  * The first screen: is the system healthy, what should my team do next, and how far can I trust this scan.
  * Five measures with their trend and status; the open actions split into definite fixes and decisions,
  * highest impact first; and the scan's own confidence, with what to do where it is low.
  */
-export function Overview({ go }: { go: (view: string) => void }) {
+/**
+ * The measures and how sure the scan is. On Health (redesign stage 8) "What to do next" is left out:
+ * the Inbox is that list now.
+ */
+export function Overview({ go, health = false }: { go: (view: string) => void; health?: boolean }) {
   const runs: any[] = D.runs ?? []
   const last = runs[runs.length - 1] ?? null
   const prev = runs.length > 1 ? runs[runs.length - 2] : null
@@ -59,7 +64,7 @@ export function Overview({ go }: { go: (view: string) => void }) {
         <ActionsCard definite={definite.length} decide={decide.length} onOpen={() => go("queue")} />
       </div>
 
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+      {health ? <ScanConfidence go={go} /> : <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         <Panel title="What to do next" description={app ? `Open actions for ${app}, highest impact first` : "Open actions, highest impact first"}
           action={<Button variant="ghost" size="sm" onClick={() => go("queue")}>All actions<ArrowRightIcon data-icon="inline-end" /></Button>}>
           <ActionGroup kind="definite" items={definite} go={go} />
@@ -67,7 +72,7 @@ export function Overview({ go }: { go: (view: string) => void }) {
           {!items.length && <Note>Nothing open. That is the goal.</Note>}
         </Panel>
         <ScanConfidence go={go} />
-      </div>
+      </div>}
     </div>
   )
 }
@@ -183,11 +188,12 @@ function ActionGroup({ kind, items, go }: { kind: Certainty; items: any[]; go: (
 /** How far to trust this scan: where the system's code was found, what's in the inventory, and the known limits. */
 function ScanConfidence({ go }: { go: (v: string) => void }) {
   const m = D.model
+  const checks = useChecks()
   if (!m) return (
     <Panel title="How sure is this scan"><Note>This scan was made before dsa recorded its own confidence. Re-run the scan to see where the system's code was found and how sure each fact is.</Note></Panel>
   )
   const comps: any[] = m.components ?? []
-  const check = comps.filter((c) => c.inferred || c.evidence.tier === "convention" || c.kind?.ambiguous).length
+  const check = comps.filter((c) => needsCheck(c, checks)).length
   const unused = comps.filter((c) => !c.uses.consumer).length
   const how: Record<string, [string, boolean]> = {
     pinned: ["Folders your team chose", true], expected: ["Where the config points", true],

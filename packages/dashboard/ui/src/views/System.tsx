@@ -13,6 +13,8 @@ import { FOUND_BY } from "@/lib/insight"
 import { replaceRoute, routePath, useApp } from "@/lib/app"
 import { AllAppsNote } from "@/components/app-select"
 import { Components } from "@/views/Components"
+import { ComponentCase } from "@/views/ComponentCase"
+import { needsCheck as unanswered, useChecks } from "@/lib/checks"
 
 type Filter = "all" | "check" | "unused" | "deprecated"
 const FILTERS: { id: Filter; label: string; hint: string }[] = [
@@ -36,6 +38,7 @@ export function System() {
   const openRow = (key: string | null) => { setOpened(key); replaceRoute(`system/${filter}${key ? `/${encodeURIComponent(key)}` : ""}`) }
   const [q, setQ] = React.useState("")
   const app = useApp()
+  const checks = useChecks()
   if (!m) return <Components />
 
   // One app chosen: each component's uses, overrides and look-alikes in that app. A report from before
@@ -45,11 +48,13 @@ export function System() {
   const usesOf = (c: any) => (!app || !split ? c.uses : { ...c.uses, ...(c.uses.byTarget?.[app] ?? { consumer: 0, files: 0 }) })
   const usage = new Map<string, any>((D.components ?? []).map((c: any) => [String(c.component).toLowerCase(), scoped(c)]))
   const cu = threshold("correct_use_rate")
-  // The same test as the Overview: found by naming alone, known only from app code, or of an unclear kind.
-  // A component with no recognised kind is not suspect: the archetypes cover the common kinds only.
-  const needsCheck = (c: any) => c.inferred || c.evidence.tier === "convention" || c.kind?.ambiguous
+  // The same test as the Overview: found by naming alone, known only from app code, or of an unclear kind,
+  // and not yet confirmed or corrected by a person (stage 8). A component with no recognised kind is not
+  // suspect: the archetypes cover the common kinds only.
+  const needsCheck = (c: any) => unanswered(c, checks)
   const rows = (m.components as any[]).map((c) => ({ ...c, uses: usesOf(c), u: usage.get(c.name.toLowerCase()) }))
-    .filter((c) => filter === "all" || (filter === "check" && needsCheck(c)) || (filter === "unused" && !c.uses.consumer) || (filter === "deprecated" && c.u?.deprecated))
+    // The open row stays while it is open, so a component just confirmed shows its answer and Undo.
+    .filter((c) => filter === "all" || (filter === "check" && (needsCheck(c) || c.key === opened)) || (filter === "unused" && !c.uses.consumer) || (filter === "deprecated" && c.u?.deprecated))
     .filter((c) => !q || c.name.toLowerCase().includes(q.toLowerCase()) || c.kind?.kind?.includes(q.toLowerCase()))
     // The app's most-used components first, as the all-apps list leads with the most used overall.
     .sort((a, b) => (app && split ? b.uses.consumer - a.uses.consumer : 0))
@@ -129,6 +134,7 @@ export function System() {
                           ["Kind", c.kind ? `${c.kind.kind}, ${Math.round(c.kind.confidence * 100)}% sure${c.kind.ambiguous ? ", close to another kind" : ""}` : "Not recognised"],
                           ["Declared in", <><button type="button" className="rounded-sm font-mono text-xs text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring outline-none" onClick={() => setReading({ file: c.evidence.file, line: c.evidence.line || 1, kind: c.name })}>{shortPath(c.evidence.file)}{c.evidence.line ? `:${c.evidence.line}` : ""}</button> <span className="text-muted-foreground">({c.evidence.extractor})</span></>],
                         ]} />
+                        <ComponentCase c={c} />
                       </div>
                     </TableCell>
                   </TableRow>
