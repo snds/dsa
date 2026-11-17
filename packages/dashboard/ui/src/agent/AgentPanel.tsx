@@ -17,7 +17,7 @@ import { Markdown } from "./Markdown"
 import { useAgent, type Msg, type Proposal } from "./store"
 
 const PROVIDER: Record<string, string> = { "claude-code": "Claude Code", cursor: "Cursor" }
-const KIND: Record<string, string> = { decision: "Decision", policy: "Policy", hint: "Scanner hint", "scanner-note": "Scanner note", issue: "Issue draft" }
+const KIND: Record<string, string> = { decision: "Decision", policy: "Policy", hint: "Scanner hint", "scanner-note": "Scanner note", issue: "Issue draft", dismissal: "Dismissal" }
 
 /**
  * The agent, docked on the right. Not modal: the card or queue item it's about stays in view.
@@ -102,7 +102,7 @@ export function ThreadBody({ className }: { className?: string }) {
         </ol>
         {orphan.length > 0 && <div className="mt-4 flex flex-col gap-2">{orphan.map(p => <ProposalCard key={p.id} p={p} />)}</div>}
         {a.changes?.files.length ? <ChangesCard /> : null}
-        {s?.kept && <p className="mt-4 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs"><GitBranchIcon className="size-4" />Kept on <code className="font-mono">{s.kept.branch}</code> ({s.kept.commit}) in your local {s.repo.name} repo. Push it and open a pull request as usual.</p>}
+        {s?.kept && <KeptBranch />}
         {a.error && <p role="alert" className="mt-4 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">{a.error} {/install|not on PATH|isn't installed/i.test(a.error) && <a href={hashFor("settings/agents")} className="underline underline-offset-4">Settings › Agents</a>}</p>}
         <div ref={end} />
       </div>
@@ -159,6 +159,37 @@ function Activity({ tools, live }: { tools: { summary: string }[]; live?: boolea
   )
 }
 
+/**
+ * A kept branch, and the last step up the ladder: a draft PR opened with the person's own gh sign-in,
+ * only on this click. The button says whose name it opens under before anything is pushed.
+ */
+function KeptBranch() {
+  const a = useAgent()
+  const s = a.session!
+  const [who, setWho] = React.useState<{ login: string | null; why?: string } | null>(null)
+  const [busy, setBusy] = React.useState(false)
+  React.useEffect(() => {
+    if (s.pr) return
+    let live = true
+    fetch("/api/agent/github").then(r => r.json()).then(w => { if (live) setWho(w) }).catch(() => { if (live) setWho({ login: null, why: "Couldn't ask gh who you are." }) })
+    return () => { live = false }
+  }, [s.id, s.pr])
+  const open = async () => { setBusy(true); await a.changesAction("pr"); setBusy(false) }
+  return (
+    <div className="mt-4 flex flex-col gap-2 rounded-lg border px-3 py-2 text-xs">
+      <p className="flex items-center gap-2"><GitBranchIcon className="size-4 shrink-0" /><span>Kept on <code className="font-mono">{s.kept!.branch}</code> ({s.kept!.commit}) in your local {s.repo.name} repo.</span></p>
+      {s.pr ? (
+        <p><a href={s.pr.url} target="_blank" rel="noreferrer" className="font-medium underline underline-offset-4">Draft PR{s.pr.number ? ` #${s.pr.number}` : ""}</a> is open. Mark it ready on GitHub when you've reviewed it.</p>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" onClick={open} disabled={busy || !who?.login}>{busy ? "Opening…" : "Open draft PR"}</Button>
+          <span className="text-muted-foreground">{who == null ? "Checking your GitHub sign-in…" : who.login ? `Opens as @${who.login}. Nothing is pushed until you click.` : who.why}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function ProposalCard({ p }: { p: Proposal }) {
   const a = useAgent()
   const [busy, setBusy] = React.useState(false)
@@ -173,6 +204,7 @@ export function ProposalCard({ p }: { p: Proposal }) {
       <p className="mt-2 font-medium">{p.title}</p>
       <p className="mt-1 text-muted-foreground">{p.rationale}</p>
       {p.kind === "hint" && <Pre className="mt-2 max-h-40">{JSON.stringify({ when: p.payload.when, prefer: p.payload.prefer, avoid: p.payload.avoid }, null, 1)}</Pre>}
+      {p.kind === "dismissal" && <p className="mt-2 rounded-md bg-muted px-2 py-1.5 text-xs">{p.payload.reason}</p>}
       {p.kind === "issue" && <Pre className="mt-2 max-h-48">{`${p.payload.title}\n\n${p.payload.body}`}</Pre>}
       {p.evidence?.length ? <p className="mt-2 text-xs text-muted-foreground">Evidence: {p.evidence.join(" · ")}</p> : null}
       {p.result && <p className="mt-2 text-xs">{/^https:/.test(p.result) ? "Opened a new GitHub issue page for you to file." : p.result}</p>}

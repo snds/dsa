@@ -78,3 +78,14 @@ test('a report with no scan yet has an empty issue list', async () => {
   const p = payloadOf(await renderReport(root, loadConfig(root).config, tmp(), ACME_PROFILE));
   assert.deepEqual(p.issues, []);
 });
+
+test('a dismissed issue is Done and keeps its label (stage 7)', () => {
+  const issues = buildIssues({
+    queue: { items: [{ id: 'F-AAAAAA', kind: 'finding', rule: 'lookalike', subject: 'Select', title: 'Look-alike', affected: ['app-a'], status: 'open' }, { id: 'F-BBBBBB', kind: 'finding', rule: 'lookalike', title: 'Other', affected: ['app-a'], status: 'open' }] },
+    dismissed: { 'F-AAAAAA': { label: 'scanner-misread', reason: 'It is a menu, not a select.', who: 'sample-user', date: '2026-11-16' } },
+  });
+  assert.equal(issues.find(i => i.key === 'F-AAAAAA')!.status, 'done');
+  assert.equal(issues.find(i => i.key === 'F-AAAAAA')!.dismissed!.label, 'scanner-misread');
+  assert.equal(issues.find(i => i.key === 'F-BBBBBB')!.status, 'open');
+  assert.equal(issues.find(i => i.key === 'F-BBBBBB')!.dismissed, undefined);
+});

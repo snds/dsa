@@ -43,7 +43,7 @@ export interface Tool { name: string; summary: string }
 export interface Msg { role: "user" | "assistant"; text: string; at: string; tools?: Tool[]; error?: string; costUsd?: number; proposals?: string[] }
 export interface Proposal { id: string; kind: string; session: string; title: string; rationale: string; confidence?: string; evidence?: string[]; payload: any; status: "open" | "accepted" | "rejected"; createdAt: string; result?: string }
 export interface Starter { label: string; prompt: string; mode?: "try" }
-export interface Session { id: string; title: string; subject: Subject; provider: "claude-code" | "cursor"; model?: string; mode: "advise" | "try"; repo: { name: string; dir: string }; sandbox: string | null; brief: string; starters: Starter[]; messages: Msg[]; kept?: { branch: string; commit: string }; visual?: VisualRun }
+export interface Session { id: string; title: string; subject: Subject; provider: "claude-code" | "cursor"; model?: string; mode: "advise" | "try"; repo: { name: string; dir: string }; sandbox: string | null; brief: string; starters: Starter[]; messages: Msg[]; kept?: { branch: string; commit: string }; pr?: { url: string; number?: number } | null; visual?: VisualRun }
 export interface Changes { files: { file: string; status: string }[]; stat: string; diff: string }
 export interface Shot { file?: string; page?: string; revealedBy?: string; match?: number; loose?: boolean }
 export interface Pair { id: string; label: string; file: string; line: number; reason: string; before: Shot; after: Shot; same: boolean | null }
@@ -78,7 +78,7 @@ interface Api extends State {
   close: () => void
   setOpen: (o: boolean) => void
   decide: (p: Proposal, action: "accept" | "reject") => Promise<void>
-  changesAction: (action: "keep" | "discard") => Promise<void>
+  changesAction: (action: "keep" | "discard" | "pr") => Promise<void>
   takePictures: () => Promise<void>
   refresh: () => Promise<void>
 }
@@ -219,8 +219,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     changesAction: async action => {
       if (!sid) return
       try {
-        const r = await api("/api/agent/changes", { id: sid, action })
-        say(action === "keep" ? `Kept on branch ${r.branch} (${r.commit}) in your local repo. Nothing was pushed.` : "Sandbox thrown away")
+        const r = await api("/api/agent/changes", { id: sid, action, ...(action === "pr" ? { link: location.href } : {}) })
+        say(action === "keep" ? `Kept on branch ${r.branch} (${r.commit}) in your local repo. Nothing was pushed.` : action === "pr" ? `Draft PR${r.number ? ` #${r.number}` : ""} opened as @${r.login}.` : "Sandbox thrown away")
         await load(sid)
         refreshThreads()
       } catch (e: any) { say(e.message, true) }

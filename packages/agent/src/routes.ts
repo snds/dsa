@@ -10,6 +10,8 @@ import { buildBrief, PERSONA, type IssueSource, type Subject } from './context.j
 import { anchorKey, anchorOf, threadIndex, writeThreadIndex } from './threads.js';
 import { evidenceOf, whatTheAgentKnows } from './knows.js';
 import { addFeedback, readFeedback, readProposals, setStatus } from './proposals.js';
+import { addDismissal, readDismissals, undoDismissal } from './dismissals.js';
+import { githubWho, openDraftPr } from './draft-pr.js';
 
 import { detectProviders, type Mode, type ProviderId, type ProviderStatus } from './providers.js';
 import { beforeAfter, diffHash, isVisualRunning, visualFile } from './visual.js';
@@ -67,6 +69,16 @@ function issueSource(x: any): IssueSource | undefined {
 }
 
 /** Every anchor's thread and its state; written to threads.json for the published page. */
+/** The issue a thread is about, for the draft PR's body: its key, title and GitHub link when it has one. */
+function issueOf(dataDir: string, s: { subject: Subject; title: string }) {
+  const sub = s.subject;
+  const id = sub.kind === 'queue' ? sub.id : sub.kind === 'issue' && sub.source?.type === 'queue' ? sub.source.id : null;
+  const q: any = id ? readSnapshot(dataDir)?.queue.find((x: any) => x.id === id) : null;
+  if (sub.kind === 'issue') return { key: sub.key, title: sub.title ?? q?.title ?? s.title, url: q?.link?.url ?? null };
+  if (sub.kind === 'queue') return { key: sub.id, title: q?.title ?? s.title, url: q?.link?.url ?? null };
+  return null;
+}
+
 function threads(dataDir: string) {
   const proposals = readProposals(dataDir);
   const snap = readSnapshot(dataDir);
@@ -170,6 +182,10 @@ export const agentRoutes: ServeRoute = async ({ req, res, url, body, send, conte
       return send(200, { sources: whatTheAgentKnows(snap, subjectFrom(await body())) }), true;
     }
     if (GET && p === '/api/agent/threads') return send(200, { threads: threads(dataDir) }), true;
+    // Who a draft PR would open as: the person's own gh sign-in, read before the click.
+    if (GET && p === '/api/agent/github') return send(200, githubWho(root)), true;
+    if (GET && p === '/api/agent/dismissals') return send(200, { dismissals: readDismissals(dataDir) }), true;
+    if (POST && p === '/api/agent/dismissal/undo') { const ok = undoDismissal(dataDir, String((await body()).key)); return send(ok ? 200 : 404, ok ? { undone: true } : { error: 'Not dismissed.' }), true; }
     if (POST && p === '/api/agent/thread/settle') {
       const b = await body();
       const s = readSession(dataDir, String(b.id));
@@ -234,6 +250,7 @@ export const agentRoutes: ServeRoute = async ({ req, res, url, body, send, conte
       if (isRunning(s.id)) return send(409, { error: 'Wait for the agent to finish.' }), true;
       if (isVisualRunning(s.id)) return send(409, { error: 'Wait for the before/after pictures to finish.' }), true;
       if (b.action === 'keep') return send(200, keepChanges(dataDir, s, b.message)), true;
+      if (b.action === 'pr') return send(200, openDraftPr(dataDir, s, { issue: issueOf(dataDir, s), dashboardUrl: typeof b.link === 'string' && /^https?:\/\//.test(b.link) ? b.link : null })), true;
       if (b.action === 'discard') { discardSandbox(dataDir, s); return send(200, { discarded: true }), true; }
       if (b.action === 'mode') { s.mode = b.mode === 'try' ? 'try' : 'advise'; writeSession(dataDir, s); return send(200, { mode: s.mode }), true; }
       return send(400, { error: 'Unknown action.' }), true;
@@ -286,6 +303,11 @@ export const agentRoutes: ServeRoute = async ({ req, res, url, body, send, conte
       } else if (pr.kind === 'scanner-note') {
         addFeedback(configDir, { ...pr.payload, rationale: pr.rationale, proposal: pr.id, session: pr.session, who, date: new Date().toISOString().slice(0, 10) });
         result = 'Saved to dsa.feedback.json for the scanner backlog.';
+      } else if (pr.kind === 'dismissal') {
+        addDismissal(dataDir, pr.payload.issue, { label: pr.payload.label, reason: String(pr.payload.reason).slice(0, 600), who, date: new Date().toISOString().slice(0, 10), proposal: pr.id, title: pr.title });
+        result = pr.payload.label === 'scanner-misread'
+          ? 'Dismissed. The scanner read this wrong: ask the agent for a scanner hint, so the next scan doesn\'t raise it again.'
+          : 'Dismissed. The issue moves to Done.';
       } else if (pr.kind === 'issue') {
         const repo = pr.payload.repo || config.github?.defaultRepo;
         result = repo && /^[\w.-]+\/[\w.-]+$/.test(repo) ? `https://github.com/${repo}/issues/new?title=${encodeURIComponent(pr.payload.title)}&body=${encodeURIComponent(String(pr.payload.body).slice(0, 6000))}` : 'No repo: copy the text.';
