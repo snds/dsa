@@ -15,6 +15,8 @@ import { AskAgent } from "@/agent/AskAgent"
 import { ThreadBadge } from "@/agent/ThreadBadge"
 import { anchorKeyOf, canChat, useAgent, type Subject } from "@/agent/store"
 import { Detail, useQueue } from "./Queue"
+import { AnswerPlaces } from "./elements/Elements"
+import { PinnedThread } from "@/agent/PinnedThread"
 
 /**
  * The Inbox: every issue in one list (the report's `issues`, redesign stage 4). One problem is one row,
@@ -100,6 +102,11 @@ export function Inbox() {
       const el = e.target as HTMLElement
       if (e.metaKey || e.ctrlKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable) return
       const at = sel ? order.findIndex(i => i.key === sel.key) : -1
+      // A question's places take J / K themselves (Element Review's keys); Shift+J / K still moves between issues.
+      const placesOpen = Boolean(document.querySelector('[data-slot="by-component"]'))
+      if ((e.key === "j" || e.key === "k" || e.key === "J" || e.key === "K") && placesOpen && !e.shiftKey) return
+      if (e.key === "J" || e.key === "K") { const n = order[Math.max(0, Math.min(order.length - 1, at + (e.key === "J" ? 1 : -1)))]; if (n) { pick(n.key); e.preventDefault() } return }
+      if (e.key === "x" && placesOpen) return
       if (e.key === "j" || e.key === "k") { const n = order[Math.max(0, Math.min(order.length - 1, at + (e.key === "j" ? 1 : -1)))]; if (n) { pick(n.key); e.preventDefault(); list.current?.querySelector(`[data-key="${CSS.escape(n.key)}"]`)?.scrollIntoView({ block: "nearest" }) } }
       if (e.key === "x" && sel) { tick(sel.key); e.preventDefault() }
       if (e.key === "Escape") setTicked(new Set())
@@ -155,8 +162,9 @@ export function Inbox() {
         </div>
       )}
 
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-        <div ref={list} className="flex min-w-0 flex-col overflow-hidden rounded-lg border" role="list" aria-label="Issues">
+      {/* Wide: the list, the issue, and its pinned thread. Narrower: the thread opens as the side sheet. */}
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] xl:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)_minmax(22rem,26rem)]">
+        <div ref={list} className="flex min-w-0 flex-col overflow-hidden rounded-lg border lg:max-h-[calc(100vh-12rem)] lg:overflow-y-auto" role="list" aria-label="Issues">
           {!shown.length && <Empty><EmptyHeader><EmptyTitle>{filter === "waiting" ? "Nothing is waiting on you" : filter === "done" ? "Nothing done yet" : "Nothing here"}</EmptyTitle><EmptyDescription>{plural(count("open"), "issue")} open in all.</EmptyDescription></EmptyHeader></Empty>}
           {groups.map(([g, items]) => {
             const open = !closed.has(g)
@@ -179,7 +187,11 @@ export function Inbox() {
             )
           })}
         </div>
-        {sel ? <IssueDetail i={sel} q={q} creating={!!creating} create={create} /> : <Panel><p className="text-sm text-muted-foreground">Select an issue.</p></Panel>}
+        <div className="flex min-w-0 flex-col gap-3">
+          {sel && canChat() && <Button variant="outline" size="sm" className="w-fit xl:hidden" onClick={() => agent.start(subjectOf(sel))}><SparkleIcon data-icon="inline-start" />Open this issue's thread</Button>}
+          {sel ? <IssueDetail i={sel} q={q} creating={!!creating} create={create} /> : <Panel><p className="text-sm text-muted-foreground">Select an issue.</p></Panel>}
+        </div>
+        {sel && <PinnedThread subject={subjectOf(sel)} className="hidden xl:sticky xl:top-36 xl:flex xl:max-h-[calc(100vh-10rem)]" />}
       </div>
     </div>
   )
@@ -214,6 +226,19 @@ function IssueDetail({ i, q, creating, create }: { i: Issue; q: any; creating: b
     if (item) return <Detail i={item} q={q} busy={creating} onCreate={() => create([item.id])} base="inbox" />
   }
   const subject = subjectOf(i)
+  if (i.kind === "question") {
+    const ids: string[] = (D.elements?.questions ?? []).find((x: any) => x.key === i.source?.key)?.ids ?? []
+    if (ids.length) return (
+      <section aria-label={i.title} className="flex flex-col gap-3">
+        <header className="flex flex-wrap items-center gap-2">
+          <h2 className="font-heading text-lg font-semibold">{i.title}</h2>
+          <CertaintyWord c={i.certainty} />
+          <span className="text-xs text-muted-foreground">{plural(ids.length, "place")}{i.apps.length ? ` in ${i.apps.join(", ")}` : ""} · Shift+J / K for the next issue</span>
+        </header>
+        <AnswerPlaces ids={ids} />
+      </section>
+    )
+  }
   const where: Record<string, [string, string]> = {
     question: ["Answer it in Element Review", "elements"],
     "component-check": ["Confirm or correct it in System", "system"],

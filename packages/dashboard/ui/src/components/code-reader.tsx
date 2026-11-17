@@ -146,16 +146,14 @@ export function CodeReader({ places, index, onIndex, onClose }: { places: Place[
  * line, what's there, vendored marked); each opens the code reader. Without places (older reports),
  * the evidence text as it was.
  */
-export function Evidence({ text, summary, places }: { text: string; summary?: string; places?: Place[] }) {
+export function Evidence({ text, summary, places, upFront = false }: { text: string; summary?: string; places?: Place[]; upFront?: boolean }) {
   const [at, setAt] = React.useState<number | null>(null)
   if (!places?.length) return <span className="break-words">{text}</span>
   const vendored = places.filter(p => p.vendored).length
-  return (
-    <div className="flex flex-col gap-1">
-      {summary && <span>{summary}</span>}
-      <Disclosure label={`${places.length} place${places.length === 1 ? "" : "s"}`} hint={vendored ? `${vendored} vendored` : undefined} className="border-t-0 pt-0">
-        <ul className="flex flex-col divide-y rounded-lg border" aria-label="Places">
-          {places.map((p, i) => (
+  // The issue page shows one example before the verdict; the rest fold under "N more".
+  const first = upFront ? places.slice(0, 1) : []
+  const rest = upFront ? places.slice(1) : places
+  const row = (p: Place, i: number) => (
             <li key={`${p.file}:${p.line}:${i}`}>
               <button type="button" onClick={() => setAt(i)} className="flex w-full min-w-0 items-center gap-2 px-2.5 py-1.5 text-left outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring" title={p.file}
                 aria-label={`Open ${shortPath(p.file)} line ${p.line}${p.kind ? `, ${p.kind}` : ""}${p.vendored ? ", vendored" : ""}`} aria-haspopup="dialog">
@@ -164,9 +162,16 @@ export function Evidence({ text, summary, places }: { text: string; summary?: st
                 {p.vendored && <Badge variant="secondary" className="shrink-0" title="Vendored or third-party code: not this team's to fix">Vendored</Badge>}
               </button>
             </li>
-          ))}
+  )
+  return (
+    <div className="flex flex-col gap-1">
+      {summary && <span>{summary}</span>}
+      {first.length > 0 && <ul className="flex flex-col divide-y rounded-lg border" aria-label="Example">{first.map((p, i) => row(p, i))}</ul>}
+      {rest.length > 0 && <Disclosure label={upFront ? `${rest.length} more place${rest.length === 1 ? "" : "s"}` : `${places.length} place${places.length === 1 ? "" : "s"}`} hint={vendored ? `${vendored} vendored` : undefined} className="border-t-0 pt-0">
+        <ul className="flex flex-col divide-y rounded-lg border" aria-label="Places">
+          {rest.map((p, j) => row(p, j + first.length))}
         </ul>
-      </Disclosure>
+      </Disclosure>}
       {at != null && <CodeReader places={places} index={at} onIndex={setAt} onClose={() => setAt(null)} />}
     </div>
   )

@@ -58,6 +58,8 @@ interface State {
   busy: boolean
   starting: boolean
   error: string | null
+  /** The subject pinned in place (the issue page) with no thread yet: the first message starts one. */
+  pending: Subject | null
   /** Every anchor's thread and its state (GET /api/agent/threads), for the badges on rows and cards. */
   threads: Record<string, Thread>
   /** Before/after pictures: being taken, their progress lines, and whether the sandbox changed since. */
@@ -66,8 +68,10 @@ interface State {
 
 interface Api extends State {
   /** Opens the subject's thread when it has one (one thread per anchor); `fresh` starts a new thread. */
-  start: (subject: Subject, opts?: { mode?: "advise" | "try"; provider?: string; ask?: string; fresh?: boolean }) => Promise<void>
+  start: (subject: Subject, opts?: { mode?: "advise" | "try"; provider?: string; ask?: string; fresh?: boolean; panel?: boolean }) => Promise<void>
   refreshThreads: () => Promise<void>
+  /** Shows a subject's thread in place without opening the side panel; no session is made until the first message. */
+  pin: (subject: Subject) => Promise<void>
   resume: (id: string) => Promise<void>
   send: (text: string, mode?: "advise" | "try") => Promise<void>
   cancel: () => Promise<void>
@@ -108,7 +112,7 @@ async function stream(url: string, body: unknown, onEvent: (e: any) => void) {
 }
 
 export function AgentProvider({ children }: { children: React.ReactNode }) {
-  const [s, set] = React.useState<State>({ open: false, session: null, proposals: [], changes: null, streaming: null, busy: false, starting: false, error: null, threads: {}, visual: NO_VISUAL })
+  const [s, set] = React.useState<State>({ open: false, session: null, proposals: [], changes: null, streaming: null, busy: false, starting: false, error: null, pending: null, threads: {}, visual: NO_VISUAL })
   const patch = (p: Partial<State>) => set(x => ({ ...x, ...p }))
   const sid = s.session?.id
 
@@ -124,8 +128,18 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     set(x => ({ ...x, session: r.session, proposals: r.proposals, changes: r.changes, busy: r.running, visual: { ...x.visual, running: x.visual.running || r.visualRunning, stale: r.visualStale } }))
   }, [])
 
-  const send = React.useCallback(async (text: string, mode?: "advise" | "try", id = sid) => {
-    if (!id || !text.trim()) return
+  const send = React.useCallback(async (text: string, mode?: "advise" | "try", id0 = sid) => {
+    if (!text.trim()) return
+    let id = id0
+    // A pinned subject with no thread yet: its first message starts the thread (one per anchor).
+    if (!id && s.pending) {
+      try {
+        const r = await api("/api/agent/session", { subject: s.pending, mode, reuse: true })
+        set(x => ({ ...x, session: r.session, pending: null }))
+        id = r.session.id
+      } catch (e: any) { patch({ error: e.message }); return }
+    }
+    if (!id) return
     const now = new Date().toISOString()
     set(x => ({ ...x, busy: true, error: null, streaming: { role: "assistant", text: "", at: now, tools: [] },
       session: x.session ? { ...x.session, mode: mode ?? x.session.mode, messages: [...x.session.messages, { role: "user", text, at: now }] } : x.session }))
@@ -147,11 +161,12 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       await load(id).catch(() => {})
       refreshThreads()
     }
-  }, [sid, load, refreshThreads])
+  }, [sid, s.pending, load, refreshThreads])
 
-  const start = React.useCallback(async (subject: Subject, opts: { mode?: "advise" | "try"; provider?: string; ask?: string; fresh?: boolean } = {}) => {
+  const start = React.useCallback(async (subject: Subject, opts: { mode?: "advise" | "try"; provider?: string; ask?: string; fresh?: boolean; panel?: boolean } = {}) => {
     if (!canChat()) { say("Agents work when the dashboard is served: run dsa serve.", true); return }
-    patch({ open: true, starting: true, error: null, session: null, proposals: [], changes: null, visual: NO_VISUAL })
+    // panel: false keeps it in place (the issue page's pinned thread) instead of opening the side panel.
+    set(x => ({ ...x, open: opts.panel === false ? x.open : true, starting: true, error: null, session: null, pending: null, proposals: [], changes: null, visual: NO_VISUAL }))
     try {
       const r = await api("/api/agent/session", { subject, mode: opts.mode, provider: opts.provider, reuse: !opts.fresh })
       set(x => ({ ...x, session: r.session, starting: false }))
@@ -165,6 +180,12 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     ...s,
     start,
     refreshThreads,
+    pin: async subject => {
+      if (!canChat()) return
+      const t = s.threads[anchorKeyOf(subject)]
+      if (t) { patch({ pending: null, error: null, visual: NO_VISUAL }); try { await load(t.session) } catch (e: any) { patch({ error: e.message }) } }
+      else patch({ session: null, pending: subject, proposals: [], changes: null, error: null, visual: NO_VISUAL })
+    },
     send: (t, m) => send(t, m),
     resume: async id => { patch({ open: true, error: null, visual: NO_VISUAL }); try { await load(id) } catch (e: any) { patch({ error: e.message }) } },
     cancel: async () => { if (sid) await api("/api/agent/cancel", { id: sid }).catch(() => {}) },

@@ -272,7 +272,7 @@ export function Detail({ i, q, busy, onCreate, base = "queue" }: { i: any; q: Q;
     ["Routed to", <><b>{i.owner}</b> <Badge variant="outline" className="ml-1">{SCOPES[i.scope] ?? i.scope}</Badge></>],
     ...(i.why ? [["Why them", i.why] as [string, React.ReactNode]] : []),
     ["Who acts", whoActs(i.rule)],
-    ["Evidence", <Evidence text={i.evidence} summary={i.summary} places={i.places} />],
+    ["Evidence", <Evidence text={i.evidence} summary={i.summary} places={i.places} upFront={base === "inbox"} />],
     ...(d?.verdict === "replace" ? [["Decision", <>Use {d.use}{i.from ? <span className="text-muted-foreground"> instead of {i.from}</span> : null}</>] as [string, React.ReactNode]] : []),
     ...(i.exit ? [["Done when", i.exit] as [string, React.ReactNode]] : []),
     ...(l ? [["Issue", (

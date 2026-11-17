@@ -100,7 +100,8 @@ function Bar({ c }: { c: Counts }) {
   )
 }
 
-export function ByComponent({ evals }: { evals: any[] }) {
+/** `rail: false` drops the component list when only one component's places are shown (the issue page). */
+export function ByComponent({ evals, rail = true }: { evals: any[]; rail?: boolean }) {
   const { byId, applyLocal, refresh, openPicker } = useEl()
   const groups = byComponent(evals, NAMES, decideNow)
   const [sel, setSel] = React.useState<string>(() => { const k = read(VIEW_KEY); return k && groups.some(g => g.key === k) ? k : groups.find(g => g.counts.todo)?.key ?? groups[0]?.key ?? "" })
@@ -229,13 +230,13 @@ export function ByComponent({ evals }: { evals: any[] }) {
   return (
     <SelCtx.Provider value={{ selected, toggle, click, notes, setNote, checks, see, useFor: (pick, ids) => answer({ pick }, ids), busy, apart, reviewable, cursor,
       look: (id: string) => { const ids = visible.map(e => e.id); setFocus({ ids, i: Math.max(0, ids.indexOf(id)) }) } }}>
-      <div className="grid gap-4 md:grid-cols-[15rem_minmax(0,1fr)]" data-slot="by-component">
-        <nav aria-label="Where places go" className="flex flex-col gap-1 md:sticky md:top-2 md:max-h-[calc(100vh-1rem)] md:self-start md:overflow-y-auto">
+      <div className={rail || groups.length > 1 ? "grid gap-4 md:grid-cols-[15rem_minmax(0,1fr)]" : "grid gap-4"} data-slot="by-component">
+        {(rail || groups.length > 1) && <nav aria-label="Where places go" className="flex flex-col gap-1 md:sticky md:top-2 md:max-h-[calc(100vh-1rem)] md:self-start md:overflow-y-auto">
           <RailHead>Components</RailHead>
           {components.map(x => <RailItem key={x.key} g={x} on={x.key === g.key} onClick={() => choose(x.key)} />)}
           {others.length > 0 && <RailHead>Other answers</RailHead>}
           {others.map(x => <RailItem key={x.key} g={x} on={x.key === g.key} onClick={() => choose(x.key)} />)}
-        </nav>
+        </nav>}
 
         <section className="flex min-w-0 flex-col gap-4" aria-labelledby="bc-title">
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">

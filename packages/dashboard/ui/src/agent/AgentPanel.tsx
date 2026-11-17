@@ -25,18 +25,8 @@ const KIND: Record<string, string> = { decision: "Decision", policy: "Policy", h
  */
 export function AgentPanel() {
   const a = useAgent()
-  const [draft, setDraft] = React.useState("")
-  const end = React.useRef<HTMLDivElement>(null)
   const s = a.session
-  const msgs = s?.messages ?? []
-  React.useEffect(() => { end.current?.scrollIntoView({ block: "end" }) }, [msgs.length, a.streaming?.text.length, a.proposals.length])
   if (!a.open) return null
-
-  const send = (text: string, mode?: "advise" | "try") => { if (!text.trim() || a.busy || a.visual.running) return; a.send(text, mode); setDraft("") }
-  const open = a.proposals.filter(p => p.status === "open")
-  const shown = (m: Msg) => a.proposals.filter(p => m.proposals?.includes(p.id))
-  const orphan = a.proposals.filter(p => !msgs.some(m => m.proposals?.includes(p.id)))
-
   return (
     <aside aria-label="Agent" className="fixed inset-y-0 right-0 z-40 flex w-full flex-col border-l bg-background shadow-xl sm:w-[440px]">
       <header className="flex items-start gap-2 border-b px-4 py-3">
@@ -55,7 +45,31 @@ export function AgentPanel() {
           <TooltipContent>Close (the session is kept)</TooltipContent>
         </Tooltip>
       </header>
+      <ThreadBody />
+    </aside>
+  )
+}
 
+/**
+ * A thread's conversation: the mode, the messages with their proposals, sandbox changes, starters and
+ * the message box. The side panel and the issue page's pinned thread both show it. With a pinned
+ * subject and no thread yet, the box is live and the first message starts the thread.
+ */
+export function ThreadBody({ className }: { className?: string }) {
+  const a = useAgent()
+  const [draft, setDraft] = React.useState("")
+  const end = React.useRef<HTMLDivElement>(null)
+  const s = a.session
+  const msgs = s?.messages ?? []
+  React.useEffect(() => { end.current?.scrollIntoView({ block: "nearest" }) }, [msgs.length, a.streaming?.text.length, a.proposals.length])
+  const live = Boolean(s || a.pending)
+  const send = (text: string, mode?: "advise" | "try") => { if (!text.trim() || a.busy || a.visual.running || !live) return; a.send(text, mode); setDraft("") }
+  const open = a.proposals.filter(p => p.status === "open")
+  const shown = (m: Msg) => a.proposals.filter(p => m.proposals?.includes(p.id))
+  const orphan = a.proposals.filter(p => !msgs.some(m => m.proposals?.includes(p.id)))
+
+  return (
+    <div className={cn("flex min-h-0 flex-1 flex-col", className)}>
       {s && (
         <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/30 px-4 py-2">
           <ToggleGroup value={[s.mode]} onValueChange={(v: any) => v[0] && v[0] !== s.mode && api("/api/agent/changes", { id: s.id, action: "mode", mode: v[0] }).then(a.refresh)} variant="outline" size="sm" disabled={a.busy}>
@@ -68,6 +82,12 @@ export function AgentPanel() {
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
         {a.starting && <p className="text-sm text-muted-foreground">Preparing the brief: the scan's evidence, the design-system entries, and the rules…</p>}
+        {!s && a.pending && !a.busy && (
+          <div className="mb-4 rounded-lg border bg-muted/30 p-3 text-sm">
+            <p className="font-medium">No thread yet.</p>
+            <p className="mt-1 text-muted-foreground">Ask anything and it stays pinned here. I'll read the scan's evidence first, and anything I'd change comes back to you to accept.</p>
+          </div>
+        )}
         {s && msgs.length === 0 && !a.busy && (
           <div className="mb-4 rounded-lg border bg-muted/30 p-3 text-sm">
             <p className="font-medium">I've read the scan for this.</p>
@@ -95,16 +115,16 @@ export function AgentPanel() {
         </div>
       )}
       <form className="flex flex-col gap-2 px-4 py-3" onSubmit={e => { e.preventDefault(); send(draft) }}>
-        <Textarea value={draft} onChange={e => setDraft(e.target.value)} placeholder={s ? "Ask about this, or tell it what to try…" : "Start from a card, a queue item, or Agent Readiness."} disabled={!s}
+        <Textarea value={draft} onChange={e => setDraft(e.target.value)} placeholder={live ? "Ask about this, or tell it what to try…" : "Start from a card, a queue item, or Agent Readiness."} disabled={!live}
           rows={2} className="max-h-40 min-h-16 resize-none" onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(draft) } }} aria-label="Message the agent" />
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs text-muted-foreground">{open.length ? `${open.length} proposal${open.length === 1 ? "" : "s"} waiting for you` : "Enter sends · Shift+Enter for a new line"}</span>
           {a.busy
             ? <Button type="button" size="sm" variant="outline" onClick={a.cancel}><StopIcon data-icon="inline-start" />Stop</Button>
-            : <Button type="submit" size="sm" disabled={!s || !draft.trim() || a.visual.running}><PaperPlaneRightIcon data-icon="inline-start" />Send</Button>}
+            : <Button type="submit" size="sm" disabled={!live || !draft.trim() || a.visual.running}><PaperPlaneRightIcon data-icon="inline-start" />Send</Button>}
         </div>
       </form>
-    </aside>
+    </div>
   )
 }
 

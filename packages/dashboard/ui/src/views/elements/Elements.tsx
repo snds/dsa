@@ -35,25 +35,56 @@ for (const e of D.elements?.evals ?? []) {
  * "No home yet", or "Keep native". Status is a filter over those groups (needs you, ready,
  * decided), so every card is listed once. A card names a design pattern and the decision it needs.
  */
-export function Elements() {
+/**
+ * Element Review's shared state (the elements by id, the picker, lightbox and code viewer) for any
+ * screen that answers places: Element Review itself, and the issue page for a question.
+ */
+export function useElementsScope() {
   const E = D.elements, th = E.threshold
   const [, bump] = React.useState(0)
   const refresh = () => bump(x => x + 1)
   const byId = React.useMemo(() => new Map<string, any>(E.evals.map((e: any) => [e.id, e])), [E])
-  // The app chosen in the header. All apps: every question at once, since one question can cover the
-  // same pattern in several apps and one answer settles it everywhere; splitting it per app would ask twice.
-  const target = useApp()
   const [picker, setPicker] = React.useState<PickerTarget | null>(null)
   const [lb, setLb] = React.useState<{ ids: string[]; i: number; decision?: any } | null>(null)
   const [code, setCode] = React.useState<string | null>(null)
+  const applyLocal = (ids: string[], decided: any) => { for (const id of ids) { const e = byId.get(id); if (!e) continue; if (decided) e.decided = decided; else delete e.decided; e.needsHuman = !e.decided && e.confidence < th } }
+  const ctx = { th, byId, applyLocal, refresh, openPicker: setPicker, openLightbox: (ids: string[], i: number, decision?: any) => setLb({ ids, i, decision }), openCode: setCode }
+  const dialogs = (
+    <>
+      {picker && <Picker target={picker} onClose={() => setPicker(null)} />}
+      {lb && <Lightbox ids={lb.ids} start={lb.i} decision={lb.decision} onClose={() => setLb(null)} />}
+      {code && <CodeViewer id={code} onClose={() => setCode(null)} />}
+    </>
+  )
+  return { E, th, byId, applyLocal, ctx, dialogs }
+}
+
+/** Answer some places outside Element Review (the issue page): the same batches, answers, notes and undo. */
+export function AnswerPlaces({ ids }: { ids: string[] }) {
+  const { E, ctx, dialogs } = useElementsScope()
+  const want = new Set(ids)
+  const evals = E.evals.filter((e: any) => want.has(e.id))
+  if (!evals.length) return null
+  return (
+    <ElCtx.Provider value={ctx}>
+      <ByComponent evals={evals} rail={false} />
+      {!D.serve && <StagedBar />}
+      {dialogs}
+    </ElCtx.Provider>
+  )
+}
+
+export function Elements() {
+  const { E, th, byId, applyLocal, ctx, dialogs } = useElementsScope()
+  // The app chosen in the header. All apps: every question at once, since one question can cover the
+  // same pattern in several apps and one answer settles it everywhere; splitting it per app would ask twice.
+  const target = useApp()
   // One review screen, by component, in dsa serve and on a published copy alike. The older "by question"
   // cards stay reachable with #elements/question while the redesign replaces them.
   const [view, setView] = React.useState<"component" | "question">(() => (routePath().endsWith("/question") ? "question" : "component"))
   const chooseView = (v: "component" | "question") => setView(v)
-  const applyLocal = (ids: string[], decided: any) => { for (const id of ids) { const e = byId.get(id); if (!e) continue; if (decided) e.decided = decided; else delete e.decided; e.needsHuman = !e.decided && e.confidence < th } }
   // A published copy: answers staged in this browser show on their places until a scan holds them.
   React.useState(() => { if (!D.serve) for (const x of readStaged()) if (!x.pattern) applyLocal(x.ids.filter(id => !byId.get(id)?.decided), stagedDecided(x.decision, x.note)) })
-  const ctx = { th, byId, applyLocal, refresh, openPicker: setPicker, openLightbox: (ids: string[], i: number, decision?: any) => setLb({ ids, i, decision }), openCode: setCode }
 
   const mine = E.evals.filter((e: any) => !target || e.target === target)
   const unused = mine.filter((e: any) => e.exception === "unused")
@@ -104,13 +135,6 @@ export function Elements() {
       <ToggleGroupItem value="component">By component</ToggleGroupItem>
       <ToggleGroupItem value="question">By question</ToggleGroupItem>
     </ToggleGroup>
-  )
-  const dialogs = (
-    <>
-      {picker && <Picker target={picker} onClose={() => setPicker(null)} />}
-      {lb && <Lightbox ids={lb.ids} start={lb.i} decision={lb.decision} onClose={() => setLb(null)} />}
-      {code && <CodeViewer id={code} onClose={() => setCode(null)} />}
-    </>
   )
   if (view === "component") return (
     <ElCtx.Provider value={ctx}>
