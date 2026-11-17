@@ -23,7 +23,8 @@ export function ThreadBadge({ subject, className, interactive = true }: { subjec
   const a = useAgent()
   if (!canChat()) return null
   const t = a.threads[anchorKeyOf(subject)]
-  if (!t) return null
+  // A thread opened but not used yet has nothing to say.
+  if (!t || !t.turns) return null
   const st = THREAD_STATE[t.state]
   const Icon = st.icon
   const waiting = t.openProposals > 0 ? `${t.openProposals} proposal${t.openProposals === 1 ? "" : "s"} waiting` : null
@@ -48,7 +49,7 @@ export function ThreadBadge({ subject, className, interactive = true }: { subjec
 export function WaitingOnYou() {
   const a = useAgent()
   if (!canChat()) return null
-  const waiting = Object.values(a.threads).filter(t => t.state === "waiting-on-you" || t.state === "changes-ready")
+  const waiting = Object.values(a.threads).filter(t => t.turns > 0 && (t.state === "waiting-on-you" || t.state === "changes-ready"))
   if (!waiting.length) return null
   const newest = [...waiting].sort((x, y) => y.updatedAt.localeCompare(x.updatedAt))[0]!
   return (

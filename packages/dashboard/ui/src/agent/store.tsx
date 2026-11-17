@@ -16,7 +16,7 @@ export type Subject =
 
 /** A thread's state (agent package threads.ts). */
 export type ThreadState = "working" | "waiting-on-you" | "changes-ready" | "on-a-branch" | "in-pr" | "settled" | "out-of-date"
-export interface Thread { anchor: string; session: string; title: string; state: ThreadState; updatedAt: string; openProposals: number; pr: { url: string } | null; previous: string[] }
+export interface Thread { anchor: string; session: string; title: string; state: ThreadState; updatedAt: string; openProposals: number; turns: number; pr: { url: string } | null; previous: string[] }
 
 /** The same batch key the server makes (threads.ts idsKey): FNV-1a of the sorted, unique ids. */
 export function idsKey(ids: string[]): string {
