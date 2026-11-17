@@ -28,19 +28,13 @@ const safeHref = (u: unknown) => { try { const x = new URL(String(u)); return x.
  * item's issue moves it to Completed. When served, the queue reloads from the server and pulls live issue
  * state once a minute; the static report shows the snapshot it was built with.
  */
-type Q = { items: any[]; prompt: string; github: { token: boolean; defaultRepo: string | null }; syncedAt: string | null; syncError?: string }
+export type Q = { items: any[]; prompt: string; github: { token: boolean; defaultRepo: string | null }; syncedAt: string | null; syncError?: string }
 
-export function Queue() {
+/** The queue, fresh from the server when served (approvals made since the page loaded, live issue state each minute). */
+export function useQueue() {
   const [q, setQ] = React.useState<Q | null>(D.queue ?? null)
-  const [scope, setScope] = React.useState("all")
-  const [certainty, setCertainty] = React.useState<"any" | Certainty>("any")
-  // An Overview link opens the queue on one item: #queue/<id>.
-  const [current, setCurrent] = React.useState<string | null>(() => { const id = routePath().split("/")[1]; return id ? decodeURIComponent(id) : null })
   const [syncing, setSyncing] = React.useState(false)
-  const [confirm, setConfirm] = React.useState(false)
   const [creating, setCreating] = React.useState<string[] | null>(null)
-  const app = useApp()
-
   const load = React.useCallback(async (sync: "" | "1" | "force" = "1") => {
     if (!D.serve) return
     if (sync === "force") setSyncing(true)
@@ -51,10 +45,8 @@ export function Queue() {
     } catch (e: any) { if (sync === "force") say(e.message, true) }
     finally { setSyncing(false) }
   }, [])
-  // Fresh on open (approvals made in Element Review since the page loaded), then live issue state each minute.
   React.useEffect(() => { load("1"); const t = setInterval(() => load("1"), 60000); return () => clearInterval(t) }, [load])
-
-  async function create(ids?: string[]) {
+  const create = React.useCallback(async (ids?: string[]) => {
     setCreating(ids ?? ["*"])
     try {
       const r = await api("/api/issues/create", ids ? { ids } : {})
@@ -63,8 +55,20 @@ export function Queue() {
       if (r.skipped.length) say(`${r.skipped.length} skipped: ${[...new Set(r.skipped.map((s: any) => s.reason))].join("; ")}`, !n)
       await load("")
     } catch (e: any) { say(e.message, true) }
-    finally { setCreating(null); setConfirm(false) }
-  }
+    finally { setCreating(null) }
+  }, [load])
+  return { q, load, syncing, creating, create }
+}
+
+export function Queue() {
+  const { q, load, syncing, creating, create: createIssues } = useQueue()
+  const [scope, setScope] = React.useState("all")
+  const [certainty, setCertainty] = React.useState<"any" | Certainty>("any")
+  // An Overview link opens the queue on one item: #queue/<id>.
+  const [current, setCurrent] = React.useState<string | null>(() => { const id = routePath().split("/")[1]; return id ? decodeURIComponent(id) : null })
+  const [confirm, setConfirm] = React.useState(false)
+  const app = useApp()
+  const create = async (ids?: string[]) => { await createIssues(ids); setConfirm(false) }
 
   if (!q) return <Empty className="border"><EmptyHeader><EmptyTitle>The queue isn't in this report</EmptyTitle><EmptyDescription>Re-run the scan to build it.</EmptyDescription></EmptyHeader></Empty>
 
@@ -256,7 +260,8 @@ function Row({ i, sel, onClick }: { i: any; sel: boolean; onClick: () => void })
   )
 }
 
-function Detail({ i, q, busy, onCreate }: { i: any; q: Q; busy: boolean; onCreate: () => void }) {
+/** One item: who, why, what to do, when it's done, and its issue. `base` is the route its disclosures link under. */
+export function Detail({ i, q, busy, onCreate, base = "queue" }: { i: any; q: Q; busy: boolean; onCreate: () => void; base?: string }) {
   const issue = i.issue.title + (i.issue.body ? "\n\n" + i.issue.body : "")
   const cmd = `./bin/dsa.js issues sync --apply --only ${i.id}`
   const l = i.link
@@ -317,7 +322,7 @@ function Detail({ i, q, busy, onCreate }: { i: any; q: Q; busy: boolean; onCreat
           <Pre className="max-h-80">{issue}</Pre>
         </Disclosure>
       </>}
-      <Disclosure key={i.id} label="Technical details" hint="history, repo, IDs" hash={`queue/${encodeURIComponent(i.id)}/details`} closedHash={`queue/${encodeURIComponent(i.id)}`} className="mt-4">
+      <Disclosure key={i.id} label="Technical details" hint="history, repo, IDs" hash={`${base}/${encodeURIComponent(i.id)}/details`} closedHash={`${base}/${encodeURIComponent(i.id)}`} className="mt-4">
         <Facts rows={tech} />
         {i.kind === "finding" && <Button variant="outline" size="sm" className="w-fit" onClick={() => copy(cmd, `Copied: ${cmd}`)}>Copy command</Button>}
       </Disclosure>
