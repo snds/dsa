@@ -3,6 +3,7 @@ import path from 'node:path';
 import { label, tools } from './system.js';
 
 import { agentDir, type Snapshot } from './snapshot.js';
+import { knowsSection } from './knows.js';
 
 /**
  * What a session is about, and the brief an agent gets before the first message: the scan's evidence
@@ -110,7 +111,7 @@ export function buildBrief(snap: Snapshot, s: Subject): Brief {
   const comp = componentOfSubject(s);
   const l = legacyOf(s);
   const body = comp ? componentBody(snap, comp) : !l ? scanBody(snap) : l.kind === 'review' ? reviewBody(snap, l) : l.kind === 'queue' ? queueBody(snap, l) : l.kind === 'readiness' ? readinessBody(snap, l) : scanBody(snap);
-  const markdown = [...head, ...body.lines, '', ...intent(snap, repo), '', toolsSection()].join('\n');
+  const markdown = [...head, ...body.lines, '', ...knowsSection(snap, s), '', ...intent(snap, repo), '', toolsSection()].join('\n');
   const dir = path.join(agentDir(snap.dataDir), 'context');
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `${key}.md`);
@@ -266,6 +267,6 @@ function intent(snap: Snapshot, repo: { dir: string }): string[] {
 function toolsSection(): string {
   const own = tools().tools;
   return ['## Tools', '',
-    '- dsa (this scan): get_subject, scan_summary, get_element, find_elements, view_screenshot, component_signature, check_file, and the propose_* tools.',
+    '- dsa (this scan): get_subject, scan_summary, get_element, find_elements, view_screenshot, component_signature, check_file, past_decisions, component_guidelines, tokens_for, related_threads, and the propose_* tools.',
     ...(own ? [`- ${label()} (the design system): ${own}`] : [])].join('\n');
 }

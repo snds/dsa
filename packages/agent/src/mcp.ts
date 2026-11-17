@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 import { readSnapshot, type Snapshot } from './snapshot.js';
+import { guidelines, pastDecisions, relatedThreads, tokensFor } from './knows.js';
 import { buildBrief, type Subject } from './context.js';
 import { propose, readProposals, type ProposalKind } from './proposals.js';
 
@@ -90,6 +91,18 @@ export const TOOLS: Tool[] = [
       if (!check) return text("The design system's profile names no usage checker, so there is nothing to run. Check the file by reading it.");
       return text(await check(root, path.relative(root, f)));
     } },
+  { name: 'past_decisions', description: 'Decisions people already made: decided elements with who decided and their notes, for one component (or all). Read before you propose: do not contradict one without new evidence.', readOnly: true,
+    inputSchema: { type: 'object', properties: { component: { type: 'string', description: 'Exact component name; omit for every decision' }, limit: { type: 'number' } } },
+    run: (a, _env, snap) => { const list = pastDecisions(snap, a.component ?? null); return text({ total: list.length, decisions: list.slice(-(Number(a.limit) || 40)), rejectedProposals: readProposals(snap.dataDir).filter(p => p.status === 'rejected').slice(-10).map(p => ({ title: p.title, reason: p.result ?? null })) }); } },
+  { name: 'component_guidelines', description: "A design-system component's usage guidelines: its entry's description and its docs file, when the system has one.", readOnly: true,
+    inputSchema: { type: 'object', properties: { component: { type: 'string' } }, required: ['component'] },
+    run: a => { const g = guidelines(String(a.component)); return text(g.text || g.description ? g : `No guidelines found for ${a.component}. Say so rather than guess.`); } },
+  { name: 'tokens_for', description: 'The tokens in play for a component: how many the scan saw bound to it, the system\'s token groups, and its measured variants and defaults.', readOnly: true,
+    inputSchema: { type: 'object', properties: { component: { type: 'string' } }, required: ['component'] },
+    run: (a, _env, snap) => text(tokensFor(snap, String(a.component))) },
+  { name: 'related_threads', description: 'Other agent threads about the same component or issue, with their state, so you can build on them instead of starting over.', readOnly: true,
+    inputSchema: { type: 'object', properties: {} },
+    run: (_a, env, snap) => { const r = relatedThreads(snap, subjectOf(env)); return text(r.length ? r : 'No related threads.'); } },
   { name: 'list_proposals', description: 'Proposals made in this session (or all, with all: true) and whether the designer accepted them.', readOnly: true,
     inputSchema: { type: 'object', properties: { all: { type: 'boolean' } } },
     run: (a, env) => text(readProposals(env.dataDir).filter(p => a.all || p.session === session(env)).map(p => `${p.id} [${p.status}] ${p.kind}: ${p.title}${p.result ? ` — ${p.result}` : ''}`).join('\n') || 'None yet.') },

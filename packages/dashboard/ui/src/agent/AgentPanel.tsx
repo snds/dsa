@@ -12,6 +12,7 @@ import { Pre } from "@/components/bits"
 import { api, ago } from "@/lib/dsa"
 import { hashFor } from "@/lib/app"
 import { BeforeAfter } from "./BeforeAfter"
+import { Knows } from "./Knows"
 import { Markdown } from "./Markdown"
 import { useAgent, type Msg, type Proposal } from "./store"
 
@@ -81,6 +82,7 @@ export function ThreadBody({ className }: { className?: string }) {
       )}
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
+        {(s?.subject ?? a.pending) && <Knows subject={(s?.subject ?? a.pending)!} />}
         {a.starting && <p className="text-sm text-muted-foreground">Preparing the brief: the scan's evidence, the design-system entries, and the rules…</p>}
         {!s && a.pending && !a.busy && (
           <div className="mb-4 rounded-lg border bg-muted/30 p-3 text-sm">

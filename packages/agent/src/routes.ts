@@ -8,6 +8,7 @@ import { DSA_CLI, contextArgs, tools, useProfile } from './system.js';
 import { readSnapshot, writeSnapshot, agentDir } from './snapshot.js';
 import { buildBrief, PERSONA, type IssueSource, type Subject } from './context.js';
 import { anchorKey, anchorOf, threadIndex, writeThreadIndex } from './threads.js';
+import { evidenceOf, whatTheAgentKnows } from './knows.js';
 import { addFeedback, readFeedback, readProposals, setStatus } from './proposals.js';
 
 import { detectProviders, type Mode, type ProviderId, type ProviderStatus } from './providers.js';
@@ -68,9 +69,12 @@ function issueSource(x: any): IssueSource | undefined {
 /** Every anchor's thread and its state; written to threads.json for the published page. */
 function threads(dataDir: string) {
   const proposals = readProposals(dataDir);
+  const snap = readSnapshot(dataDir);
   const index = threadIndex(listSessions(dataDir) as any[], proposals, id => {
     const s = readSession(dataDir, id);
-    return { running: isRunning(id), changedFiles: s?.sandbox ? sandboxChanges(s)?.files.length ?? 0 : 0 };
+    // Out of date: a newer scan changed the evidence the thread started on (stage 6).
+    const evidenceChanged = Boolean(s && snap?.run && s.scanId && s.evidence && s.scanId !== snap.run.id && evidenceOf(snap, s.subject) !== s.evidence);
+    return { running: isRunning(id), changedFiles: s?.sandbox ? sandboxChanges(s)?.files.length ?? 0 : 0, evidenceChanged };
   });
   writeThreadIndex(dataDir, index);
   return index;
@@ -159,6 +163,11 @@ export const agentRoutes: ServeRoute = async ({ req, res, url, body, send, conte
       raw.agents = { provider: prov, model: String(b.model ?? '').trim() || undefined, cursorModel: String(b.cursorModel ?? '').trim() || undefined, mode, timeoutMinutes: t > 0 && t <= 60 ? t : undefined };
       fs.writeFileSync(file, JSON.stringify(raw, null, 2) + '\n');
       return send(200, { saved: true }), true;
+    }
+    // What the agent knows for a subject: the drawer beside a thread (stage 6).
+    if (POST && p === '/api/agent/context') {
+      const snap = await snapshot(ctx);
+      return send(200, { sources: whatTheAgentKnows(snap, subjectFrom(await body())) }), true;
     }
     if (GET && p === '/api/agent/threads') return send(200, { threads: threads(dataDir) }), true;
     if (POST && p === '/api/agent/thread/settle') {
