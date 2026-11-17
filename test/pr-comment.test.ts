@@ -7,6 +7,7 @@ import { createProgram, type CliIo } from "../src/cli.js";
 import { githubHost } from "../src/deploy/adapters/github.js";
 import type { HostContext } from "../src/deploy/types.js";
 import type { ViolationCounts } from "../src/metrics/adoption.js";
+import { dropGitIgnored } from "../src/git-ignored.js";
 import { styleValuesInText } from "../src/metrics/style-values.js";
 import { PR_COMMENT_MARKER, compareScans, prCommentMarkdown, pullRequestFromEnv, type ComparableScan } from "../src/pr-comment.js";
 import { scan } from "../src/scan.js";
@@ -149,6 +150,46 @@ describe("styleValuesInText", () => {
       expect(r.styleValues).toContainEqual({ file: "src/screens/theme.css", line: 2, column: 10, value: "#123456", kind: "color" });
       expect(r.styleValues.find((v) => v.file === "src/screens/landing.tsx")).toMatchObject({ value: "8", kind: "length" });
       expect(ScanReportSchema.safeParse(r).success).toBe(true);
+    } finally {
+      rmrf(dir);
+    }
+  });
+});
+
+describe("git-ignored files", () => {
+  const git = (dir: string, ...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "ignore" });
+  const repo = () => {
+    const dir = tempFixture();
+    git(dir, "init", "-q");
+    fs.writeFileSync(path.join(dir, ".gitignore"), "storybook-static\n");
+    fs.mkdirSync(path.join(dir, "storybook-static/assets"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "storybook-static/assets/built.css"), ".y {\n  color: #abcdef;\n}\n");
+    fs.writeFileSync(path.join(dir, "storybook-static/Page.tsx"), "export const Page = () => <div style={{ color: '#fedcba' }} />;\n");
+    return dir;
+  };
+
+  it("are left out of the scan, like build output", () => {
+    const dir = repo();
+    try {
+      const r = scan({ dir });
+      expect(r.styleValues.some((v) => v.file.startsWith("storybook-static/"))).toBe(false);
+      expect(r.styleValues.find((v) => v.file === "src/screens/landing.tsx")).toMatchObject({ value: "8", kind: "length" });
+    } finally {
+      rmrf(dir);
+    }
+  });
+
+  it("stay in when git tracks them, and outside a checkout", () => {
+    const dir = repo();
+    try {
+      const built = path.join(dir, "storybook-static/assets/built.css");
+      const kept = path.join(dir, "src/screens/landing.tsx");
+      expect(dropGitIgnored(dir, [built, kept])).toEqual([kept]);
+      git(dir, "add", "-f", "storybook-static/assets/built.css");
+      expect(dropGitIgnored(dir, [built, kept])).toEqual([built, kept]);
+      fs.rmSync(path.join(dir, ".git"), { recursive: true, force: true });
+      const outside = path.join(dir, "storybook-static/Page.tsx");
+      expect(dropGitIgnored(dir, [outside, kept])).toEqual([outside, kept]);
     } finally {
       rmrf(dir);
     }

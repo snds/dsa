@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import fg from "fast-glob";
+import { dropGitIgnored } from "../git-ignored.js";
 import type { DsaConfig } from "../config.js";
 import { READABLE, readFile } from "./elements.js";
 import { extractConcepts, PLUMBING } from "./extract.js";
@@ -89,7 +90,7 @@ export function readRepo({ root, config, include, extraDirs = [] }: BuildModelOp
   const globs = include ?? config.scan.include;
   const ignore = [...DEFAULT_EXCLUDE, ...config.scan.exclude];
   const outside = extraDirs.map((d) => path.resolve(absRoot, d)).filter((d) => !isInside(d, absRoot));
-  const files = [...new Set([absRoot, ...outside].flatMap((cwd) => fg.sync(globs, { cwd, absolute: true, ignore })))].filter((f) => READABLE.test(f)).sort();
+  const files = [...new Set([absRoot, ...outside].flatMap((cwd) => dropGitIgnored(cwd, fg.sync(globs, { cwd, absolute: true, ignore }))))].filter((f) => READABLE.test(f)).sort();
   const readings: FileReading[] = [];
   const skipped: { file: string; message: string }[] = [];
   for (const file of files) {
