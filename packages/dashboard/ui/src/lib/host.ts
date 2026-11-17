@@ -95,7 +95,10 @@ export function threadIssueUrl(t: { url: string; labels: string[] }, anchor: str
   return `${t.url}?${q.toString()}`
 }
 
-/** The search that finds the open GitHub issue already discussing an anchor. */
-export function threadSearchUrl(t: { search: string; labels: string[] }, anchor: string): string {
-  return `${t.search}?${new URLSearchParams({ q: `is:issue label:${t.labels[0] ?? "dsa-thread"} "${anchor}"` }).toString()}`
+/**
+ * The search that finds the open GitHub issue already discussing an anchor. It looks for the hidden
+ * marker, not the label: a new-issue link drops a label the repo doesn't have.
+ */
+export function threadSearchUrl(t: { search: string }, anchor: string): string {
+  return `${t.search}?${new URLSearchParams({ q: `is:issue in:body "dsa:thread ${anchor}"` }).toString()}`
 }

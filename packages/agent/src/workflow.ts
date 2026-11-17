@@ -33,6 +33,8 @@ export const REPLY_MARKER = '<!-- dsa:thread-reply -->';
 /** The workflow template, printed by `dsa agent workflow`. Nothing writes it into a repo for you. */
 export const THREAD_WORKFLOW = String.raw`# dsa-thread: the agent replies on GitHub issues opened from a published dsa page.
 # Copy to .github/workflows/dsa-thread.yml. Needs the repository secret ANTHROPIC_API_KEY.
+# It acts on issues labelled dsa-thread or carrying the page's hidden marker, so it works where the
+# label doesn't exist (a new-issue link drops a label the repo lacks).
 # Optional repository variable DSA_THREAD_DAILY_LIMIT (default 30 replies a day).
 name: dsa-thread
 on:
@@ -49,7 +51,7 @@ concurrency:
 jobs:
   reply:
     if: >-
-      contains(github.event.issue.labels.*.name, 'dsa-thread') &&
+      (contains(github.event.issue.labels.*.name, 'dsa-thread') || contains(github.event.issue.body, 'dsa:thread ')) &&
       github.event.sender.type != 'Bot' &&
       !contains(github.event.comment.body || '', '${REPLY_MARKER}')
     runs-on: ubuntu-latest
@@ -139,6 +141,6 @@ jobs:
         env:
           PR: ${'$'}{{ steps.pr.outputs.url }}
         run: |
-          { echo "${REPLY_MARKER}"; cat "$RUNNER_TEMP/answer.md"; [ -n "$PR" ] && printf '\n\nDraft PR: %s\n' "$PR"; } > "$RUNNER_TEMP/reply.md"
+          { echo "${REPLY_MARKER}"; cat "$RUNNER_TEMP/answer.md"; if [ -n "$PR" ]; then printf '\n\nDraft PR: %s\n' "$PR"; fi; } > "$RUNNER_TEMP/reply.md"
           gh issue comment "$ISSUE" --repo "$REPO" --body-file "$RUNNER_TEMP/reply.md"
 `;

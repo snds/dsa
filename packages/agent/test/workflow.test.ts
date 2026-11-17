@@ -32,6 +32,8 @@ test('the workflow: valid YAML, gated on write access and a daily limit, user te
   assert.deepEqual(Object.keys(wf.on).sort(), ['issue_comment', 'issues']);
   const job = wf.jobs.reply;
   assert.match(job.if, /dsa-thread/);
+  // The label may not exist on the repo (a new-issue link drops it), so the page's marker counts too.
+  assert.match(job.if, /contains\(github\.event\.issue\.body, 'dsa:thread '\)/);
   assert.match(job.if, /sender\.type != 'Bot'/);
   assert.match(job.if, /dsa:thread-reply/, 'its own replies never start it again');
   const steps: any[] = job.steps;
@@ -50,6 +52,8 @@ test('the workflow: valid YAML, gated on write access and a daily limit, user te
   assert.equal(steps.find(s => s.name === 'The agent answers').env.ANTHROPIC_API_KEY, '${{ secrets.ANTHROPIC_API_KEY }}');
   assert.match(steps.find(s => s.name === 'Scan and write the brief').run, /npx dsa brief "\$ANCHOR"/);
   assert.match(steps.find(s => s.name === 'Reply').run, /dsa:thread-reply/);
+  // Actions runs scripts with bash -e: a reply with no draft PR must not end on a failed test.
+  assert.doesNotMatch(steps.find(s => s.name === 'Reply').run, /\] && printf/);
   assert.equal(threadMarker('issue:F-1'), '<!-- dsa:thread issue:F-1 -->');
   assert.equal(REPLY_MARKER, '<!-- dsa:thread-reply -->');
   // The anchor read from the issue body is what the page's marker writes.

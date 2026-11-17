@@ -64,5 +64,5 @@ test("Discuss on GitHub opens a labelled issue with the anchor marker; an issue 
   expect(u.searchParams.get("title")).toBe("dsa: Overrides on Select")
   expect(u.searchParams.get("body")).toContain("<!-- dsa:thread issue:F-2 -->")
   const find = new URL([...thread()!.querySelectorAll("a")].find(x => x.textContent === "Find the discussion")!.getAttribute("href")!)
-  expect(find.searchParams.get("q")).toBe('is:issue label:dsa-thread "issue:F-2"')
+  expect(find.searchParams.get("q")).toBe('is:issue in:body "dsa:thread issue:F-2"')
 })
