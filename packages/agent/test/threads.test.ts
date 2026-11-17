@@ -65,6 +65,7 @@ test('sessions: new ones carry their anchor and scan; old files without them sti
   assert.deepEqual(t.previous, ['S-old'], 'the older one is kept as a previous thread');
   assert.equal(t.state, 'waiting-on-you');
   assert.equal(t.openProposals, 1);
+  assert.equal(t.turns, 0, 'a thread nobody wrote in yet');
   writeThreadIndex(data, index);
   assert.equal(readThreadIndex(data)['issue:F-ABC123']!.session, s.id);
 });

@@ -113,6 +113,8 @@ export interface ThreadEntry {
   pr: { url: string; number?: number } | null;
   /** Proposals in this thread still waiting for a person. */
   openProposals: number;
+  /** Messages so far. A thread nobody has written in yet (0) shows no badge. */
+  turns: number;
   /** Older sessions on the same anchor, newest first (New thread keeps them). */
   previous: string[];
 }
@@ -133,7 +135,7 @@ export function threadIndex(sessions: (ThreadFacts & { title: string })[], propo
     const t = list[0]!;
     out[k] = {
       anchor: k, session: t.id, title: t.title, state: threadState(t, { ...facts(t.id), proposals }), updatedAt: t.updatedAt,
-      scanId: t.scanId ?? null, pr: t.pr ?? null, openProposals: proposals.filter(p => p.session === t.id && p.status === 'open').length, previous: list.slice(1).map(s => s.id),
+      scanId: t.scanId ?? null, pr: t.pr ?? null, openProposals: proposals.filter(p => p.session === t.id && p.status === 'open').length, turns: t.turns ?? t.messages?.length ?? 0, previous: list.slice(1).map(s => s.id),
     };
   }
   return out;
