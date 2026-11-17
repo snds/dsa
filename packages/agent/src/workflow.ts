@@ -1,5 +1,6 @@
 import { questions } from '@snds/dsa/engine';
 import { readSession } from './sessions.js';
+import { READ_TOOLS } from './mcp.js';
 import { readSnapshot, type Snapshot } from './snapshot.js';
 import { idsKey, readThreadIndex } from './threads.js';
 import type { Subject } from './context.js';
@@ -141,6 +142,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${'$'}{{ secrets.ANTHROPIC_API_KEY }}
           WORKSPACE_ID: ${'$'}{{ vars.ANTHROPIC_WORKSPACE_ID }}
+          ANCHOR: ${'$'}{{ steps.ask.outputs.anchor }}
           MODE: ${'$'}{{ steps.ask.outputs.mode }}
         run: |
           # Whatever goes wrong, the thread gets a reply saying so, and the details go to the run log.
@@ -151,14 +153,17 @@ jobs:
           fi
           if [ -n "$WORKSPACE_ID" ]; then export ANTHROPIC_CUSTOM_HEADERS="anthropic-workspace-id: $WORKSPACE_ID"; fi
           npm i -g @anthropic-ai/claude-code
-          tools="Read,Grep,Glob"
+          # dsa's own tools on this scan, read-only: nobody is here to accept a proposal, so proposals stay text.
+          jq -n --arg anchor "$ANCHOR" '{mcpServers: {dsa: {command: "npx", args: ["dsa", "mcp", "--anchor", $anchor]}}}' > "$RUNNER_TEMP/mcp.json"
+          dsa_tools="${READ_TOOLS.map(t => `mcp__dsa__${t}`).join(',')}"
+          tools="Read,Grep,Glob,$dsa_tools"
           ask="Answer the latest message in the thread below (the issue's description when it has no comments yet), in plain words, citing evidence. If you would change something, say so as a proposal for a person; never decide."
           if [ "$MODE" = fix ]; then
-            tools="Read,Grep,Glob,Edit,Write"
+            tools="Read,Grep,Glob,Edit,Write,$dsa_tools"
             ask="Make the smallest change in this checkout that fixes what the thread asks, then say what you changed and how to verify it."
           fi
           { cat "$RUNNER_TEMP/brief.md"; echo; echo "## The GitHub thread"; cat "$RUNNER_TEMP/thread.txt"; echo; echo "$ask"; } > "$RUNNER_TEMP/prompt.md"
-          if claude -p --allowedTools "$tools" < "$RUNNER_TEMP/prompt.md" > "$RUNNER_TEMP/answer.md" 2> "$RUNNER_TEMP/agent-err.txt"; then
+          if claude -p --strict-mcp-config --mcp-config "$RUNNER_TEMP/mcp.json" --allowedTools "$tools" < "$RUNNER_TEMP/prompt.md" > "$RUNNER_TEMP/answer.md" 2> "$RUNNER_TEMP/agent-err.txt"; then
             echo "ok=true" >> "$GITHUB_OUTPUT"
           else
             echo "::error::The agent failed:"; cat "$RUNNER_TEMP/answer.md" "$RUNNER_TEMP/agent-err.txt"

@@ -84,7 +84,7 @@ export function whatTheAgentKnows(snap: Snapshot, s: Subject): Source[] {
   if (comp) {
     const g = guidelines(comp);
     const entry = componentEntry(comp);
-    out.push({ layer: 'system', name: `${comp}: the system's entry`, status: entry ? 'included' : 'missing', detail: entry ? `Import ${entry.import ?? '?'}${entry.variants ? `, ${Object.keys(entry.variants).length} variant axes` : ''}` : `The design system's profile has no entry for ${comp}.` });
+    out.push({ layer: 'system', name: `${comp}: the system's entry`, status: entry ? 'included' : 'missing', detail: entry ? `Import ${entry.import ?? '?'}${entry.variants ? `, ${Object.keys(entry.variants).length} variant axes` : ''}${entry.fromRoles ? ` (from the profile's role map: ${entry.roles.join(', ')}; no fuller entry)` : ''}` : `The design system's profile has no entry for ${comp}.` });
     out.push({ layer: 'system', name: 'Usage guidelines', status: g.text || g.description ? 'included' : 'missing', detail: g.text ? `From ${g.path}` : g.description ? 'The entry\'s description only.' : `No guidelines found for ${comp}.` });
     const t = tokensFor(snap, comp);
     out.push({ layer: 'system', name: 'Tokens in play', status: t.boundTokens != null || t.axes ? 'included' : 'missing', detail: t.boundTokens != null ? `${t.boundTokens} bound to ${comp}` : t.axes ? 'Its measured variants and defaults.' : 'The scan has no tokens for it.' });

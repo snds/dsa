@@ -54,11 +54,13 @@ export default defineAddon({
       .description('the scan as MCP tools over stdio, for Claude Code, Cursor or any MCP client')
       .option('--session <id>', 'a dashboard session (proposals are tied to it)')
       .option('--repo <dir>', "the repo the agent works in (check_file reads from it)")
-      .action(async (o: { session?: string; repo?: string }, cmd: Command) => {
+      .option('--anchor <anchor>', "without a session, the thread's subject, as dsa brief takes it (get_subject answers for it)")
+      .action(async (o: { session?: string; repo?: string; anchor?: string }, cmd: Command) => {
         // MCP over stdio: stdout is the protocol, so nothing else may print there.
         const ctx = await api.context(cmd);
         useProfile(ctx.profile);
-        await serveMcp({ dataDir: ctx.dataDir, session: o.session, repoDir: o.repo ? path.resolve(api.cwd, o.repo) : ctx.root });
+        const subject = o.anchor ? subjectForAnchor(ctx.dataDir, o.anchor) : undefined;
+        await serveMcp({ dataDir: ctx.dataDir, session: o.session, repoDir: o.repo ? path.resolve(api.cwd, o.repo) : ctx.root, subject });
       });
 
     // dsa brief <anchor>: the brief a thread's agent gets, for a workflow or a terminal (stage 9).

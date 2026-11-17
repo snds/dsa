@@ -24,7 +24,8 @@ const INSTRUCTIONS = [
   'You never decide or write hints: propose_* records a proposal and the designer accepts or rejects it in the dashboard.',
 ].join('\n');
 
-export interface McpEnv { dataDir: string; session?: string; repoDir?: string }
+/** `subject` is set when there is no dashboard session but the subject is known (a GitHub thread's anchor). */
+export interface McpEnv { dataDir: string; session?: string; repoDir?: string; subject?: Subject }
 
 const rec = { type: 'object', properties: { verdict: { type: 'string', enum: ['replace', 'keep', 'gap', 'ignore'] }, use: { type: 'string', description: "The design system's component, exact export name" }, props: { type: 'object', additionalProperties: { type: 'string' } }, gap: { type: 'string' } }, required: ['verdict'] };
 const common = { rationale: { type: 'string', description: 'What you looked at and why, in plain words' }, confidence: { type: 'string', enum: ['high', 'medium', 'low'] }, evidence: { type: 'array', items: { type: 'string' }, description: 'Element ids, file:line, screenshot ids, doc paths' }, title: { type: 'string' } };
@@ -40,7 +41,7 @@ const trimEval = (e: any) => ({
 });
 
 function sigs(dataDir: string): any[] { try { return JSON.parse(fs.readFileSync(path.join(dataDir, 'signatures.json'), 'utf8')); } catch { return []; } }
-function subjectOf(env: McpEnv): Subject { return (env.session && readSession(env.dataDir, env.session)?.subject) || { kind: 'scan' }; }
+function subjectOf(env: McpEnv): Subject { return (env.session && readSession(env.dataDir, env.session)?.subject) || env.subject || { kind: 'scan' }; }
 const session = (env: McpEnv) => env.session ?? 'external';
 
 const proposeTool = (kind: ProposalKind, name: string, description: string, props: Record<string, any>, required: string[]): Tool => ({
@@ -116,6 +117,9 @@ export const TOOLS: Tool[] = [
     { issue: { type: 'string', description: 'The issue key (get_subject names it).' }, label: { type: 'string', enum: ['scanner-misread', 'intended', 'not-worth-it', 'duplicate'] }, reason: { type: 'string' } }, ['issue', 'label', 'reason']),
   proposeTool('issue', 'propose_issue', 'Draft a GitHub issue. The designer reviews it and files it.', { title: { type: 'string' }, body: { type: 'string' }, repo: { type: 'string' } }, ['title', 'body']),
 ];
+
+/** The tools that only read: what an agent gets where nobody is there to accept a proposal (the GitHub thread workflow). */
+export const READ_TOOLS = TOOLS.filter(t => t.readOnly).map(t => t.name);
 
 class RpcError extends Error { constructor(public code: number, msg: string) { super(msg); } }
 
