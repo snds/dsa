@@ -12,6 +12,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 import { Disclosure, Facts, Panel, Pre, SevBadge, Stat, sevTone } from "@/components/bits"
 import { D, SCOPES, ago, api, copy, fmtD, say } from "@/lib/dsa"
 import { AskAgent } from "@/agent/AskAgent"
+import { ThreadBadge } from "@/agent/ThreadBadge"
 import { Evidence } from "@/components/code-reader"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { CERTAINTY, classify, whoActs, type Certainty } from "@/lib/insight"
@@ -244,6 +245,7 @@ function Row({ i, sel, onClick }: { i: any; sel: boolean; onClick: () => void })
             {i.stillDetected && <Badge variant="destructive">Still detected</Badge>}
             {i.newSinceIssue > 0 && <Badge variant="outline">{i.newSinceIssue} new since issue closed</Badge>}
             {!done && <IssueBadge link={i.link} />}
+            <ThreadBadge subject={{ kind: "queue", id: i.id }} interactive={false} />
           </span>
         </span>
         <span className="shrink-0 text-right">
@@ -309,6 +311,7 @@ function Detail({ i, q, busy, onCreate }: { i: any; q: Q; busy: boolean; onCreat
           {l && <Button variant="outline" nativeButton={false} render={<a href={safeHref(l.url)} target="_blank" rel="noopener" />}><ArrowSquareOutIcon data-icon="inline-start" />Open issue</Button>}
           <Button variant="outline" onClick={() => copy(issue, "Issue text copied")}>Copy issue</Button>
           <AskAgent subject={{ kind: "queue", id: i.id }} label="Ask the agent" />
+          <ThreadBadge subject={{ kind: "queue", id: i.id }} className="self-center" />
         </div>
         <Disclosure label="Details" hint={l ? "the GitHub issue as filed" : "the drafted GitHub issue"} className="mt-4">
           <Pre className="max-h-80">{issue}</Pre>

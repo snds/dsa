@@ -13,6 +13,8 @@ import { Focus } from "./Focus"
 import { KEYS, keyAction } from "./keys"
 import { Kbd } from "@/components/ui/kbd"
 import { Checkbox } from "@/components/ui/checkbox"
+import { AskAgent } from "@/agent/AskAgent"
+import { ThreadBadge } from "@/agent/ThreadBadge"
 import { byComponent, neighboursOf, pickOf, shows, statusOf, withApart, type Batch, type ComponentGroup, type Counts, type LookGroup, type PlaceStatus } from "./structure"
 
 /**
@@ -369,7 +371,10 @@ function BatchCard({ b }: { b: Batch }) {
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-2.5">
         <h3 className="text-sm font-semibold">{pickText(b.pick)}</h3>
         <span className="text-xs text-muted-foreground">{plural(b.items.length, "place")} · {b.counts.todo} to decide{b.counts.decided ? ` · ${b.counts.decided} decided` : ""}</span>
-        <span className="ml-auto"><TickAll items={b.items} label="Select all {n}" /></span>
+        <span className="ml-auto flex items-center gap-2">
+          {D.serve && <><ThreadBadge subject={{ kind: "review", ids: b.items.map((e: any) => e.id), title: pickText(b.pick) }} /><AskAgent subject={{ kind: "review", ids: b.items.map((e: any) => e.id), title: pickText(b.pick) }} label="Ask the agent" size="xs" variant="ghost" /></>}
+          <TickAll items={b.items} label="Select all {n}" />
+        </span>
       </header>
       <Neighbours b={b} />
       <div className="flex flex-col divide-y">

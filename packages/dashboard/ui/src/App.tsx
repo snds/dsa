@@ -21,6 +21,7 @@ import { Overview } from "@/views/Overview"
 import { System } from "@/views/System"
 import { Usage } from "@/views/Usage"
 import { AgentProvider, canChat, useAgent } from "@/agent/store"
+import { WaitingOnYou } from "@/agent/ThreadBadge"
 import { AgentPanel } from "@/agent/AgentPanel"
 import { cn } from "cn"
 import { ACTIONS, rescan as hostRescan, rescanIssueUrl } from "@/lib/host"
@@ -194,6 +195,7 @@ function Shell() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
           <AppSelect />
+          {D.serve && <WaitingOnYou />}
           {D.serve && <AgentButton />}
           {canRun() ? <ScanButton /> : !D.serve && D.published && ACTIONS && <StaticRescan onPost={rerun} />}
           </div>

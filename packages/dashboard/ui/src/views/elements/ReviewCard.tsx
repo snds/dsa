@@ -8,6 +8,7 @@ import { Code, Disclosure, Pre } from "@/components/bits"
 import { D, short, SYS } from "@/lib/dsa"
 import { stageKey, useStaged } from "@/lib/staged"
 import { AskAgent } from "@/agent/AskAgent"
+import { ThreadBadge } from "@/agent/ThreadBadge"
 import { WIDER, Conf, ElementRow, NoShot, Reasons, ReviewControls, contentText, decidable, desc, nameOf, ownSays, ownWords, pickText, proposalCheck, proposalFor, revealedText, sourceLabel, sourceTip, useEl, useReviewState } from "./shared"
 import { Crop, InContext, Natural, SameScale } from "./SameScale"
 import { useApp } from "@/lib/app"
@@ -130,7 +131,7 @@ export function ReviewCard({ items, auto, pattern, options, fit, kind, title, as
         )}
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
           <span>{split || !reviewable.length ? "" : scope}{ready.length > 0 && `${split ? "" : " "}${ready.length} more of this kind are already sure; they're listed under Ready.`}{elsewhere.length > 0 && ` ${otherApps(elsewhere)}`}</span>
-          {D.serve && <AskAgent subject={{ kind: "review", ids: items.map(e => e.id), pattern: pattern ?? null }} label={kind === "question" ? "Talk it through" : "Ask the agent"} size="xs" variant="ghost" />}
+          {D.serve && <span className="inline-flex items-center gap-2"><ThreadBadge subject={{ kind: "review", ids: items.map(e => e.id), pattern: pattern ?? null }} /><AskAgent subject={{ kind: "review", ids: items.map(e => e.id), pattern: pattern ?? null }} label={kind === "question" ? "Talk it through" : "Ask the agent"} size="xs" variant="ghost" /></span>}
         </div>
       </CardHeader>
       {/* 4. The evidence. */}
