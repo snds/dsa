@@ -81,6 +81,8 @@ interface Api extends State {
 
 const Ctx = React.createContext<Api | null>(null)
 export const useAgent = () => { const c = React.useContext(Ctx); if (!c) throw new Error("useAgent outside AgentProvider"); return c }
+/** The agent when there is one: views also render on their own (tests, a published copy), where badges just stay away. */
+export const useAgentMaybe = () => React.useContext(Ctx)
 /** True when this page can talk to an agent (served by `dsa serve`, not opened from disk). */
 export const canChat = () => Boolean(D.serve)
 

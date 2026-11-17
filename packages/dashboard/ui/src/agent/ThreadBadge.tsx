@@ -2,7 +2,7 @@ import { CheckCircleIcon, CircleNotchIcon, ClockIcon, FlaskIcon, GitBranchIcon, 
 import { cn } from "cn"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { anchorKeyOf, canChat, useAgent, type Subject, type ThreadState } from "./store"
+import { anchorKeyOf, canChat, useAgentMaybe, type Subject, type ThreadState } from "./store"
 
 /** Each thread state: its word, glyph, colour (the Figma "Thread State" chips) and what it means. */
 export const THREAD_STATE: Record<ThreadState, { label: string; icon: typeof ClockIcon; tone: string; hint: string }> = {
@@ -20,8 +20,8 @@ export const THREAD_STATE: Record<ThreadState, { label: string; icon: typeof Clo
  * subject has no thread yet, or when the page can't reach an agent. Opens the thread on click.
  */
 export function ThreadBadge({ subject, className, interactive = true }: { subject: Subject; className?: string; interactive?: boolean }) {
-  const a = useAgent()
-  if (!canChat()) return null
+  const a = useAgentMaybe()
+  if (!a || !canChat()) return null
   const t = a.threads[anchorKeyOf(subject)]
   // A thread opened but not used yet has nothing to say.
   if (!t || !t.turns) return null
@@ -47,8 +47,8 @@ export function ThreadBadge({ subject, className, interactive = true }: { subjec
 
 /** How many threads are waiting on the person, for the header. */
 export function WaitingOnYou() {
-  const a = useAgent()
-  if (!canChat()) return null
+  const a = useAgentMaybe()
+  if (!a || !canChat()) return null
   const waiting = Object.values(a.threads).filter(t => t.turns > 0 && (t.state === "waiting-on-you" || t.state === "changes-ready"))
   if (!waiting.length) return null
   const newest = [...waiting].sort((x, y) => y.updatedAt.localeCompare(x.updatedAt))[0]!

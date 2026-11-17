@@ -8,14 +8,14 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Pre } from "@/components/bits"
 import { api, copy, say } from "@/lib/dsa"
-import { canChat, useAgent, type Subject } from "./store"
+import { canChat, useAgentMaybe, type Subject } from "./store"
 
 /**
  * The way into the agent from any card: chat here (the side panel), or take the same brief to Cursor
  * or a Claude Code terminal. All three start from the same facts.
  */
 export function AskAgent({ subject, label = "Ask the agent", ask, size, variant = "outline" }: { subject: Subject; label?: string; ask?: string; size?: ControlSizeName | "xs"; variant?: "outline" | "ghost" | "default" }) {
-  const a = useAgent()
+  const a = useAgentMaybe()
   // Both halves take the row's size, so the split button matches the buttons beside it.
   const row = useControlSize()
   const s = size ?? row
@@ -24,6 +24,8 @@ export function AskAgent({ subject, label = "Ask the agent", ask, size, variant 
   async function take() {
     try { setHandoff(await api("/api/agent/handoff", { subject, question: ask ?? "" })) } catch (e: any) { say(e.message, true) }
   }
+  // Rendered outside the agent's provider (a view on its own, as in tests): no agent to ask.
+  if (!a) return null
   const main = <Button variant={variant} size={s} onClick={() => a.start(subject, { ask })} disabled={!live}><SparkleIcon data-icon="inline-start" />{label}</Button>
   // Disabled buttons get no hover, so the reason sits on the whole group (which keeps the halves flush).
   const group = (
