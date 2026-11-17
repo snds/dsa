@@ -8,6 +8,7 @@ import { scanEstimate, type PageActions, type ResolvedProfile } from '@snds/dsa'
 import { buildQueue, PKG_DIR } from './queue.js';
 import { hashText, propsAt } from '@snds/dsa';
 import { pageName, photosLine, withReview, type Precedent, type ReviewQueueEntry } from './review.js';
+import { buildIssues } from './issues.js';
 
 /**
  * Builds a single self-contained HTML report from the store: no server, opens from disk,
@@ -268,6 +269,7 @@ how: e.how ?? null, parent: e.parent ?? null, recipe: e.recipe ?? null,
       };
     });
     const bench: any[] = !provider?.benchRuns ? [] : await provider.benchRuns([...new Set([root, ...readiness.map(r => hostDirs.find(t => t.name === r.subject)?.dir).filter((x): x is string => Boolean(x))])]).catch(() => []);
+    const model = readJson(path.join(dataDir, 'model-summary.json'));
     const payload = {
       generatedAt: new Date().toISOString(),
       root: path.basename(root),
@@ -292,7 +294,9 @@ how: e.how ?? null, parent: e.parent ?? null, recipe: e.recipe ?? null,
       thresholds: fOn ? thresholds : thresholds.filter(t => !t.id.startsWith('figma_')),
       libraries: [config.designSystem.core, ...(config.designSystem.children ?? [])].map(l => ({ name: l.name, packages: l.packages })),
       // What the system is (inventory, kinds, facets, tokens, where its code was found), from this scan.
-      model: readJson(path.join(dataDir, 'model-summary.json')),
+      model,
+      // One list of issues across Actions, Element Review, System and readiness (docs/redesign stage 1).
+      issues: buildIssues({ queue, elements: reviewed.elements ?? elements, model, readiness }),
       ...displayOpts(root, config, profile, opts.serve),
       published: Boolean(opts.site),
       // What the scan read: the live revision and when it went live, or why it isn't the live one.
@@ -363,7 +367,7 @@ function displayOpts(root: string, config: Config, profile: ResolvedProfile, ser
 
 function emptyPayload(root: string, config: Config, profile: ResolvedProfile, serve?: boolean) {
   return {
-    generatedAt: new Date().toISOString(), root: path.basename(root), run: null, budget: 0, findings: [], components: [], targets: [], figma: [], runs: [], elements: null, events: [],
+    generatedAt: new Date().toISOString(), root: path.basename(root), run: null, budget: 0, findings: [], components: [], targets: [], figma: [], runs: [], elements: null, events: [], issues: [],
     settings: {}, settingsLog: [], thresholds: [], libraries: [config.designSystem.core, ...(config.designSystem.children ?? [])].map(l => ({ name: l.name, packages: l.packages })),
     ...displayOpts(root, config, profile, serve),
   };
