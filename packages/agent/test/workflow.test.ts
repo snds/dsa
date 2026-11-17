@@ -58,5 +58,29 @@ test('the workflow: valid YAML, gated on write access and a daily limit, user te
   assert.equal(REPLY_MARKER, '<!-- dsa:thread-reply -->');
   // The anchor read from the issue body is what the page's marker writes.
   const read = steps.find(s => s.id === 'ask').run as string;
-  assert.match(read, /grep -o 'dsa:thread \[A-Za-z0-9:,\._-\]\*'/);
+  assert.match(read, /grep -o 'dsa:thread \[A-Za-z0-9:,\._-\]\*'/);});
+
+test('the workflow, from a live run: the agent sees the question, and every failure gets a reply', () => {
+  const steps: any[] = parse(THREAD_WORKFLOW).jobs.reply.steps;
+  // A new thread's question is in the issue's description; --comments alone leaves it out.
+  const brief = steps.find(s => s.name === 'Scan and write the brief').run as string;
+  assert.match(brief, /gh issue view "\$ISSUE" --repo "\$REPO";/, 'the description');
+  assert.match(brief, /gh issue view "\$ISSUE" --repo "\$REPO" --comments/, 'then the comments');
+  const agent = steps.find(s => s.id === 'agent');
+  assert.match(agent.run, /issue's description when it has no comments yet/);
+  // No key: a reply that says so, not a silent failure.
+  assert.match(agent.run, /if \[ -z "\$ANTHROPIC_API_KEY" \]/);
+  assert.match(agent.run, /isn't set up here/);
+  // A key not scoped to a workspace names one through a repository variable.
+  assert.equal(agent.env.WORKSPACE_ID, '${{ vars.ANTHROPIC_WORKSPACE_ID }}');
+  assert.match(agent.run, /ANTHROPIC_CUSTOM_HEADERS="anthropic-workspace-id: \$WORKSPACE_ID"/);
+  // The agent's error reaches the log; the thread gets a pointer to it, and the run still shows as failed.
+  assert.match(agent.run, /::error::The agent failed/);
+  assert.match(agent.run, /couldn't answer this time.*\$RUN_URL/);
+  assert.match(steps.find(s => s.id === 'pr').if, /steps\.agent\.outputs\.ok == 'true'/, 'no draft PR from a failed run');
+  const last = steps[steps.length - 1];
+  assert.equal(last.if, "steps.limit.outputs.ok == 'true' && steps.agent.outputs.ok == 'false'");
+  assert.equal(last.run, 'exit 1');
+  assert.ok(steps.findIndex(s => s.name === 'Reply') < steps.length - 1, 'the reply goes out first');
+  assert.match(THREAD_WORKFLOW, /Allow GitHub Actions to create and approve pull requests/);
 });

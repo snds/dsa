@@ -55,7 +55,9 @@ export const REPLY_MARKER = '<!-- dsa:thread-reply -->';
 
 /** The workflow template, printed by `dsa agent workflow`. Nothing writes it into a repo for you. */
 export const THREAD_WORKFLOW = String.raw`# dsa-thread: the agent replies on GitHub issues opened from a published dsa page.
-# Copy to .github/workflows/dsa-thread.yml. Needs the repository secret ANTHROPIC_API_KEY.
+# Copy to .github/workflows/dsa-thread.yml. Needs the repository secret ANTHROPIC_API_KEY, and
+# Settings > Actions > General > "Allow GitHub Actions to create and approve pull requests" for /dsa draft-fix.
+# A key that isn't scoped to a workspace also needs the repository variable ANTHROPIC_WORKSPACE_ID.
 # It acts on issues labelled dsa-thread or carrying the page's hidden marker, so it works where the
 # label doesn't exist (a new-issue link drops a label the repo lacks).
 # Optional repository variable DSA_THREAD_DAILY_LIMIT (default 30 replies a day).
@@ -84,6 +86,7 @@ jobs:
       REPO: ${'$'}{{ github.repository }}
       ISSUE: ${'$'}{{ github.event.issue.number }}
       ACTOR: ${'$'}{{ github.event.sender.login }}
+      RUN_URL: ${'$'}{{ github.server_url }}/${'$'}{{ github.repository }}/actions/runs/${'$'}{{ github.run_id }}
       # User text only ever reaches the steps as environment variables, never inside the script.
       ISSUE_BODY: ${'$'}{{ github.event.issue.body }}
       TEXT: ${'$'}{{ github.event.comment.body || github.event.issue.body }}
@@ -130,25 +133,41 @@ jobs:
           npm ci
           npx dsa run --no-history
           npx dsa brief "$ANCHOR" --out "$RUNNER_TEMP/brief.md"
-          gh issue view "$ISSUE" --repo "$REPO" --comments > "$RUNNER_TEMP/thread.txt"
+          # The issue's description (a new thread's question is there), then its comments.
+          { gh issue view "$ISSUE" --repo "$REPO"; echo; echo "--- comments ---"; gh issue view "$ISSUE" --repo "$REPO" --comments; } > "$RUNNER_TEMP/thread.txt"
       - name: The agent answers
+        id: agent
         if: steps.limit.outputs.ok == 'true'
         env:
           ANTHROPIC_API_KEY: ${'$'}{{ secrets.ANTHROPIC_API_KEY }}
+          WORKSPACE_ID: ${'$'}{{ vars.ANTHROPIC_WORKSPACE_ID }}
           MODE: ${'$'}{{ steps.ask.outputs.mode }}
         run: |
+          # Whatever goes wrong, the thread gets a reply saying so, and the details go to the run log.
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::The repository has no ANTHROPIC_API_KEY secret."
+            echo "The agent isn't set up here: this repository has no ANTHROPIC_API_KEY secret. A maintainer can add it under Settings, Secrets and variables, Actions." > "$RUNNER_TEMP/answer.md"
+            echo "ok=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [ -n "$WORKSPACE_ID" ]; then export ANTHROPIC_CUSTOM_HEADERS="anthropic-workspace-id: $WORKSPACE_ID"; fi
           npm i -g @anthropic-ai/claude-code
           tools="Read,Grep,Glob"
-          ask="Answer the latest comment in the thread below, in plain words, citing evidence. If you would change something, say so as a proposal for a person; never decide."
+          ask="Answer the latest message in the thread below (the issue's description when it has no comments yet), in plain words, citing evidence. If you would change something, say so as a proposal for a person; never decide."
           if [ "$MODE" = fix ]; then
             tools="Read,Grep,Glob,Edit,Write"
             ask="Make the smallest change in this checkout that fixes what the thread asks, then say what you changed and how to verify it."
           fi
           { cat "$RUNNER_TEMP/brief.md"; echo; echo "## The GitHub thread"; cat "$RUNNER_TEMP/thread.txt"; echo; echo "$ask"; } > "$RUNNER_TEMP/prompt.md"
-          claude -p --allowedTools "$tools" < "$RUNNER_TEMP/prompt.md" > "$RUNNER_TEMP/answer.md"
+          if claude -p --allowedTools "$tools" < "$RUNNER_TEMP/prompt.md" > "$RUNNER_TEMP/answer.md" 2> "$RUNNER_TEMP/agent-err.txt"; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::The agent failed:"; cat "$RUNNER_TEMP/answer.md" "$RUNNER_TEMP/agent-err.txt"
+            echo "The agent couldn't answer this time. A maintainer can see why in the run log: $RUN_URL" > "$RUNNER_TEMP/answer.md"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Open a draft PR (/dsa draft-fix)
         id: pr
-        if: steps.limit.outputs.ok == 'true' && steps.ask.outputs.mode == 'fix'
+        if: steps.limit.outputs.ok == 'true' && steps.ask.outputs.mode == 'fix' && steps.agent.outputs.ok == 'true'
         run: |
           if git diff --quiet; then echo "url=" >> "$GITHUB_OUTPUT"; exit 0; fi
           branch="dsa-thread/$ISSUE-$(date -u +%Y%m%d%H%M)"
@@ -157,6 +176,7 @@ jobs:
           git switch -c "$branch"
           git commit -qam "Draft fix from dsa thread #$ISSUE"
           git push -q origin "$branch"
+          # Needs "Allow GitHub Actions to create and approve pull requests" in the repo's Actions settings.
           url=$(gh pr create --repo "$REPO" --draft --head "$branch" --title "Draft fix from dsa thread #$ISSUE" --body "A draft from the dsa thread #$ISSUE, asked for by @$ACTOR. Review before marking it ready.")
           echo "url=$url" >> "$GITHUB_OUTPUT"
       - name: Reply
@@ -166,4 +186,7 @@ jobs:
         run: |
           { echo "${REPLY_MARKER}"; cat "$RUNNER_TEMP/answer.md"; if [ -n "$PR" ]; then printf '\n\nDraft PR: %s\n' "$PR"; fi; } > "$RUNNER_TEMP/reply.md"
           gh issue comment "$ISSUE" --repo "$REPO" --body-file "$RUNNER_TEMP/reply.md"
+      - name: Mark the run failed when the agent didn't answer
+        if: steps.limit.outputs.ok == 'true' && steps.agent.outputs.ok == 'false'
+        run: exit 1
 `;
