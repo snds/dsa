@@ -112,6 +112,8 @@ export const TOOLS: Tool[] = [
     { when: { type: 'object', properties: { element: { type: 'string' }, role: { type: 'string' }, ruleId: { type: 'string' }, use: { type: 'string', description: 'The pick the scanner makes today' }, region: { type: 'string' }, text: { type: 'string', description: 'Regex over visible text / aria-label / title' }, classes: { type: 'array', items: { type: 'string' } }, paths: { type: 'array', items: { type: 'string' } }, styleKey: { type: 'string' } }, required: ['element'] },
       prefer: rec, avoid: { type: 'array', items: { type: 'string' } }, why: { type: 'string' }, examples: { type: 'array', items: { type: 'string' } } }, ['when', 'examples']),
   proposeTool('scanner-note', 'propose_scanner_note', "Report a scanner bug or idea that a hint can't fix (it needs a code change in the scanner).", { problem: { type: 'string' }, examples: { type: 'array', items: { type: 'string' } }, suggestion: { type: 'string' } }, ['problem']),
+  proposeTool('dismissal', 'propose_dismissal', "Propose dismissing an issue, with a reason. Labels: scanner-misread (the scanner read this wrong), intended (meant to be this way), not-worth-it, duplicate. A person accepts it; the issue moves to Done. For scanner-misread, also propose_hint so the next scan doesn't raise it again.",
+    { issue: { type: 'string', description: 'The issue key (get_subject names it).' }, label: { type: 'string', enum: ['scanner-misread', 'intended', 'not-worth-it', 'duplicate'] }, reason: { type: 'string' } }, ['issue', 'label', 'reason']),
   proposeTool('issue', 'propose_issue', 'Draft a GitHub issue. The designer reviews it and files it.', { title: { type: 'string' }, body: { type: 'string' }, repo: { type: 'string' } }, ['title', 'body']),
 ];
 

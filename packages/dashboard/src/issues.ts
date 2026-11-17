@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import crypto from 'node:crypto';
 
 /**
@@ -39,6 +41,8 @@ export interface Issue {
   apps: string[];
   owner: string | null;
   status: 'open' | 'done';
+  /** A person dismissed it with a reason (stage 7): it shows under Done with the label. */
+  dismissed?: { label: string; reason: string; who?: string; date: string } | null;
   /** Where the full detail lives in today's payload, so screens can open it. */
   source:
     | { type: 'queue'; id: string }
@@ -72,6 +76,8 @@ export interface IssueInputs {
   model?: { components?: any[] } | null;
   /** readiness rows, one per repo. */
   readiness?: any[] | null;
+  /** Issues people dismissed, by key (the agent's dismissals.json). */
+  dismissed?: Record<string, { label: string; reason: string; who?: string; date: string }> | null;
 }
 
 export function buildIssues(p: IssueInputs): Issue[] {
@@ -129,5 +135,13 @@ export function buildIssues(p: IssueInputs): Issue[] {
       source: { type: 'readiness', subject: r.subject, check: ch.id },
     });
   }
+
+  // ---- Dismissed with a reason: Done, with the label kept so the list can say why.
+  for (const i of out) { const d = p.dismissed?.[i.key]; if (d) { i.status = 'done'; i.dismissed = d; } }
   return out;
+}
+
+/** The agent's record of dismissed issues (agent/dismissals.json in the data folder), or none. */
+export function readDismissedIssues(dataDir: string): IssueInputs['dismissed'] {
+  try { return JSON.parse(fs.readFileSync(path.join(dataDir, 'agent', 'dismissals.json'), 'utf8')).issues ?? null; } catch { return null; }
 }

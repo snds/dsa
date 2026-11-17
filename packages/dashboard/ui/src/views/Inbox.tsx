@@ -29,6 +29,12 @@ type Issue = {
   key: string; kind: "finding" | "approval" | "question" | "component-check" | "component-unused" | "readiness"
   rule: string; title: string; certainty: "measured" | "inferred" | "needs-person"; component: string | null; apps: string[]
   owner: string | null; status: "open" | "done"; source: any
+  dismissed?: { label: string; reason: string; who?: string; date: string } | null
+}
+
+/** The reasons a person can dismiss an issue with (stage 7), in plain words. */
+export const DISMISS_LABEL: Record<string, string> = {
+  "scanner-misread": "The scanner read this wrong", intended: "Meant to be this way", "not-worth-it": "Not worth fixing", duplicate: "Another issue covers it",
 }
 
 /** One certainty word (decision D2), its colour, and what it means. */
@@ -125,7 +131,7 @@ export function Inbox() {
     ["needs-person", "Needs a person", CERTAINTY_WORD["needs-person"].hint],
     ["measured", "Measured", CERTAINTY_WORD.measured.hint],
     ["inferred", "Inferred", CERTAINTY_WORD.inferred.hint],
-    ["done", "Done", "Closed, resolved by a scan, or migrated"],
+    ["done", "Done", "Closed, resolved by a scan, migrated, or dismissed with a reason"],
   ]
 
   return (
@@ -210,6 +216,7 @@ function IssueRow({ i, sel, ticked, onPick, onTick }: { i: Issue; sel: boolean; 
       <button type="button" onClick={onPick} aria-current={sel} className={cn("flex min-w-0 flex-1 flex-col gap-1 text-left", i.status === "done" && "opacity-70")}>
         <span className="text-sm font-medium">{i.title}</span>
         <span className="text-xs text-muted-foreground">{KIND[i.kind]}{i.apps.length ? ` · ${i.apps.slice(0, 3).join(", ")}${i.apps.length > 3 ? ` +${i.apps.length - 3}` : ""}` : ""}</span>
+        {i.dismissed && <span className="text-xs text-muted-foreground" title={i.dismissed.reason}>Dismissed: {DISMISS_LABEL[i.dismissed.label] ?? i.dismissed.label}{i.dismissed.who ? ` · ${i.dismissed.who}` : ""}</span>}
       </button>
       <span className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
         <CertaintyWord c={i.certainty} />

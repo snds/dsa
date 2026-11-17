@@ -5,6 +5,7 @@ import { hintProblems, type HintMatch, type Recommendation } from '@snds/dsa/eng
 
 import { agentDir, type Snapshot } from './snapshot.js';
 import { componentEntry } from './context.js';
+import { DISMISS_LABELS } from './dismissals.js';
 
 /**
  * What an agent proposes and a human accepts or rejects. Agents never write decisions, hints, or issues
@@ -12,7 +13,7 @@ import { componentEntry } from './context.js';
  * The file is append-only JSON lines (proposals, then status changes), so several agent processes and
  * the dashboard can write to it at once without a lock.
  */
-export type ProposalKind = 'decision' | 'policy' | 'hint' | 'scanner-note' | 'issue';
+export type ProposalKind = 'decision' | 'policy' | 'hint' | 'scanner-note' | 'issue' | 'dismissal';
 export interface Proposal {
   id: string;
   kind: ProposalKind;
@@ -102,6 +103,10 @@ export function propose(dataDir: string, snap: Snapshot, sigs: any[], input: Pro
     if (!pl.problem) problems.push('`problem`: what the scanner does wrong.');
   } else if (input.kind === 'issue') {
     if (!pl.title || !pl.body) problems.push('An issue needs `title` and `body`.');
+  } else if (input.kind === 'dismissal') {
+    if (!/^[A-Z]{1,3}-[\w-]+$/.test(String(pl.issue ?? ''))) problems.push('`issue`: the issue key, like F-1A2B3C or Q-…, from get_subject.');
+    if (!(pl.label in DISMISS_LABELS)) problems.push(`\`label\` is one of ${Object.keys(DISMISS_LABELS).join(', ')}.`);
+    if (!String(pl.reason ?? '').trim()) problems.push('`reason`: one or two plain sentences a reviewer can check.');
   } else problems.push(`Unknown proposal kind ${input.kind}.`);
   if (problems.length) throw new Error(problems.join(' '));
   const p: Proposal = {
@@ -119,6 +124,7 @@ function defaultTitle(kind: ProposalKind, pl: any): string {
   if (kind === 'policy') return `Everything styled by ${pl.pattern} → ${d(pl.decision)}`;
   if (kind === 'hint') return pl.prefer ? `Scanner: prefer ${d(pl.prefer)} for <${pl.when?.element}>` : `Scanner: never ${(pl.avoid ?? []).join('/')} for <${pl.when?.element}>`;
   if (kind === 'scanner-note') return `Scanner note: ${String(pl.problem).slice(0, 80)}`;
+  if (kind === 'dismissal') return `Dismiss ${pl.issue}: ${DISMISS_LABELS[pl.label as keyof typeof DISMISS_LABELS] ?? pl.label}`;
   return String(pl.title ?? 'Issue');
 }
 
