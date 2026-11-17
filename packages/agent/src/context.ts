@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { label, tools } from './system.js';
+import { label, profile, tools } from './system.js';
 
 import { agentDir, type Snapshot } from './snapshot.js';
 import { knowsSection } from './knows.js';
@@ -73,7 +73,23 @@ const effective = (e: any) => e.decided?.decision ?? e;
 
 /** The system's entry for a component (import, variants, docs), from the profile; null when it has none. */
 export function componentEntry(name: string): any | null {
-  try { return tools().component?.(name) ?? null; } catch { return null; }
+  try { const c = tools().component?.(name); if (c) return c; } catch { /* the profile's lookup failed */ }
+  return roleEntry(name);
+}
+
+/**
+ * A component the profile names only in its role map (`roles: { select: { use: 'Select' } }`) is still
+ * one the system offers: say where it comes from and how to use it, rather than "no entry".
+ */
+function roleEntry(name: string): any | null {
+  const lc = name.toLowerCase();
+  const p = profile();
+  const hits = Object.entries(p.roles ?? {}).filter(([, r]) => String(r?.use ?? '').toLowerCase() === lc);
+  if (!hits.length) return null;
+  const from = hits.map(([, r]) => r.from).find(Boolean) ?? p.sources?.[0] ?? null;
+  const how = hits.map(([role, r]) => r.how ? `As ${role}: ${r.how}` : null).filter(Boolean).join(' ');
+  return { name: hits[0]![1].use, import: from ?? '?', roles: hits.map(([role]) => role), fromRoles: true,
+    docs: { description: how || `The profile maps the ${hits.map(([role]) => role).join(', ')} role${hits.length === 1 ? '' : 's'} to ${hits[0]![1].use}; it has no fuller entry.` } };
 }
 function componentBlock(name: string): string {
   const c = componentEntry(name);
