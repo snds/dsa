@@ -9,6 +9,7 @@ import { agentDir, type Snapshot } from './snapshot.js';
 import { buildBrief, PERSONA, type Starter, type Subject } from './context.js';
 import { readProposals, type Proposal } from './proposals.js';
 import { anchorOf, type Anchor } from './threads.js';
+import { evidenceOf } from './knows.js';
 
 import { startTurn, type AgentEvent, type Mode, type ProviderId, type RunningTurn } from './providers.js';
 
@@ -39,6 +40,8 @@ export interface Session {
   anchor?: Anchor;
   /** The scan the session started on, to tell when newer evidence makes it out of date. */
   scanId?: string | null;
+  /** A fingerprint of the evidence it started on (knows.ts evidenceOf): when a newer scan changes it, the thread is Out of date. */
+  evidence?: string;
   /** The draft pull request opened from its kept branch, if any. */
   pr?: { url: string; number?: number } | null;
   /** The person marked the thread done. */
@@ -76,7 +79,7 @@ export function createSession(snap: Snapshot, subject: Subject, opts: { provider
     id: 'S-' + crypto.randomBytes(4).toString('hex'), subject, title: brief.title, provider: opts.provider, model: opts.model, mode: opts.mode,
     repo: { name: brief.repo.name, dir: brief.repo.dir, top, sub: path.relative(top, brief.repo.dir) }, sandbox: null,
     brief: brief.file, starters: brief.starters, messages: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-    anchor: anchorOf(subject), scanId: snap.run?.id ?? null,
+    anchor: anchorOf(subject), scanId: snap.run?.id ?? null, evidence: evidenceOf(snap, subject),
   };
   writeSession(snap.dataDir, s);
   return s;

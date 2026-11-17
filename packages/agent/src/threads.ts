@@ -82,6 +82,7 @@ export interface ThreadFacts {
   turns?: number;
   updatedAt: string;
   settledAt?: string | null;
+  evidence?: string;
 }
 
 /**
