@@ -418,7 +418,18 @@ To have the agent reply there, print the workflow and copy it into the repo:
 npx dsa agent workflow > .github/workflows/dsa-thread.yml
 ```
 
-It needs the repository secret `ANTHROPIC_API_KEY`. What it does, and what keeps it safe:
+It needs:
+
+- The repository secret `ANTHROPIC_API_KEY`.
+- For a key that isn't scoped to a workspace, the repository variable `ANTHROPIC_WORKSPACE_ID`
+  (`wrkspc_…`, from the Console's workspace settings). Without it the API refuses the key.
+- For `/dsa draft-fix`, *Settings → Actions → General → Allow GitHub Actions to create and approve
+  pull requests*. New repositories have it off, and GitHub then refuses to open the draft PR.
+
+When something goes wrong, the thread still gets a reply: a missing key says so, and a failed answer
+links to the run log, where the agent's error is printed. The run is marked failed either way.
+
+What it does, and what keeps it safe:
 
 - It answers only people with write access. Anyone else's comment gets no reply.
 - It keeps to a daily limit (`DSA_THREAD_DAILY_LIMIT`, default 30 replies).
