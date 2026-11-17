@@ -2,6 +2,7 @@ import { CheckCircleIcon, CircleNotchIcon, ClockIcon, FlaskIcon, GitBranchIcon, 
 import { cn } from "cn"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { D } from "@/lib/dsa"
 import { anchorKeyOf, canChat, useAgentMaybe, type Subject, type ThreadState } from "./store"
 
 /** Each thread state: its word, glyph, colour (the Figma "Thread State" chips) and what it means. */
@@ -21,6 +22,9 @@ export const THREAD_STATE: Record<ThreadState, { label: string; icon: typeof Clo
  */
 export function ThreadBadge({ subject, className, interactive = true }: { subject: Subject; className?: string; interactive?: boolean }) {
   const a = useAgentMaybe()
+  // A published page shows the state each thread had when it was published, as a label (stage 9).
+  const published = !canChat() ? ((D.threads ?? {}) as Record<string, any>)[anchorKeyOf(subject)] : null
+  if (published?.turns) { const st = THREAD_STATE[published.state as ThreadState] ?? THREAD_STATE.settled; return <Badge variant="outline" className={cn(st.tone, className)} aria-label={`Thread: ${st.label}, as of publishing`} title={`${st.hint} As of publishing.`}><st.icon />{st.label}</Badge> }
   if (!a || !canChat()) return null
   const t = a.threads[anchorKeyOf(subject)]
   // A thread opened but not used yet has nothing to say.

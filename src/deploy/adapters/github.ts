@@ -121,6 +121,13 @@ export const githubHost: HostAdapter = {
         : c.host.rescan
         ? { ...generic.rescan, ...(generic.rescan.kind === "link" ? { ...shots, command: runCommand(s) } : {}) }
         : { kind: "none", label: "Re-scan", help: NO_RELAY },
+      thread: {
+        url: `${s.server}/${s.repo}/issues/new`,
+        search: `${s.server}/${s.repo}/issues`,
+        label: "Discuss on GitHub",
+        labels: ["dsa-thread"],
+        help: `Continues this thread as an issue on ${s.repo}. If the dsa-thread workflow is set up, the agent replies there to people with write access, in a few minutes.`,
+      },
       decisions:
         mode === "issue" || mode === "pr"
           ? {
