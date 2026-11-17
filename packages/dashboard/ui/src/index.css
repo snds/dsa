@@ -3,6 +3,9 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/ibm-plex-sans";
 
+/* The redesign wireframes (wireframes/) have their own build; keep their classes out of this one. */
+@source not "../wireframes";
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
