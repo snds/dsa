@@ -9,6 +9,7 @@ import { buildQueue, PKG_DIR } from './queue.js';
 import { hashText, propsAt } from '@snds/dsa';
 import { pageName, photosLine, withReview, type Precedent, type ReviewQueueEntry } from './review.js';
 import { buildIssues, readComponentChecks, readDismissedIssues } from './issues.js';
+import { readPublishedThreads } from './published-threads.js';
 
 /**
  * Builds a single self-contained HTML report from the store: no server, opens from disk,
@@ -297,6 +298,8 @@ how: e.how ?? null, parent: e.parent ?? null, recipe: e.recipe ?? null,
       model,
       // One list of issues across Actions, Element Review, System and readiness (docs/redesign stage 1).
       componentChecks: readComponentChecks(dataDir) ?? {},
+      // A published copy carries thread summaries, read-only (stage 9); dsa serve reads them live.
+      threads: opts.site ? readPublishedThreads(dataDir) : undefined,
       issues: buildIssues({ queue, elements: reviewed.elements ?? elements, model, readiness, dismissed: readDismissedIssues(dataDir), checked: readComponentChecks(dataDir) }),
       ...displayOpts(root, config, profile, opts.serve),
       published: Boolean(opts.site),

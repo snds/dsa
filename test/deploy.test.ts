@@ -270,6 +270,9 @@ describe("host adapters", () => {
     expect(none).toMatchObject({ kind: "none", help: expect.stringMatching(/deploys the dsa scan relay.*--relay <url>/) });
     expect(JSON.stringify(none)).not.toMatch(/actions\/workflows/);
     expect(a.decisions).toMatchObject({ kind: "issue", url: "https://github.com/acme/site/issues/new", labels: ["dsa-decisions"], apply: "dsa apply-decisions --issue <number>" });
+    // Discuss on GitHub (redesign stage 9): a thread continues as a labelled issue on the same repo.
+    expect(a.thread).toMatchObject({ url: "https://github.com/acme/site/issues/new", search: "https://github.com/acme/site/issues", labels: ["dsa-thread"], label: "Discuss on GitHub" });
+    expect(githubHost.actions(hostCtx({ adapter: "github" })).thread).toBeUndefined();
     const ghes = githubHost.actions(hostCtx({ adapter: "github", github: { server: "https://git.corp.test/" }, decisions: { mode: "pr" } }, { env: { GITHUB_REPOSITORY: "team/app" } }));
     expect(ghes.rescan.kind).toBe("none");
     expect(ghes.decisions.help).toMatch(/pull request/);

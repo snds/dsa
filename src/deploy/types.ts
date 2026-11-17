@@ -132,6 +132,12 @@ export interface PageActions {
     title?: string | undefined;
     labels?: string[] | undefined;
   };
+  /**
+   * Discuss on GitHub (redesign stage 9): a published page can't run an agent, so a thread continues as a
+   * GitHub issue. `url` is the new-issue page; the page adds the title and a hidden anchor marker.
+   * `search` is the issue list the page searches for the anchor's open issue. A workflow (dsa agent workflow) replies.
+   */
+  thread?: { url: string; search: string; label: string; labels: string[]; help: string } | undefined;
   decisions: {
     kind: "export" | "post" | "issue";
     /** post: the webhook. issue: the new-issue page (title, label and body are added by the page). */

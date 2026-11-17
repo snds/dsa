@@ -18,6 +18,7 @@ import { Detail, useQueue } from "./Queue"
 import { AnswerPlaces } from "./elements/Elements"
 import { PinnedThread } from "@/agent/PinnedThread"
 import { CheckAnswer } from "./ComponentCase"
+import { PublishedThread } from "@/agent/PublishedThread"
 
 /**
  * The Inbox: every issue in one list (the report's `issues`, redesign stage 4). One problem is one row,
@@ -200,6 +201,8 @@ export function Inbox() {
           {sel ? <IssueDetail i={sel} q={q} creating={!!creating} create={create} /> : <Panel><p className="text-sm text-muted-foreground">Select an issue.</p></Panel>}
         </div>
         {sel && <PinnedThread subject={subjectOf(sel)} className="hidden xl:sticky xl:top-36 xl:flex xl:max-h-[calc(100vh-10rem)]" />}
+        {/* A published page: the thread as of publishing, and Discuss on GitHub (stage 9). */}
+        {sel && !canChat() && <PublishedThread subject={subjectOf(sel)} title={sel.title} className="lg:col-start-2 xl:col-start-auto xl:sticky xl:top-36" />}
       </div>
     </div>
   )

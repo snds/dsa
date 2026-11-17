@@ -8,6 +8,8 @@ export interface PageActions {
   host: string
   rescan: { kind: "link" | "post" | "issue" | "none"; url?: string; label: string; help: string; shots?: boolean; command?: string; title?: string; labels?: string[] }
   decisions: { kind: "export" | "post" | "issue"; url?: string; label: string; help: string; title?: string; labels?: string[]; apply: string }
+  /** Discuss on GitHub (stage 9): the new-issue page, the issue list to search, and the label. */
+  thread?: { url: string; search: string; label: string; labels: string[]; help: string }
 }
 
 export const ACTIONS: PageActions | null = D.actions ?? null
@@ -73,4 +75,27 @@ export function rescanIssueUrl(r: { url?: string | undefined; title?: string | u
   ].join("\n")
   const q = new URLSearchParams({ title: r.title ?? "Re-scan the dsa dashboard", body, ...(r.labels?.length ? { labels: r.labels.join(",") } : {}) })
   return `${r.url}?${q.toString()}`
+}
+
+/**
+ * Discuss on GitHub (redesign stage 9): a new issue for a thread, with its anchor in a hidden marker
+ * the dsa-thread workflow reads, and the label it listens for. The person types their question there.
+ */
+export function threadIssueUrl(t: { url: string; labels: string[] }, anchor: string, title: string, page?: string): string {
+  const body = [
+    `About: ${title}`,
+    `Thread: \`${anchor}\``,
+    ...(page ? [`From the dashboard: ${page}`] : []),
+    "",
+    "Ask your question below. If the dsa-thread workflow is set up, the agent replies here to people with write access.",
+    "",
+    `<!-- dsa:thread ${anchor} -->`,
+  ].join("\n")
+  const q = new URLSearchParams({ title: `dsa: ${title}`.slice(0, 200), body, labels: t.labels.join(",") })
+  return `${t.url}?${q.toString()}`
+}
+
+/** The search that finds the open GitHub issue already discussing an anchor. */
+export function threadSearchUrl(t: { search: string; labels: string[] }, anchor: string): string {
+  return `${t.search}?${new URLSearchParams({ q: `is:issue label:${t.labels[0] ?? "dsa-thread"} "${anchor}"` }).toString()}`
 }

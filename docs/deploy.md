@@ -400,6 +400,34 @@ The scan workflow closes open `dsa-rescan` issues once it has published, for exa
 `gh issue list --label dsa-rescan --state open --json number -q '.[].number' | xargs -I{} gh issue close {} --comment "Done: the dashboard is updated."`.
 Labels in a new-issue link only apply for people who can triage the repo; members can.
 
+### Threads on a published page
+
+A published page can't run the agent, but it shows each thread as it stood when the page was
+published: the question, the last answer, the proposals and what people decided, and a draft PR if
+one was opened. Only those summaries are published; full transcripts stay where they ran.
+
+With the github adapter, each issue also offers **Discuss on GitHub**. It opens a new issue labelled
+`dsa-thread`, with the thread's anchor in a hidden marker (`<!-- dsa:thread issue:F-1A2B3C -->`).
+*Find the discussion* searches for an issue already open on that anchor.
+
+To have the agent reply there, print the workflow and copy it into the repo:
+
+```sh
+npx dsa agent workflow > .github/workflows/dsa-thread.yml
+```
+
+It needs the repository secret `ANTHROPIC_API_KEY`. What it does, and what keeps it safe:
+
+- It answers only people with write access. Anyone else's comment gets no reply.
+- It keeps to a daily limit (`DSA_THREAD_DAILY_LIMIT`, default 30 replies).
+- Comment text reaches its scripts only as environment variables, never pasted into a script.
+- It scans, writes the thread's brief with `dsa brief <anchor>`, and answers as a comment.
+- `/dsa draft-fix` lets the agent edit the checkout, then opens a **draft** pull request linked to the thread. It never merges.
+- Proposals stay text for a person to act on. Accepting one is a separate step.
+
+`dsa brief <anchor> [--out file]` works anywhere: `issue:<key>`, `component:<name>`,
+`group:component:<name>`, `group:app:<name>`, `elements:E-1,E-2`, or `scan`.
+
 ### Re-scan from the page
 
 Every host gets a runner with the same three calls: `trigger()` starts a scan, `status(id)` says
