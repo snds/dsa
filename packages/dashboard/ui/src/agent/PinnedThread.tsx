@@ -36,7 +36,7 @@ export function PinnedThread({ subject, className }: { subject: Subject; classNa
       {a.open ? (
         <div className="flex flex-1 flex-col items-start gap-2 p-4 text-sm text-muted-foreground">
           <p>The side panel is open on another conversation.</p>
-          <Button size="sm" variant="outline" onClick={a.close}><SidebarSimpleIcon data-icon="inline-start" />Close it and show this issue's thread</Button>
+          <Button size="sm" variant="outline" onClick={a.close}><SidebarSimpleIcon data-icon="inline-start" />Close the side panel</Button>
         </div>
       ) : here ? <ThreadBody /> : <p className="p-4 text-sm text-muted-foreground">Opening the thread…</p>}
     </section>
