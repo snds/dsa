@@ -112,3 +112,12 @@ test("the highlighter marks comments, strings and keywords", async () => {
   const host = await mount(<code>{cr.highlight(`const a = "b" // c`)}</code>)
   expect([...host.querySelectorAll("span")].map(s => s.textContent)).toEqual(["const", '"b"', "// c"])
 })
+
+test("on the issue page the first place shows up front, the rest fold under N more", async () => {
+  await mount(<cr.Evidence text="3 overrides" summary="3 className overrides" places={places} upFront />)
+  const example = document.querySelector('[aria-label="Example"]')!
+  expect(example.textContent).toContain("ToolbarDivider.tsx")
+  expect(button(/2 more places/)).toBeTruthy()
+  await click(example.querySelector("button")!)
+  expect(title()).toContain("ToolbarDivider.tsx")
+})
