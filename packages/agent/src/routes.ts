@@ -6,7 +6,8 @@ import { addHint, decideMany, loadHints, openStore, reevaluateElements, removeHi
 import { DSA_CLI, contextArgs, tools, useProfile } from './system.js';
 
 import { readSnapshot, writeSnapshot, agentDir } from './snapshot.js';
-import { buildBrief, PERSONA, type Subject } from './context.js';
+import { buildBrief, PERSONA, type IssueSource, type Subject } from './context.js';
+import { anchorKey, anchorOf, threadIndex, writeThreadIndex } from './threads.js';
 import { addFeedback, readFeedback, readProposals, setStatus } from './proposals.js';
 
 import { detectProviders, type Mode, type ProviderId, type ProviderStatus } from './providers.js';
@@ -50,7 +51,29 @@ function subjectFrom(b: any): Subject {
   if (k === 'review' && Array.isArray(b.subject.ids) && b.subject.ids.length) return { kind: 'review', ids: b.subject.ids.map(String).slice(0, 500), title: b.subject.title ? String(b.subject.title) : undefined, pattern: b.subject.pattern ?? null };
   if (k === 'queue' && b.subject.id) return { kind: 'queue', id: String(b.subject.id) };
   if (k === 'readiness' && b.subject.subject) return { kind: 'readiness', subject: String(b.subject.subject) };
+  if (k === 'issue' && b.subject.key) return { kind: 'issue', key: String(b.subject.key), title: b.subject.title ? String(b.subject.title) : undefined, source: issueSource(b.subject.source) };
+  if (k === 'component' && b.subject.name) return { kind: 'component', name: String(b.subject.name) };
+  if (k === 'group' && b.subject.value && (b.subject.by === 'component' || b.subject.by === 'app')) return { kind: 'group', by: b.subject.by, value: String(b.subject.value), title: b.subject.title ? String(b.subject.title) : undefined };
   return { kind: 'scan' };
+}
+
+function issueSource(x: any): IssueSource | undefined {
+  if (x?.type === 'queue' && x.id) return { type: 'queue', id: String(x.id) };
+  if (x?.type === 'question' && Array.isArray(x.ids)) return { type: 'question', ids: x.ids.map(String).slice(0, 500) };
+  if (x?.type === 'readiness' && x.subject) return { type: 'readiness', subject: String(x.subject) };
+  if (x?.type === 'component' && x.name) return { type: 'component', name: String(x.name) };
+  return undefined;
+}
+
+/** Every anchor's thread and its state; written to threads.json for the published page. */
+function threads(dataDir: string) {
+  const proposals = readProposals(dataDir);
+  const index = threadIndex(listSessions(dataDir) as any[], proposals, id => {
+    const s = readSession(dataDir, id);
+    return { running: isRunning(id), changedFiles: s?.sandbox ? sandboxChanges(s)?.files.length ?? 0 : 0 };
+  });
+  writeThreadIndex(dataDir, index);
+  return index;
 }
 
 async function snapshot(ctx: EngineContext, fresh = false) {
@@ -137,6 +160,15 @@ export const agentRoutes: ServeRoute = async ({ req, res, url, body, send, conte
       fs.writeFileSync(file, JSON.stringify(raw, null, 2) + '\n');
       return send(200, { saved: true }), true;
     }
+    if (GET && p === '/api/agent/threads') return send(200, { threads: threads(dataDir) }), true;
+    if (POST && p === '/api/agent/thread/settle') {
+      const b = await body();
+      const s = readSession(dataDir, String(b.id));
+      if (!s) return send(404, { error: 'No such session.' }), true;
+      s.settledAt = b.undo === true ? null : new Date().toISOString();
+      writeSession(dataDir, s);
+      return send(200, { settledAt: s.settledAt }), true;
+    }
     if (GET && p === '/api/agent/sessions') return send(200, { sessions: listSessions(dataDir).map(s => ({ ...s, running: isRunning(s.id) })) }), true;
     if (GET && p === '/api/agent/session') {
       const s = readSession(dataDir, String(url.searchParams.get('id')));
@@ -152,7 +184,14 @@ export const agentRoutes: ServeRoute = async ({ req, res, url, body, send, conte
       const provider: ProviderId = b.provider === 'cursor' || b.provider === 'claude-code' ? b.provider : (a.provider ?? 'claude-code');
       const st = list.find(x => x.id === provider);
       if (!st?.chat) return send(400, { error: `${st?.label ?? provider} isn't installed here. See Settings › Agents.` }), true;
-      const s = createSession(snap, subjectFrom(b), { provider, model: provider === 'cursor' ? a.cursorModel : a.model, mode: (b.mode as Mode) ?? a.mode ?? 'advise' });
+      const subject = subjectFrom(b);
+      // One thread per anchor (D3): `reuse` opens the anchor's thread when it has one; New thread leaves it out.
+      if (b.reuse === true) {
+        const t = threads(dataDir)[anchorKey(anchorOf(subject))];
+        const existing = t ? readSession(dataDir, t.session) : null;
+        if (existing) return send(200, { session: existing, reused: true }), true;
+      }
+      const s = createSession(snap, subject, { provider, model: provider === 'cursor' ? a.cursorModel : a.model, mode: (b.mode as Mode) ?? a.mode ?? 'advise' });
       return send(200, { session: s }), true;
     }
     if (POST && p === '/api/agent/handoff') {

@@ -7,7 +7,8 @@ import { agentRoutes } from './routes.js';
 import { readSnapshot, writeSnapshot } from './snapshot.js';
 import { useProfile } from './system.js';
 
-export { buildBrief, componentEntry, repoFor, subjectKey, titleOf, PERSONA, type Brief, type Starter, type Subject } from './context.js';
+export { buildBrief, componentEntry, legacyOf, repoFor, subjectKey, titleOf, PERSONA, type Brief, type IssueSource, type Starter, type Subject } from './context.js';
+export { anchorKey, anchorOf, idsKey, readThreadIndex, STATE_LABEL, threadIndex, threadState, writeThreadIndex, type Anchor, type ThreadEntry, type ThreadFacts, type ThreadState } from './threads.js';
 export { createHandler, serveMcp, TOOLS, SERVER_INFO, type McpEnv } from './mcp.js';
 export { propose, readProposals, setStatus, recommendationProblems, readFeedback, addFeedback, feedbackPath, type Proposal, type ProposalKind } from './proposals.js';
 export { claudeArgs, cursorArgs, detectProviders, startTurn, toolSummary, type AgentEvent, type Mode, type ProviderId } from './providers.js';
