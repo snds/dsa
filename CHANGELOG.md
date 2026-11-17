@@ -8,6 +8,14 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ### Fixed
 
+- Discuss on GitHub works on a repo without a `dsa-thread` label. A new-issue link drops a label the
+  repo lacks, so the thread workflow never started and *Find the discussion* found nothing. Both now
+  go by the hidden marker in the issue body as well.
+- The thread workflow's reply step no longer fails when no draft PR was opened. Actions runs scripts
+  with `bash -e`, and the reply ended on a test that was false for every plain answer.
+
+### Fixed
+
 - Scans leave out files git ignores. Build output such as a built Storybook (`storybook-static/`) was
   read as authored code, so a scan run after a build counted its hard-coded colours and sizes, and
   `dsa pr-comment` reported them as new. Files git tracks still count, and outside a git checkout
