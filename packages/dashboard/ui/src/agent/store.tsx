@@ -10,6 +10,34 @@ export type Subject =
   | { kind: "queue"; id: string }
   | { kind: "readiness"; subject: string }
   | { kind: "scan" }
+  | { kind: "issue"; key: string; title?: string; source?: any }
+  | { kind: "component"; name: string }
+  | { kind: "group"; by: "component" | "app"; value: string; title?: string }
+
+/** A thread's state (agent package threads.ts). */
+export type ThreadState = "working" | "waiting-on-you" | "changes-ready" | "on-a-branch" | "in-pr" | "settled" | "out-of-date"
+export interface Thread { anchor: string; session: string; title: string; state: ThreadState; updatedAt: string; openProposals: number; pr: { url: string } | null; previous: string[] }
+
+/** The same batch key the server makes (threads.ts idsKey): FNV-1a of the sorted, unique ids. */
+export function idsKey(ids: string[]): string {
+  let h = 0x811c9dc5
+  for (const ch of [...new Set(ids)].sort().join("\n")) { h ^= ch.charCodeAt(0); h = Math.imul(h, 0x01000193) >>> 0 }
+  return "E-" + h.toString(16).toUpperCase().padStart(8, "0")
+}
+
+/** The anchor a subject's thread is pinned to, as the server keys it (threads.ts anchorKey). */
+export function anchorKeyOf(s: Subject): string {
+  const low = (x: string) => x.trim().toLowerCase()
+  switch (s.kind) {
+    case "issue": return `issue:${s.key}`
+    case "queue": return `issue:${s.id}`
+    case "review": return `elements:${idsKey(s.ids)}`
+    case "readiness": return `group:app:${low(s.subject)}`
+    case "component": return `component:${low(s.name)}`
+    case "group": return `group:${s.by}:${low(s.value)}`
+    default: return "scan"
+  }
+}
 
 export interface Tool { name: string; summary: string }
 export interface Msg { role: "user" | "assistant"; text: string; at: string; tools?: Tool[]; error?: string; costUsd?: number; proposals?: string[] }
@@ -30,12 +58,16 @@ interface State {
   busy: boolean
   starting: boolean
   error: string | null
+  /** Every anchor's thread and its state (GET /api/agent/threads), for the badges on rows and cards. */
+  threads: Record<string, Thread>
   /** Before/after pictures: being taken, their progress lines, and whether the sandbox changed since. */
   visual: { running: boolean; log: string[]; stale: boolean; error: string | null }
 }
 
 interface Api extends State {
-  start: (subject: Subject, opts?: { mode?: "advise" | "try"; provider?: string; ask?: string }) => Promise<void>
+  /** Opens the subject's thread when it has one (one thread per anchor); `fresh` starts a new thread. */
+  start: (subject: Subject, opts?: { mode?: "advise" | "try"; provider?: string; ask?: string; fresh?: boolean }) => Promise<void>
+  refreshThreads: () => Promise<void>
   resume: (id: string) => Promise<void>
   send: (text: string, mode?: "advise" | "try") => Promise<void>
   cancel: () => Promise<void>
@@ -74,9 +106,16 @@ async function stream(url: string, body: unknown, onEvent: (e: any) => void) {
 }
 
 export function AgentProvider({ children }: { children: React.ReactNode }) {
-  const [s, set] = React.useState<State>({ open: false, session: null, proposals: [], changes: null, streaming: null, busy: false, starting: false, error: null, visual: NO_VISUAL })
+  const [s, set] = React.useState<State>({ open: false, session: null, proposals: [], changes: null, streaming: null, busy: false, starting: false, error: null, threads: {}, visual: NO_VISUAL })
   const patch = (p: Partial<State>) => set(x => ({ ...x, ...p }))
   const sid = s.session?.id
+
+  const refreshThreads = React.useCallback(async () => {
+    if (!canChat()) return
+    try { const r = await api("/api/agent/threads"); set(x => ({ ...x, threads: r.threads ?? {} })) } catch { /* no agent package: no badges */ }
+  }, [])
+  // Badges on first paint, and again now and then so a thread finishing elsewhere shows up.
+  React.useEffect(() => { refreshThreads(); const t = window.setInterval(refreshThreads, 30_000); return () => window.clearInterval(t) }, [refreshThreads])
 
   const load = React.useCallback(async (id: string) => {
     const r = await api(`/api/agent/session?id=${encodeURIComponent(id)}`)
@@ -104,22 +143,26 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     finally {
       set(x => ({ ...x, streaming: null, busy: false }))
       await load(id).catch(() => {})
+      refreshThreads()
     }
-  }, [sid, load])
+  }, [sid, load, refreshThreads])
 
-  const start = React.useCallback(async (subject: Subject, opts: { mode?: "advise" | "try"; provider?: string; ask?: string } = {}) => {
+  const start = React.useCallback(async (subject: Subject, opts: { mode?: "advise" | "try"; provider?: string; ask?: string; fresh?: boolean } = {}) => {
     if (!canChat()) { say("Agents work when the dashboard is served: run dsa serve.", true); return }
     patch({ open: true, starting: true, error: null, session: null, proposals: [], changes: null, visual: NO_VISUAL })
     try {
-      const r = await api("/api/agent/session", { subject, mode: opts.mode, provider: opts.provider })
+      const r = await api("/api/agent/session", { subject, mode: opts.mode, provider: opts.provider, reuse: !opts.fresh })
       set(x => ({ ...x, session: r.session, starting: false }))
+      if (r.reused) await load(r.session.id)
+      refreshThreads()
       if (opts.ask) await send(opts.ask, opts.mode, r.session.id)
     } catch (e: any) { patch({ starting: false, error: e.message }) }
-  }, [send])
+  }, [send, load, refreshThreads])
 
   const api_: Api = {
     ...s,
     start,
+    refreshThreads,
     send: (t, m) => send(t, m),
     resume: async id => { patch({ open: true, error: null, visual: NO_VISUAL }); try { await load(id) } catch (e: any) { patch({ error: e.message }) } },
     cancel: async () => { if (sid) await api("/api/agent/cancel", { id: sid }).catch(() => {}) },
@@ -132,6 +175,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         if (action === "accept") say(r.result && !/^https:/.test(r.result) ? r.result : "Accepted")
         if (action === "accept" && /^https:\/\/github\.com\//.test(r.result ?? "")) window.open(r.result, "_blank", "noopener")
         set(x => ({ ...x, proposals: x.proposals.map(y => (y.id === p.id ? { ...y, status: action === "accept" ? "accepted" : "rejected", result: r.result } : y)) }))
+        refreshThreads()
       } catch (e: any) { say(e.message, true) }
     },
     takePictures: async () => {
@@ -155,6 +199,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         const r = await api("/api/agent/changes", { id: sid, action })
         say(action === "keep" ? `Kept on branch ${r.branch} (${r.commit}) in your local repo. Nothing was pushed.` : "Sandbox thrown away")
         await load(sid)
+        refreshThreads()
       } catch (e: any) { say(e.message, true) }
     },
   }
