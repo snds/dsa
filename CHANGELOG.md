@@ -6,6 +6,31 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-17
+
+The dashboard redesign: issues are the unit of work, each with a pinned agent thread, in five tabs
+(Inbox, Components, Apps, Health, Settings). On a published page, threads continue as GitHub issues
+through the `dsa-thread` workflow. Every package moves to 0.4.0; install them together.
+
+### Fixed
+
+- The thread workflow's agent sees a new thread's question. It is in the issue's description, and the
+  workflow passed only the comments, so the agent answered that the thread was empty.
+- A missing key or a failed answer gets a reply on the thread, pointing to the run log, where the
+  agent's error is printed. Both failed silently before. No draft PR comes from a failed answer.
+- The brief no longer says the profile has "no entry" for a component it maps in its role map
+  (`roles: { select: { use: "Select" } }`). It names the role and where the component comes from.
+
+### Added
+
+- The thread workflow's agent gets dsa's read-only tools on the scan (`get_subject`,
+  `find_elements`, `component_signature` and the rest). `dsa mcp --anchor <anchor>` answers
+  `get_subject` for a thread without a dashboard session. The propose tools stay off there: nobody is
+  present to accept a proposal, so proposals stay text in the reply.
+- `ANTHROPIC_WORKSPACE_ID`, an optional repository variable, for a key not scoped to a workspace.
+- docs/deploy.md names what the workflow needs: the key, the variable, and *Allow GitHub Actions to
+  create and approve pull requests* for `/dsa draft-fix`.
+
 ### Fixed
 
 - Discuss on GitHub works on a repo without a `dsa-thread` label. A new-issue link drops a label the
