@@ -16,7 +16,7 @@ export { createHandler, serveMcp, TOOLS, SERVER_INFO, type McpEnv } from './mcp.
 export { propose, readProposals, setStatus, recommendationProblems, readFeedback, addFeedback, feedbackPath, type Proposal, type ProposalKind } from './proposals.js';
 export { claudeArgs, cursorArgs, detectProviders, startTurn, toolSummary, type AgentEvent, type Mode, type ProviderId } from './providers.js';
 export { agentRoutes } from './routes.js';
-export { subjectForAnchor, threadMarker, REPLY_MARKER, THREAD_WORKFLOW } from './workflow.js';
+export { batchForKey, subjectForAnchor, threadMarker, REPLY_MARKER, THREAD_WORKFLOW } from './workflow.js';
 export { addDismissal, readDismissals, undoDismissal, DISMISS_LABELS, type Dismissal, type DismissLabel } from './dismissals.js';
 export { readComponentChecks, setComponentCheck, type ComponentCheck } from './component-checks.js';
 export { githubWho, openDraftPr, prText, type PrContext, type Run } from './draft-pr.js';
@@ -72,7 +72,7 @@ export default defineAddon({
         await api.requireStore('brief');
         useProfile(ctx.profile);
         const snap = readSnapshot(ctx.dataDir) ?? (await writeSnapshot(ctx));
-        const md = buildBrief(snap, subjectForAnchor(ctx.dataDir, anchor)).markdown;
+        const md = buildBrief(snap, subjectForAnchor(ctx.dataDir, anchor, snap)).markdown;
         if (o.out) { fs.mkdirSync(path.dirname(path.resolve(api.cwd, o.out)), { recursive: true }); fs.writeFileSync(path.resolve(api.cwd, o.out), md); api.out(`Wrote the brief for ${anchor} to ${o.out}`); }
         else api.out(md);
       });
