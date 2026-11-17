@@ -16,6 +16,7 @@ export { bench, benchText, correctness, repeatability, predictionsOf, matchLabel
 export { migratedLabels, historyLabels, reviewQueue, stripTargets, sourceRef, type QueueItem as LabelQueueItem } from './labels.js';
 export { payloadOf, cardsOf } from './bench-cli.js';
 export { wilson, lowerBound } from './stats.js';
+export { buildIssues, certaintyOfRule, needsCheck, type Issue, type IssueKind, type Certainty } from './issues.js';
 export { buildQueue, createIssues, syncLinks, readState, agentPrompt, PKG_DIR, type QueueItem } from './queue.js';
 
 /** Where `dsa run` and `dsa report` write the single-file report. */

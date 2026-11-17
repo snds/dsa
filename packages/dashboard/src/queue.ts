@@ -54,6 +54,8 @@ export interface QueueItem {
   kind: 'finding' | 'approval';
   /** The finding's rule (deprecated, lookalike…), or 'approval' for a reviewer-approved migration. */
   rule: string;
+  /** A finding's subject: the component, app or repo it is about. */
+  subject?: string;
   title: string;
   owner: string;
   scope: string;
@@ -158,7 +160,7 @@ export async function buildQueue(root: string, config: Config, dataDir: string):
     const closed = link?.state === 'closed';
     const done = f.status === 'resolved' || closed;
     items.push({
-      id: f.id, kind: 'finding', rule: f.rule, title: f.title, owner: f.owner, scope: f.scope, repo: repoFor(f.repo),
+      id: f.id, kind: 'finding', rule: f.rule, subject: f.subject, title: f.title, owner: f.owner, scope: f.scope, repo: repoFor(f.repo),
       severity: f.severity, score: f.score, family: f.family, pushed: pushed.has(f.id),
       why: f.why, evidence: f.evidence, ...evidenceOf(f.evidence, f.places), fix: f.fix, exit: f.exit, affected: f.affected,
       status: done ? 'done' : 'open',
