@@ -105,7 +105,7 @@ export function propose(dataDir: string, snap: Snapshot, sigs: any[], input: Pro
     if (!pl.title || !pl.body) problems.push('An issue needs `title` and `body`.');
   } else if (input.kind === 'dismissal') {
     if (!/^[A-Z]{1,3}-[\w-]+$/.test(String(pl.issue ?? ''))) problems.push('`issue`: the issue key, like F-1A2B3C or Q-…, from get_subject.');
-    if (!(pl.label in DISMISS_LABELS)) problems.push(`\`label\` is one of ${Object.keys(DISMISS_LABELS).join(', ')}.`);
+    if (!(Object.hasOwn(DISMISS_LABELS, pl.label))) problems.push(`\`label\` is one of ${Object.keys(DISMISS_LABELS).join(', ')}.`);
     if (!String(pl.reason ?? '').trim()) problems.push('`reason`: one or two plain sentences a reviewer can check.');
   } else problems.push(`Unknown proposal kind ${input.kind}.`);
   if (problems.length) throw new Error(problems.join(' '));
