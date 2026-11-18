@@ -113,7 +113,8 @@ const systemServer = (servers: Record<string, unknown>) => Object.keys(servers).
 function setup(ctx: EngineContext) {
   const servers = externalServers(ctx);
   const own = systemServer(servers);
-  const q = (s: string) => (/[\s'"$]/.test(s) ? `'${s.replace(/'/g, "'\\''")}'` : s);
+  // Quote anything but plain path characters: &, ;, |, ( and the like break or chain a pasted command (code review A C-18, C C-40).
+  const q = (s: string) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, "'\\''")}'`);
   const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64');
   return {
     claudeCode: {

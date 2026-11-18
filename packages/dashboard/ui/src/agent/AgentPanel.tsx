@@ -1,4 +1,5 @@
 import * as React from "react"
+import { safeHref } from "@/lib/host"
 import { cn } from "cn"
 import { CaretDownIcon, CheckIcon, FlaskIcon, GitBranchIcon, PaperPlaneRightIcon, SparkleIcon, StopIcon, TrashIcon, WrenchIcon, XIcon, ChatCircleDotsIcon, ClockCounterClockwiseIcon } from "@phosphor-icons/react"
 import { Badge } from "@/components/ui/badge"
@@ -180,7 +181,7 @@ function KeptBranch() {
     <div className="mt-4 flex flex-col gap-2 rounded-lg border px-3 py-2 text-xs">
       <p className="flex items-center gap-2"><GitBranchIcon className="size-4 shrink-0" /><span>Kept on <code className="font-mono">{s.kept!.branch}</code> ({s.kept!.commit}) in your local {s.repo.name} repo.</span></p>
       {s.pr ? (
-        <p><a href={s.pr.url} target="_blank" rel="noreferrer" className="font-medium underline underline-offset-4">Draft PR{s.pr.number ? ` #${s.pr.number}` : ""}</a> is open. Mark it ready on GitHub when you've reviewed it.</p>
+        <p><a href={safeHref(s.pr.url)} target="_blank" rel="noreferrer" className="font-medium underline underline-offset-4">Draft PR{s.pr.number ? ` #${s.pr.number}` : ""}</a> is open. Mark it ready on GitHub when you've reviewed it.</p>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" onClick={open} disabled={busy || !who?.login}>{busy ? "Opening…" : "Open draft PR"}</Button>

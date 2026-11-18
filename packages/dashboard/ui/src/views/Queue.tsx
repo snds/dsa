@@ -263,7 +263,7 @@ function Row({ i, sel, onClick }: { i: any; sel: boolean; onClick: () => void })
 /** One item: who, why, what to do, when it's done, and its issue. `base` is the route its disclosures link under. */
 export function Detail({ i, q, busy, onCreate, base = "queue" }: { i: any; q: Q; busy: boolean; onCreate: () => void; base?: string }) {
   const issue = i.issue.title + (i.issue.body ? "\n\n" + i.issue.body : "")
-  const cmd = `./bin/dsa.js issues sync --apply --only ${i.id}`
+  const cmd = `npx --no dsa issues sync --apply --only ${i.id}`
   const l = i.link
   const d = i.decision
   // First view: who, why, what to do, when it's done, and the issue. The evidence behind it (paths,

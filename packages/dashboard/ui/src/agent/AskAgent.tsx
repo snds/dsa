@@ -24,8 +24,9 @@ export function AskAgent({ subject, label = "Ask the agent", ask, size, variant 
   async function take() {
     try { setHandoff(await api("/api/agent/handoff", { subject, question: ask ?? "" })) } catch (e: any) { say(e.message, true) }
   }
-  // Rendered outside the agent's provider (a view on its own, as in tests): no agent to ask.
-  if (!a) return null
+  // Rendered outside the agent's provider (a view on its own, as in tests): no agent to ask. On a published
+  // page there's no agent to run: the thread's Discuss on GitHub is the way in, so no dead button (UX B U-26, C U-20).
+  if (!a || !live) return null
   const main = <Button variant={variant} size={s} onClick={() => a.start(subject, { ask })} disabled={!live}><SparkleIcon data-icon="inline-start" />{label}</Button>
   // Disabled buttons get no hover, so the reason sits on the whole group (which keeps the halves flush).
   const group = (

@@ -84,7 +84,9 @@ export function ThemeProvider({
   ...props
 }: ThemeProviderProps) {
   const [theme, setThemeState] = React.useState<Theme>(() => {
-    const storedTheme = localStorage.getItem(storageKey)
+    // Storage can throw (blocked site data): a blank page is worse than the default theme (code review C C-13).
+    let storedTheme: string | null = null
+    try { storedTheme = localStorage.getItem(storageKey) } catch { /* default */ }
     if (isTheme(storedTheme)) {
       return storedTheme
     }
@@ -94,7 +96,7 @@ export function ThemeProvider({
 
   const setTheme = React.useCallback(
     (nextTheme: Theme) => {
-      localStorage.setItem(storageKey, nextTheme)
+      try { localStorage.setItem(storageKey, nextTheme) } catch { /* this visit only */ }
       setThemeState(nextTheme)
     },
     [storageKey]
@@ -166,7 +168,7 @@ export function ThemeProvider({
                 ? "light"
                 : "dark"
 
-        localStorage.setItem(storageKey, nextTheme)
+        try { localStorage.setItem(storageKey, nextTheme) } catch { /* this visit only */ }
         return nextTheme
       })
     }

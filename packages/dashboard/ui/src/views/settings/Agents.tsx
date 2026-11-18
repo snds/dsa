@@ -28,7 +28,7 @@ export function Agents() {
   // Refresh when a proposal is decided, however long that took (code review A C-15: it was a fixed 800 ms).
   React.useEffect(() => { if (!D.serve) return; const on = () => { void load() }; window.addEventListener("dsa:changed", on); return () => window.removeEventListener("dsa:changed", on) }, [load])
 
-  if (!D.serve) return <Note>Agents work when the dashboard is served. Run <Code>./bin/dsa.js serve</Code> and open it from there.</Note>
+  if (!D.serve) return <Note>Agents work when the dashboard is served. Run <Code>npx --no dsa serve</Code> and open it from there.</Note>
   if (err) return <Note className="text-destructive">{err}</Note>
   if (!v) return <Skeleton className="h-64" />
   const s = v.settings
@@ -117,9 +117,9 @@ export function Agents() {
           </section>
           <section>
             <h3 className="mb-1 font-medium">Claude Code</h3>
-            <p className="text-muted-foreground">Run both in a terminal, once.</p>
-            <Pre className="mt-2">{`${v.setup.claudeCode.add}\n${v.setup.claudeCode.addCds}`}</Pre>
-            <Button size="sm" variant="outline" className="mt-2" onClick={() => copy(`${v.setup.claudeCode.add}\n${v.setup.claudeCode.addCds}`, "Commands copied")}><CopyIcon data-icon="inline-start" />Copy</Button>
+            <p className="text-muted-foreground">Run {v.setup.claudeCode.addSystem ? "both" : "it"} in a terminal, once.</p>
+            <Pre className="mt-2">{[v.setup.claudeCode.add, v.setup.claudeCode.addSystem].filter(Boolean).join("\n")}</Pre>
+            <Button size="sm" variant="outline" className="mt-2" onClick={() => copy([v.setup.claudeCode.add, v.setup.claudeCode.addSystem].filter(Boolean).join("\n"), "Copied")}><CopyIcon data-icon="inline-start" />Copy</Button>
           </section>
           <section>
             <h3 className="mb-1 font-medium">Any other MCP client</h3>
