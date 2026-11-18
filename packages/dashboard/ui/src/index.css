@@ -25,6 +25,7 @@
     --color-chart-2: var(--chart-2);
     --color-chart-1: var(--chart-1);
     --color-ring: var(--ring);
+    --color-primary-line: var(--primary-line);
     --color-input: var(--input);
     --color-border: var(--border);
     --color-destructive: var(--destructive);
@@ -82,22 +83,24 @@
     --accent-foreground: oklch(0.212 0.019 322.12);
     --destructive: oklch(0.577 0.245 27.325);
     --border: oklch(0.922 0.005 325.62);
-    --input: oklch(0.922 0.005 325.62);
-    --ring: oklch(0.711 0.019 323.02);
+    /* Control edges and the focus ring are non-text contrast (WCAG 1.4.11): 3:1 against the page. */
+    --input: oklch(0.62 0.01 325.62);
+    --ring: oklch(0.62 0.034 322.5);
     --chart-1: oklch(0.865 0.127 207.078);
     --chart-2: oklch(0.715 0.143 215.221);
     --chart-3: oklch(0.609 0.126 221.723);
     --chart-4: oklch(0.52 0.105 223.128);
     --chart-5: oklch(0.45 0.085 224.283);
     --radius: 0.45rem;
-    --success: oklch(0.696 0.17 162.48);
+    /* Status colours mark dots and icons, so they need 3:1 too. */
+    --success: oklch(0.59 0.17 162.48);
     --success-soft-foreground: oklch(0.508 0.118 165.612);
     --success-soft-border: oklch(0.696 0.17 162.48 / 40%);
-    --warning: oklch(0.769 0.188 70.08);
+    --warning: oklch(0.63 0.188 70.08);
     --warning-soft: oklch(0.769 0.188 70.08 / 10%);
-    --warning-soft-foreground: oklch(0.555 0.163 48.998);
+    --warning-soft-foreground: oklch(0.5 0.163 48.998);
     --warning-soft-border: oklch(0.769 0.188 70.08 / 45%);
-    --caution: oklch(0.705 0.213 47.604);
+    --caution: oklch(0.64 0.213 47.604);
     --sidebar: oklch(0.985 0 0);
     --sidebar-foreground: oklch(0.145 0.008 326);
     --sidebar-primary: oklch(0.546 0.245 262.881);
@@ -105,7 +108,9 @@
     --sidebar-accent: oklch(0.96 0.003 325.6);
     --sidebar-accent-foreground: oklch(0.212 0.019 322.12);
     --sidebar-border: oklch(0.922 0.005 325.62);
-    --sidebar-ring: oklch(0.711 0.019 323.02);
+    --sidebar-ring: oklch(0.62 0.034 322.5);
+    /* Selection outlines: the primary blue, lighter in dark mode, where the button blue is too dark to see on the page. */
+    --primary-line: oklch(0.488 0.243 264.376);
 }
 
 .dark {
@@ -133,7 +138,7 @@
     --accent-foreground: oklch(0.985 0 0);
     --destructive: oklch(0.704 0.191 22.216);
     --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
+    --input: oklch(0.54 0.01 325.62);
     --ring: oklch(0.542 0.034 322.5);
     --chart-1: oklch(0.865 0.127 207.078);
     --chart-2: oklch(0.715 0.143 215.221);
@@ -148,11 +153,12 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.542 0.034 322.5);
+    --primary-line: oklch(0.623 0.214 259.815);
 }
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border outline-ring;
     }
   body {
     @apply bg-background text-foreground;

@@ -69,9 +69,10 @@ export function Lightbox({ ids, start, decision, onClose }: { ids: string[]; sta
 function Frame({ src, zoom, box, onClick }: { src: string; zoom: number; box?: any; onClick: () => void }) {
   const [w, setW] = React.useState<number | null>(null)
   return (
-    <div className="relative shrink-0 cursor-zoom-in" style={w ? { width: (w / 2) * (zoom || 2), maxWidth: zoom ? undefined : "100%" } : undefined} onClick={onClick}>
+    // A button, so the keyboard can zoom too (the zoom buttons below do the same).
+    <button type="button" aria-label={zoom === 4 ? "Fit the photo" : "Zoom in"} className="relative block shrink-0 cursor-zoom-in p-0 focus-visible:outline-2 focus-visible:outline-ring" style={w ? { width: (w / 2) * (zoom || 2), maxWidth: zoom ? undefined : "100%" } : undefined} onClick={onClick}>
       <img src={src} alt="" className="block w-full" onLoad={ev => setW((ev.target as HTMLImageElement).naturalWidth)} />
       <Ring b={box} />
-    </div>
+    </button>
   )
 }

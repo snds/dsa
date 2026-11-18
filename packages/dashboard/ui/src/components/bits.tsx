@@ -51,7 +51,7 @@ export function Stat({ label, value, detail, active, onClick }: { label: string;
       {detail != null && <span className="text-xs text-muted-foreground">{detail}</span>}
     </>
   )
-  const cls = cn("flex min-w-0 flex-col gap-1 rounded-lg border bg-card p-3 text-left", onClick && "cursor-pointer transition-colors hover:bg-muted/60", active && "border-primary ring-2 ring-primary/20")
+  const cls = cn("flex min-w-0 flex-col gap-1 rounded-lg border bg-card p-3 text-left", onClick && "cursor-pointer transition-colors hover:bg-muted/60", active && "border-primary-line ring-2 ring-primary-line/30")
   return onClick ? <button type="button" className={cls} aria-pressed={active} onClick={onClick}>{body}</button> : <div className={cls}>{body}</div>
 }
 
@@ -91,8 +91,8 @@ export function Pre({ children, className }: { children: React.ReactNode; classN
   return <pre className={cn("overflow-auto rounded-lg border bg-muted/50 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap", className)}>{children}</pre>
 }
 
-export function Note({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <p className={cn("text-sm text-muted-foreground", className)}>{children}</p>
+export function Note({ children, className, role }: { children: React.ReactNode; className?: string; role?: string }) {
+  return <p role={role} className={cn("text-sm text-muted-foreground", className)}>{children}</p>
 }
 
 /**

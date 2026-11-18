@@ -321,7 +321,8 @@ function TickAll({ items, label }: { items: any[]; label: string }) {
   return (
     <span className="flex items-center gap-1.5 text-xs" data-slot="tick-all">
       <Checkbox checked={all} indeterminate={n > 0 && !all} onCheckedChange={on => toggle(ok, Boolean(on))} aria-label={text} />
-      <span className="cursor-default select-none" onClick={() => toggle(ok, !all)}>{text}</span>
+      {/* A larger target for the mouse; the Checkbox carries the same name for the keyboard and screen readers. */}
+      <span className="cursor-default select-none" aria-hidden="true" onClick={() => toggle(ok, !all)}>{text}</span>
     </span>
   )
 }
@@ -344,7 +345,7 @@ function Neighbours({ b }: { b: Batch }) {
         {list.map(n => {
           const drawn = proposalFor(n.pick, rep)
           return (
-            <figure key={`${n.pick.use}|${JSON.stringify(n.pick.props)}`} className={cn("m-0 flex min-w-[9rem] flex-none flex-col gap-1.5 rounded-md border bg-background p-2", n.mine && "border-primary ring-1 ring-primary")} data-slot="neighbour">
+            <figure key={`${n.pick.use}|${JSON.stringify(n.pick.props)}`} className={cn("m-0 flex min-w-[9rem] flex-none flex-col gap-1.5 rounded-md border bg-background p-2", n.mine && "border-primary-line ring-1 ring-primary-line")} data-slot="neighbour">
               <div className="grid min-h-10 place-items-start">{drawn?.url ? <Natural url={drawn.url} alt={`${SYS} ${pickText(n.pick)}`} /> : <span className="text-xs text-muted-foreground">Not drawn yet</span>}</div>
               <figcaption className="text-xs">
                 <b className="font-medium">{pickText(n.pick)}</b>
@@ -428,7 +429,7 @@ function Place({ e, group }: { e: any; group: string[] }) {
   // The zoom view steps through this look group's photos.
   const openShot = () => { const ids = group.filter(id => byId.get(id)?.shot); openLightbox(ids, Math.max(0, ids.indexOf(e.id))) }
   return (
-    <li className={cn("grid gap-3 px-4 py-2.5 @2xl:grid-cols-[auto_minmax(0,1fr)_minmax(0,14rem)_auto] @2xl:items-center", on && "bg-primary/5", here && "shadow-[inset_3px_0_0_var(--color-primary)] ring-1 ring-primary/40 ring-inset")}
+    <li className={cn("grid gap-3 px-4 py-2.5 @2xl:grid-cols-[auto_minmax(0,1fr)_minmax(0,14rem)_auto] @2xl:items-center", on && "bg-primary/5", here && "shadow-[inset_3px_0_0_var(--color-primary-line)] ring-1 ring-primary-line ring-inset")}
       data-slot="place" data-place={e.id} data-status={check ? "check" : st} aria-current={here ? "true" : undefined}>
       <span className="flex @2xl:self-center">
         {(

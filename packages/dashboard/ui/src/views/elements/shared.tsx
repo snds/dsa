@@ -319,7 +319,7 @@ function OptionTiles({ choices, current, onPick, disabled, rep }: { choices: { d
         const on = sameDecision(decision, current)
         return (
           <button key={desc(decision)} type="button" disabled={disabled} aria-pressed={on} onClick={() => onPick(decision, recommended)}
-            className={cn("flex min-w-0 flex-col gap-1.5 rounded-lg border bg-card p-2 text-left transition-colors hover:bg-muted/60 disabled:opacity-60", on && "border-primary ring-1 ring-primary")}>
+            className={cn("flex min-w-0 flex-col gap-1.5 rounded-lg border bg-card p-2 text-left transition-colors hover:bg-muted/60 disabled:opacity-60", on && "border-primary-line ring-1 ring-primary-line")}>
             <span className="grid h-20 place-items-center overflow-hidden rounded-md border bg-background p-2">
               {p?.url ? <img src={p.url} alt={`${SYS} ${pickText(decision)}`} loading="lazy" className="block max-h-16 w-auto max-w-full object-contain" />
                 : p?.fallback ? <img src={p.fallback} alt={`${SYS} ${decision.use}, its story as written`} loading="lazy" className="block max-h-16 w-auto max-w-full object-contain opacity-80" />
