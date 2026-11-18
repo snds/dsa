@@ -111,7 +111,7 @@ export function System() {
                         <TooltipTrigger render={<span className="cursor-default" />}>
                           <Badge variant={c.kind.ambiguous || c.kind.confidence < 0.6 ? "outline" : "secondary"}>{c.kind.kind}{c.kind.ambiguous ? "?" : ""}</Badge>
                         </TooltipTrigger>
-                        <TooltipContent>{Math.round(c.kind.confidence * 100)}% sure{c.kind.ambiguous ? ", and close to another kind" : ""}</TooltipContent>
+                        <TooltipContent>Inferred from its code ({Math.round(c.kind.confidence * 100)}% match){c.kind.ambiguous ? ", and close to another kind" : ""}</TooltipContent>
                       </Tooltip>
                     ) : <span className="text-muted-foreground">—</span>}
                   </TableCell>
@@ -131,7 +131,7 @@ export function System() {
                           ["Variants", c.axes.length ? c.axes.map((a: any) => `${a.name}: ${a.values.join(", ")}`).join(" · ") : "None"],
                           ["Parts", c.parts.length ? c.parts.join(", ") : "None"],
                           ["Tokens", c.tokens ? fmt(c.tokens) : "None"],
-                          ["Kind", c.kind ? `${c.kind.kind}, ${Math.round(c.kind.confidence * 100)}% sure${c.kind.ambiguous ? ", close to another kind" : ""}` : "Not recognised"],
+                          ["Kind", c.kind ? `${c.kind.kind}, inferred (${Math.round(c.kind.confidence * 100)}% match)${c.kind.ambiguous ? ", close to another kind" : ""}` : "Not recognised"],
                           ["Declared in", <><button type="button" className="rounded-sm font-mono text-xs text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring outline-none" onClick={() => setReading({ file: c.evidence.file, line: c.evidence.line || 1, kind: c.name })}>{shortPath(c.evidence.file)}{c.evidence.line ? `:${c.evidence.line}` : ""}</button> <span className="text-muted-foreground">({c.evidence.extractor})</span></>],
                         ]} />
                         <ComponentCase c={c} />

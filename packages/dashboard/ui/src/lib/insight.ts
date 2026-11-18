@@ -28,8 +28,9 @@ const RULES: Record<string, { certainty: Certainty; roles: Actor[]; verb: string
 export function classify(rule: string | undefined) { return RULES[rule ?? ""] ?? { certainty: "recommendation" as Certainty, roles: ["owner"] as Actor[], verb: "Review" } }
 
 export const CERTAINTY: Record<Certainty, { label: string; hint: string }> = {
-  definite: { label: "Definite", hint: "Measured by the scan, with a known fix. Do it." },
-  recommendation: { label: "Recommendation", hint: "Inferred by the scan. A person decides whether it holds." },
+  // The certainty words are the Inbox's (decision D2): one scale everywhere.
+  definite: { label: "Measured", hint: "Counted from the code, with a known fix." },
+  recommendation: { label: "Inferred", hint: "The scan's reading of the code. A person checks it before acting." },
 }
 
 // The page once had a "View as" role picker kept in localStorage; it's gone (one page serves every

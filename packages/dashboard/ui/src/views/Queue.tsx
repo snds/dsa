@@ -295,7 +295,7 @@ export function Detail({ i, q, busy, onCreate, base = "queue" }: { i: any; q: Q;
   const canCreate = D.serve && i.status === "open" && l?.state !== "open"
   const createBlock = !q.github.token ? "Add a GitHub token in Settings first." : !i.repo ? "No repo for this owner: set a default repo in Settings." : ""
   return (
-    <Panel title={i.title} action={i.kind === "finding" ? <SevBadge sev={i.severity} /> : <Badge variant="outline">Review approval</Badge>} className="lg:sticky lg:top-36">
+    <Panel title={i.title} action={i.kind === "finding" ? <span className="flex flex-wrap gap-1.5"><CertaintyBadge rule={i.rule} /><SevBadge sev={i.severity} /></span> : <Badge variant="outline">Review approval</Badge>} className="lg:sticky lg:top-36">
       {i.status === "done" && (
         <p className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm">
           <CheckCircleIcon className="size-4 text-success-soft-foreground" /><b className="font-medium">Done</b>

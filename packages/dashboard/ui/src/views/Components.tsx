@@ -17,7 +17,7 @@ export function Components() {
       <Table>
         <TableHeader><TableRow>
           <TableHead className="pl-4">Component</TableHead><TableHead>Library</TableHead><TableHead className="text-right">Instances</TableHead><TableHead className="text-right">Consumers</TableHead>
-          <TableHead className="text-right">Used as intended</TableHead><TableHead className="text-right">Raw look-alikes</TableHead><TableHead className="pr-4">Status</TableHead>
+          <TableHead className="text-right">Used as intended</TableHead><TableHead className="text-right">Look-alikes</TableHead><TableHead className="pr-4">Status</TableHead>
         </TableRow></TableHeader>
         <TableBody>
           {rows.map((c: any) => {

@@ -30,7 +30,7 @@ describe("cli", () => {
     const text = out.join("\n");
     expect(text).toMatch(/dsa scan — fixture/);
     expect(text).toMatch(/directory\s+ds\s+local\s+html\s+external\s+total\s+custom/);
-    expect(text).toMatch(/local look-alikes\s+2/);
+    expect(text).toMatch(/local components named like system ones\s+2/);
   });
 
   it("--json prints the report instead of writing it", async () => {

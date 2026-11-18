@@ -54,7 +54,7 @@ export function formatScan(report: ScanReport): string {
         ["className overrides on DS", String(cu.classNameOverrides)],
         ["style overrides on DS", String(cu.styleOverrides)],
         ["spread props on DS", String(cu.spreadProps)],
-        ["local look-alikes", String(cu.lookAlikes)],
+        ["local components named like system ones", String(cu.lookAlikes)],
         ["raw HTML controls", String(cu.rawElements)],
         ["hard-coded style values", String((report.styleValues ?? []).length)],
       ],
