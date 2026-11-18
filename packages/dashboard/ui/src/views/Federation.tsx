@@ -15,7 +15,9 @@ export function Federation() {
   const off = (t: any, k: string, node: React.ReactNode) => (t.measures && t.measures[k] === false ? <span className="text-muted-foreground">Off</span> : node)
   const cell = (v: React.ReactNode, b: any) => <span className="inline-flex items-center gap-2">{v}<StatusDot band={b} /></span>
   const table = (rows: any[]) => (
-    <Table>
+    // Fixed column widths, so the child-library and consumer tables line up column for column (visual review B V-23, C V-13).
+    <Table className="min-w-[1080px] table-fixed [&_th]:whitespace-normal [&_td]:break-words">
+      <colgroup><col className="w-[12%]" /><col className="w-[9%]" /><col className="w-[22%]" />{Array.from({ length: 7 }, (_, i) => <col key={i} className="w-[8.14%]" />)}</colgroup>
       <TableHeader><TableRow>
         <TableHead className="pl-4">Name</TableHead><TableHead>Role</TableHead><TableHead>DS packages (resolved / latest)</TableHead>
         <TableHead className="text-right">Majors behind</TableHead><TableHead className="text-right">Instances</TableHead><TableHead className="text-right">Used as intended</TableHead>

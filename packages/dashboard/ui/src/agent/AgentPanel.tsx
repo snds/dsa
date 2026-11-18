@@ -28,9 +28,22 @@ const KIND: Record<string, string> = { decision: "Decision", policy: "Policy", h
 export function AgentPanel() {
   const a = useAgent()
   const s = a.session
+  const panel = React.useRef<HTMLElement>(null)
+  // Below xl the panel covers the page, so it acts like a sheet: a scrim behind it, Esc closes it, and
+  // focus moves into it (visual review B V-17). From xl up the page makes room beside it instead.
+  const covers = () => typeof window !== "undefined" && !window.matchMedia?.("(min-width: 80rem)").matches
+  React.useEffect(() => {
+    if (!a.open) return
+    if (covers()) panel.current?.focus()
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && covers() && !e.defaultPrevented) a.close() }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [a.open]) // eslint-disable-line react-hooks/exhaustive-deps
   if (!a.open) return null
   return (
-    <aside aria-label="Agent" className="fixed inset-y-0 right-0 z-40 flex w-full flex-col border-l bg-background shadow-xl sm:w-[440px]">
+    <>
+    <div aria-hidden className="fixed inset-0 z-30 bg-black/30 xl:hidden" onClick={a.close} />
+    <aside ref={panel} tabIndex={-1} aria-label="Agent" className="fixed inset-y-0 right-0 z-40 flex w-full flex-col border-l bg-background shadow-xl outline-none sm:w-[440px]">
       <header className="flex items-start gap-2 border-b px-4 py-3">
         <SparkleIcon className="mt-1 size-4 shrink-0 text-primary" weight="fill" />
         <div className="min-w-0 flex-1">
@@ -49,6 +62,7 @@ export function AgentPanel() {
       </header>
       <ThreadBody />
     </aside>
+    </>
   )
 }
 

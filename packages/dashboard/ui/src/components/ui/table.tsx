@@ -4,9 +4,27 @@ import * as React from "react"
 import { cn } from "cn"
 
 function Table({ className, ...props }: React.ComponentProps<"table">) {
+  // A shadow on the side that has more columns, so a clipped table says it scrolls (visual review A V-20).
+  const box = React.useRef<HTMLDivElement>(null)
+  const [more, setMore] = React.useState({ left: false, right: false })
+  React.useEffect(() => {
+    const el = box.current
+    if (!el) return
+    const check = () => setMore(m => {
+      const n = { left: el.scrollLeft > 1, right: el.scrollLeft + el.clientWidth < el.scrollWidth - 1 }
+      return n.left === m.left && n.right === m.right ? m : n
+    })
+    check()
+    el.addEventListener("scroll", check, { passive: true })
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(check)
+    ro?.observe(el)
+    return () => { el.removeEventListener("scroll", check); ro?.disconnect() }
+  }, [])
   return (
     <div
+      ref={box}
       data-slot="table-container"
+      data-more={[more.left && "left", more.right && "right"].filter(Boolean).join(" ") || undefined}
       className="relative w-full overflow-x-auto"
     >
       <table

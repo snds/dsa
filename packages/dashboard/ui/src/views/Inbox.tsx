@@ -160,7 +160,11 @@ export function Inbox() {
   React.useEffect(() => {
     if (!current) return
     // The linked issue is on screen: from here on, acting on it moves on.
-    if (order.some(i => i.key === current)) { fromLink.current = false; return }
+    if (order.some(i => i.key === current)) {
+      // A linked issue is scrolled into view in the list, not left below its inner scroll (visual review B V-16).
+      if (fromLink.current) ([...(list.current?.querySelectorAll("[data-key]") ?? [])].find(el => (el as HTMLElement).dataset.key === current) as HTMLElement | undefined)?.scrollIntoView?.({ block: "nearest" })
+      fromLink.current = false; return
+    }
     const it = issues.find(i => i.key === current)
     // Acting on the open issue (answering, confirming, dismissing) moves on to the one after it.
     if (!fromLink.current) {
@@ -262,21 +266,22 @@ export function Inbox() {
           as the side sheet. One column: the chosen issue comes first. */}
       <div className="@container">
       <div className={cn("grid items-start gap-6 @4xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]", third && "@7xl:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)_minmax(22rem,26rem)]")}>
-        <div ref={list} className="order-2 flex min-w-0 flex-col overflow-hidden rounded-lg border @4xl:order-none @4xl:max-h-[calc(100vh-12rem)] @4xl:overflow-y-auto" role="list" aria-label="Issues">
+        <div ref={list} className="order-2 flex min-w-0 flex-col overflow-hidden rounded-lg border @4xl:order-none @4xl:max-h-[calc(100vh-12rem)] @4xl:overflow-y-auto @4xl:shadow-[inset_0_-14px_10px_-12px_var(--color-border)]" role="list" aria-label="Issues">
           {!shown.length && <Empty><EmptyHeader><EmptyTitle>{filter === "waiting" ? "Nothing is waiting on you" : filter === "done" ? "Nothing done yet" : "Nothing here"}</EmptyTitle><EmptyDescription>{plural(count("open"), "issue")} open in all.</EmptyDescription></EmptyHeader></Empty>}
           {groups.map(([g, items]) => {
             const open = !closed.has(g)
             const groupSubject: Subject | null = g && by !== "kind" ? { kind: "group", by: by === "app" ? "app" : "component", value: g, title: `Everything about ${groupLabel(g)}` } : null
             return (
               <section key={g || "_"} aria-label={groupLabel(g)}>
-                <header className="flex flex-wrap items-center gap-2 border-b bg-muted px-3 py-2">
-                  <button type="button" className="flex items-center gap-2 text-left" aria-expanded={open} onClick={() => setClosed(c => { const n = new Set(c); n.has(g) ? n.delete(g) : n.add(g); return n })}>
+                {/* One line at every width: the name truncates, the actions stay put (visual review C V-17). */}
+                <header className="flex items-center gap-2 border-b bg-muted px-3 py-2">
+                  <button type="button" className="flex min-w-0 items-center gap-2 text-left" title={groupLabel(g)} aria-expanded={open} onClick={() => setClosed(c => { const n = new Set(c); n.has(g) ? n.delete(g) : n.add(g); return n })}>
                     {open ? <CaretDownIcon className="size-4 text-muted-foreground" /> : <CaretRightIcon className="size-4 text-muted-foreground" />}
                     {by === "component" && g && <CubeIcon className="size-4" />}
-                    <span className="text-sm font-semibold">{groupLabel(g)}</span>
+                    <span className="truncate text-sm font-semibold">{groupLabel(g)}</span>
                   </button>
-                  <Badge variant="outline">{plural(items.length, "issue")}</Badge>
-                  {groupSubject && <span className="ml-auto flex items-center gap-2"><ThreadBadge subject={groupSubject} />{canChat() && <AskAgent subject={groupSubject} label={`Ask about all ${items.length}`} size="xs" variant="ghost" />}</span>}
+                  <Badge variant="outline" className="shrink-0">{plural(items.length, "issue")}</Badge>
+                  {groupSubject && <span className="ml-auto flex shrink-0 items-center gap-2"><ThreadBadge subject={groupSubject} />{canChat() && <AskAgent subject={groupSubject} label={`Ask about all ${items.length}`} size="xs" variant="ghost" />}</span>}
                 </header>
                 {open && items.map(i => (
                   <IssueRow key={i.key} i={i} sel={sel?.key === i.key} ticked={ticked.has(i.key)} onPick={() => pick(i.key)} onTick={() => tick(i.key)} />
@@ -310,7 +315,8 @@ function IssueRow({ i, sel, ticked, onPick, onTick }: { i: Issue; sel: boolean; 
     <div role="listitem" data-key={i.key} className={cn("flex items-start gap-3 border-b px-3 py-2.5 last:border-b-0", sel && "bg-muted/60", ticked && "bg-primary/5")}>
       <Checkbox checked={ticked} onCheckedChange={onTick} aria-label={`Tick ${i.title}`} className="mt-1" />
       <button type="button" onClick={onPick} aria-current={sel} className={cn("flex min-w-0 flex-1 flex-col gap-1 text-left", i.status === "done" && "opacity-70")}>
-        <span className="text-sm font-medium">{i.title}</span>
+        {/* A long unbroken title wraps instead of running under the badges (visual review A V-11). */}
+        <span className="text-sm font-medium [overflow-wrap:anywhere]">{i.title}</span>
         <span className="text-xs text-muted-foreground">{KIND[i.kind]}{i.apps.length ? ` · ${i.apps.slice(0, 3).join(", ")}${i.apps.length > 3 ? ` +${i.apps.length - 3}` : ""}` : ""}</span>
         {i.dismissed && <span className="text-xs text-muted-foreground" title={i.dismissed.reason}>Dismissed: {DISMISS_LABEL[i.dismissed.label] ?? i.dismissed.label}{i.dismissed.who ? ` · ${i.dismissed.who}` : ""}</span>}
       </button>

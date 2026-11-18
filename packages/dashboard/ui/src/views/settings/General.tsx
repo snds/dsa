@@ -242,7 +242,7 @@ export function General({ onTitle }: { onTitle: (t: string) => void }) {
         </Field>
       </Panel>
 
-      <Note className="px-1 text-xs">Changes save on their own when you leave a field, to {v.configFile || "dsa.config.json"}. Tokens save with their own button, to .dsa/secrets.json.</Note>
+      <Note className="px-1 text-xs">Changes save on their own when you leave a field, to <code className="[overflow-wrap:anywhere]">{v.configFile || "dsa.config.json"}</code>. Tokens save with their own button, to .dsa/secrets.json.</Note>
     </div>
   )
 }
