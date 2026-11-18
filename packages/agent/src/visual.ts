@@ -95,6 +95,12 @@ function planIn(plan: AppPlan, appDir: string, wrapper: string | null): AppPlan 
 
 const sha = (f: string) => { try { return crypto.createHash('sha1').update(fs.readFileSync(f)).digest('hex'); } catch { return ''; } };
 
+/**
+ * Files that run when the app starts (build config, package scripts, hooks). The "after" side starts a dev
+ * server from the sandbox, so an agent's edit to one of these would run on this machine: refuse instead.
+ */
+export const RUNS_AT_START = /(^|\/)(package\.json|[^/]*\.config\.(?:[cm]?[jt]s|json)|\.husky\/.*|\.npmrc|\.yarnrc(?:\.yml)?|\.pnpmfile\.cjs|scripts\/.*)$/;
+
 export async function beforeAfter(opts: { root: string; dataDir: string; config: Config; id: string; max?: number; log?: (m: string) => void }): Promise<VisualRun> {
   const log = opts.log ?? (() => {});
   const s = readSession(opts.dataDir, opts.id);
@@ -105,6 +111,8 @@ export async function beforeAfter(opts: { root: string; dataDir: string; config:
   try {
     const ch = sandboxChanges(s);
     if (!s.sandbox || !ch?.files.length) throw new Error('There are no sandbox changes to picture.');
+    const risky = ch.files.map(f => f.file).filter(f => RUNS_AT_START.test(f));
+    if (risky.length) throw new Error(`The agent changed ${risky.join(', ')}, which runs when the app starts, so Before/After won't start it. Read the change first; keep it and run the app yourself if it's right.`);
     const snap = readSnapshot(opts.dataDir);
     if (!snap) throw new Error('No scan yet: run a scan first.');
     const { config } = opts;

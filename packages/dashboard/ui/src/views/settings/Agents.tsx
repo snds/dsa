@@ -25,6 +25,8 @@ export function Agents() {
     } catch (e: any) { setErr(e.message) }
   }, [])
   React.useEffect(() => { if (D.serve) load() }, [load])
+  // Refresh when a proposal is decided, however long that took (code review A C-15: it was a fixed 800 ms).
+  React.useEffect(() => { if (!D.serve) return; const on = () => { void load() }; window.addEventListener("dsa:changed", on); return () => window.removeEventListener("dsa:changed", on) }, [load])
 
   if (!D.serve) return <Note>Agents work when the dashboard is served. Run <Code>./bin/dsa.js serve</Code> and open it from there.</Note>
   if (err) return <Note className="text-destructive">{err}</Note>
@@ -41,7 +43,7 @@ export function Agents() {
     <div className="flex flex-col gap-6">
       <Panel title="What the agent does here">
         <ul className="ml-4 list-disc space-y-1.5 text-sm">
-          <li>It's a senior design-system engineer to think out loud with. Open it from a review card, a queue item, or Agent Readiness, and it starts already briefed: the scan's evidence, the screenshots, the design-system docs, and why the rules are the way they are.</li>
+          <li>It's a senior design-system engineer to think out loud with. Every issue in the Inbox has its thread beside it (and every component, app and group can have one), and it starts already briefed: the scan's evidence, the screenshots, the design-system docs, and why the rules are the way they are.</li>
           <li>It looks before it answers (screenshots, code, the design system's docs) and tells you how sure it is.</li>
           <li>It never changes anything itself. Decisions, policies, scanner hints, and issue drafts come back as proposals you accept or reject.</li>
           <li>To try a change, switch the session to <b>Try in sandbox</b>. It edits a throwaway copy of the repo; you see the diff and keep it as a local branch, or throw it away. Nothing is pushed.</li>
@@ -129,7 +131,7 @@ export function Agents() {
       </Panel>
 
       <Panel title={`Waiting for you (${props.length})`} description="Proposals from every session, including Cursor and Claude Code.">
-        {props.length ? <div className="flex flex-col gap-3" onClick={() => setTimeout(() => load(), 800)}>{props.map(p => <ProposalCard key={p.id} p={p} />)}</div> : <Note>Nothing waiting.</Note>}
+        {props.length ? <div className="flex flex-col gap-3">{props.map(p => <ProposalCard key={p.id} p={p} />)}</div> : <Note>Nothing waiting.</Note>}
       </Panel>
 
       <Panel title={`Scanner hints (${v.hints.length})`} description="Reviewed corrections the scanner applies on every scan. Saved in dsa.hints.json; commit it so everyone gets them.">

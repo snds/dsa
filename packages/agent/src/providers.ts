@@ -67,6 +67,8 @@ export interface TurnOptions {
   resume?: string;
   model?: string;
   addDirs?: string[];
+  /** Folders the agent may read but never edit, even in Try (links into the real checkout, extra dirs). */
+  readOnly?: string[];
   timeoutMs?: number;
 }
 
@@ -93,7 +95,7 @@ export function claudeArgs(o: TurnOptions): string[] {
     '--permission-mode', o.mode === 'try' ? 'acceptEdits' : 'default',
     '--allowedTools', allowed.join(','), '--disallowedTools', denied.join(','),
     '--strict-mcp-config', '--mcp-config', o.mcpConfig,
-    '--setting-sources', 'project', '--settings', JSON.stringify(isolation(o.cwd)),
+    '--setting-sources', 'project', '--settings', JSON.stringify({ ...isolation(o.cwd), permissions: { deny: (o.readOnly ?? []).map(d => `Edit(/${path.resolve(d)}/**)`) } }),
     '--append-system-prompt', o.persona];
   for (const d of o.addDirs ?? []) a.push('--add-dir', d);
   if (o.model) a.push('--model', o.model);
@@ -103,10 +105,12 @@ export function claudeArgs(o: TurnOptions): string[] {
 
 export function cursorArgs(o: TurnOptions): string[] {
   const a = ['-p', '--output-format', 'stream-json', '--stream-partial-output', '--workspace', o.cwd, '--trust', '--approve-mcps'];
+  // --force approves what .cursor/cli.json allows; the shell is denied there (cursorPermissions).
   if (o.mode === 'try') a.push('--force');
   if (o.model) a.push('--model', o.model);
   if (o.resume) a.push('--resume', o.resume);
-  a.push(o.prompt);
+  // The prompt is a positional argument: one starting with "-" would be read as a flag.
+  a.push(o.prompt.startsWith('-') ? ` ${o.prompt}` : o.prompt);
   return a;
 }
 
