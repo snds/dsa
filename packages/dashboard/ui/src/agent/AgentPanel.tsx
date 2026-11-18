@@ -34,7 +34,7 @@ export function AgentPanel() {
         <SparkleIcon className="mt-1 size-4 shrink-0 text-primary" weight="fill" />
         <div className="min-w-0 flex-1">
           <p className="text-xs text-muted-foreground">DS engineer{s ? ` · ${PROVIDER[s.provider]}` : ""}</p>
-          <h2 className="truncate font-heading text-sm font-semibold" title={s?.title}>{s?.title ?? (a.starting ? "Starting…" : "Agent")}</h2>
+          <h2 className="line-clamp-2 font-heading text-sm font-semibold" title={s?.title}>{s?.title ?? (a.starting ? "Starting…" : "Agent")}</h2>
         </div>
         {s && <Tooltip>
           <TooltipTrigger render={<Button variant="ghost" size="sm" onClick={() => a.start(s.subject, { fresh: true })} disabled={a.busy || a.starting} />}><SparkleIcon data-icon="inline-start" />New thread</TooltipTrigger>

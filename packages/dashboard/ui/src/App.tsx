@@ -53,7 +53,7 @@ function readHash(): { view: ViewId; section: SectionId; part?: string } {
   if (v0 === "overview" || v0 === "trends" || v0 === "readiness") return { view: "health", section: "general", part: v0 }
   // Older links: #components is the System view now; #review is part of Element Review.
   // Actions folded into the Inbox (redesign stage 4): #queue and #queue/<id> land on the same issue there.
-  const v = v0 === "components" ? "system" : v0 === "review" && D.elements ? "elements" : v0 === "queue" ? "inbox" : v0
+  const v = v0 === "components" ? "system" : v0 === "apps" ? "federation" : v0 === "review" && D.elements ? "elements" : v0 === "queue" ? "inbox" : v0
   // The Inbox first, before the first scan too: its empty state says what to press (UX review C U-25).
   const view = (v === "settings" || ROUTES.includes(v as ViewId) ? v : "inbox") as ViewId
   // The old Rules tab lives in Settings now.
@@ -74,6 +74,9 @@ function ComponentsNav({ view }: { view: ViewId }) {
     </nav>
   )
 }
+
+/** The Inbox tab carries its open count (the page's issues), as a nav with counts would. */
+const openIssues = ((D.issues ?? []) as any[]).filter(i => i.status === "open").length
 
 export function App() {
   return <AgentProvider><Shell /></AgentProvider>
@@ -223,12 +226,14 @@ function Shell() {
               <Tooltip>
                 <TooltipTrigger render={<TabsTrigger value="settings" aria-label="Settings" className="flex-none px-2" />}>
                   <GearSixIcon weight={view === "settings" ? "fill" : "regular"} />
+                  {/* Named where there's room; the icon alone on a phone, with the same name for screen readers. */}
+                  <span className="hidden sm:inline">Settings</span>
                 </TooltipTrigger>
                 <TooltipContent>Settings, notes, rules, and history</TooltipContent>
               </Tooltip>
               <Separator orientation="vertical" className="mx-1.5 h-5! self-center" />
               {VIEWS.map(v => (
-                <TabsTrigger key={v.id} value={v.id} title={v.hint} className="px-1.5 sm:px-2.5">{v.label}</TabsTrigger>
+                <TabsTrigger key={v.id} value={v.id} title={v.hint} className="px-1.5 sm:px-2.5">{v.label}{v.id === "inbox" && openIssues > 0 && <span className="ml-1 rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground" aria-label={`${openIssues} open`}>{openIssues}</span>}</TabsTrigger>
               ))}
             </TabsList>
           </Tabs>
