@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import zlib from "node:zlib";
 import { excluded } from "../history.js";
 import type { HistoryBackend, HistoryContext, HistoryFactory } from "../types.js";
 
@@ -33,6 +34,31 @@ function gitOnData(root: string, dataDir: string, index: string): Git {
   };
 }
 
+/**
+ * DuckDB files sit mostly empty and grow by tens of MB a week; GitHub refuses a pushed file over 100 MB.
+ * The branch holds them gzipped (about a tenth of the size): `dsa.duckdb` travels as `dsa.duckdb.gz`.
+ * gzip with a fixed header, so unchanged data gives the same blob and an unchanged push is still skipped.
+ */
+const isDb = (name: string) => name.endsWith(".duckdb");
+const GZ = ".gz";
+
+function databasesIn(dataDir: string): string[] {
+  return fs.readdirSync(dataDir, { withFileTypes: true }).filter((e) => e.isFile() && isDb(e.name)).map((e) => e.name);
+}
+
+/** The push error as GitHub gave it: every line, so a refusal (a file too large, a rule) shows its reason. */
+export function pushError(branch: string, remote: string, err: string): string {
+  const lines = err.split("\n").map((l) => l.replace(/^remote:\s*/, "").trim()).filter((l) => l && !/^error: Trace:/.test(l) && !/^To /.test(l));
+  const why = /non-fast-forward|fetch first/.test(err)
+    ? " (another run pushed first; run again)"
+    : /file size limit|exceeds GitHub|GH001/.test(err)
+      ? " (a file is over GitHub's 100 MB limit)"
+      : /GH013|rule violations|protected branch/.test(err)
+        ? ` (a branch rule refuses pushes to ${branch})`
+        : "";
+  return `Couldn't push ${branch} to ${remote}${why}: ${lines.slice(0, 6).join(" / ") || err}`;
+}
+
 /** Commits need an author; a fresh CI runner has none configured. */
 function author(git: Git): Record<string, string> {
   if (git(["config", "user.email"]).ok) return {};
@@ -60,6 +86,13 @@ export const gitBranchHistory: HistoryFactory = {
           const r1 = g(["read-tree", local]);
           const r2 = r1.ok ? g(["checkout-index", "--all", "--force"]) : r1;
           if (!r2.ok) throw new Error(`Couldn't restore the data folder from ${branch}: ${r2.err}`);
+          // Databases travel gzipped; give the run the file it opens.
+          for (const e of fs.readdirSync(dataDir)) {
+            if (!e.endsWith(GZ) || !isDb(e.slice(0, -GZ.length))) continue;
+            const gz = path.join(dataDir, e);
+            fs.writeFileSync(path.join(dataDir, e.slice(0, -GZ.length)), zlib.gunzipSync(fs.readFileSync(gz)));
+            fs.rmSync(gz);
+          }
         } finally {
           cleanup(idx);
         }
@@ -73,15 +106,23 @@ export const gitBranchHistory: HistoryFactory = {
           const g = gitOnData(c.root, dataDir, idx);
           // A name leaves out that entry (and a folder's contents); a glob is matched at any depth.
           const skip = excluded(c).map((p) => (p.includes("*") ? `:(exclude,glob)**/${p}` : `:(exclude)${p}`));
-          const add = g(["add", "--all", "--", ".", ...skip]);
+          const dbs = databasesIn(dataDir);
+          const add = g(["add", "--all", "--", ".", ...skip, ...dbs.map((n) => `:(exclude)${n}`)]);
           if (!add.ok) throw new Error(`Couldn't stage the data folder: ${add.err}`);
+          for (const n of dbs) {
+            const gz = path.join(path.dirname(idx), `${n}${GZ}`);
+            fs.writeFileSync(gz, zlib.gzipSync(fs.readFileSync(path.join(dataDir, n)), { level: 6 }));
+            const blob = g(["hash-object", "-w", "--", gz]);
+            const staged = blob.ok ? g(["update-index", "--add", "--cacheinfo", `100644,${blob.out},${n}${GZ}`]) : blob;
+            if (!staged.ok) throw new Error(`Couldn't stage ${n}: ${staged.err}`);
+          }
           const tree = g(["write-tree"]).out;
           const parent = had && keep === "all" ? git(["rev-parse", local]).out : "";
           if (had && git(["rev-parse", `${local}^{tree}`]).out === tree) return `History: ${remote}/${branch} already has this data.`;
           const commit = git(["commit-tree", tree, ...(parent ? ["-p", parent] : []), "-m", message], author(git));
           if (!commit.ok) throw new Error(`Couldn't commit the data folder: ${commit.err}`);
           const push = git(["push", "--quiet", ...(keep === "latest" ? ["--force"] : []), "--end-of-options", remote, `${commit.out}:refs/heads/${branch}`]);
-          if (!push.ok) throw new Error(`Couldn't push ${branch} to ${remote}${/rejected|non-fast-forward|fetch first/.test(push.err) ? " (another run pushed first; run again)" : ""}: ${push.err.split("\n")[0]}`);
+          if (!push.ok) throw new Error(pushError(branch, remote, push.err));
           git(["update-ref", local, commit.out]);
           return `History: saved to ${remote}/${branch} (${commit.out.slice(0, 7)}).`;
         } finally {
