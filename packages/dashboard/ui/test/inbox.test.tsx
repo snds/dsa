@@ -95,3 +95,12 @@ test("group by app and by kind", async () => {
   await act(async () => ([...document.querySelectorAll('[aria-label="Group by"] button')].find(b => b.textContent === "App") as HTMLButtonElement).click())
   expect(groups()).toEqual(["app-a", "app-b", "Every app"])
 })
+
+test("a published page with no thread to show keeps two columns: no empty third (visual reviews A, B, C)", async () => {
+  await mount()
+  const grid = document.querySelector('[aria-label="Issues"]')!.parentElement!
+  expect(grid.className).toContain("@4xl:grid-cols-")
+  expect(grid.className).not.toContain("minmax(22rem,26rem)")
+  // The columns follow the Inbox's own width (a container), not the window's.
+  expect(grid.parentElement!.className).toContain("@container")
+})

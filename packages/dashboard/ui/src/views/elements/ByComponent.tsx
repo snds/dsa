@@ -230,8 +230,10 @@ export function ByComponent({ evals, rail = true }: { evals: any[]; rail?: boole
   return (
     <SelCtx.Provider value={{ selected, toggle, click, notes, setNote, checks, see, useFor: (pick, ids) => answer({ pick }, ids), busy, apart, reviewable, cursor,
       look: (id: string) => { const ids = visible.map(e => e.id); setFocus({ ids, i: Math.max(0, ids.indexOf(id)) }) } }}>
-      <div className={rail || groups.length > 1 ? "grid gap-4 md:grid-cols-[15rem_minmax(0,1fr)]" : "grid gap-4"} data-slot="by-component">
-        {(rail || groups.length > 1) && <nav aria-label="Where places go" className="flex flex-col gap-1 md:sticky md:top-2 md:max-h-[calc(100vh-1rem)] md:self-start md:overflow-y-auto">
+      {/* The rail and the rows follow the room this review has (a whole page, or the Inbox's middle column), not the window. */}
+      <div className="@container">
+      <div className={rail || groups.length > 1 ? "grid gap-4 @3xl:grid-cols-[15rem_minmax(0,1fr)]" : "grid gap-4"} data-slot="by-component">
+        {(rail || groups.length > 1) && <nav aria-label="Where places go" className="flex flex-col gap-1 @3xl:sticky @3xl:top-2 @3xl:max-h-[calc(100vh-1rem)] @3xl:self-start @3xl:overflow-y-auto">
           <RailHead>Components</RailHead>
           {components.map(x => <RailItem key={x.key} g={x} on={x.key === g.key} onClick={() => choose(x.key)} />)}
           {others.length > 0 && <RailHead>Other answers</RailHead>}
@@ -264,6 +266,7 @@ export function ByComponent({ evals, rail = true }: { evals: any[]; rail?: boole
           {g.batches.map(b => <BatchCard key={b.key} b={b} />)}
           {!g.batches.some(b => b.items.some(see)) && <Note>Nothing here matches this filter.</Note>}
         </section>
+      </div>
       </div>
 
       {selected.size > 0 && (
@@ -425,9 +428,9 @@ function Place({ e, group }: { e: any; group: string[] }) {
   // The zoom view steps through this look group's photos.
   const openShot = () => { const ids = group.filter(id => byId.get(id)?.shot); openLightbox(ids, Math.max(0, ids.indexOf(e.id))) }
   return (
-    <li className={cn("grid gap-3 px-4 py-2.5 sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,14rem)_auto] sm:items-center", on && "bg-primary/5", here && "shadow-[inset_3px_0_0_var(--color-primary)] ring-1 ring-primary/40 ring-inset")}
+    <li className={cn("grid gap-3 px-4 py-2.5 @2xl:grid-cols-[auto_minmax(0,1fr)_minmax(0,14rem)_auto] @2xl:items-center", on && "bg-primary/5", here && "shadow-[inset_3px_0_0_var(--color-primary)] ring-1 ring-primary/40 ring-inset")}
       data-slot="place" data-place={e.id} data-status={check ? "check" : st} aria-current={here ? "true" : undefined}>
-      <span className="flex sm:self-center">
+      <span className="flex @2xl:self-center">
         {(
           <Checkbox checked={on} disabled={Boolean(why)} title={why ?? "Tick to answer with others"} aria-label={`Select ${nameOf(e)}`}
             onCheckedChange={(_, d) => { if (!why) click(e.id, Boolean((d?.event as MouseEvent | undefined)?.shiftKey)) }} />
@@ -452,7 +455,7 @@ function Place({ e, group }: { e: any; group: string[] }) {
           : !why && <input id={`note-${e.id}`} value={notes[e.id] ?? ""} onChange={ev => setNote(e.id, ev.target.value)} onKeyDown={ev => { if (ev.key === "Escape" || ev.key === "Enter") (ev.target as HTMLInputElement).blur() }} placeholder="Note for this place" aria-label={`Note for ${nameOf(e)}`}
               className="h-7 w-full rounded border bg-background px-2 text-xs focus-visible:outline-2 focus-visible:outline-ring" />}
       </div>
-      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+      <div className="flex flex-wrap items-center gap-2 @2xl:justify-end">
         <Conf c={e.confidence} cap={e.evidenceCap} />
         <Badge variant="outline" className={cn("text-[11px] font-normal", chip.cls)}>{chip.text}</Badge>
         {/* Undecided places with their evidence open on their own (a spot check always does); the rest use the full dialog. */}
