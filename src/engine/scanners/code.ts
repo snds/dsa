@@ -76,7 +76,8 @@ export function scanCode(root: string, config: Config, target: Target, exclude: 
   for (const file of files) {
     let src: string;
     try { src = fs.readFileSync(file, 'utf8'); } catch { continue; }
-    if (src.length > 1_500_000) continue; // generated bundles
+    // Generated bundles: left out, but said, so a missing file isn't read as a clean one (code review C C-04).
+    if (src.length > 1_500_000) { res.parseErrors.push({ file: rel(ctx, file), message: 'over 1.5 MB, so read as a generated bundle and skipped' }); continue; }
     res.filesScanned++;
     try {
       const ext = path.extname(file);

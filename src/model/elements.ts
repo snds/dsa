@@ -1,7 +1,7 @@
 import path from "node:path";
 import { Parser } from "htmlparser2";
 import { parse as parseSfc } from "@vue/compiler-sfc";
-import { lineAt, parseTs } from "./extract.js";
+import { lineAt, parseTs, parseTsStrict } from "./extract.js";
 import type { Declaration, Element } from "./types.js";
 
 /**
@@ -105,8 +105,10 @@ function readMacroCalls(file: string, text: string): Element[] {
 // ---------- JSX and Lit ----------
 
 function readScript(file: string, text: string): { elements: Element[]; declared: Declaration[] } {
-  const ast = parseTs(text, file);
-  if (!ast) return { elements: [], declared: [] };
+  // A file that won't parse throws: the reading lists it as skipped, so a scan and the ratchet say so
+  // instead of counting it as a file with nothing in it (code review C C-04).
+  let ast: any;
+  try { ast = parseTsStrict(text, file); } catch (e: any) { throw new Error(`couldn't parse it: ${String(e?.message ?? e).split("\n")[0]}`); }
   const imports: Imports = new Map();
   for (const st of ast.program.body) {
     if (st.type !== "ImportDeclaration") continue;

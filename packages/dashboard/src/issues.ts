@@ -65,7 +65,10 @@ export const needsCheck = (c: any) => Boolean(c?.inferred || c?.evidence?.tier =
 /** A readiness check below this score is an issue (System shows it with a warning below 80). */
 export const READINESS_PASS = 80;
 
-const hashKey = (prefix: string, s: string) => `${prefix}-${crypto.createHash('sha1').update(s).digest('hex').slice(0, 6).toUpperCase()}`;
+const hashKey = (prefix: string, s: string, n = 6) => `${prefix}-${crypto.createHash('sha1').update(s).digest('hex').slice(0, n).toUpperCase()}`;
+/** The seed each hashed key came from, so a collision can be told apart (code review C C-23). */
+const seeds = new WeakMap<Issue, { prefix: string; seed: string }>();
+function hashed(i: Issue, prefix: string, seed: string): Issue { seeds.set(i, { prefix, seed }); return i; }
 
 export interface IssueInputs {
   /** queue.items (findings and approvals). */
@@ -106,37 +109,43 @@ export function buildIssues(p: IssueInputs): Issue[] {
     const ids: string[] = q.ids ?? [];
     const decided = ids.length > 0 && ids.every(id => (p.elements?.evals ?? []).find((e: any) => e.id === id)?.decided);
     const use = q.options?.[0]?.decision?.use ?? q.auto?.use;
-    out.push({
+    out.push(hashed({
       key: hashKey('Q', q.key), kind: 'question', rule: 'question', title: q.title,
       certainty: 'needs-person',
       component: componentOf(use) ?? use ?? null,
       apps: [...new Set(ids.map(id => appOf.get(id)).filter((x): x is string => Boolean(x)))],
       owner: null, status: decided ? 'done' : 'open',
       source: { type: 'question', key: q.key },
-    });
+    }, 'Q', q.key));
   }
 
   // ---- System: components to confirm, and components no app uses.
   for (const c of p.model?.components ?? []) {
-    if (needsCheck(c)) out.push({
+    if (needsCheck(c)) out.push(hashed({
       key: hashKey('C', `check|${String(c.name).toLowerCase()}`), kind: 'component-check', rule: 'component', title: `Confirm ${c.name} is a system component`,
       certainty: 'needs-person', component: c.name, apps: [], owner: null, status: 'open', source: { type: 'component', name: c.name },
-    });
-    if (!c.uses?.consumer) out.push({
+    }, 'C', `check|${String(c.name).toLowerCase()}`));
+    if (!c.uses?.consumer) out.push(hashed({
       key: hashKey('C', `unused|${String(c.name).toLowerCase()}`), kind: 'component-unused', rule: 'component', title: `${c.name} is not used by any app`,
       certainty: 'measured', component: c.name, apps: [], owner: null, status: 'open', source: { type: 'component', name: c.name },
-    });
+    }, 'C', `unused|${String(c.name).toLowerCase()}`));
   }
 
   // ---- Agent readiness: each check that scored low, per repo.
   for (const r of p.readiness ?? []) for (const ch of r.checks ?? []) {
     if (typeof ch.score !== 'number' || ch.score >= READINESS_PASS) continue;
-    out.push({
+    out.push(hashed({
       key: hashKey('R', `${r.subject}|${ch.id}`), kind: 'readiness', rule: 'readiness', title: `${ch.title} (${r.subject})`,
       certainty: 'measured', component: null, apps: [r.subject], owner: null, status: 'open',
       source: { type: 'readiness', subject: r.subject, check: ch.id },
-    });
+    }, 'R', `${r.subject}|${ch.id}`));
   }
+
+  // ---- Two different issues with one short key: give both a longer key. Keys that don't collide stay
+  // as they were, so dismissals and threads already filed under them still match.
+  const byKey = new Map<string, Issue[]>();
+  for (const i of out) byKey.set(i.key, [...(byKey.get(i.key) ?? []), i]);
+  for (const group of byKey.values()) if (group.length > 1) for (const i of group) { const h = seeds.get(i); if (h) i.key = hashKey(h.prefix, h.seed, 12); }
 
   // ---- Dismissed with a reason: Done, with the label kept so the list can say why.
   for (const i of out) { const d = p.dismissed?.[i.key]; if (d) { i.status = 'done'; i.dismissed = d; } }

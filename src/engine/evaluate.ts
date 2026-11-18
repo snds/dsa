@@ -16,7 +16,14 @@ import type { Finding } from './types.js';
  */
 export interface EvalSummary { opened: string[]; updated: string[]; reopened: string[]; resolved: string[]; held: string[] }
 
-export async function applyObservations(store: Store, runId: string, obs: Observation[], now = new Date()): Promise<EvalSummary> {
+/**
+ * What this run couldn't fully measure: apps it couldn't reach or read every file of, and whether a stage
+ * failed. A finding there that wasn't observed is held, not resolved (code review C C-05): an outage
+ * mustn't close issues that the next good run reopens.
+ */
+export interface Unmeasured { targets: string[]; stageFailed: boolean }
+
+export async function applyObservations(store: Store, runId: string, obs: Observation[], now = new Date(), unmeasured: Unmeasured = { targets: [], stageFailed: false }): Promise<EvalSummary> {
   const at = now.toISOString();
   const existing = new Map((await store.all<any>('select * from findings')).map(f => [f.id, f]));
   const sum: EvalSummary = { opened: [], updated: [], reopened: [], resolved: [], held: [] };
@@ -54,8 +61,19 @@ export async function applyObservations(store: Store, runId: string, obs: Observ
       sum.held.push(o.id);
     }
   }
+  const gaps = new Set(unmeasured.targets);
+  const inGap = (f: any) => {
+    if (unmeasured.stageFailed) return true;
+    const affected: string[] = typeof f.affected === 'string' ? (() => { try { return JSON.parse(f.affected); } catch { return []; } })() : f.affected ?? [];
+    return [f.owner, f.repo, ...affected].some(t => t && gaps.has(String(t)));
+  };
   for (const [id, f] of existing) {
     if (seen.has(id) || f.status === 'resolved') continue;
+    if (inGap(f)) {
+      await event(id, 'held', { reason: unmeasured.stageFailed ? 'a scan stage failed, so it could not be checked' : 'its app was not fully read this run' });
+      sum.held.push(id);
+      continue;
+    }
     await store.exec(`update findings set status='resolved', resolved_at=$2, updated_at=$2 where id=$1`, [id, at]);
     await event(id, 'resolved', { reason: 'no longer observed' });
     sum.resolved.push(id);

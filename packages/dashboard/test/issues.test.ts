@@ -97,3 +97,13 @@ test('a component a person confirmed or corrected has its Confirm issue Done (st
   assert.equal(check('Chip').status, 'done');
   assert.equal(check('Tag').status, 'open');
 });
+
+test('two issues whose short keys collide both get a longer key; keys that don\'t collide stay short (code review C C-23)', () => {
+  // check|component629 and check|component3366 share the 6-character key C-B72091.
+  const comp = (name: string) => ({ name, inferred: true, uses: { consumer: 1 } });
+  const issues = buildIssues({ model: { components: [comp('component629'), comp('component3366'), comp('Button')] } });
+  const keys = issues.filter(i => i.kind === 'component-check').map(i => i.key);
+  assert.equal(new Set(keys).size, 3);
+  assert.equal(keys.filter(k => k.length === 'C-'.length + 12).length, 2);
+  assert.ok(keys.some(k => k.length === 'C-'.length + 6), 'Button keeps its short key');
+});

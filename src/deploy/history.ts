@@ -7,8 +7,13 @@ import type { HistoryBackend, HistoryContext, HistoryFactory } from "./types.js"
  * commands (an object store, a CI artifact).
  */
 
-/** Never persisted: secrets, saved sign-ins, things rebuilt from the rest, and clones of other repos. */
-export const NEVER_PERSIST = ["secrets.json", "auth", "site", "report", "remotes", "agent", "serve", "*.wal", "*.tmp"];
+/**
+ * Never persisted: secrets, saved sign-ins, things rebuilt from the rest, and clones of other repos.
+ * The agent's folder is kept, because people's records live there (dismissals, component checks,
+ * threads and proposals, which a published page shows); only what's rebuilt each time is left out:
+ * its briefs, its scan snapshot and its MCP configs (code review A C-04).
+ */
+export const NEVER_PERSIST = ["secrets.json", "auth", "site", "report", "remotes", "agent/context", "agent/snapshot.json", "*.mcp.json", "serve", "*.wal", "*.tmp"];
 
 export const localHistory: HistoryFactory = {
   id: "local",

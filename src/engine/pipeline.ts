@@ -132,10 +132,13 @@ function begin(config: Config, profile: ResolvedProfile) {
   resetSystemIndex();
 }
 
+/** Stages that threw during this process's runs; read and cleared by runEngine. */
+const stageFailures = new Set<string>();
+
 async function runStages(stages: PipelineStage[] | undefined, phase: PipelineStage['phase'], ctx: StageContext) {
   for (const st of stages ?? []) {
     if (st.phase !== phase) continue;
-    try { await st.run(ctx); } catch (e) { ctx.notes.push(`${st.id} skipped: ${String((e as Error)?.message ?? e).split('\n')[0]!.slice(0, 200)}`); }
+    try { await st.run(ctx); } catch (e) { stageFailures.add(st.id); ctx.notes.push(`${st.id} skipped: ${String((e as Error)?.message ?? e).split('\n')[0]!.slice(0, 200)}`); }
   }
 }
 
@@ -148,6 +151,9 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
   const settings = effectiveSettings(catalog, config, opts.dataDir);
   const excludes = [...defaultExcludes(opts.root), ...(config.exclude ?? []).map(e => path.resolve(opts.root, e))];
   const notes: string[] = [...remoteNotes];
+  // Apps with files the scan couldn't read: their unobserved findings are held, not resolved.
+  const partlyRead = new Set<string>();
+  stageFailures.clear();
 
   begin(config, opts.profile);
   const targets = resolveTargets(opts.root, config);
@@ -231,6 +237,7 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
     }
     if (res.nonProduct) notes.push(`${t.name}: ${res.nonProduct} look-alike${res.nonProduct === 1 ? '' : 's'} in tests, stories, fixtures, stubs or docs left out (not product code).`);
     for (const e of res.parseErrors.slice(0, 3)) notes.push(`Parse error skipped in ${e.file}: ${e.message}`);
+    if (res.parseErrors.length) partlyRead.add(t.name);
     if (app.tokens) {
       // tokenSkip globs are relative to the app's own folder.
       const rel = (f: string) => targetRelative(opts.root, f, t.dir);
@@ -286,7 +293,8 @@ export async function runPipeline(opts: RunOptions): Promise<RunResult> {
     await store.insertMany('metrics', ['run_id', 'metric_id', 'scope', 'subject', 'value', 'detail'], metrics.map(m => [runId, m.metric_id, m.scope, m.subject, m.value, JSON.stringify(m.detail)]));
 
     const obs = runRules(data, config, catalog, settings, metrics, prev);
-    const summary = await applyObservations(store, runId, obs, now);
+    const summary = await applyObservations(store, runId, obs, now, { targets: [...skipped.map(x => x.name), ...partlyRead], stageFailed: stageFailures.size > 0 });
+    stageFailures.clear();
     return { runId, data, summary, notes };
   } finally {
     store.close();

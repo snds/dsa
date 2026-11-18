@@ -16,6 +16,8 @@ export interface RatchetOptions extends RunOptions {
   init?: boolean;
   /** Rewrite the baseline with the current counts. */
   update?: boolean;
+  /** Pass even when some files couldn't be read (they count as nothing). Off by default. */
+  allowSkipped?: boolean;
 }
 
 export type RatchetAction = "compared" | "initialized" | "updated";
@@ -35,6 +37,10 @@ export interface RatchetReport {
   grew: (keyof ViolationCounts)[];
   /** Metrics the baseline doesn't have yet (added in a later dsa): reported, not compared. */
   untracked: (keyof ViolationCounts)[];
+  /** Files the scan couldn't read: their violations aren't in `current`, so a compare fails unless allowed. */
+  skipped: { file: string; message: string }[];
+  /** Why a compare failed for a reason other than growth. */
+  problems: string[];
 }
 
 export const VIOLATION_KEYS: (keyof ViolationCounts)[] = ["classNameOverrides", "styleOverrides", "spreadProps", "lookAlikes", "rawElements"];
@@ -80,7 +86,7 @@ export function compareCounts(before: Partial<ViolationCounts> | null, current: 
   return { deltas, grew, shrank, untracked };
 }
 
-export function ratchetFromContext(ctx: RunContext, options: Pick<RatchetOptions, "init" | "update"> = {}): RatchetReport {
+export function ratchetFromContext(ctx: RunContext, options: Pick<RatchetOptions, "init" | "update" | "allowSkipped"> = {}): RatchetReport {
   const baselinePath = path.resolve(ctx.root, ctx.loaded.config.ratchet.baseline);
   const current = adoptionFromReading(ctx.reading, ctx.loaded.config).correctUse.counts;
   const existing = readBaseline(baselinePath);
@@ -93,6 +99,11 @@ export function ratchetFromContext(ctx: RunContext, options: Pick<RatchetOptions
   }
 
   const { deltas, grew, untracked } = compareCounts(existing?.counts ?? null, current);
+  const skipped = ctx.reading.skipped ?? [];
+  // Two ways a compare could pass without measuring anything (code review C C-04, C-18).
+  const problems: string[] = [];
+  if (skipped.length && !options.allowSkipped) problems.push(`${skipped.length} file${skipped.length === 1 ? "" : "s"} couldn't be read, so ${skipped.length === 1 ? "its" : "their"} violations aren't counted (first: ${skipped[0]!.file}: ${skipped[0]!.message}). Fix ${skipped.length === 1 ? "it" : "them"}, or pass --allow-skipped.`);
+  if (existing && untracked.length === VIOLATION_KEYS.length) problems.push(`The baseline at ${baselinePath} tracks none of the counts. Run "dsa ratchet --update" to write them.`);
 
   let action: RatchetAction = "compared";
   if (options.init && !existing) action = "initialized";
@@ -108,9 +119,11 @@ export function ratchetFromContext(ctx: RunContext, options: Pick<RatchetOptions
     baselinePath,
     action,
     // A ratchet only fails on growth; an init or update by definition sets the new bar.
-    ok: action === "compared" ? grew.length === 0 : true,
+    ok: action === "compared" ? grew.length === 0 && problems.length === 0 : true,
     baseline: existing?.counts ?? null,
     current,
+    skipped,
+    problems: action === "compared" ? problems : [],
     deltas,
     grew,
     // After an update or init the baseline has every metric.
@@ -120,9 +133,10 @@ export function ratchetFromContext(ctx: RunContext, options: Pick<RatchetOptions
 
 /** Compare correct-use violation counts against the frozen baseline; growth fails. */
 export function ratchet(options: RatchetOptions = {}): RatchetReport {
-  const { init, update, ...run } = options;
-  const extra: Pick<RatchetOptions, "init" | "update"> = {};
+  const { init, update, allowSkipped, ...run } = options;
+  const extra: Pick<RatchetOptions, "init" | "update" | "allowSkipped"> = {};
   if (init !== undefined) extra.init = init;
   if (update !== undefined) extra.update = update;
+  if (allowSkipped !== undefined) extra.allowSkipped = allowSkipped;
   return ratchetFromContext(createRunContext(run), extra);
 }

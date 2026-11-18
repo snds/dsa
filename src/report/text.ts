@@ -129,10 +129,11 @@ export function formatRatchet(report: RatchetReport): string {
       ["left", "right", "right", "right"],
     ),
   );
-  if (!report.ok) {
+  if (report.grew.length > 0) {
     out.push("");
     out.push(`Grew: ${report.grew.join(", ")}. Fix the new findings or run "dsa ratchet --update" if the growth was accepted in review.`);
   }
+  for (const p of report.problems ?? []) { out.push(""); out.push(p); }
   if (report.untracked.length > 0) {
     out.push("");
     out.push(`Not in the baseline yet: ${report.untracked.join(", ")} (new in this dsa). Run "dsa ratchet --update" to start ratcheting them.`);

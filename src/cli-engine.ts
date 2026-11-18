@@ -1,8 +1,11 @@
 import fs from "node:fs";
+import fg from "fast-glob";
 import os from "node:os";
 import path from "node:path";
 import type { Command } from "commander";
-import pc from "picocolors";
+import picocolors from "picocolors";
+// Colour only on a terminal (or FORCE_COLOR): piped output and files stay plain, even under CI (UX review C U-30).
+const pc = picocolors.createColors(process.env.FORCE_COLOR ? process.env.FORCE_COLOR !== "0" : Boolean(process.stdout.isTTY) && !process.env.NO_COLOR);
 import type { CliIo } from "./cli.js";
 import { loadAddons, runAfterDecisions, runAfterHooks, type AppliedDecision, type DsaAddon } from "./addons.js";
 import { findConfigFile, CONFIG_FILENAME } from "./config.js";
@@ -144,17 +147,35 @@ export function addEngineCommands(program: Command, io: CliIo): void {
       for (const w of ws) for (const d of Object.keys(w.deps)) if (names.has(d)) dependedOn.set(d, (dependedOn.get(d) ?? 0) + 1);
       const looksDs = (n: string) => /(design|ds-|-ds\b|\/ds\b|ui-kit|uikit|components|tokens)/i.test(n);
       const core = [...dependedOn.keys()].filter(looksDs);
+      // The system's tokens package, even when no app imports it directly (UX review A U-17).
+      const scopes = new Set(core.map((n) => n.split("/")[0]).filter((x): x is string => Boolean(x && x.startsWith("@"))));
+      for (const n of names) if (/tokens/i.test(n) && scopes.has(n.split("/")[0]!) && !core.includes(n)) core.push(n);
+      // Other libraries several apps use: likely child libraries, named for a person to confirm.
+      const apps = ws.filter((w) => !dependedOn.has(w.name));
+      const shared = [...dependedOn.entries()].filter(([n, k]) => !core.includes(n) && k >= 2 && apps.filter((a) => a.deps[n]).length >= 2).map(([n]) => n);
+      // Custom-element prefixes (Angular, Vue, web components: <ds-button>), read from the apps' templates (UX review B U-04).
+      const prefixes = new Map<string, number>();
+      for (const w of ws) {
+        for (const f of fg.sync(["**/*.html", "**/*.vue", "**/*.svelte"], { cwd: w.dir, ignore: ["**/node_modules/**", "**/dist/**"], absolute: true }).slice(0, 400)) {
+          let text = ""; try { text = fs.readFileSync(f, "utf8"); } catch { continue; }
+          for (const m of text.matchAll(/<([a-z][a-z0-9]*)-[a-z0-9-]+[\s>/]/g)) prefixes.set(m[1]!, (prefixes.get(m[1]!) ?? 0) + 1);
+        }
+      }
+      const coreScopes = [...scopes].map((s) => s.slice(1));
+      const tagPrefixes = [...prefixes].filter(([p, n]) => n >= 3 && (core.some((c) => c.includes(`/${p}-`) || c.includes(`-${p}`) || c.endsWith(`/${p}`)) || coreScopes.includes(p) || p === "ds")).map(([p]) => `${p}-`);
       const cfg = {
         $schema: "https://raw.githubusercontent.com/snds/dsa/main/schema/config.json",
-        system: { name: "Core", packages: core.length ? core : ["@your-org/your-design-system"], tagPrefixes: [] as string[], children: [] as unknown[] },
+        system: { name: "Core", packages: core.length ? core : ["@your-org/your-design-system"], tagPrefixes, children: [] as unknown[] },
         correctUse: { deprecated: {} },
         github: {},
         modules: { figma: false },
       };
       fs.writeFileSync(target, JSON.stringify(cfg, null, 2) + "\n");
       io.out(`Wrote ${target}`);
-      io.out(core.length ? `Guessed core packages: ${core.join(", ")}` : "Could not guess the core packages: edit system.packages.");
-      io.out('Next: add child libraries, tag prefixes (e.g. "ds-") and github.defaultRepo, then run "dsa run".');
+      io.out(core.length ? `Guessed the system's packages: ${core.join(", ")}` : "Couldn't guess the system's packages: list them in system.packages.");
+      if (tagPrefixes.length) io.out(`Guessed the system's element prefixes (for Angular, Vue and web-component tags): ${tagPrefixes.join(", ")}`);
+      if (shared.length) io.out(`Several apps also use ${shared.join(", ")}. If ${shared.length === 1 ? "it is" : "they are"} part of the design system (a library built on it), add ${shared.length === 1 ? "it" : "them"} under system.children.`);
+      io.out('Next: check the guesses in the file, then run "dsa run" to scan, and "dsa serve" to open the dashboard.');
     });
 
   program
@@ -182,7 +203,7 @@ export function addEngineCommands(program: Command, io: CliIo): void {
       if (o.history !== false) io.out(await deploy.history.pull(ctx.dataDir));
       const { addons, notes: addonNotes } = await useAddons(io.cwd);
       const stages: PipelineStage[] = addons.flatMap((a) => a.stages ?? []);
-      for (const n of [...(ctx.loaded.migrated ? [`${ctx.loaded.configPath} is an analytics-suite config; read it converted. "dsa config migrate" writes the new format.`] : []), ...addonNotes]) io.out(`note: ${n}`);
+      for (const n of [...(ctx.loaded.migrated ? [`${ctx.loaded.configPath} is an analytics-suite config; read it converted. "dsa config migrate" writes the new format.`] : []), ...(ctx.loaded.unknownKeys?.length ? [`${ctx.loaded.configPath} has keys dsa doesn't know, ignored: ${ctx.loaded.unknownKeys.join(", ")}. Check the spelling against schema/config.json.`] : []), ...addonNotes]) io.out(`note: ${n}`);
       const res = await runPipeline({
         root: ctx.root,
         dataDir: ctx.dataDir,
@@ -328,7 +349,7 @@ export function addEngineCommands(program: Command, io: CliIo): void {
       await storeFor(io, "findings");
       const list = await openFindings(ctx.dataDir, Boolean(o.all));
       if (g(cmd).json) return io.out(JSON.stringify(list, null, 2));
-      if (!list.length) return io.out("No open findings.");
+      if (!list.length) return io.out(fs.existsSync(path.join(ctx.dataDir, "dsa.duckdb")) ? "No open findings." : 'No scan yet: run "dsa run" first.');
       for (const f of list) io.out(`${f.id}  ${String(Math.round(f.score)).padStart(3)}  ${f.severity.padEnd(7)}  ${f.status.padEnd(8)}  ${f.owner.padEnd(28)}  ${f.title}`);
     });
 

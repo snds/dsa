@@ -53,4 +53,23 @@ describe("ratchet", () => {
     expect(r.ok).toBe(true);
     expect(r.deltas.styleOverrides).toBe(-1);
   });
+
+  it("fails when a file can't be parsed, instead of counting it as clean (code review C C-04)", () => {
+    ratchet({ dir, init: true });
+    fs.writeFileSync(path.join(dir, "src/screens/broken.tsx"), 'export const B = () => <div>{</div>;\n<button className="x">Raw</button>;\n');
+    const r = ratchet({ dir });
+    expect(r.ok).toBe(false);
+    expect(r.skipped.map((s) => s.file)).toContain("src/screens/broken.tsx");
+    expect(r.problems.join(" ")).toMatch(/couldn't be read.*--allow-skipped/);
+    expect(ratchet({ dir, allowSkipped: true }).problems).toEqual([]);
+    expect(RatchetReportSchema.safeParse(r).success).toBe(true);
+  });
+
+  it("fails on a baseline that tracks none of the counts (code review C C-18)", () => {
+    fs.mkdirSync(path.join(dir, ".dsa"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".dsa/baseline.json"), JSON.stringify({ counts: {} }));
+    const r = ratchet({ dir });
+    expect(r.ok).toBe(false);
+    expect(r.problems.join(" ")).toMatch(/tracks none of the counts/);
+  });
 });

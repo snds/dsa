@@ -248,7 +248,15 @@ export function nearestLabel(use: string, want: Record<string, string>, have: Re
 
 /** The count that doesn't flatter: a photo of another look isn't a photo of what's proposed, and one photo on many cards is one photo. */
 export function photosLine(p: { cards: number; sameLook: number; otherLook: number; elsewhere: number; labOnly: number; none: number; distinctPhotos: number; mostShown: number }): string {
-  return `Review cards: ${p.cards}. Photo in the look proposed, in the product: ${p.sameLook}. Only another look in the product: ${p.otherLook} (${p.elsewhere} of them just how the app uses it elsewhere). Only from a lab page: ${p.labOnly}. No photo: ${p.none}. ${p.distinctPhotos} different photos, none on more than ${p.mostShown} cards.`;
+  // Plain words (UX review A U-18, B U-24): what the review cards show, and how many photos that took.
+  if (!p.cards) return 'Review: nothing for a person to look at.';
+  const parts = [
+    p.sameLook && `${p.sameLook} with a photo of the place as it would look`,
+    p.otherLook && `${p.otherLook} with a photo of another look the app uses${p.elsewhere ? ` (${p.elsewhere} from elsewhere in the app)` : ''}`,
+    p.labOnly && `${p.labOnly} with a photo from a demo page only`,
+    p.none && `${p.none} with no photo`,
+  ].filter(Boolean);
+  return `Review: ${p.cards} card${p.cards === 1 ? '' : 's'} for a person to look at: ${parts.join(', ')}. ${p.distinctPhotos} different photo${p.distinctPhotos === 1 ? '' : 's'} in all${p.mostShown > 1 ? `, the most used on ${p.mostShown} cards` : ''}.`;
 }
 
 export interface ReviewQueueEntry { id: string; why: 'decide' | 'disagree' | 'audit'; note?: string | undefined }

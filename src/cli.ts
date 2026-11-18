@@ -3,7 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { Command } from "commander";
-import pc from "picocolors";
+import picocolors from "picocolors";
+// Colour only on a terminal (or FORCE_COLOR): piped output and files stay plain, even under CI (UX review C U-30).
+const pc = picocolors.createColors(process.env.FORCE_COLOR ? process.env.FORCE_COLOR !== "0" : Boolean(process.stdout.isTTY) && !process.env.NO_COLOR);
 import { ignoreCandidate, loadDecisions, saveDecisions } from "./detect/decisions.js";
 import { decisionsPath, patternsFromContext } from "./patterns.js";
 import { ratchetFromContext } from "./ratchet.js";
@@ -142,13 +144,15 @@ export function createProgram(io: CliIo = { out: console.log, err: console.error
     .argument("[dir]", "directory to scan", ".")
     .option("--init", "create the baseline from the current counts")
     .option("--update", "rewrite the baseline with the current counts")
-    .description("compare correct-use violation counts against ratchet.baseline; exit 1 if any grew")
-    .action(async (dir: string, opts: { init?: boolean; update?: boolean }, cmd: Command) => {
+    .option("--allow-skipped", "pass even when some files couldn't be read (their violations aren't counted)")
+    .description("compare correct-use violation counts against ratchet.baseline; exit 1 if any grew or a file couldn't be read")
+    .action(async (dir: string, opts: { init?: boolean; update?: boolean; allowSkipped?: boolean }, cmd: Command) => {
       const g = cmd.optsWithGlobals<GlobalOpts>();
       const ctx = await loadRunContext(runOptions(dir, g, io));
       const extra: Parameters<typeof ratchetFromContext>[1] = {};
       if (opts.init) extra.init = true;
       if (opts.update) extra.update = true;
+      if (opts.allowSkipped) extra.allowSkipped = true;
       const report = ratchetFromContext(ctx, extra);
       emit(io, g.json, path.join(ctx.outputDir, "ratchet.json"), report, formatRatchet(report));
       if (!report.ok) process.exitCode = 1;

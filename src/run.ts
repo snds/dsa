@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import fg from "fast-glob";
 import path from "node:path";
 import { loadConfig, type DsaConfig, type DsaConfigInput, type LoadedConfig } from "./config.js";
 import { readRepo, type RepoReading } from "./model/index.js";
@@ -79,6 +80,7 @@ function resolveRun(options: RunOptions): { scanDir: string; loaded: LoadedConfi
 }
 
 function buildContext(scanDir: string, loaded: LoadedConfig, profile: ResolvedProfile): RunContext {
+  if (loaded.unknownKeys?.length) process.stderr.write(`note: ${loaded.configPath} has keys dsa doesn't know, ignored: ${loaded.unknownKeys.join(", ")}. Check the spelling against schema/config.json.\n`);
   // When the config sits above the scan directory, globs stay relative to the
   // config root but only files under the scan directory are kept.
   const root = loaded.root;
@@ -116,6 +118,11 @@ function buildContext(scanDir: string, loaded: LoadedConfig, profile: ResolvedPr
         reading = readRepo({ root, config: loaded.config });
         if (within) reading = { ...reading, files: reading.files.filter((f) => path.resolve(root, f.file).startsWith(within + path.sep)) };
         if (reading.skipped.length) process.stderr.write(`note: skipped ${reading.skipped.length} file${reading.skipped.length === 1 ? "" : "s"} dsa couldn't read (first: ${reading.skipped[0]!.file}: ${reading.skipped[0]!.message})\n`);
+        // Templates this command doesn't read (dsa run does): say how many, so a partial count isn't read as the whole (UX review C U-29).
+        try {
+          const other = fg.sync(["**/*.vue", "**/*.component.html", "**/*.svelte"], { cwd: within ?? root, ignore: ["**/node_modules/**", ...(loaded.config.scan.exclude ?? [])], onlyFiles: true });
+          if (other.length) process.stderr.write(`note: ${other.length} Vue, Angular or Svelte template${other.length === 1 ? "" : "s"} not read here (scan.include covers ${loaded.config.scan.include.join(", ")}). dsa run reads Vue and Angular.\n`);
+        } catch { /* a count only */ }
       }
       return reading;
     },

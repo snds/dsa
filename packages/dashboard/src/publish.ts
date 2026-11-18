@@ -15,6 +15,9 @@ import type { PageActions, ResolvedProfile } from '@snds/dsa';
 export const siteDir = (dataDir: string) => path.join(dataDir, 'site');
 
 export async function publish(root: string, config: Config, dataDir: string, profile: ResolvedProfile, outDir = siteDir(dataDir), actions: PageActions | null = null, opts: { runDir?: string | undefined } = {}): Promise<{ dir: string; shots: number; rendered: number; bytes: number }> {
+  // The output is cleaned first: one that is, or holds, the data folder would delete the screenshots it copies from (code review C C-39).
+  const out = path.resolve(outDir), data = path.resolve(dataDir);
+  if (out === data || data.startsWith(out + path.sep)) throw new Error(`--out ${outDir} is or holds the data folder (${dataDir}). Publish somewhere else, such as ${path.join(dataDir, 'site')} or dist/dsa.`);
   const html = await renderReport(root, config, dataDir, profile, { site: true, actions, runDir: opts.runDir, log: (m) => console.error(m) });
   // Start clean so images from an older scan don't linger in the commit.
   for (const sub of ['shots', 'rendered']) fs.rmSync(path.join(outDir, sub), { recursive: true, force: true });
