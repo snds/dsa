@@ -980,7 +980,7 @@ add-ons can be installed outside this repo.
   dashboard and review are peers now, not dependencies.
 - `dsa mcp` reports the package's version instead of a fixed `0.1.0`.
 
-### Fixed after the Unicron QA review
+### Fixed after a QA review
 
 - Component signatures read components in subfolders of `src/` that the package's
   `src/index` re-exports (a shadcn layout keeps them in `src/components/ui/`).

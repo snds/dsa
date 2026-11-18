@@ -9,6 +9,30 @@ name), and a **ratchet** that stops correct-use violations from growing in CI.
 It is vendor-neutral: point it at any React design system, shadcn-style owned
 source or published package, through one small config file.
 
+With its add-ons it is also a **dashboard** for the design-system team: one Inbox of issues, each with
+a certainty word (Measured, Inferred, Needs a person) and an agent thread pinned beside it; a review of
+the places the scanner wants a person to look at; and Health, the measures over time. It runs locally
+(`dsa serve`) or as a static page your CI publishes, where threads continue as GitHub issues.
+
+## Quick start
+
+In the repo you want to measure, with Node 22+:
+
+```sh
+V=0.4.0
+R=https://github.com/snds/dsa/releases/download/v$V
+pnpm add -D $R/snds-dsa-$V.tgz $R/snds-dsa-history-$V.tgz $R/snds-dsa-dashboard-$V.tgz $R/snds-dsa-review-$V.tgz $R/snds-dsa-agent-$V.tgz
+pnpm exec dsa init     # writes dsa.config.json; check the system's packages it guessed
+pnpm exec dsa run      # scans, and keeps the history in .dsa/
+pnpm exec dsa serve    # the dashboard at http://localhost:4319
+```
+
+npm and yarn work too (`npm i -D …`, then `npx --no dsa …`). Don't run a bare `npx dsa` without
+installing first: dsa isn't on npm, and an unrelated package called `dsa` is.
+
+Start in the **Inbox**: the issues that need a person come first. [docs/dashboard.md](docs/dashboard.md)
+walks through the dashboard, and [docs/deploy.md](docs/deploy.md) publishes it from CI.
+
 ## The rule it implements
 
 > A composition of two or more components in the same arrangement that appears
@@ -50,7 +74,8 @@ use; the agent add-on needs the dashboard and review add-ons too. To upgrade, ch
 `V` everywhere at once. `github:snds/dsa#<sha>` still installs the core alone
 (it builds through `prepare`), but not the add-ons.
 
-Requires Node 22+ and pnpm 10 (the package sets `engine-strict=true`).
+Requires Node 22+. Install with pnpm, npm or yarn. (Working on dsa itself needs pnpm 10: see
+[Development](#development).)
 
 Releasing: set every package's version (they move together), add the changelog
 entry, merge, then push the tag `v<version>`. The release workflow tests, packs
@@ -337,7 +362,7 @@ Install them from the release (see [Install](#install)).
 
 | Command | Add-on | What it does |
 |---|---|---|
-| `dsa serve [--port 4319] [--host] [--base /dsa/] [--allow-host]` | dashboard | The live dashboard: findings, element review, the action queue, trends, live Settings and a Run button. On localhost by default; on a server under a sub-path, behind your sign-in proxy. |
+| `dsa serve [--port 4319] [--host] [--base /dsa/] [--allow-host]` | dashboard | The live dashboard: Inbox, Components, Apps, Health and Settings, with an agent thread on each issue and a Run button. On localhost by default; on a server under a sub-path, behind your sign-in proxy. [docs/dashboard.md](docs/dashboard.md) walks through it. |
 | `dsa report` | dashboard | Rebuilds the single-file report in `<data>/report/index.html`. `dsa run` writes it too (`--no-report` skips it). |
 | `dsa publish [--out <dir>] [--relay <url>]` | dashboard | The dashboard as a static folder (default `<data>/site`), with only the images it shows. Works under any sub-path; Re-scan goes through the scan relay, decisions where the host adapter says. |
 | `dsa relay [--port <n>] [--check]` | core | The scan relay alone: viewers sign in with GitHub and it starts scans with its own credential, for a published dashboard's Re-scan ([docs/relay.md](docs/relay.md)). `dsa serve` mounts it too when `DSA_RELAY_*` is set. |
@@ -346,7 +371,9 @@ Install them from the release (see [Install](#install)).
 | `dsa setup` | review | One time: installs the headless browser and app dependencies, and turns screenshots on for every run. |
 | `dsa login <url> [--out <file>]` | review | Signs in to a private live site once, in a visible browser, and saves the session for screenshots and renderings. |
 | `dsa run --figma \| --no-figma` | figma | Forces or skips the Figma crawl. It runs by itself when `modules.figma` is on and a token and a library are set. |
-| `dsa mcp [--session] [--repo]` | agent | The scan as MCP tools over stdio, for Claude Code, Cursor or any MCP client. |
+| `dsa mcp [--session] [--repo] [--anchor <anchor>]` | agent | The scan as MCP tools over stdio, for Claude Code, Cursor or any MCP client. `--anchor` answers `get_subject` for one thread. |
+| `dsa brief <anchor> [--out <file>]` | agent | The brief a thread's agent gets, for `issue:<key>`, `component:<name>`, `group:component:<name>`, `group:app:<name>`, `elements:<ids>` or `scan`. |
+| `dsa agent workflow` | agent | Prints the GitHub workflow that answers *Discuss on GitHub* threads ([docs/deploy.md](docs/deploy.md#threads-on-a-published-page)). |
 | `dsa agent brief [E-id,… \| F-id \| A-id \| R:<repo>]` | agent | Prints the brief an agent gets for a review group, a queue item or a repo. |
 
 With the review add-on, `dsa run --shots` (or `shots.auto`) takes screenshots
@@ -370,12 +397,12 @@ the details and one example per environment: a server, CI with any static host, 
 ## Configuration
 
 `dsa.config.json` at the repository root. Every key is optional; these are the
-defaults for a shadcn-style system called `unicron`:
+defaults for a shadcn-style system called `sample-ui`:
 
 ```json
 {
   "$schema": "https://github.com/snds/dsa/schema/config.json",
-  "system": { "name": "unicron", "packages": ["@unicron/ui"], "localAliases": ["@/components/ui"] },
+  "system": { "name": "sample-ui", "packages": ["@sample/ui"], "localAliases": ["@/components/ui"] },
   "scan": { "include": ["apps/**/src/**/*.tsx", "packages/**/src/**/*.tsx"], "exclude": ["**/node_modules/**", "**/*.test.tsx", "**/*.stories.tsx"] },
   "hosts": { "by": "file" },
   "patterns": { "minOccurrences": 3, "minHosts": 2, "minComponents": 2, "ignoreIgnoredTimes": 3 },
@@ -388,7 +415,7 @@ defaults for a shadcn-style system called `unicron`:
 | Key | Meaning |
 |---|---|
 | `system.name` | Human name used in summaries. |
-| `system.packages` | Import sources that count as design-system components. A source matches if it is the entry or a subpath of it (`@unicron/ui`, `@unicron/ui/button`). |
+| `system.packages` | Import sources that count as design-system components. A source matches if it is the entry or a subpath of it (`@sample/ui`, `@sample/ui/button`). |
 | `system.localAliases` | In-repo import sources that *are* the design system (owned source, shadcn style). Matched the same way. |
 | `scan.include` / `scan.exclude` | fast-glob patterns relative to the config root. |
 | `hosts.by` | `file` (default) or `dir`: what counts as one host when measuring a composition's spread. |
@@ -569,12 +596,12 @@ A record on the fixture:
 
 ## Wiring it into a consumer's CI
 
-For a design-system monorepo such as `unicron`:
+For a design-system monorepo such as `sample-ui` (dsa installed from the release, as in [Install](#install)):
 
 ```jsonc
 // package.json
 {
-  "devDependencies": { "@snds/dsa": "github:snds/dsa#main" },
+  "devDependencies": { "@snds/dsa": "https://github.com/snds/dsa/releases/download/v0.4.0/snds-dsa-0.4.0.tgz" },
   "scripts": {
     "ds:scan": "dsa scan",
     "ds:patterns": "dsa patterns",
@@ -596,8 +623,8 @@ then run `dsa ratchet` after typecheck, lint and build:
 - run: pnpm install --frozen-lockfile
 - run: pnpm typecheck
 - run: pnpm lint
-- run: pnpm --filter @unicron/tokens build
-- run: pnpm --filter @unicron/ui build
+- run: pnpm --filter @sample/tokens build
+- run: pnpm --filter @sample/ui build
 - run: pnpm ds:ratchet            # exit 1 if any correct-use count grew
 - run: pnpm ds:patterns           # advisory: upload .dsa/patterns.json as an artifact
 ```

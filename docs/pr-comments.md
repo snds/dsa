@@ -110,7 +110,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
-      - run: npx dsa pr-comment --post --quiet-when-clean
+      - run: npx --no dsa pr-comment --post --quiet-when-clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
