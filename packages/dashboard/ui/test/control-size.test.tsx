@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { afterEach, beforeAll, expect, test } from "vitest"
+import { afterEach, beforeAll, expect, test, vi } from "vitest"
 import * as React from "react"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
@@ -16,7 +16,9 @@ let root: Root
 beforeAll(async () => {
   const data = document.createElement("script")
   data.id = "dsa-data"; data.type = "application/json"
-  data.textContent = JSON.stringify({ serve: false })
+  // Served: the Ask button only shows where an agent can run (UX review B, C).
+  data.textContent = JSON.stringify({ serve: true })
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ threads: {} }))))
   document.head.append(data)
   ui = {
     ...(await import("@/components/ui/button")),
@@ -84,7 +86,7 @@ test("a row's size reaches every control in it: buttons, the split button's halv
   }
 })
 
-test("the split button's halves sit flush: one group, the reason for disabling on the group", async () => {
+test("the split button's halves sit flush: one group", async () => {
   const { AskAgent, AgentProvider } = ui
   const host = await mount(<AgentProvider><AskAgent subject={{ kind: "queue", id: "F-1" }} /></AgentProvider>)
   const group = host.querySelector('[data-slot="button-group"]')!
@@ -94,9 +96,7 @@ test("the split button's halves sit flush: one group, the reason for disabling o
   // The group squares and joins its direct [data-slot] children, so both halves must be direct children.
   expect(group.className).toContain("[&>[data-slot]~[data-slot]]:rounded-l-none")
   expect(group.className).toContain("[&>[data-slot]~[data-slot]]:border-l-0")
-  // Not served: both disabled, still readable, and the tooltip trigger wraps the whole group.
-  expect(halves.every(h => (h as HTMLButtonElement).disabled)).toBe(true)
-  expect(group.parentElement!.getAttribute("tabindex")).toBe("0")
+  expect(halves.every(h => !(h as HTMLButtonElement).disabled)).toBe(true)
 })
 
 test("views don't override a control's height, padding or font size", () => {

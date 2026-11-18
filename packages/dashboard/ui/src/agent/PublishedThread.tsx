@@ -2,7 +2,7 @@ import { ChatCircleIcon, GithubLogoIcon, GitPullRequestIcon, MagnifyingGlassIcon
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { D, fmtD } from "@/lib/dsa"
-import { ACTIONS, threadIssueUrl, threadSearchUrl } from "@/lib/host"
+import { pageLink, safeHref, ACTIONS, threadIssueUrl, threadSearchUrl } from "@/lib/host"
 import { THREAD_STATE } from "./ThreadBadge"
 import { anchorKeyOf, type Subject } from "./store"
 
@@ -31,7 +31,7 @@ export function PublishedThread({ subject, title, className }: { subject: Subjec
       {t ? (
         <>
           {t.asked && <div><p className="text-xs font-medium text-muted-foreground">Asked</p><p className="mt-0.5">{t.asked}</p></div>}
-          {t.answer && <div><p className="text-xs font-medium text-muted-foreground">Last answer</p><p className="mt-0.5 whitespace-pre-line">{t.answer}</p></div>}
+          {t.answer && <div><p className="text-xs font-medium text-muted-foreground">Last answer, in short</p><p className="mt-0.5 whitespace-pre-line">{t.answer}</p></div>}
           {t.proposals?.length > 0 && (
             <div>
               <p className="text-xs font-medium text-muted-foreground">Proposals</p>
@@ -40,15 +40,16 @@ export function PublishedThread({ subject, title, className }: { subject: Subjec
               </ul>
             </div>
           )}
-          {t.pr?.url && <a href={t.pr.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 underline underline-offset-4"><GitPullRequestIcon />Draft PR{t.pr.number ? ` #${t.pr.number}` : ""}</a>}
+          {safeHref(t.pr?.url) && <a href={safeHref(t.pr.url)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 underline underline-offset-4"><GitPullRequestIcon />Draft PR{t.pr.number ? ` #${t.pr.number}` : ""}</a>}
           <p className="text-xs text-muted-foreground">A summary from the last publish. The full thread lives where it ran.</p>
         </>
       ) : <p className="text-muted-foreground">No thread on this yet.</p>}
       {gh && (
         <div className="flex flex-wrap items-center gap-2 border-t pt-3">
-          <Button size="sm" variant="outline" nativeButton={false} render={<a href={threadIssueUrl(gh, key, t?.title || title, location.href)} target="_blank" rel="noreferrer" />}><GithubLogoIcon data-icon="inline-start" />{gh.label}</Button>
-          <a href={threadSearchUrl(gh, key)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs underline underline-offset-4"><MagnifyingGlassIcon />Find the discussion</a>
-          <p className="w-full text-xs text-muted-foreground">{gh.help}</p>
+          {/* Look first, so one issue gets one discussion (UX review B U-06): a new one is the second step. */}
+          <Button size="sm" variant="outline" nativeButton={false} render={<a href={threadSearchUrl(gh, key)} target="_blank" rel="noreferrer" />}><MagnifyingGlassIcon data-icon="inline-start" />Find the discussion</Button>
+          <a href={threadIssueUrl(gh, key, t?.title || title, pageLink())} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs underline underline-offset-4"><GithubLogoIcon />Start a new one on GitHub</a>
+          <p className="w-full text-xs text-muted-foreground">Look for an open discussion first: one per issue. {gh.help}</p>
         </div>
       )}
     </section>

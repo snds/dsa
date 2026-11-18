@@ -18,7 +18,7 @@ export const ACTIONS: PageActions | null = D.actions ?? null
 export async function rescan(): Promise<void> {
   const r = ACTIONS?.rescan
   if (!r || r.kind === "none" || !r.url) return
-  if (r.kind === "link") { window.open(r.url, "_blank", "noopener"); return }
+  if (r.kind === "link") { if (!openTab(r.url)) say(BLOCKED, true); return }
   const res = await fetch(r.url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dsa: "rescan", run: D.run?.id ?? null, revision: D.live?.head ?? null }) })
   if (!res.ok) throw new Error(`The scan job answered ${res.status}.`)
   say("Scan requested. The dashboard updates when it is published.")
@@ -27,11 +27,31 @@ export async function rescan(): Promise<void> {
 /** Browsers and GitHub refuse very long URLs; past this the body goes on the clipboard instead. */
 const MAX_URL = 7000
 
-/** The issue body: what it is, then the file in a fenced block the apply workflow reads. */
+/**
+ * Open a new tab, and say whether the browser allowed it. ("noopener" makes window.open return null even
+ * when it opens, so the opener is cleared by hand instead: code review C C-31.)
+ */
+export function openTab(url: string): boolean {
+  const w = window.open(url, "_blank")
+  if (w) { try { w.opener = null } catch { /* cross-origin already */ } }
+  return Boolean(w)
+}
+const BLOCKED = "The browser blocked the new tab. Allow pop-ups for this page, then send again."
+
+/** One answer in plain words, for people reading the issue before the workflow applies it. */
+const answerLine = (x: Staged) => {
+  const d = x.decision ?? {}
+  const what = d.verdict === "replace" ? `replace with ${d.use}${d.props && Object.keys(d.props).length ? ` (${Object.entries(d.props).map(([k, v]) => `${k}="${v}"`).join(", ")})` : ""}` : d.verdict === "keep" ? "keep as it is" : d.verdict === "gap" ? "a gap in the system" : d.verdict === "ignore" ? "leave out of the review" : String(d.verdict ?? "?")
+  return `- ${x.label || x.key} in ${x.target}: ${what}${x.note ? `. "${x.note}"` : ""}`
+}
+
+/** The issue body: what it is in plain words, then the file in a fenced block the apply workflow reads. */
 export function issueBody(list: Staged[]): string {
   const file = JSON.stringify(decisionsFile(list), null, 1)
   return [
-    `${list.length} review decision${list.length === 1 ? "" : "s"} from the dashboard${D.run?.id ? ` (scan ${D.run.id}${D.live?.head ? ` at ${String(D.live.head).slice(0, 7)}` : ""})` : ""}.`,
+    `${list.length} review decision${list.length === 1 ? "" : "s"} from the dashboard${D.run?.id ? ` (scan ${D.run.id}${D.live?.head ? ` at ${String(D.live.head).slice(0, 7)}` : ""})` : ""}:`,
+    "",
+    ...list.map(answerLine),
     "",
     `A workflow applies them with \`${ACTIONS?.decisions.apply ?? "dsa apply-decisions"}\`. Edit the block below to change them before it runs.`,
     "",
@@ -55,11 +75,12 @@ export async function sendDecisions(list: Staged[]): Promise<string> {
   if (d.title) u.searchParams.set("title", d.title)
   if (d.labels?.length) u.searchParams.set("labels", d.labels.join(","))
   u.searchParams.set("body", body)
-  if (u.toString().length <= MAX_URL) { window.open(u.toString(), "_blank", "noopener"); return "Opened a new issue with the decisions. Submit it to apply them." }
-  // Too long for a link: the issue opens with a placeholder and the decisions go on the clipboard.
+  if (u.toString().length <= MAX_URL) return openTab(u.toString()) ? "Opened a new issue with the decisions. Submit it to apply them." : BLOCKED
+  // Too long for a link: the issue opens with a placeholder and the decisions go on the clipboard. The tab
+  // opens first, while the click still counts, then the copy (after an await the browser blocks the tab).
   u.searchParams.set("body", "Paste the decisions here (they are on your clipboard).")
-  try { await navigator.clipboard.writeText(body) } catch { downloadDecisions(list); window.open(u.toString(), "_blank", "noopener"); return `Too many to put in a link: saved ${FILE_NAME}. Paste its contents into the issue in a \`\`\`json block.` }
-  window.open(u.toString(), "_blank", "noopener")
+  if (!openTab(u.toString())) return BLOCKED
+  try { await navigator.clipboard.writeText(body) } catch { downloadDecisions(list); return `Too many to put in a link: saved ${FILE_NAME}. Paste its contents into the issue in a \`\`\`json block.` }
   return "Opened a new issue. The decisions are on your clipboard: paste them as the issue's body."
 }
 
@@ -93,6 +114,17 @@ export function threadIssueUrl(t: { url: string; labels: string[] }, anchor: str
   ].join("\n")
   const q = new URLSearchParams({ title: `dsa: ${title}`.slice(0, 200), body, labels: t.labels.join(",") })
   return `${t.url}?${q.toString()}`
+}
+
+/** A link the page may open: http(s) only (code review C C-41). */
+export const safeHref = (u: unknown): string | undefined => (typeof u === "string" && /^https?:\/\//i.test(u) ? u : undefined)
+
+/**
+ * This page's address, for a new issue's body: only a real web address. A file:// copy or a localhost
+ * preview would put a local path or a dev address into a possibly public issue (code review C, UX A).
+ */
+export function pageLink(href = location.href): string | undefined {
+  try { const u = new URL(href); return u.protocol === "https:" && !/^(localhost|127\.|\[::1\])/.test(u.hostname) ? href : undefined } catch { return undefined }
 }
 
 /**

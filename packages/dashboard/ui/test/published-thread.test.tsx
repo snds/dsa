@@ -57,7 +57,8 @@ test("an issue with a thread shows its summary, state and draft PR, as of publis
 test("Discuss on GitHub opens a labelled issue with the anchor marker; an issue with no thread says so", async () => {
   await mount("#inbox/F-2")
   expect(thread()!.textContent).toContain("No thread on this yet.")
-  const a = [...thread()!.querySelectorAll("a")].find(x => x.textContent === "Discuss on GitHub")!
+  // Find comes first; a new discussion is the second step (UX review B U-06).
+  const a = [...thread()!.querySelectorAll("a")].find(x => x.textContent === "Start a new one on GitHub")!
   const u = new URL(a.getAttribute("href")!)
   expect(u.origin + u.pathname).toBe("https://github.com/sample-org/app-a/issues/new")
   expect(u.searchParams.get("labels")).toBe("dsa-thread")
@@ -65,4 +66,13 @@ test("Discuss on GitHub opens a labelled issue with the anchor marker; an issue 
   expect(u.searchParams.get("body")).toContain("<!-- dsa:thread issue:F-2 -->")
   const find = new URL([...thread()!.querySelectorAll("a")].find(x => x.textContent === "Find the discussion")!.getAttribute("href")!)
   expect(find.searchParams.get("q")).toBe('is:issue in:body "dsa:thread issue:F-2"')
+})
+
+test("links: only http(s) opens, and a page link goes into an issue only from a real web address (code review C, UX A)", async () => {
+  const { safeHref, pageLink } = await import("@/lib/host")
+  expect(safeHref("https://github.com/sample-org/sample-app/pull/9")).toBe("https://github.com/sample-org/sample-app/pull/9")
+  expect(safeHref("javascript:alert(1)")).toBeUndefined()
+  expect(pageLink("https://sample-org.github.io/sample-app/dsa/#inbox")).toBe("https://sample-org.github.io/sample-app/dsa/#inbox")
+  expect(pageLink("file:///Users/someone/site/index.html#inbox")).toBeUndefined()
+  expect(pageLink("http://localhost:4319/#inbox")).toBeUndefined()
 })

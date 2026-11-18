@@ -20,6 +20,7 @@ export interface PublishedThread {
   proposals: { id: string; kind: string; title: string; status: string }[];
 }
 
+const firstPara = (t: unknown) => String(t ?? '').trim().split(/\n\s*\n/)[0] ?? '';
 const clip = (t: unknown, n: number) => { const s = String(t ?? '').replace(/\s+/g, ' ').trim(); return s ? (s.length > n ? s.slice(0, n).trimEnd() + '…' : s) : null; };
 
 export function readPublishedThreads(dataDir: string): Record<string, PublishedThread> {
@@ -42,8 +43,9 @@ export function readPublishedThreads(dataDir: string): Record<string, PublishedT
     out[anchor] = {
       anchor, title: String(t.title ?? ''), state: String(t.state ?? 'settled'), updatedAt: String(t.updatedAt ?? ''), turns: Number(t.turns) || msgs.length,
       openProposals: Number(t.openProposals) || 0, pr: t.pr ?? null,
-      asked: clip(msgs.find(m => m.role === 'user')?.text, 400),
-      answer: clip([...msgs].reverse().find(m => m.role === 'assistant' && m.text)?.text, 900),
+      // A summary, not the transcript (decision D6; code review B, C, UX C): the first paragraph, kept short.
+      asked: clip(firstPara(msgs.find(m => m.role === 'user')?.text), 240),
+      answer: clip(firstPara([...msgs].reverse().find(m => m.role === 'assistant' && m.text)?.text), 280),
       proposals: [...proposals.values()].filter(p => p.session === t.session).map(p => ({ id: p.id, kind: p.kind, title: clip(p.title, 160) ?? '', status: p.status ?? 'open' })),
     };
   }
