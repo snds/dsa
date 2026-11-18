@@ -67,6 +67,14 @@ function SystemFolders({ d, onPin }: { d: any; onPin: (dirs: string[]) => void }
   )
 }
 
+/** Names and examples for a child library's fields: each input gets a name a screen reader says, and a hint when empty. */
+const CHILD_FIELD = {
+  path: { label: "folder", placeholder: "../ui" },
+  gitUrl: { label: "git URL", placeholder: "https://…/ui.git" },
+  gitRef: { label: "git branch or tag", placeholder: "main" },
+  exclude: { label: "folders to leave out", placeholder: "stories, tests" },
+} as const
+
 export function General({ onTitle }: { onTitle: (t: string) => void }) {
   const [v, setV] = React.useState<any>(null)
   const [err, setErr] = React.useState<string | null>(null)
@@ -187,7 +195,7 @@ export function General({ onTitle }: { onTitle: (t: string) => void }) {
                 <TableRow key={c.name}>
                   <TableCell className="font-medium">{c.name}</TableCell>
                   {(["path", "gitUrl", "gitRef", "exclude"] as const).map(k => (
-                    <TableCell key={k}><Input value={c[k]} className={k === "gitRef" ? "w-24" : ""} onChange={e => set(["sources", "children", String(i), k], e.target.value)} onBlur={() => commit("sources")} /></TableCell>
+                    <TableCell key={k}><Input value={c[k]} aria-label={`${c.name}: ${CHILD_FIELD[k].label}`} placeholder={CHILD_FIELD[k].placeholder} className={k === "gitRef" ? "w-24" : ""} onChange={e => set(["sources", "children", String(i), k], e.target.value)} onBlur={() => commit("sources")} /></TableCell>
                   ))}
                 </TableRow>))}</TableBody>
             </Table>

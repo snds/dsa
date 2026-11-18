@@ -64,7 +64,7 @@ export function CodeLines({ src, first, last = first, around }: { src: SourceFil
             const n = c.start + i, on = n >= first && n <= last
             return (
               <div key={n} ref={n === first ? mark : undefined} data-line={n} aria-current={on ? "true" : undefined} className={cn("grid grid-cols-[3.5rem_1fr]", on && "bg-primary/10")}>
-                <span className={cn("pr-3 text-right text-muted-foreground tabular-nums select-none", on && "border-l-2 border-primary text-foreground")}>{n}</span>
+                <span className={cn("pr-3 text-right text-muted-foreground tabular-nums select-none", on && "border-l-2 border-primary-line text-foreground")}>{n}</span>
                 <code className="pr-4 whitespace-pre">{t ? highlight(t) : " "}</code>
               </div>
             )

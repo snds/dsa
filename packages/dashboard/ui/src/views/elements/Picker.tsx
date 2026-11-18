@@ -335,14 +335,14 @@ export function Picker({ target, onClose }: { target: PickerTarget; onClose: () 
                 <>
                   <iframe ref={frame} key={sb.url + storyId + (direct ? comp.component : "")} title="Live preview" src={`${sb.url}iframe.html?id=${encodeURIComponent(storyId)}&viewMode=story`} className="min-h-0 w-full flex-1 rounded-lg border bg-background"
                     onLoad={() => setTimeout(() => { if (!preview.helper) { setTimeout(pushArgs, 700); setTimeout(pushArgs, 2000) } }, 2500)} />
-                  <p className="text-xs text-muted-foreground">{direct ? <>Rendered directly from <code className="font-mono">{comp.file}</code>: <b className="font-medium text-foreground">{comp.component}</b> has no story in Storybook, so this skips Storybook's decorators and any story-supplied props</> : <>Live from Storybook: <b className="font-medium text-foreground">{label}</b></>}{hasContent(comp) && (() => { const pc = previewContent(); return <>, showing the first instance's content{pc.leading ? ` (icon ${pc.leading})` : ""}.{preview.jsx === false ? " This Storybook couldn’t render the icon here; the label shows." : preview.icons === "glyph" && (pc.leading || pc.trailing) ? " No story exposes the Icon component, so the icon is drawn with the same glyph markup it renders." : ""}</> })()} {preview.error && <span className="text-destructive">{preview.error}</span>}</p>
+                  <p className="text-xs text-muted-foreground">{direct ? <>Rendered directly from <code className="font-mono">{comp.file}</code>: <b className="font-medium text-foreground">{comp.component}</b> has no story in Storybook, so this skips Storybook's decorators and any story-supplied props</> : <>Live from Storybook: <b className="font-medium text-foreground">{label}</b></>}{hasContent(comp) && (() => { const pc = previewContent(); return <>, showing the first instance's content{pc.leading ? ` (icon ${pc.leading})` : ""}.{preview.jsx === false ? " This Storybook couldn’t render the icon here; the label shows." : preview.icons === "glyph" && (pc.leading || pc.trailing) ? " No story exposes the Icon component, so the icon is drawn with the same glyph markup it renders." : ""}</> })()} {preview.error && <span role="alert" className="text-destructive">{preview.error}</span>}</p>
                 </>
               ) : comp ? (
                 <div className="flex flex-col gap-3">
                   {Object.keys(comp.thumbs || {}).length ? (
                     <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-2">
                       {Object.entries<string>(comp.thumbs).map(([k, u]) => (
-                        <button key={k} type="button" className={cn("flex flex-col items-center gap-1 rounded-lg border bg-muted/40 p-2", k === `${props.variant ?? "default"}/${props.size ?? "default"}` && "border-primary ring-2 ring-primary/20")}
+                        <button key={k} type="button" className={cn("flex flex-col items-center gap-1 rounded-lg border bg-muted/40 p-2", k === `${props.variant ?? "default"}/${props.size ?? "default"}` && "border-primary-line ring-2 ring-primary-line/30")}
                           onClick={() => { const [v, z] = k.split("/"); setProps(p => ({ ...p, ...(comp.axes?.variant ? { variant: v } : {}), ...(comp.axes?.size ? { size: z } : {}) })); setSetByUser(s => new Set([...s, "variant", "size"])) }}>
                           <img src={u} alt={k} className="max-h-16 max-w-full object-contain" /><span className="font-mono text-[11px] text-muted-foreground">{k}</span>
                         </button>
@@ -350,7 +350,7 @@ export function Picker({ target, onClose }: { target: PickerTarget; onClose: () 
                     </div>
                   ) : <Note>No measured renderings for this component.</Note>}
                   {!D.serve ? <Note className="text-xs">Live previews need <code className="font-mono">dsa serve</code>.</Note>
-                    : sbErr ? <div className="flex flex-col gap-2"><Note className="text-xs text-destructive">Storybook didn't start: {sbErr}</Note><Button variant="outline" className="w-fit" onClick={startSb}>Try again</Button></div>
+                    : sbErr ? <div className="flex flex-col gap-2"><Note role="alert" className="text-xs text-destructive">Storybook didn't start: {sbErr}</Note><Button variant="outline" className="w-fit" onClick={startSb}>Try again</Button></div>
                     : <Note className="text-xs">{sbBusy ? "Storybook is still starting in the background (the first start can take a minute). The live preview appears here when it's ready." : "Connecting to Storybook…"}</Note>}
                 </div>
               ) : null}
@@ -486,7 +486,7 @@ function IconPicker({ value, icons, onChange }: { value: string; icons: string[]
             <div className="grid max-h-64 grid-cols-6 gap-1 overflow-auto">
               {list.map(n => (
                 <button key={n} type="button" title={n} onClick={() => { onChange(n); setOpen(false) }}
-                  className={cn("flex aspect-square items-center justify-center rounded-md hover:bg-muted", n === value && "bg-primary/10 ring-1 ring-primary")}>
+                  className={cn("flex aspect-square items-center justify-center rounded-md hover:bg-muted", n === value && "bg-primary/10 ring-1 ring-primary-line")}>
                   <Glyph name={n} size={22} />
                 </button>
               ))}
