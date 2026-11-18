@@ -289,7 +289,7 @@ export function Inbox() {
           {sel && canChat() && <Button variant="outline" size="sm" className="w-fit @7xl:hidden" onClick={() => agent.start(subjectOf(sel))}><SparkleIcon data-icon="inline-start" />Open this issue's thread</Button>}
           {sel ? <IssueDetail i={sel} q={q} creating={!!creating} create={create} /> : <Panel><p className="text-sm text-muted-foreground">Select an issue.</p></Panel>}
         </div>
-        {sel && canChat() && <PinnedThread subject={subjectOf(sel)} className="hidden @7xl:sticky @7xl:top-36 @7xl:flex @7xl:max-h-[calc(100vh-10rem)]" />}
+        {sel && canChat() && <PinnedThread subject={subjectOf(sel)} className="hidden @7xl:sticky @7xl:top-36 @7xl:flex @7xl:h-[calc(100vh-10rem)]" />}
         {/* A published page: the thread as of publishing, and Discuss on GitHub (stage 9). */}
         {sel && !canChat() && <PublishedThread subject={subjectOf(sel)} title={sel.title} className="order-3 @4xl:order-none @4xl:col-start-2 @7xl:col-start-auto @7xl:sticky @7xl:top-36" />}
       </div>

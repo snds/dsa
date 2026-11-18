@@ -41,19 +41,22 @@ async function mount(node: React.ReactNode) {
   return host
 }
 const text = () => document.body.textContent ?? ""
-const tabs = () => [...document.querySelectorAll('[role="tab"]')].map(t => t.textContent || t.getAttribute("aria-label"))
-const selected = () => document.querySelector('[role="tab"][aria-selected="true"]')?.textContent
+// A tab's name without the Inbox's open count.
+const tabs = () => [...document.querySelectorAll('[role="tab"]')].map(t => (t.textContent || t.getAttribute("aria-label") || "").replace(/\d+$/, ""))
+const selected = () => document.querySelector('[role="tab"][aria-selected="true"]')?.textContent?.replace(/\d+$/, "")
 
 test("five pages: Settings, Inbox, Components, Apps, Health", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ threads: {} }))))
   history.replaceState(null, "", "#inbox")
   await mount(<m.App />)
   expect(tabs()).toEqual(["Settings", "Inbox", "Components", "Apps", "Health"])
+  // Settings is named on screen, and the Inbox tab carries its open count (visual A, UX B).
+  expect([...document.querySelectorAll('[role="tab"]')].map(t => t.textContent)).toContain("Inbox1")
 })
 
 test("old links open where their content went", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ threads: {} }))))
-  for (const [hash, tab] of [["#overview", "Health"], ["#trends", "Health"], ["#readiness", "Health"], ["#system/check", "Components"], ["#components", "Components"], ["#queue", "Inbox"]] as const) {
+  for (const [hash, tab] of [["#overview", "Health"], ["#trends", "Health"], ["#readiness", "Health"], ["#system/check", "Components"], ["#components", "Components"], ["#queue", "Inbox"], ["#apps", "Apps"]] as const) {
     history.replaceState(null, "", hash)
     await mount(<m.App />)
     expect(selected(), hash).toBe(tab)
