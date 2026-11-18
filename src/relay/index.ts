@@ -170,7 +170,8 @@ function cookies(req: Request): Record<string, string> {
   const out: Record<string, string> = {};
   for (const part of (req.headers.get("cookie") ?? "").split(";")) {
     const i = part.indexOf("=");
-    if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+    // A malformed value (someone else's cookie on the same path) is skipped, not a 502 on every call.
+    if (i > 0) { try { out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim()); } catch { /* not ours */ } }
   }
   return out;
 }
@@ -206,6 +207,9 @@ export function createRelay(o: RelayOptions): RelayHandler {
     return value;
   }
   const forget = () => cache.clear();
+  /** Run ids this relay started or listed, which anyone may ask about. */
+  const seen = new Set<string>();
+  const saw = (id: unknown) => { if (id) { seen.add(String(id)); if (seen.size > 500) seen.delete(seen.values().next().value!); } };
 
   function cors(req: Request): Record<string, string> {
     const origin = req.headers.get("origin");
@@ -307,7 +311,9 @@ export function createRelay(o: RelayOptions): RelayHandler {
         try {
           perm = (await o.identity.recheck?.(s.login)) ?? perm;
         } catch (e) {
+          // Fail closed: access may have been removed since sign-in, and this couldn't confirm it.
           log(`Relay: couldn't re-check ${s.login}'s access: ${e instanceof Error ? e.message : e}`);
+          return json(req, 503, { error: `Couldn't confirm ${s.login}'s access to ${o.identity.resource} just now. Try again in a minute.` });
         }
         if (!atLeast(perm, min)) return json(req, 403, { error: `${s.login} has ${perm} access to ${o.identity.resource}. Re-scan needs ${min} access.` });
         const recent = (starts.get(s.login) ?? []).filter((t) => now() - t < limit.windowSeconds * 1000);
@@ -330,6 +336,7 @@ export function createRelay(o: RelayOptions): RelayHandler {
         try {
           const r = await go;
           forget();
+          saw("run" in r ? r.run?.id : r.running?.id);
           if ("running" in r && r.running) return json(req, 409, { error: "A scan is already running.", run: r.running });
           starts.set(s.login, [...recent, now()]);
           log(`Relay: ${s.login} started scan ${r.run!.id}.`);
@@ -345,9 +352,12 @@ export function createRelay(o: RelayOptions): RelayHandler {
         if (route === "scan/status") {
           const id = url.searchParams.get("id") ?? "";
           if (!/^[\w.-]{1,100}$/.test(id)) return json(req, 400, { error: "That isn't a run id." });
+          // Without a session, only runs this relay started or saw: random ids can't spend its GitHub quota.
+          if (!s && !seen.has(id)) return json(req, 404, { error: "No such scan here." });
           return json(req, 200, { run: view(await cached(`status:${id}`, 4000, () => o.runner.status(id)), Boolean(s)) });
         }
         const runs = await cached("active", 10_000, () => o.runner.listActive());
+        for (const r of runs) saw(r.id);
         const estimate = await cached("estimate", 10 * 60_000, async () => (await o.runner.estimate?.().catch(() => null)) ?? null);
         return json(req, 200, { runs: runs.map((r) => view(r, Boolean(s))), estimate });
       }
@@ -395,7 +405,8 @@ export function relayEnvProblems(env: Env): string[] {
   if (runner !== "github" && runner !== "webhook") out.push(`DSA_RELAY_RUNNER is "${runner}"; the built-in runners are github and webhook.`);
   if (env.DSA_RELAY_SESSION_SECRET && env.DSA_RELAY_SESSION_SECRET.length < 32) out.push("DSA_RELAY_SESSION_SECRET is shorter than 32 characters.");
   if (env.DSA_RELAY_MIN_PERMISSION && !(PERMISSIONS as string[]).includes(env.DSA_RELAY_MIN_PERMISSION)) out.push(`DSA_RELAY_MIN_PERMISSION must be one of ${PERMISSIONS.join(", ")}.`);
-  if (env.DSA_RELAY_RATE && !/^\d+\/\d+$/.test(env.DSA_RELAY_RATE)) out.push('DSA_RELAY_RATE must look like "3/600" (scans per seconds).');
+  if (env.DSA_RELAY_RATE && (!/^\d+\/\d+$/.test(env.DSA_RELAY_RATE) || env.DSA_RELAY_RATE.split("/").some((n) => Number(n) <= 0))) out.push('DSA_RELAY_RATE must look like "3/600" (scans per seconds), both above 0.');
+  if (env.DSA_RELAY_SESSION_HOURS && !(Number(env.DSA_RELAY_SESSION_HOURS) > 0)) out.push("DSA_RELAY_SESSION_HOURS must be a number of hours above 0.");
   if (env.DSA_RELAY_REPO && !/^[\w.-]+\/[\w.-]+$/.test(env.DSA_RELAY_REPO)) out.push('DSA_RELAY_REPO must be "owner/name".');
   for (const k of ["DSA_RELAY_URL"] as const) if (env[k] && !originOf(env[k]!)) out.push(`${k} isn't a URL.`);
   for (const o of (env.DSA_RELAY_ORIGINS ?? "").split(",").map((x) => x.trim()).filter(Boolean)) if (!originOf(o)) out.push(`DSA_RELAY_ORIGINS has "${o}", which isn't an origin (https://host).`);
@@ -440,7 +451,8 @@ export function relayOptionsFromEnv(env: Env, extra: { fetch?: typeof fetch; log
 export function relayFromEnv(extra: { fetch?: typeof fetch; log?: (m: string) => void } = {}): (req: Request, env: Env) => Promise<Response> {
   let built: { key: string; handler: RelayHandler } | null = null;
   return async (req, env) => {
-    const key = RELAY_ENV.required.map((k) => env[k] ?? "").join("\u0000") + (env.DSA_RELAY_RUNNER_TOKEN ?? "");
+    // Every setting, optional ones too: changing any rebuilds the relay (code review B C-13).
+    const key = [...RELAY_ENV.required, ...RELAY_ENV.optional].map((k) => env[k] ?? "").join("\u0000");
     if (!built || built.key !== key) {
       const problems = relayEnvProblems(env);
       if (problems.length) return new Response(JSON.stringify({ error: "The relay isn't configured yet.", missing: problems }), { status: 503, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });

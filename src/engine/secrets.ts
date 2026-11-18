@@ -11,7 +11,10 @@ export interface Secrets { figmaToken?: string | undefined; githubToken?: string
 const file = (dataDir: string) => path.join(dataDir, 'secrets.json');
 
 export function readSecrets(dataDir: string): Secrets {
-  try { return JSON.parse(fs.readFileSync(file(dataDir), 'utf8')); } catch { return {}; }
+  // Missing is empty; present but unreadable is an error to fix, not "no tokens" (code review C C-37).
+  if (!fs.existsSync(file(dataDir))) return {};
+  try { return JSON.parse(fs.readFileSync(file(dataDir), 'utf8')); }
+  catch (e: any) { throw new Error(`${file(dataDir)} isn't valid JSON (${e.message}). Fix or delete it, then save the tokens again in Settings.`); }
 }
 
 export function writeSecrets(dataDir: string, patch: Partial<Record<keyof Secrets, string | null>>): void {

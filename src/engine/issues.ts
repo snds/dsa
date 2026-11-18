@@ -51,6 +51,16 @@ export function writeDrafts(findings: Finding[], dir: string): string[] {
 
 export type Http = (method: string, url: string, body?: unknown) => Promise<any>;
 
+/**
+ * The GitHub API for this config: host.github.api, or the API of host.github.server (GitHub Enterprise),
+ * else github.com's. A GHES token never goes to api.github.com (code review C C-14).
+ */
+export function githubApiBase(config: { host?: any } | null | undefined): string {
+  const g = config?.host?.github;
+  const server = String(g?.server ?? 'https://github.com').replace(/\/+$/, '');
+  return String(g?.api ?? (server === 'https://github.com' ? 'https://api.github.com' : `${server}/api/v3`)).replace(/\/+$/, '');
+}
+
 export function githubHttp(token: string, base = 'https://api.github.com'): Http {
   return async (method, url, body) => {
     const r = await fetch(base + url, {

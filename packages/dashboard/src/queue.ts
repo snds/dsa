@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_DECISIONS_FILE, openStore, clearMappingCache, effectiveSettings, githubHttp, githubToken, labelsFor, loadCatalog, mapInstance, materializeRemotes, pushedThisWeek, renderIssue, resolveTargets, rowToFinding, targetRelative, parsePlaces, evidenceSummary, isVendored, MAX_PLACES, type Place, type Config, type ElementEval, type Finding, type Http, type Mapping, type Recommendation, type Target } from '@snds/dsa/engine';
+import { DEFAULT_DECISIONS_FILE, openStore, clearMappingCache, effectiveSettings, githubApiBase, githubHttp, githubToken, labelsFor, loadCatalog, mapInstance, materializeRemotes, pushedThisWeek, renderIssue, resolveTargets, rowToFinding, targetRelative, parsePlaces, evidenceSummary, isVendored, MAX_PLACES, type Place, type Config, type ElementEval, type Finding, type Http, type Mapping, type Recommendation, type Target } from '@snds/dsa/engine';
 
 /** An item's evidence as data: the sentence without its examples, and the places (from older findings, read back from the text). */
 function evidenceOf(evidence: string, places?: Place[]): { summary?: string; places?: (Place & { vendored?: boolean })[] } {
@@ -309,7 +309,7 @@ export async function syncLinks(root: string, config: Config, dataDir: string, o
   if (!opts.force && st.syncedAt && Date.now() - new Date(st.syncedAt).getTime() < 55_000) return { synced: false };
   const token = githubToken(dataDir);
   if (!token && !opts.http) return { synced: false, error: 'No GitHub token.' };
-  const http = opts.http ?? githubHttp(token!);
+  const http = opts.http ?? githubHttp(token!, githubApiBase(config));
   const { items } = await buildQueue(root, config, dataDir);
   const repos = new Set<string>([...Object.values(st.links).map(l => l.repo), ...items.map(i => i.repo).filter(Boolean) as string[]]);
   const now = new Date().toISOString();
@@ -358,7 +358,7 @@ export async function syncLinks(root: string, config: Config, dataDir: string, o
 export async function createIssues(root: string, config: Config, dataDir: string, ids?: string[], opts: { http?: Http } = {}): Promise<{ created: { id: string; url: string }[]; skipped: { id: string; reason: string }[] }> {
   const token = githubToken(dataDir);
   if (!token && !opts.http) throw new Error('Add a GitHub token in Settings first (it needs issues: write on the target repos).');
-  const http = opts.http ?? githubHttp(token!);
+  const http = opts.http ?? githubHttp(token!, githubApiBase(config));
   const { items } = await buildQueue(root, config, dataDir);
   const want = items.filter(i => i.status === 'open' && (ids ? ids.includes(i.id) : true));
   const created: { id: string; url: string }[] = [], skipped: { id: string; reason: string }[] = [];

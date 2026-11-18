@@ -19,7 +19,9 @@ function runtimeFile(dataDir: string) {
 }
 
 function readRuntime(dataDir: string): Record<string, unknown> {
-  try { return JSON.parse(fs.readFileSync(runtimeFile(dataDir), 'utf8')); } catch { return {}; }
+  if (!fs.existsSync(runtimeFile(dataDir))) return {};
+  try { return JSON.parse(fs.readFileSync(runtimeFile(dataDir), 'utf8')); }
+  catch (e: any) { throw new Error(`${runtimeFile(dataDir)} isn't valid JSON (${e.message}). Fix or delete it; dsa set rewrites it.`); }
 }
 
 /** Parse "3", "true", '{"DataTable":4}' into JSON values; fall back to the raw string. */

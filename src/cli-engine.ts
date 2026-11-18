@@ -11,7 +11,7 @@ import { APP_DIR, resolveHostRoot, targetRelative } from "./engine/paths.js";
 import { runPipeline, reevaluateElements, type PipelineStage } from "./engine/pipeline.js";
 import { hasStore, openStore, registerStore } from "./engine/store.js";
 import { rowToFinding, snooze } from "./engine/evaluate.js";
-import { githubHttp, pushedThisWeek, syncIssues, writeDrafts } from "./engine/issues.js";
+import { githubApiBase, githubHttp, pushedThisWeek, syncIssues, writeDrafts } from "./engine/issues.js";
 import { discoverWorkspaces, resolveTargets } from "./engine/workspaces.js";
 import { githubToken } from "./engine/secrets.js";
 import { loadCatalog, withMetrics } from "./engine/catalog.js";
@@ -360,7 +360,7 @@ export function addEngineCommands(program: Command, io: CliIo): void {
       const token = githubToken(ctx.dataDir);
       if (!token) io.out("GITHUB_TOKEN not set: showing the plan without checking existing issues.");
       if (o.apply && !token) throw new Error("--apply needs GITHUB_TOKEN (a token with issues:write on the target repos).");
-      const { actions, urls } = await syncIssues(all, pushed, ctx.config, token ? githubHttp(token) : null, Boolean(o.apply));
+      const { actions, urls } = await syncIssues(all, pushed, ctx.config, token ? githubHttp(token, githubApiBase(ctx.config)) : null, Boolean(o.apply));
       for (const a of actions) io.out(`${o.apply ? "" : "[plan] "}${a.kind.padEnd(7)} ${a.id} ${a.repo ?? ""}${a.number ? "#" + a.number : ""} ${a.reason ?? a.title ?? ""}`);
       if (!actions.length) io.out("Nothing to change.");
       if (o.apply && urls.size) {
