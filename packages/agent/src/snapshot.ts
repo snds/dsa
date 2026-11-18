@@ -1,9 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { EngineContext } from '@snds/dsa';
-import { DEFAULT_THRESHOLD, openStore, latestEvals, loadHints, resolveTargets } from '@snds/dsa/engine';
+import { DEFAULT_THRESHOLD, openStore, latestEvals, loadHints, questions, resolveTargets } from '@snds/dsa/engine';
 
-import { buildQueue } from '@snds/dsa-dashboard';
+import { buildIssues, buildQueue } from '@snds/dsa-dashboard';
+import type { IssueSource } from './context.js';
 
 /**
  * What an agent reads: one JSON file per data folder, written when a session starts and after each scan.
@@ -24,6 +25,11 @@ export interface Snapshot {
   queue: any[];
   readiness: any[];
   hints: any[];
+  /**
+   * The dashboard's issue list for this scan (key, title, where its detail lives), so an anchor like
+   * issue:C-1A2B3C can be briefed from the scan data alone. Older snapshots don't have it.
+   */
+  issues?: { key: string; kind: string; title: string; component: string | null; source: IssueSource }[];
 }
 
 export const agentDir = (dataDir: string) => path.join(dataDir, 'agent');
@@ -67,9 +73,25 @@ export async function writeSnapshot(ctx: Pick<EngineContext, 'root' | 'config' |
     queue: (queue.items ?? []).map((i: any) => ({ ...i, issue: i.issue ? { title: i.issue.title, body: String(i.issue.body ?? '').slice(0, 6000) } : null })),
     readiness, hints: loadHints(ctx.configDir).hints,
   };
+  snap.issues = issuesOf(snap, dataDir, queue.items ?? []);
   fs.mkdirSync(agentDir(dataDir), { recursive: true });
   fs.writeFileSync(file(dataDir), JSON.stringify(snap));
   return snap;
+}
+
+/** The issue list the dashboard shows, as briefs need it: questions carry their element ids. */
+function issuesOf(snap: Snapshot, dataDir: string, items: any[]): NonNullable<Snapshot['issues']> {
+  let model: any = null;
+  try { model = JSON.parse(fs.readFileSync(path.join(dataDir, 'model-summary.json'), 'utf8')); } catch { /* no model */ }
+  let qs: any[] = [];
+  try { qs = questions(snap.evals as any[], { threshold: snap.threshold }).map(q => ({ ...q, ids: q.items.map((e: any) => e.id) })); } catch { /* evals the review can't group */ }
+  try {
+    return buildIssues({ queue: { items }, elements: { questions: qs, evals: snap.evals }, model, readiness: snap.readiness }).map(i => {
+      const src: any = i.source;
+      const source: IssueSource = src.type === 'question' ? { type: 'question', ids: qs.find(q => q.key === src.key)?.ids ?? [] } : src;
+      return { key: i.key, kind: i.kind, title: i.title, component: i.component, source };
+    });
+  } catch { return []; }
 }
 
 export function readSnapshot(dataDir: string): Snapshot | null {

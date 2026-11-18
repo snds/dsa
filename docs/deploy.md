@@ -412,30 +412,49 @@ With the github adapter, each issue also offers **Discuss on GitHub**. It opens 
 acts on the label or the marker: a new-issue link drops a label the repo doesn't have, so the marker
 alone is enough.
 
-To have the agent reply there, print the workflow and copy it into the repo:
+To have the agent reply there, print the workflow from the dsa installed in the repo, and copy it in:
 
 ```sh
-npx dsa agent workflow > .github/workflows/dsa-thread.yml
+pnpm exec dsa agent workflow > .github/workflows/dsa-thread.yml
 ```
+
+Use your package manager's own runner (`pnpm exec`, `yarn dsa`, `npm exec --no -- dsa`). Don't use a bare
+`npx dsa`: dsa isn't on npm, and an unrelated package called `dsa` is, so npx can fetch and run that one.
 
 It needs:
 
+- dsa in the repo's `devDependencies` (see the README's Install), so `node_modules/.bin/dsa` exists after
+  install. The workflow installs with the repo's own package manager (pnpm, yarn or npm, from the lockfile)
+  and runs that binary. If it isn't there, the thread is told so.
 - The repository secret `ANTHROPIC_API_KEY`.
 - For a key that isn't scoped to a workspace, the repository variable `ANTHROPIC_WORKSPACE_ID`
   (`wrkspc_…`, from the Console's workspace settings). Without it the API refuses the key.
 - For `/dsa draft-fix`, *Settings → Actions → General → Allow GitHub Actions to create and approve
   pull requests*. New repositories have it off, and GitHub then refuses to open the draft PR.
 
-When something goes wrong, the thread still gets a reply: a missing key says so, and a failed answer
-links to the run log, where the agent's error is printed. The run is marked failed either way.
+Optional repository variables: `DSA_THREAD_DAILY_LIMIT` (default 30 replies a day) and
+`DSA_CLAUDE_CODE_VERSION` (the workflow pins a Claude Code release; set this to choose another).
+
+When something goes wrong, the thread still gets a reply that says what happened: dsa isn't installed,
+the anchor isn't in the latest scan, the key is missing, or the agent failed (with a link to the run
+log, where the error is printed). The run is marked failed.
 
 What it does, and what keeps it safe:
 
-- It answers only people with write access. Anyone else's comment gets no reply.
-- It keeps to a daily limit (`DSA_THREAD_DAILY_LIMIT`, default 30 replies).
+- **Only people with write access start it.** Anyone else gets one note per issue saying so.
+- **Only their words reach the agent.** On a public repo anyone can comment, so the thread the agent
+  reads leaves out every comment (and the issue text) written by someone without write access.
+- **The agent can't reach the job's tokens.** The checkout keeps no token, the agent's step has no GitHub
+  token, and the agent may not read the process environment, the runner's home or `.git`.
+- **Nothing shaped like a key or token is posted.** The answer is checked before it goes out; if it
+  holds one, the thread is told to look at the run instead.
+- **Least privilege.** A reply runs with read access to the code. Only `/dsa draft-fix` runs in a job
+  that can push a branch and open a pull request, and git hooks are switched off there.
+- It keeps to a daily limit, and only its own replies count toward it.
 - Comment text reaches its scripts only as environment variables, never pasted into a script.
-- It scans, writes the thread's brief with `dsa brief <anchor>`, and answers as a comment.
-- `/dsa draft-fix` lets the agent edit the checkout, then opens a **draft** pull request linked to the thread. It never merges.
+- It scans, writes the thread's brief with `dsa brief <anchor>`, and answers everything since its last reply.
+- `/dsa draft-fix` lets the agent edit the checkout, then opens a **draft** pull request linked to the
+  thread, with the files it changed or created (never `.github`, never the scan's own output). It never merges.
 - Proposals stay text for a person to act on. Accepting one is a separate step.
 
 `dsa brief <anchor> [--out file]` works anywhere: `issue:<key>`, `component:<name>`,

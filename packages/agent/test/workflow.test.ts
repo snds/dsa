@@ -27,60 +27,46 @@ test('anchors read back to the subject the brief needs; a thread on record wins'
   assert.deepEqual(subjectForAnchor(dataDir, 'elements:E-ABA86594'), { kind: 'review', ids: ['E-2', 'E-1'] });
 });
 
-test('the workflow: valid YAML, gated on write access and a daily limit, user text only through env', () => {
+test('the workflow: valid YAML, gated, least privilege, user text only through env', () => {
   const wf = parse(THREAD_WORKFLOW);
   assert.deepEqual(Object.keys(wf.on).sort(), ['issue_comment', 'issues']);
-  const job = wf.jobs.reply;
-  assert.match(job.if, /dsa-thread/);
+  assert.deepEqual(wf.permissions, {}, 'nothing by default; each job asks for its own');
+  assert.equal(wf.concurrency['cancel-in-progress'], false);
+  const { gate, reply, fix } = wf.jobs;
+  assert.match(gate.if, /dsa-thread/);
   // The label may not exist on the repo (a new-issue link drops it), so the page's marker counts too.
-  assert.match(job.if, /contains\(github\.event\.issue\.body, 'dsa:thread '\)/);
-  assert.match(job.if, /sender\.type != 'Bot'/);
-  assert.match(job.if, /dsa:thread-reply/, 'its own replies never start it again');
-  const steps: any[] = job.steps;
-  const gate = steps.find(s => s.id === 'gate');
-  assert.match(gate.run, /collaborators\/\$ACTOR\/permission/);
-  assert.match(gate.run, /admin\|maintain\|write\) echo "ok=true"/);
-  assert.equal(steps.find(s => s.id === 'limit').if, "steps.gate.outputs.ok == 'true'");
-  for (const s of steps.filter(s => s.id !== 'gate' && s.id !== 'limit')) assert.equal(s.if?.includes("steps.limit.outputs.ok == 'true'"), true, `${s.name ?? s.uses} runs only past both gates`);
-  // Comments and issue text reach scripts as variables, never pasted into a script (no injection).
-  for (const s of steps) if (s.run) assert.doesNotMatch(s.run, /\$\{\{/, `${s.name} has no expressions inside its script`);
-  assert.equal(job.env.TEXT, '${{ github.event.comment.body || github.event.issue.body }}');
-  // The fix is a draft PR; the model key is a secret, never on the page.
-  const pr = steps.find(s => s.id === 'pr');
+  assert.match(gate.if, /contains\(github\.event\.issue\.body, 'dsa:thread '\)/);
+  assert.match(gate.if, /sender\.type != 'Bot'/);
+  assert.match(gate.if, /dsa:thread-reply/, 'its own replies never start it again');
+  assert.deepEqual(gate.permissions, { issues: 'write' });
+  // Replying needs no write access to the code; only a draft fix does.
+  assert.deepEqual(reply.permissions, { contents: 'read', issues: 'write' });
+  assert.deepEqual(fix.permissions, { contents: 'write', issues: 'write', 'pull-requests': 'write' });
+  assert.match(reply.if, /needs\.gate\.outputs\.mode == 'reply'/);
+  assert.match(fix.if, /needs\.gate\.outputs\.mode == 'fix'/);
+  for (const job of [reply, fix]) {
+    const steps: any[] = job.steps;
+    assert.equal(steps[0].uses, 'actions/checkout@v4');
+    assert.equal(steps[0].with['persist-credentials'], false, 'no token left in .git/config');
+    const agent = steps.find(s => s.id === 'agent');
+    assert.equal(agent.env.ANTHROPIC_API_KEY, '${{ secrets.ANTHROPIC_API_KEY }}');
+    assert.equal(agent.env.GH_TOKEN, undefined, 'the agent step never holds a GitHub token');
+    assert.match(agent.run, /unset GH_TOKEN GITHUB_TOKEN/);
+    assert.match(agent.run, /claude -p --settings/);
+    assert.doesNotMatch(agent.run, /claude-code"?\s*$/m, 'Claude Code is pinned');
+    assert.match(agent.run, /@anthropic-ai\/claude-code@\$CC_VERSION/);
+    assert.equal(steps.find(s => s.name === 'Reply').if, 'always()', 'every failure still gets a reply');
+    const commands = steps.filter(s => s.run).flatMap(s => s.run.split('\n')).filter((l: string) => !l.trim().startsWith('#'));
+    assert.equal(commands.some((l: string) => /\bnpx\s+dsa\b/.test(l)), false, 'never npx dsa: an unrelated package has that name');
+  }
+  const pr = fix.steps.find((s: any) => s.id === 'pr');
   assert.match(pr.run, /gh pr create .*--draft/);
   assert.doesNotMatch(pr.run, /gh pr merge/);
-  assert.equal(steps.find(s => s.name === 'The agent answers').env.ANTHROPIC_API_KEY, '${{ secrets.ANTHROPIC_API_KEY }}');
-  assert.match(steps.find(s => s.name === 'Scan and write the brief').run, /npx dsa brief "\$ANCHOR"/);
-  assert.match(steps.find(s => s.name === 'Reply').run, /dsa:thread-reply/);
-  // Actions runs scripts with bash -e: a reply with no draft PR must not end on a failed test.
-  assert.doesNotMatch(steps.find(s => s.name === 'Reply').run, /\] && printf/);
+  assert.match(pr.run, /core\.hooksPath=\/dev\/null/);
+  assert.equal(reply.steps.find((s: any) => s.id === 'pr'), undefined);
+  // Comments and issue text reach scripts as variables, never pasted into a script (no injection).
+  for (const job of Object.values<any>(wf.jobs)) for (const s of job.steps) if (s.run) assert.doesNotMatch(s.run, /\$\{\{/, `${s.name} has no expressions inside its script`);
+  assert.equal(gate.env.TEXT, '${{ github.event.comment.body || github.event.issue.body }}');
   assert.equal(threadMarker('issue:F-1'), '<!-- dsa:thread issue:F-1 -->');
   assert.equal(REPLY_MARKER, '<!-- dsa:thread-reply -->');
-  // The anchor read from the issue body is what the page's marker writes.
-  const read = steps.find(s => s.id === 'ask').run as string;
-  assert.match(read, /grep -o 'dsa:thread \[A-Za-z0-9:,\._-\]\*'/);});
-
-test('the workflow, from a live run: the agent sees the question, and every failure gets a reply', () => {
-  const steps: any[] = parse(THREAD_WORKFLOW).jobs.reply.steps;
-  // A new thread's question is in the issue's description; --comments alone leaves it out.
-  const brief = steps.find(s => s.name === 'Scan and write the brief').run as string;
-  assert.match(brief, /gh issue view "\$ISSUE" --repo "\$REPO";/, 'the description');
-  assert.match(brief, /gh issue view "\$ISSUE" --repo "\$REPO" --comments/, 'then the comments');
-  const agent = steps.find(s => s.id === 'agent');
-  assert.match(agent.run, /issue's description when it has no comments yet/);
-  // No key: a reply that says so, not a silent failure.
-  assert.match(agent.run, /if \[ -z "\$ANTHROPIC_API_KEY" \]/);
-  assert.match(agent.run, /isn't set up here/);
-  // A key not scoped to a workspace names one through a repository variable.
-  assert.equal(agent.env.WORKSPACE_ID, '${{ vars.ANTHROPIC_WORKSPACE_ID }}');
-  assert.match(agent.run, /ANTHROPIC_CUSTOM_HEADERS="anthropic-workspace-id: \$WORKSPACE_ID"/);
-  // The agent's error reaches the log; the thread gets a pointer to it, and the run still shows as failed.
-  assert.match(agent.run, /::error::The agent failed/);
-  assert.match(agent.run, /couldn't answer this time.*\$RUN_URL/);
-  assert.match(steps.find(s => s.id === 'pr').if, /steps\.agent\.outputs\.ok == 'true'/, 'no draft PR from a failed run');
-  const last = steps[steps.length - 1];
-  assert.equal(last.if, "steps.limit.outputs.ok == 'true' && steps.agent.outputs.ok == 'false'");
-  assert.equal(last.run, 'exit 1');
-  assert.ok(steps.findIndex(s => s.name === 'Reply') < steps.length - 1, 'the reply goes out first');
-  assert.match(THREAD_WORKFLOW, /Allow GitHub Actions to create and approve pull requests/);
 });

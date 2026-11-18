@@ -17,16 +17,17 @@ test('the workflow agent gets dsa\'s read-only tools for the thread\'s anchor, n
   assert.equal(READ_TOOLS.some(t => t.startsWith('propose_')), false, 'nobody is there to accept a proposal');
   assert.deepEqual(READ_TOOLS, TOOLS.filter(t => t.readOnly).map(t => t.name));
 
-  const agent = parse(THREAD_WORKFLOW).jobs.reply.steps.find((s: any) => s.id === 'agent');
-  assert.equal(agent.env.ANCHOR, '${{ steps.ask.outputs.anchor }}');
-  // The MCP config is built by jq from the anchor (already limited to [A-Za-z0-9:,._-]), never pasted into JSON.
-  assert.match(agent.run, /jq -n --arg anchor "\$ANCHOR" '\{mcpServers: \{dsa: \{command: "npx", args: \["dsa", "mcp", "--anchor", \$anchor\]\}\}\}'/);
-  assert.match(agent.run, /claude -p --strict-mcp-config --mcp-config "\$RUNNER_TEMP\/mcp\.json" --allowedTools "\$tools"/);
-  const list = agent.run.match(/dsa_tools="([^"]+)"/)![1] as string;
-  assert.deepEqual(list.split(','), READ_TOOLS.map(t => `mcp__dsa__${t}`));
-  assert.match(agent.run, /tools="Read,Grep,Glob,\$dsa_tools"/);
-  assert.match(agent.run, /tools="Read,Grep,Glob,Edit,Write,\$dsa_tools"/, 'draft-fix keeps them too');
-  assert.match(agent.run, /propose_\* tools are not available here, so don't offer to record one/);
+  for (const job of ['reply', 'fix']) {
+    const agent = parse(THREAD_WORKFLOW).jobs[job].steps.find((s: any) => s.id === 'agent');
+    assert.equal(parse(THREAD_WORKFLOW).jobs[job].env.ANCHOR, '${{ needs.gate.outputs.anchor }}');
+    // The MCP config is built by jq from the anchor, never pasted into JSON, and runs the repo's own dsa.
+    assert.match(agent.run, /jq -n --arg dsa "\$DSA_BIN" --arg anchor "\$ANCHOR" '\{mcpServers: \{dsa: \{command: \$dsa, args: \["mcp", "--anchor", \$anchor\]\}\}\}'/);
+    assert.match(agent.run, /--strict-mcp-config --mcp-config "\$RUNNER_TEMP\/mcp\.json" --allowedTools "\$tools"/);
+    const list = agent.run.match(/dsa_tools="([^"]+)"/)![1] as string;
+    assert.deepEqual(list.split(','), READ_TOOLS.map(t => `mcp__dsa__${t}`));
+    assert.match(agent.run, job === 'fix' ? /tools="Read,Grep,Glob,Edit,Write,\$dsa_tools"/ : /tools="Read,Grep,Glob,\$dsa_tools"/);
+    if (job === 'reply') assert.match(agent.run, /propose_\* tools are not available here, so don't offer to record one/);
+  }
 });
 
 test('on the fixture: dsa mcp --anchor answers get_subject for the thread, and a role-map component has an entry', async () => {
