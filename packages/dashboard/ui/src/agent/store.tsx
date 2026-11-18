@@ -73,7 +73,8 @@ interface Api extends State {
   /** Shows a subject's thread in place without opening the side panel; no session is made until the first message. */
   pin: (subject: Subject) => Promise<void>
   resume: (id: string) => Promise<void>
-  send: (text: string, mode?: "advise" | "try") => Promise<void>
+  /** Resolves false when the message didn't go through; the error is in `error`. */
+  send: (text: string, mode?: "advise" | "try") => Promise<boolean>
   cancel: () => Promise<void>
   close: () => void
   setOpen: (o: boolean) => void
@@ -115,6 +116,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const [s, set] = React.useState<State>({ open: false, session: null, proposals: [], changes: null, streaming: null, busy: false, starting: false, error: null, pending: null, threads: {}, visual: NO_VISUAL })
   const patch = (p: Partial<State>) => set(x => ({ ...x, ...p }))
   const sid = s.session?.id
+  // The thread open now: a reply that finishes after a switch must not pull the panel back (code review C C-11).
+  const openId = React.useRef(sid)
+  openId.current = sid
 
   const refreshThreads = React.useCallback(async () => {
     if (!canChat()) return
@@ -129,7 +133,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const send = React.useCallback(async (text: string, mode?: "advise" | "try", id0 = sid) => {
-    if (!text.trim()) return
+    if (!text.trim()) return false
+    let failed: string | null = null
     let id = id0
     // A pinned subject with no thread yet: its first message starts the thread (one per anchor).
     if (!id && s.pending) {
@@ -137,30 +142,35 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         const r = await api("/api/agent/session", { subject: s.pending, mode, reuse: true })
         set(x => ({ ...x, session: r.session, pending: null }))
         id = r.session.id
-      } catch (e: any) { patch({ error: e.message }); return }
+      } catch (e: any) { patch({ error: `Your message wasn't sent: ${e.message}` }); return false }
     }
-    if (!id) return
+    if (!id) return false
     const now = new Date().toISOString()
     set(x => ({ ...x, busy: true, error: null, streaming: { role: "assistant", text: "", at: now, tools: [] },
       session: x.session ? { ...x.session, mode: mode ?? x.session.mode, messages: [...x.session.messages, { role: "user", text, at: now }] } : x.session }))
     try {
       await stream("/api/agent/send", { id, text, mode }, e => {
         set(x => {
+          // Streamed text belongs to its own thread: drop it from the screen once another one is open.
+          if (x.session && x.session.id !== id && e.type !== "proposals") return x
           const m = x.streaming ?? { role: "assistant" as const, text: "", at: now, tools: [] }
           if (e.type === "text") return { ...x, streaming: { ...m, text: m.text + e.delta } }
           if (e.type === "tool") return { ...x, streaming: { ...m, tools: [...(m.tools ?? []), { name: e.name, summary: e.summary }] } }
           if (e.type === "proposals") return { ...x, proposals: [...x.proposals.filter(p => !e.items.some((n: Proposal) => n.id === p.id)), ...e.items] }
           if (e.type === "changes") return { ...x, changes: { files: e.files, stat: e.stat, diff: x.changes?.diff ?? "" } }
-          if (e.type === "result" && !e.ok) return { ...x, error: e.error ?? "The agent stopped." }
+          if (e.type === "result" && !e.ok) { failed = e.error ?? "The agent stopped."; return { ...x, error: failed } }
           return x
         })
       })
-    } catch (e: any) { patch({ error: e.message }) }
+    } catch (e: any) { failed = e.message; patch({ error: e.message }) }
     finally {
       set(x => ({ ...x, streaming: null, busy: false }))
-      await load(id).catch(() => {})
+      if (openId.current === id || !openId.current) await load(id).catch(() => {})
+      // The reload can drop a message the agent never received: keep the reason on screen.
+      if (failed && openId.current === id) patch({ error: failed })
       refreshThreads()
     }
+    return !failed
   }, [sid, s.pending, load, refreshThreads])
 
   const start = React.useCallback(async (subject: Subject, opts: { mode?: "advise" | "try"; provider?: string; ask?: string; fresh?: boolean; panel?: boolean } = {}) => {
@@ -198,6 +208,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         if (action === "accept") say(r.result && !/^https:/.test(r.result) ? r.result : "Accepted")
         if (action === "accept" && /^https:\/\/github\.com\//.test(r.result ?? "")) window.open(r.result, "_blank", "noopener")
         set(x => ({ ...x, proposals: x.proposals.map(y => (y.id === p.id ? { ...y, status: action === "accept" ? "accepted" : "rejected", result: r.result } : y)) }))
+        window.dispatchEvent(new CustomEvent("dsa:changed", { detail: { url: "/api/agent/proposal" } }))
         refreshThreads()
       } catch (e: any) { say(e.message, true) }
     },
@@ -213,7 +224,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       } catch (e: any) { set(x => ({ ...x, visual: { ...x.visual, error: e.message } })) }
       finally {
         set(x => ({ ...x, visual: { ...x.visual, running: false } }))
-        await load(sid).catch(() => {})
+        if (openId.current === sid) await load(sid).catch(() => {})
       }
     },
     changesAction: async action => {

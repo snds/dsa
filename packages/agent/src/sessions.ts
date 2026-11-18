@@ -111,7 +111,7 @@ export const depLinks = () => ['node_modules', ...(tools().sandboxLinks ?? [])];
 export const baseOf = (s: Session) => path.join(SANDBOXES, `${s.id}-base`);
 export const VITE_WRAPPER = '.dsa-visual.vite.config.mjs';
 
-const ours = () => [VITE_WRAPPER, ...depLinks().map(l => l.split(path.sep).join('/')), '.cursor/mcp.json', '.cursor/rules/dsa-counterpart.mdc'];
+const ours = () => [VITE_WRAPPER, ...depLinks().map(l => l.split(path.sep).join('/')), '.cursor/mcp.json', '.cursor/cli.json', '.cursor/rules/dsa-counterpart.mdc'];
 
 /**
  * Pathspecs that keep our own files (linked dependencies, agent config) out of the diff and a kept branch.
@@ -139,7 +139,18 @@ export function sandboxChanges(s: Session): { files: { file: string; status: str
     if (!files.length) return { files: [], stat: '', diff: '' };
     git(s.sandbox, ['add', '--intent-to-add', '-A', '--', '.', ...EXCLUDE]);
     return { files, stat: git(s.sandbox, ['diff', '--stat', '--', '.', ...EXCLUDE]), diff: git(s.sandbox, ['diff', '--', '.', ...EXCLUDE]).slice(0, 200_000) };
-  } catch { return null; }
+  } catch (e: any) {
+    // Not "no changes": say what went wrong where someone can see it (code review C C-30).
+    process.stderr.write(`dsa: couldn't read the sandbox changes for session ${s.id}: ${String(e?.stderr ?? e?.message ?? e).split('\n')[0]}\n`);
+    return null;
+  }
+}
+
+/** How many files the sandbox changed, for lists: one read-only git status, no index writes (code review B C-11). */
+export function changedCount(s: Session): number {
+  if (!s.sandbox || !fs.existsSync(s.sandbox)) return 0;
+  try { return execFileSync('git', ['-C', s.sandbox, 'status', '--porcelain', '-z', '--', '.', ...excludes(s.sandbox)], { encoding: 'utf8' }).split('\0').filter(Boolean).length; }
+  catch { return 0; }
 }
 
 /** Keep: commit the sandbox's changes on a new local branch in the real repo. Never pushes. */
@@ -153,7 +164,8 @@ export function keepChanges(dataDir: string, s: Session, message?: string): { br
   const EXCLUDE = excludes(s.sandbox);
   git(s.sandbox, ['switch', '-c', branch]);
   git(s.sandbox, ['add', '-A', '--', '.', ...EXCLUDE]);
-  git(s.sandbox, ['commit', '-m', message?.trim() || `${s.title}\n\nDrafted with an agent in the dsa dashboard (session ${s.id}); reviewed by a human before merge.`]);
+  // No hooks: the agent could have written one (a relative core.hooksPath, .husky) and this runs it on the host.
+  git(s.sandbox, ['-c', 'core.hooksPath=/dev/null', 'commit', '--no-verify', '-m', message?.trim() || `${s.title}\n\nDrafted with an agent in the dsa dashboard (session ${s.id}); reviewed by a human before merge.`]);
   const commit = git(s.sandbox, ['rev-parse', '--short', 'HEAD']);
   s.kept = { branch, commit, at: new Date().toISOString() };
   writeSession(dataDir, s);
@@ -177,6 +189,8 @@ export function discardSandbox(dataDir: string, s: Session) {
 export function deleteSession(dataDir: string, id: string) {
   const s = readSession(dataDir, id);
   if (!s) return;
+  // A turn still running is stopped first; its end sees the session gone and doesn't bring it back.
+  running.get(id)?.cancel();
   discardSandbox(dataDir, s);
   for (const f of [fileOf(dataDir, id), fileOf(dataDir, id).replace(/\.json$/, '.mcp.json')]) fs.rmSync(f, { force: true });
 }
@@ -198,10 +212,19 @@ export function mcpConfig(dataDir: string, args: string[], s: Session, sandbox: 
   return { file, servers };
 }
 
-/** Cursor reads MCP servers and rules from the workspace: write them into the sandbox (excluded from diffs). */
-function cursorWorkspace(sandbox: string, servers: any) {
+/**
+ * Cursor reads MCP servers, rules and permissions from the workspace: write them into the sandbox (excluded
+ * from diffs). Its CLI has no tool flags, so the permissions file does what Claude Code's flags do: no shell
+ * ever, no writing in Advise, and in Try no writing through the links into the real checkout.
+ */
+export function cursorPermissions(mode: Mode): { permissions: { allow: string[]; deny: string[] } } {
+  const links = depLinks().map(l => `Write(${l.split(path.sep).join('/')}/**)`);
+  return { permissions: { allow: ['Read(**)', ...(mode === 'try' ? ['Write(**)'] : [])], deny: ['Shell(*)', ...(mode === 'try' ? links : ['Write(**)'])] } };
+}
+function cursorWorkspace(sandbox: string, servers: any, mode: Mode) {
   fs.mkdirSync(path.join(sandbox, '.cursor', 'rules'), { recursive: true });
   fs.writeFileSync(path.join(sandbox, '.cursor', 'mcp.json'), JSON.stringify({ mcpServers: servers }, null, 2));
+  fs.writeFileSync(path.join(sandbox, '.cursor', 'cli.json'), JSON.stringify(cursorPermissions(mode), null, 2));
   fs.writeFileSync(path.join(sandbox, '.cursor', 'rules', 'dsa-counterpart.mdc'), `---\ndescription: dsa counterpart\nalwaysApply: true\n---\n\n${PERSONA}\n`);
 }
 
@@ -218,10 +241,21 @@ export async function runTurn(opts: { dataDir: string; args: string[]; id: strin
   if (running.has(s.id)) throw new Error('The agent is still answering the last message.');
   const switched = Boolean(opts.mode && opts.mode !== s.mode);
   if (opts.mode) s.mode = opts.mode;
-  const sandbox = ensureSandbox(opts.dataDir, s);
+  // Advise only reads, so a repo that isn't a git checkout is read in place. Try needs a sandbox copy,
+  // which is a git worktree: say so instead of failing quietly (UX review B, code review A).
+  const isGit = (() => { try { git(s.repo.top, ['rev-parse', '--git-dir']); return true; } catch { return false; } })();
+  if (s.mode === 'try' && !isGit) throw new Error(`Try in sandbox needs ${s.repo.name} to be a git checkout (it makes a copy with git worktree). Use Advise, or run git init there first.`);
+  // Cursor reads its settings from the workspace; never write them into a real checkout.
+  if (s.provider === 'cursor' && !isGit) throw new Error(`Cursor needs ${s.repo.name} to be a git checkout, so its settings go in a sandbox copy. Use Claude Code, or run git init there first.`);
+  const sandbox = isGit ? ensureSandbox(opts.dataDir, s) : s.repo.top;
   const cwd = path.join(sandbox, s.repo.sub);
   const { file, servers } = mcpConfig(opts.dataDir, opts.args, s, sandbox);
-  if (s.provider === 'cursor') cursorWorkspace(sandbox, servers);
+  if (s.provider === 'cursor') cursorWorkspace(sandbox, servers, s.mode);
+  const addDirs = [...(tools().root ? [tools().root!] : []), path.dirname(s.brief)];
+  // In Try, the agent edits the sandbox only: not the folders linked into it (node_modules, a vendored
+  // system), nor the extra folders it may read (the system's checkout, the briefs). Code review A, B, C.
+  const links = depLinks().map(l => path.join(sandbox, l));
+  const readOnly = [...links, ...links.flatMap(l => { try { return [fs.realpathSync(l)]; } catch { return []; } }), ...addDirs];
   const first = !s.providerSession;
   const kind = s.mode === 'try' ? 'a sandbox session: you may edit files in this copy of the repo' : 'a review session: read and advise, do not edit files';
   const prompt = (first ? `Start by reading the brief (the get_subject tool; the same text is in ${s.brief}). This is ${kind}.\n\n` : switched ? `(The designer switched modes. This is now ${kind}.)\n\n` : '') + opts.text;
@@ -229,7 +263,7 @@ export async function runTurn(opts: { dataDir: string; args: string[]; id: strin
   writeSession(opts.dataDir, s);
   const before = new Set(readProposals(opts.dataDir).map(p => p.id));
   const msg: Msg = { role: 'assistant', text: '', at: new Date().toISOString(), tools: [] };
-  const turn = startTurn({ provider: s.provider, binary: opts.binary, cwd, prompt, mode: s.mode, mcpConfig: file, persona: PERSONA, resume: s.providerSession, model: s.model, addDirs: [...(tools().root ? [tools().root!] : []), path.dirname(s.brief)], timeoutMs: opts.timeoutMs }, e => {
+  const turn = startTurn({ provider: s.provider, binary: opts.binary, cwd, prompt, mode: s.mode, mcpConfig: file, persona: PERSONA, resume: s.providerSession, model: s.model, addDirs, readOnly, timeoutMs: opts.timeoutMs }, e => {
     if (e.type === 'init') { s.providerSession = e.providerSession; }
     if (e.type === 'text') msg.text += e.delta;
     if (e.type === 'tool') msg.tools!.push({ name: e.name, summary: e.summary });
@@ -249,11 +283,14 @@ export async function runTurn(opts: { dataDir: string; args: string[]; id: strin
     onEvent({ type: 'result', ok: r.ok, error: r.error, costUsd: r.costUsd });
   } finally {
     running.delete(s.id);
-    const latest = readSession(opts.dataDir, s.id) ?? s;
-    latest.messages = [...s.messages, msg];
-    latest.providerSession = s.providerSession;
-    latest.mode = s.mode;
-    writeSession(opts.dataDir, latest);
+    // Deleted while it ran (code review A C-14, C C-26): leave it deleted.
+    const latest = readSession(opts.dataDir, s.id);
+    if (latest) {
+      latest.messages = [...s.messages, msg];
+      latest.providerSession = s.providerSession;
+      latest.mode = s.mode;
+      writeSession(opts.dataDir, latest);
+    }
   }
   onEvent({ type: 'saved', message: msg });
   return msg;

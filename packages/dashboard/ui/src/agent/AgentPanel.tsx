@@ -64,7 +64,8 @@ export function ThreadBody({ className }: { className?: string }) {
   const msgs = s?.messages ?? []
   React.useEffect(() => { end.current?.scrollIntoView({ block: "nearest" }) }, [msgs.length, a.streaming?.text.length, a.proposals.length])
   const live = Boolean(s || a.pending)
-  const send = (text: string, mode?: "advise" | "try") => { if (!text.trim() || a.busy || a.visual.running || !live) return; a.send(text, mode); setDraft("") }
+  // Cleared at once; put back if it didn't go through, so nothing typed is lost.
+  const send = (text: string, mode?: "advise" | "try") => { if (!text.trim() || a.busy || a.visual.running || !live) return; setDraft(""); void a.send(text, mode).then(ok => { if (!ok) setDraft(d => d || text) }) }
   const open = a.proposals.filter(p => p.status === "open")
   const shown = (m: Msg) => a.proposals.filter(p => m.proposals?.includes(p.id))
   const orphan = a.proposals.filter(p => !msgs.some(m => m.proposals?.includes(p.id)))
@@ -203,6 +204,13 @@ export function ProposalCard({ p }: { p: Proposal }) {
       </div>
       <p className="mt-2 font-medium">{p.title}</p>
       <p className="mt-1 text-muted-foreground">{p.rationale}</p>
+      {/* What accepting records, from the payload itself, not only the agent's own title (code review C C-28). */}
+      {(p.kind === "decision" || p.kind === "policy") && p.payload?.decision && (
+        <p className="mt-2 rounded-md bg-muted px-2 py-1.5 text-xs">
+          Records: {p.kind === "policy" ? <>every element styled <code className="font-mono">{p.payload.pattern}</code></> : `${p.payload.ids?.length ?? 0} place${p.payload.ids?.length === 1 ? "" : "s"} (${(p.payload.ids ?? []).slice(0, 4).join(", ")}${(p.payload.ids?.length ?? 0) > 4 ? ", …" : ""})`}
+          {" → "}{p.payload.decision.verdict === "replace" ? `replace with ${p.payload.decision.use}${p.payload.decision.props && Object.keys(p.payload.decision.props).length ? ` ${Object.entries(p.payload.decision.props).map(([k, v]) => `${k}="${v}"`).join(" ")}` : ""}` : p.payload.decision.verdict}
+        </p>
+      )}
       {p.kind === "hint" && <Pre className="mt-2 max-h-40">{JSON.stringify({ when: p.payload.when, prefer: p.payload.prefer, avoid: p.payload.avoid }, null, 1)}</Pre>}
       {p.kind === "dismissal" && <p className="mt-2 rounded-md bg-muted px-2 py-1.5 text-xs">{p.payload.reason}</p>}
       {p.kind === "issue" && <Pre className="mt-2 max-h-48">{`${p.payload.title}\n\n${p.payload.body}`}</Pre>}

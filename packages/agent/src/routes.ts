@@ -16,7 +16,7 @@ import { readComponentChecks, setComponentCheck } from './component-checks.js';
 
 import { detectProviders, type Mode, type ProviderId, type ProviderStatus } from './providers.js';
 import { beforeAfter, diffHash, isVisualRunning, visualFile } from './visual.js';
-import { cancelTurn, createSession, deleteSession, discardSandbox, isRunning, keepChanges, listSessions, readSession, runTurn, sandboxChanges, writeSession } from './sessions.js';
+import { cancelTurn, createSession, deleteSession, discardSandbox, isRunning, keepChanges, listSessions, readSession, runTurn, sandboxChanges, changedCount, writeSession } from './sessions.js';
 
 /**
  * /api/agent/*: the workbench's server side. Mounted by `dsa serve` (the dashboard add-on), which already binds 127.0.0.1,
@@ -87,7 +87,7 @@ function threads(dataDir: string) {
     const s = readSession(dataDir, id);
     // Out of date: a newer scan changed the evidence the thread started on (stage 6).
     const evidenceChanged = Boolean(s && snap?.run && s.scanId && s.evidence && s.scanId !== snap.run.id && evidenceOf(snap, s.subject) !== s.evidence);
-    return { running: isRunning(id), changedFiles: s?.sandbox ? sandboxChanges(s)?.files.length ?? 0 : 0, evidenceChanged };
+    return { running: isRunning(id), changedFiles: s?.sandbox ? changedCount(s) : 0, evidenceChanged };
   });
   writeThreadIndex(dataDir, index);
   return index;
@@ -150,6 +150,9 @@ function handoff(ctx: EngineContext, snapBrief: ReturnType<typeof buildBrief>, q
     cursor: { open: `cursor ${q(snapBrief.repo.dir)}`, prompt: `cursor://anysphere.cursor-deeplink/prompt?text=${encodeURIComponent(short.slice(0, 6000))}` },
   };
 }
+
+/** Proposals being accepted right now. */
+const accepting = new Set<string>();
 
 export const agentRoutes: ServeRoute = async ({ req, res, url, body, send, context }) => {
   const p = url.pathname;
@@ -316,13 +319,17 @@ export const agentRoutes: ServeRoute = async ({ req, res, url, body, send, conte
       const who = String(b.who ?? '').trim() || reviewer(root);
       if (b.action === 'reject') { setStatus(dataDir, pr.id, 'rejected', who, String(b.note ?? '').slice(0, 300) || undefined); return send(200, { status: 'rejected' }), true; }
       if (b.action !== 'accept') return send(400, { error: 'Unknown action.' }), true;
+      // One accept at a time per proposal: a double click must not apply it twice (code review C C-27).
+      if (accepting.has(pr.id)) return send(409, { error: 'Already being accepted.' }), true;
+      accepting.add(pr.id);
+      try {
       const note = `Agent proposal ${pr.id} (${pr.session}), accepted by ${who}: ${pr.rationale}`.slice(0, 600);
       let result = '';
       if (pr.kind === 'decision' || pr.kind === 'policy') {
         const r = await decideMany(root, config, dataDir, pr.kind === 'policy' ? { pattern: pr.payload.pattern } : { ids: pr.payload.ids }, pr.payload.decision, who, note);
         result = `Recorded for ${r.reduce((n: number, x: any) => n + (x.count ?? 1), 0)} element(s).`;
       } else if (pr.kind === 'hint') {
-        const h = addHint(configDir, { when: pr.payload.when, prefer: pr.payload.prefer, avoid: pr.payload.avoid, confidence: pr.payload.confidence, why: pr.payload.why ?? pr.rationale, by: 'human', who, source: { session: pr.session, examples: pr.payload.examples } });
+        const h = addHint(configDir, { when: pr.payload.when, prefer: pr.payload.prefer, avoid: pr.payload.avoid, confidence: pr.payload.confidence, why: pr.payload.why ?? pr.rationale, by: 'agent', who, source: { session: pr.session, examples: pr.payload.examples } });
         const r = await rescore();
         result = `Hint ${h.id} saved to dsa.hints.json; the review re-scored ${r.changed} of ${r.total} elements.`;
       } else if (pr.kind === 'scanner-note') {
@@ -340,6 +347,7 @@ export const agentRoutes: ServeRoute = async ({ req, res, url, body, send, conte
       setStatus(dataDir, pr.id, 'accepted', who, result);
       await writeSnapshot(ctx).catch(() => null);
       return send(200, { status: 'accepted', result }), true;
+      } finally { accepting.delete(pr.id); }
     }
     if (POST && p === '/api/agent/hint/delete') {
       const ok = removeHint(configDir, String((await body()).id));
