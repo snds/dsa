@@ -30,6 +30,13 @@ jobs:
           DSA_NAME_DENYLIST: ${{ secrets.DSA_NAME_DENYLIST }}
         run: node scripts/name-check.mjs --require
       - run: pnpm install --frozen-lockfile
+      # The browser tests need Chromium, as in ci.yml. Without it the screenshot test waits on a
+      # browser that never starts and times out, so the release stops at its tests.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: pnpm --filter @snds/dsa-review exec playwright install chromium
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
