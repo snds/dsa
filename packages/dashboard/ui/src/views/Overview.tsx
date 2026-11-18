@@ -43,16 +43,16 @@ export function Overview({ go, health = false }: { go: (view: string) => void; h
       means: `How many major versions ${app}'s most out-of-date ${SYS} package is behind the latest release.`, to: "federation" },
     { label: "Tokens in new code", value: mine(last, "token_compliance", t?.tokenCompliance), prev: mine(prev, "token_compliance", null), unit: "%", up: true, band: band(mine(last, "token_compliance", t?.tokenCompliance), tc?.watch ?? 95, tc?.act ?? 90), how: "measured",
       means: `Share of colour, space and type values in ${app}'s recently changed files that use a token instead of a hard-coded value.`, to: "federation" },
-    { label: "Custom look-alikes", value: mine(last, "lookalikes", t?.lookalikes), prev: mine(prev, "lookalikes", null), unit: "", up: false, band: "", how: "estimated",
+    { label: "Look-alikes", value: mine(last, "lookalikes", t?.lookalikes), prev: mine(prev, "lookalikes", null), unit: "", up: false, band: "", how: "inferred",
       means: `Native elements and custom components in ${app} that look like a ${SYS} component. Found by resemblance, so each one is a recommendation to check.`, to: "queue" },
   ] : [
     { label: "Used as intended", value: last?.correct_use, prev: prev?.correct_use, unit: "%", up: true, band: band(last?.correct_use, cu?.watch ?? 90, cu?.act ?? 75), how: "measured",
-      means: `Share of ${SYS} component uses in app code with no class, style or spread-prop overrides.`, to: "federation" },
+      means: `Share of all ${SYS} component uses, across every component and app, with no class, style or spread-prop overrides. Components shows it per component.`, to: "federation" },
     { label: "Apps on a current version", value: currentShare(last), prev: currentShare(prev), unit: "%", up: true, band: band(currentShare(last), 100, 75), how: "measured",
       means: `Apps within one major version of the latest ${SYS} release.`, to: "federation" },
     { label: "Tokens in new code", value: last?.token_compliance, prev: prev?.token_compliance, unit: "%", up: true, band: band(last?.token_compliance, tc?.watch ?? 95, tc?.act ?? 90), how: "measured",
       means: "Share of colour, space and type values in recently changed files that use a token instead of a hard-coded value.", to: "federation" },
-    { label: "Custom look-alikes", value: last?.lookalikes, prev: prev?.lookalikes, unit: "", up: false, band: "", how: "estimated",
+    { label: "Look-alikes", value: last?.lookalikes, prev: prev?.lookalikes, unit: "", up: false, band: "", how: "inferred",
       means: `Native elements and custom components that look like a ${SYS} component. Found by resemblance, so each one is a recommendation to check.`, to: "queue" },
   ]
 
@@ -61,7 +61,7 @@ export function Overview({ go, health = false }: { go: (view: string) => void; h
       <Coverage />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {kpis.map((k) => <KpiCard key={k.label} k={k} onOpen={() => go(k.to)} since={prev?.taken_at} />)}
-        <ActionsCard definite={definite.length} decide={decide.length} onOpen={() => go("queue")} />
+        <IssuesCard app={app} onOpen={() => go("inbox")} />
       </div>
 
       {health ? <ScanConfidence go={go} /> : <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
@@ -77,7 +77,7 @@ export function Overview({ go, health = false }: { go: (view: string) => void; h
   )
 }
 
-interface Kpi { label: string; value: number | null | undefined; prev: number | null | undefined; unit: string; up: boolean; band: Band; how: "measured" | "estimated"; means: string; to: string }
+interface Kpi { label: string; value: number | null | undefined; prev: number | null | undefined; unit: string; up: boolean; band: Band; how: "measured" | "inferred"; means: string; to: string }
 
 
 /**
@@ -140,17 +140,20 @@ function KpiCard({ k, onOpen, since }: { k: Kpi; onOpen: () => void; since?: str
           </>
         )}
       </span>
-      <Badge variant="outline" className="mt-1 w-fit">{k.how === "measured" ? "Measured" : "Estimated"}</Badge>
+      <Badge variant="outline" className="mt-1 w-fit">{k.how === "measured" ? "Measured" : "Inferred"}</Badge>
     </button>
   )
 }
 
-function ActionsCard({ definite, decide, onOpen }: { definite: number; decide: number; onOpen: () => void }) {
+/** Open issues, counted as the Inbox counts them, in the Inbox's three certainty words (D2). */
+function IssuesCard({ app, onOpen }: { app: string | null; onOpen: () => void }) {
+  const open = ((D.issues ?? []) as any[]).filter(i => i.status === "open" && (!app || (i.apps ?? []).includes(app)))
+  const n = (c: string) => open.filter(i => i.certainty === c).length
   return (
     <button type="button" onClick={onOpen} className="flex min-w-0 flex-col gap-1.5 rounded-lg border bg-card p-4 text-left transition-colors hover:bg-muted/60">
-      <span className="text-xs font-medium text-muted-foreground">Open actions</span>
-      <span className="font-heading text-3xl font-semibold tabular-nums">{fmt(definite + decide)}</span>
-      <span className="text-xs text-muted-foreground">{fmt(definite)} definite · {fmt(decide)} to decide</span>
+      <span className="text-xs font-medium text-muted-foreground">Open issues</span>
+      <span className="font-heading text-3xl font-semibold tabular-nums">{fmt(open.length)}</span>
+      <span className="text-xs text-muted-foreground">{fmt(n("measured"))} measured · {fmt(n("inferred"))} inferred · {fmt(n("needs-person"))} need a person</span>
     </button>
   )
 }
@@ -161,7 +164,7 @@ function ActionGroup({ kind, items, go }: { kind: Certainty; items: any[]; go: (
   return (
     <section className="mb-5 last:mb-0">
       <h3 className="mb-1 flex items-baseline gap-2 text-sm font-medium">
-        {kind === "definite" ? "Do now" : "Decide"}
+        {CERTAINTY[kind].label}
         <span className="text-xs font-normal text-muted-foreground">{CERTAINTY[kind].hint}</span>
       </h3>
       <ul className="divide-y">

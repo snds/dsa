@@ -10,7 +10,7 @@ const SERIES: { key: string; name: string; unit: string; value: (r: any) => numb
   { key: "current", name: "Consumers within one major", unit: "%", value: r => ratio(r.current_consumers, r.consumers) },
   { key: "correct", name: "Used as intended (avg)", unit: "%", value: r => r.correct_use },
   { key: "tokens", name: "Token compliance, new code (avg)", unit: "%", value: r => r.token_compliance },
-  { key: "lookalikes", name: "Raw look-alikes", unit: "", value: r => r.lookalikes },
+  { key: "lookalikes", name: "Look-alikes", unit: "", value: r => r.lookalikes },
 ]
 
 // One app's lines, from each run's per-app measures. A run from before they were kept leaves a gap.
@@ -18,7 +18,7 @@ const APP_SERIES: { key: string; name: string; unit: string; value: (r: any, app
   { key: "majors", name: "Majors behind", unit: "", value: (r, a) => r.byTarget?.[a]?.majors ?? null },
   { key: "correct", name: "Used as intended", unit: "%", value: (r, a) => r.byTarget?.[a]?.correct_use ?? null },
   { key: "tokens", name: "Token compliance, new code", unit: "%", value: (r, a) => r.byTarget?.[a]?.token_compliance ?? null },
-  { key: "lookalikes", name: "Raw look-alikes", unit: "", value: (r, a) => r.byTarget?.[a]?.lookalikes ?? null },
+  { key: "lookalikes", name: "Look-alikes", unit: "", value: (r, a) => r.byTarget?.[a]?.lookalikes ?? null },
 ]
 
 export function Trends() {

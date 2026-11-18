@@ -35,9 +35,10 @@ export const sevTone: Record<string, string> = {
 
 export function SevBadge({ sev }: { sev: string }) {
   return (
-    <Badge variant="outline" className="gap-1.5">
-      <span className={cn("size-2 rounded-full", sevTone[sev])} />
-      {SEV[sev] ?? sev}
+    // Impact (how much it matters), not certainty (how sure the scan is): labelled so the two don't mix.
+    <Badge variant="outline" className="gap-1.5" title="How much it matters">
+      <span className={cn("size-2 rounded-full", sevTone[sev])} aria-hidden="true" />
+      <span className="text-muted-foreground">Impact</span> {SEV[sev] ?? sev}
     </Badge>
   )
 }

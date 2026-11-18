@@ -69,6 +69,10 @@ test("Health: the measures, how sure the scan is, the lines over time and readin
   expect(text()).toContain("Over time")
   expect(text()).toContain("Agent readiness and bench runs")
   expect(text()).not.toContain("What to do next")
+  // One count and one certainty scale (UX A, B, C): Health counts issues as the Inbox does, in its words.
+  expect(text()).toContain("Open issues1")
+  expect(text()).toContain("0 measured · 0 inferred · 1 need a person")
+  for (const old of ["Open actions", "definite", "to decide", "Estimated", "Custom look-alikes"]) expect(text()).not.toContain(old)
 })
 
 test("Components: a doubted component can be confirmed, and it leaves Needs a check", async () => {
