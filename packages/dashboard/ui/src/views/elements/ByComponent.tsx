@@ -205,8 +205,20 @@ export function ByComponent({ evals, rail = true }: { evals: any[]; rail?: boole
     const here = at >= 0 ? visible[at] : null
     if (act === "next") move(at + 1)
     else if (act === "prev") move(at < 0 ? 0 : at - 1)
-    else if (act === "tick") { if (here && !whyNot(here, checks)) click(here.id, false) }
-    else if (act === "confirm") { if (selected.size) answer("confirm"); else if (here && !whyNot(here, checks)) answer("confirm", [here.id]) }
+    // A key that can't act says why, instead of doing nothing (UX review C U-06).
+    else if (act === "tick") { if (!here) return; const why = whyNot(here, checks); if (why) say(why, true); else click(here.id, false) }
+    else if (act === "confirm") {
+      if (selected.size) answer("confirm")
+      else if (here) {
+        const why = whyNot(here, checks)
+        if (why) { say(why, true); return }
+        // Never confirm a place that isn't on screen: show it first, confirm on the next press (UX review A U-12).
+        const row = document.querySelector(`[data-place="${CSS.escape(here.id)}"]`)
+        const r = row?.getBoundingClientRect()
+        if (r && (r.bottom < 0 || r.top > window.innerHeight)) { row!.scrollIntoView?.({ block: "center" }); say("Press C again to confirm this place."); return }
+        answer("confirm", [here.id])
+      }
+    }
     else if (act === "change") { if (selected.size) change(); else if (here) openPicker({ ids: [here.id] }) }
     else if (act === "note") { const n = here && document.getElementById(`note-${here.id}`); if (!n) return; (n as HTMLInputElement).focus() }
     else if (act === "open") { if (here && D.serve && reviewable.has(here.id)) setFocus({ ids: visible.map(e => e.id), i: at }) }
@@ -245,6 +257,12 @@ export function ByComponent({ evals, rail = true }: { evals: any[]; rail?: boole
             <h2 id="bc-title" className="font-heading text-lg font-semibold">{g.kind === "component" ? `${SYS} ${g.name}` : g.name}</h2>
             <span className="text-sm text-muted-foreground">{plural(g.counts.total, "place")} · {plural(g.batches.length, "batch", "batches")} · {g.counts.todo} to decide</span>
           </div>
+          {/* Nothing to decide yet, but places waiting: say how to get going (UX review A U-05, C U-06). */}
+          {g.counts.todo === 0 && g.counts.evidence > 0 && (
+            <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+              {g.counts.evidence === g.counts.total ? "Every place here" : `${plural(g.counts.evidence, "place")} here`} {g.counts.evidence === 1 ? "has" : "have"} no photo or drawn proposal yet, so {g.counts.evidence === 1 ? "it" : "they"} can't be answered in a batch. Open one on its own (<kbd>O</kbd>) and answer it there, or re-scan with photos (the Re-scan menu: retake photos).
+            </p>
+          )}
           <ToggleGroup aria-label="Show" value={[show]} onValueChange={(v: string[]) => v[0] && filter(v[0] as any)} variant="outline" size="sm" className="flex-wrap">
             {FILTERS.map(([v, l]) => <ToggleGroupItem key={v} value={v}>{l} <span className="tabular-nums text-muted-foreground">{v === "all" ? g.counts.total : g.counts[v]}</span></ToggleGroupItem>)}
           </ToggleGroup>

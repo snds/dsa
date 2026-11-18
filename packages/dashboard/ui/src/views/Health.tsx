@@ -18,7 +18,7 @@ export const HEALTH_SECTIONS = [
 
 export function Health({ go, section }: { go: (view: string) => void; section?: string }) {
   const readiness = Boolean(D.readiness?.length || D.bench?.length)
-  const sections = HEALTH_SECTIONS.filter(s => s.id !== "readiness" || readiness)
+  const sections = HEALTH_SECTIONS
   React.useEffect(() => {
     const s = HEALTH_SECTIONS.find(x => x.from === section || x.id === section)
     if (s && s.id !== "measures") document.getElementById(`health-${s.id}`)?.scrollIntoView({ block: "start" })
@@ -33,12 +33,11 @@ export function Health({ go, section }: { go: (view: string) => void; section?: 
         <h2 id="h-trends" className="font-heading text-lg font-semibold">Over time</h2>
         <Trends />
       </section>
-      {readiness && (
-        <section id="health-readiness" aria-labelledby="h-readiness" className="flex scroll-mt-40 flex-col gap-4">
-          <h2 id="h-readiness" className="font-heading text-lg font-semibold">Agent readiness and bench runs</h2>
-          <Readiness />
-        </section>
-      )}
+      <section id="health-readiness" aria-labelledby="h-readiness" className="flex scroll-mt-40 flex-col gap-4">
+        <h2 id="h-readiness" className="font-heading text-lg font-semibold">Agent readiness and bench runs</h2>
+        {/* Say why it's empty rather than hide it (UX review B U-21). */}
+        {readiness ? <Readiness /> : <p className="max-w-prose text-sm text-muted-foreground">Not measured in this run. A scan measures it when the profile names a readiness provider; <code>dsa run --no-readiness</code> skips it.</p>}
+      </section>
     </div>
   )
 }

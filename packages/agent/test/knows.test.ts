@@ -33,7 +33,7 @@ test('the layers say what is included and what is missing, plainly', () => {
   assert.equal(by('Past decisions').status, 'included');
   assert.equal(by('Usage guidelines').status, 'missing', 'no profile entry: the gap is shown, not hidden');
   assert.match(by('Usage guidelines').detail, /No guidelines found for Select/);
-  assert.equal(by('Rejected proposals').status, 'missing');
+  assert.equal(by('Rejected proposals').status, 'none-yet', 'nothing rejected yet is not a gap');
   assert.equal(by('The code').status, 'included');
   const old = whatTheAgentKnows(snap(data, { run: { id: 'run-1', takenAt: '2026-01-01T00:00:00Z' } }), { kind: 'scan' });
   assert.equal(old.find(s => s.name === 'The code')!.status, 'stale');
@@ -79,4 +79,14 @@ test('MCP: the four new read-only tools answer from the scan', async () => {
   assert.match(await call('component_guidelines', { component: 'Select' }), /No guidelines found for Select/);
   assert.match(await call('tokens_for', { component: 'Select' }), /outline/);
   assert.match(await call('related_threads'), /No related threads/);
+});
+
+test('nothing to give yet is "none yet", not a gap; a finding keyed "Name|prop" is about Name', () => {
+  const data = tmp();
+  const sn = snap(data, { queue: [{ id: 'F-DT1', kind: 'finding', rule: 'override', subject: 'DataTable|className', title: 'Overrides on DataTable', evidence: 'e', places: [], status: 'open' }] as any, evals: [] });
+  const src = whatTheAgentKnows(sn, { kind: 'queue', id: 'F-DT1' } as any);
+  const by = (n: string) => src.find(s => s.name === n)!;
+  assert.equal(by('Rejected proposals').status, 'none-yet');
+  assert.equal(by('Past decisions').status, 'none-yet');
+  assert.ok(!src.some(s => s.status === 'missing' && /DataTable\|/.test(s.detail)), 'the component is DataTable, not the raw key');
 });

@@ -54,7 +54,8 @@ function readHash(): { view: ViewId; section: SectionId; part?: string } {
   // Older links: #components is the System view now; #review is part of Element Review.
   // Actions folded into the Inbox (redesign stage 4): #queue and #queue/<id> land on the same issue there.
   const v = v0 === "components" ? "system" : v0 === "review" && D.elements ? "elements" : v0 === "queue" ? "inbox" : v0
-  const view = (v === "settings" || ROUTES.includes(v as ViewId) ? v : D.run ? "inbox" : "settings") as ViewId
+  // The Inbox first, before the first scan too: its empty state says what to press (UX review C U-25).
+  const view = (v === "settings" || ROUTES.includes(v as ViewId) ? v : "inbox") as ViewId
   // The old Rules tab lives in Settings now.
   if (v === "rules") return { view: "settings", section: "rules" }
   return { view, section: (SECTIONS.some(x => x.id === s) ? s : "general") as SectionId }

@@ -87,6 +87,33 @@ function useIssues(): Issue[] {
   return issues
 }
 
+/**
+ * The thread several ticked issues share: their component when they all have the same one; otherwise the
+ * whole scan, with the issues named in the question (UX review A U-14, C U-18: it used the first one's).
+ */
+export function tickedSubject(list: Issue[]): Subject {
+  const comps = new Set(list.map(i => i.component ?? ""))
+  const only = comps.size === 1 ? [...comps][0] : ""
+  return only ? { kind: "group", by: "component", value: only, title: `${list.length} ticked issues about ${only}` } : { kind: "scan" }
+}
+
+/** Why the scan doubts a component, with what it found (UX review B U-14, C U-07: the check asked with no evidence). */
+function CheckEvidence({ name }: { name: string }) {
+  const c = ((D.model?.components ?? []) as any[]).find(x => String(x.name).toLowerCase() === name.toLowerCase())
+  if (!c) return null
+  const why: string[] = []
+  if (c.evidence?.tier === "convention") why.push("it was found by its name alone, not exported or declared by a system package")
+  if (c.inferred) why.push("it was found only in app code")
+  if (c.kind?.ambiguous) why.push(`its kind is unclear (${c.kind.kind}, close to another kind)`)
+  return (
+    <div className="flex flex-col gap-1 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+      <p><span className="font-medium">Why it asks:</span> {why.length ? why.join("; ") : "the scan isn't sure it belongs to the system"}.</p>
+      {c.evidence?.file && <p className="text-muted-foreground">Found at <code className="font-mono text-xs">{c.evidence.file}{c.evidence.line ? `:${c.evidence.line}` : ""}</code>{c.evidence.extractor ? ` (by ${c.evidence.extractor})` : ""}.</p>}
+      {c.uses && <p className="text-muted-foreground">Used {c.uses.consumer ?? 0} time{c.uses.consumer === 1 ? "" : "s"} in apps, {c.uses.internal ?? 0} inside the system, in {c.uses.files ?? 0} file{c.uses.files === 1 ? "" : "s"}.</p>}
+    </div>
+  )
+}
+
 export function Inbox() {
   const issues = useIssues()
   const app = useApp()
@@ -111,10 +138,11 @@ export function Inbox() {
   const shown = mine.filter(pass[filter])
   const count = (f: Filter) => mine.filter(pass[f]).length
 
-  const groupOf = (i: Issue) => by === "component" ? (i.component ?? "") : by === "app" ? (i.apps[0] ?? "") : i.kind
+  // An issue about several apps sits under each of them when grouped by app (UX review A U-13).
+  const groupsOf = (i: Issue): string[] => by === "component" ? [i.component ?? ""] : by === "app" ? (i.apps.length ? i.apps : [""]) : [i.kind]
   const groups = React.useMemo(() => {
     const m = new Map<string, Issue[]>()
-    for (const i of shown) { const g = groupOf(i); m.set(g, [...(m.get(g) ?? []), i]) }
+    for (const i of shown) for (const g of groupsOf(i)) m.set(g, [...(m.get(g) ?? []), i])
     // Named groups by size, then the issues not about one component or app.
     return [...m].sort((a, b) => (a[0] === "" ? 1 : b[0] === "" ? -1 : b[1].length - a[1].length || a[0].localeCompare(b[0])))
   }, [shown, by])
@@ -180,7 +208,7 @@ export function Inbox() {
     return () => removeEventListener("keydown", on)
   }, [order, sel])
 
-  if (!D.run) return <Empty className="border"><EmptyHeader><EmptyTitle>No scan yet</EmptyTitle><EmptyDescription>Run a scan to fill the Inbox.</EmptyDescription></EmptyHeader></Empty>
+  if (!D.run) return <Empty className="border"><EmptyHeader><EmptyTitle>No scan yet</EmptyTitle><EmptyDescription>Press Run scan at the top right to fill the Inbox. To check where it will look first, open Settings (the gear) › Sources.</EmptyDescription></EmptyHeader></Empty>
   if (!issues.length) return <Empty className="border"><EmptyHeader><EmptyTitle>No issues in this report</EmptyTitle><EmptyDescription>Re-run the scan to build the Inbox.</EmptyDescription></EmptyHeader></Empty>
 
   const tickedIssues = shown.filter(i => ticked.has(i.key))
@@ -219,10 +247,11 @@ export function Inbox() {
       {tickedIssues.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm" data-slot="batch-bar">
           <Badge variant="outline">{tickedIssues.length} ticked</Badge>
-          {canChat() && <Button size="sm" variant="outline" onClick={() => agent.start({ kind: "group", by: "component", value: tickedIssues[0]!.component ?? "these issues", title: `${tickedIssues.length} ticked issues` }, { ask: `Look at these issues together and say what they share: ${tickedIssues.map(i => `${i.key} (${i.title})`).join("; ")}.` })}><SparkleIcon data-icon="inline-start" />Ask the agent about {tickedIssues.length}</Button>}
+          {canChat() && <Button size="sm" variant="outline" onClick={() => agent.start(tickedSubject(tickedIssues), { ask: `Look at these issues together and say what they share: ${tickedIssues.map(i => `${i.key} (${i.title})`).join("; ")}.` })}><SparkleIcon data-icon="inline-start" />Ask the agent about {tickedIssues.length}</Button>}
           {D.serve && q?.github.token && tickedIssues.some(i => i.source?.type === "queue") && (
             <Button size="sm" onClick={() => create(tickedIssues.filter(i => i.source?.type === "queue").map(i => i.source.id))} disabled={!!creating}>Create issues for {tickedIssues.filter(i => i.source?.type === "queue").length}</Button>
           )}
+          <BatchDismiss issues={tickedIssues.filter(i => i.status === "open")} onDone={() => setTicked(new Set())} />
           <Button size="sm" variant="ghost" onClick={() => setTicked(new Set())}>Clear</Button>
           <span className="ml-auto hidden items-center gap-1 text-xs text-muted-foreground sm:flex"><Kbd>J</Kbd><Kbd>K</Kbd> move · <Kbd>X</Kbd> tick · <Kbd>Esc</Kbd> clear</span>
         </div>
@@ -336,6 +365,7 @@ function IssueDetail({ i, q, creating, create }: { i: Issue; q: any; creating: b
           {i.apps.length > 0 && <><dt className="text-muted-foreground">Apps</dt><dd>{i.apps.join(", ")}</dd></>}
           <dt className="text-muted-foreground">Issue</dt><dd className="font-mono text-xs">{i.key}</dd>
         </dl>
+        {i.kind === "component-check" && i.component && <CheckEvidence name={i.component} />}
         {i.kind === "component-check" && i.component && <CheckAnswer name={i.component} />}
         <div className="flex flex-wrap items-center gap-2">
           {route && <Button variant="outline" nativeButton={false} render={<a href={hashFor(route)} />}><ArrowSquareOutIcon data-icon="inline-start" />{label}</Button>}
@@ -345,6 +375,31 @@ function IssueDetail({ i, q, creating, create }: { i: Issue; q: any; creating: b
         <DismissIssue i={i} />
       </div>
     </Panel>
+  )
+}
+
+/** Dismiss every ticked issue with one reason (UX review A U-15, B U-19: ticking offered only Ask). */
+function BatchDismiss({ issues, onDone }: { issues: Issue[]; onDone: () => void }) {
+  const [open, setOpen] = React.useState(false)
+  const [label, setLabel] = React.useState("intended")
+  const [busy, setBusy] = React.useState(false)
+  if (!D.serve || !issues.length) return null
+  if (!open) return <Button size="sm" variant="outline" onClick={() => setOpen(true)}>Dismiss {issues.length}…</Button>
+  const go = async () => {
+    setBusy(true)
+    let n = 0
+    for (const i of issues) { try { await api("/api/agent/dismissal", { key: i.key, label, reason: "", title: i.title }); n++ } catch (e: any) { say(`${i.key}: ${e.message}`, true) } }
+    setBusy(false); setOpen(false)
+    if (n) { say(`Dismissed ${n}: ${DISMISS_LABEL[label]}. Undo on each one, under Done.`); onDone() }
+  }
+  return (
+    <span className="flex flex-wrap items-center gap-2">
+      <NativeSelect size="sm" aria-label="Why" value={label} onChange={e => setLabel(e.target.value)}>
+        {Object.entries(DISMISS_LABEL).map(([k, v]) => <NativeSelectOption key={k} value={k}>{v}</NativeSelectOption>)}
+      </NativeSelect>
+      <Button size="sm" onClick={() => void go()} disabled={busy}>Dismiss {issues.length}</Button>
+      <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+    </span>
   )
 }
 

@@ -41,7 +41,10 @@ export function Picker({ target, onClose }: { target: PickerTarget; onClose: () 
   const prior = first.decided?.decision?.verdict === "replace" ? first.decided.decision : null
   const suggested = [...new Set<string>([prior?.use, first.use, ...first.alternatives.map((a: any) => a.use)].filter(Boolean))]
 
-  const [comps, setComps] = React.useState<any[] | null>(G.comps ?? null)
+  // dsa's own pick is always offered, even when the scan found no signature for it (UX review A U-06):
+  // it shows as "no signature in this scan", with no variant axes to set.
+  const withSuggested = (list: any[]) => [...list, ...suggested.filter(n => !list.some(c => c.component === n)).map(n => ({ component: n, from: "No signature in this scan", axes: {}, unsigned: true }))]
+  const [comps, setComps] = React.useState<any[] | null>(G.comps ? withSuggested(G.comps) : null)
   const [loadErr, setLoadErr] = React.useState("")
   const [sb, setSb] = React.useState<any>(G.sb ?? null)
   const [sbBusy, setSbBusy] = React.useState(false)
@@ -62,7 +65,7 @@ export function Picker({ target, onClose }: { target: PickerTarget; onClose: () 
 
   React.useEffect(() => {
     if (comps) { pick(comps.find(c => c.component === (prior?.use ?? first.use)) ?? comps.find(c => c.component === suggested[0]) ?? null); return }
-    api("/api/components").then(r => { G.comps = r.components; G.icons = r.icons ?? []; setComps(r.components); pick(r.components.find((c: any) => c.component === (prior?.use ?? first.use)) ?? r.components.find((c: any) => c.component === suggested[0]) ?? null) }, e => setLoadErr(e.message))
+    api("/api/components").then(r => { G.comps = r.components; G.icons = r.icons ?? []; const all = withSuggested(r.components); setComps(all); pick(all.find((c: any) => c.component === (prior?.use ?? first.use)) ?? all.find((c: any) => c.component === suggested[0]) ?? null) }, e => setLoadErr(e.message))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Seed from the recorded decision, or the evaluator's pick, for the component being shown. */
@@ -296,7 +299,7 @@ export function Picker({ target, onClose }: { target: PickerTarget; onClose: () 
                     </NativeSelect>
                   </Field>
                 ))}
-                {!Object.keys(comp.axes ?? {}).length && <Note className="text-xs">No variant axes.</Note>}
+                {!Object.keys(comp.axes ?? {}).length && <Note className="text-xs">{comp.unsigned ? "This scan read no signature for it, so there are no variant axes to set. The answer still records the component." : "No variant axes."}</Note>}
                 {argControls()}
               </Section>
               {hasContent(comp) && (

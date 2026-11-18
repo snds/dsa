@@ -116,7 +116,9 @@ export function repoFor(snap: Snapshot, s0: Subject): { name: string; dir: strin
   const core = { name: snap.targets.find(t => t.role === 'core')?.name ?? path.basename(snap.root), dir: snap.root };
   const byName = (n?: string) => { const t = snap.targets.find(x => x.name === n); return t ? { name: t.name, dir: t.dir } : null; };
   if (s.kind === 'review') return byName(snap.evals.find(e => e.id === s.ids[0])?.target) ?? core;
-  if (s.kind === 'queue') { const i = snap.queue.find(q => q.id === s.id); return byName(i?.target) ?? byName(i?.affected?.[0]) ?? byName(i?.owner) ?? core; }
+  // The issue's owner before the first app it affects: a system-owned gap across apps is worked on in
+  // the system's repo, not in the first app's (UX review A U-19, B U-17).
+  if (s.kind === 'queue') { const i = snap.queue.find(q => q.id === s.id); return byName(i?.target) ?? byName(i?.owner) ?? (i?.affected?.length === 1 ? byName(i.affected[0]) : null) ?? core; }
   if (s.kind === 'readiness') return byName(s.subject) ?? core;
   return core;
 }
