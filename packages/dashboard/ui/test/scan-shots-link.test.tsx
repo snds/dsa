@@ -6,6 +6,7 @@ import { createRoot, type Root } from "react-dom/client"
 
 // A published page with no relay can only open GitHub's Run workflow form, not fill it in. So the
 // split Re-scan keeps the setting, offers a terminal command that carries it, and names the form's choice.
+// The command and the note live in the scan details under the title (RescanHow), not under the button.
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 let App: typeof import("@/App")
@@ -31,7 +32,7 @@ async function mount() {
   const host = document.createElement("div")
   document.body.append(host)
   root = createRoot(host)
-  await act(async () => root.render(<App.StaticRescan onPost={() => {}} />))
+  await act(async () => root.render(<><App.StaticRescan onPost={() => {}} /><App.RescanHow /></>))
 }
 
 test("the link and its settings form one group, with no instruction by default", async () => {
@@ -39,6 +40,7 @@ test("the link and its settings form one group, with no instruction by default",
   const group = document.querySelector('[data-slot="button-group"]')!
   expect(group.querySelector("a")!.getAttribute("href")).toContain("/actions/workflows/pages.yml")
   expect(group.querySelector('[aria-label="Re-scan settings"]')).toBeTruthy()
+  expect(group.querySelector("code"), "the command isn't under the button any more").toBeNull()
   expect(document.body.textContent).not.toContain("under Photos")
   expect(document.querySelector("code")!.textContent).toBe("gh workflow run pages.yml --repo acme/site --ref main")
 })

@@ -29,7 +29,7 @@ export function NextScan({ prefix = "Next scan", className }: { prefix?: string;
   useTick(60000)
   const next = nextScheduled(D.schedule)
   if (!next) return null
-  return <span className={className} title={`Scheduled: ${(D.schedule as string[]).join(" · ")} (cron, UTC)`}>{prefix}: <time dateTime={next.toISOString()}>{fmtWhen(next.toISOString())}</time></span>
+  return <span className={className} title={`Scheduled: ${(D.schedule as string[]).join(" · ")} (cron, UTC)`}>{prefix ? `${prefix}: ` : ""}<time dateTime={next.toISOString()}>{fmtWhen(next.toISOString())}</time></span>
 }
 
 const ACTIVE = new Set(["starting", "running", "deploying", "ready", "failed"])

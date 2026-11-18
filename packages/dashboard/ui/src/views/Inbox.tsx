@@ -1,6 +1,6 @@
 import * as React from "react"
 import { cn } from "cn"
-import { ArrowSquareOutIcon, CaretDownIcon, CaretRightIcon, CheckCircleIcon, CubeIcon, InfoIcon, QuestionIcon, SparkleIcon } from "@phosphor-icons/react"
+import { ArrowSquareOutIcon, CaretDownIcon, CaretRightIcon, CheckCircleIcon, CubeIcon, InfoIcon, QuestionIcon, SparkleIcon, CaretLineLeftIcon } from "@phosphor-icons/react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -114,6 +114,8 @@ function CheckEvidence({ name }: { name: string }) {
   )
 }
 
+const THREAD_SHUT = "dsa.inbox.threadShut"
+
 export function Inbox() {
   const issues = useIssues()
   const app = useApp()
@@ -150,7 +152,11 @@ export function Inbox() {
   const order = groups.flatMap(([g, items]) => (closed.has(g) ? [] : items))
   const sel = order.find(i => i.key === current) ?? order[0] ?? null
   // A third column only when there is a thread to show in it (a published page may have none).
-  const third = sel ? canChat() || publishedThreadShown(subjectOf(sel)) : false
+  const hasThread = sel ? canChat() || publishedThreadShown(subjectOf(sel)) : false
+  // The thread column can be hidden, so the issue gets the width to be reviewed (design review). Kept per browser.
+  const [threadShut, setThreadShut] = React.useState(() => { try { return localStorage.getItem(THREAD_SHUT) === "1" } catch { return false } })
+  const shutThread = (v: boolean) => { setThreadShut(v); try { localStorage.setItem(THREAD_SHUT, v ? "1" : "0") } catch { /* private window */ } }
+  const third = hasThread && !threadShut
   // The list as it was shown, so the issue after one that just left it can be found.
   const lastOrder = React.useRef<Issue[]>(order)
   React.useEffect(() => { if (current && order.some(i => i.key === current)) lastOrder.current = order })
@@ -265,7 +271,7 @@ export function Inbox() {
           Wide: the list, the issue, and its thread (when there is one to show). Narrower: the thread opens
           as the side sheet. One column: the chosen issue comes first. */}
       <div className="@container">
-      <div className={cn("grid items-start gap-6 @4xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]", third && "@7xl:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)_minmax(22rem,26rem)]")}>
+      <div className={cn("grid items-start gap-6 @4xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]", third && "@7xl:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)_minmax(22rem,26rem)]", hasThread && threadShut && "@7xl:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)]")}>
         <div ref={list} className="order-2 flex min-w-0 flex-col overflow-hidden rounded-lg border @4xl:order-none @4xl:max-h-[calc(100vh-12rem)] @4xl:overflow-y-auto @4xl:shadow-[inset_0_-14px_10px_-12px_var(--color-border)]" role="list" aria-label="Issues">
           {!shown.length && <Empty><EmptyHeader><EmptyTitle>{filter === "waiting" ? "Nothing is waiting on you" : filter === "done" ? "Nothing done yet" : "Nothing here"}</EmptyTitle><EmptyDescription>{plural(count("open"), "issue")} open in all.</EmptyDescription></EmptyHeader></Empty>}
           {groups.map(([g, items]) => {
@@ -292,12 +298,13 @@ export function Inbox() {
         </div>
         <div className="order-1 flex min-w-0 flex-col gap-3 @4xl:order-none">
           {sel && canChat() && <Button variant="outline" size="sm" className="w-fit @7xl:hidden" onClick={() => agent.start(subjectOf(sel))}><SparkleIcon data-icon="inline-start" />Open this issue's thread</Button>}
+          {hasThread && threadShut && <Button variant="outline" size="sm" className="hidden w-fit self-end @7xl:inline-flex" onClick={() => shutThread(false)}><CaretLineLeftIcon data-icon="inline-start" />Show the thread</Button>}
           {/* With nothing in the list, the empty state says it all; no second "Select an issue" card (visual review B V-13). */}
           {sel ? <IssueDetail i={sel} q={q} creating={!!creating} create={create} /> : shown.length > 0 && <Panel><p className="text-sm text-muted-foreground">Select an issue to see it here.</p></Panel>}
         </div>
-        {sel && canChat() && <PinnedThread subject={subjectOf(sel)} className="hidden @7xl:sticky @7xl:top-36 @7xl:flex @7xl:h-[calc(100vh-10rem)]" />}
+        {sel && canChat() && !threadShut && <PinnedThread subject={subjectOf(sel)} onHide={() => shutThread(true)} className="hidden @7xl:sticky @7xl:top-36 @7xl:flex @7xl:h-[calc(100vh-10rem)]" />}
         {/* A published page: the thread as of publishing, and Discuss on GitHub (stage 9). */}
-        {sel && !canChat() && <PublishedThread subject={subjectOf(sel)} title={sel.title} className="order-3 @4xl:order-none @4xl:col-start-2 @7xl:col-start-auto @7xl:sticky @7xl:top-36" />}
+        {sel && !canChat() && <PublishedThread subject={subjectOf(sel)} title={sel.title} onHide={() => shutThread(true)} className={cn("order-3 @4xl:order-none @4xl:col-start-2 @7xl:col-start-auto @7xl:sticky @7xl:top-36", threadShut && "@7xl:hidden")} />}
       </div>
       </div>
     </div>
