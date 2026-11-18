@@ -1,4 +1,4 @@
-import { ChatCircleIcon, GithubLogoIcon, GitPullRequestIcon, MagnifyingGlassIcon } from "@phosphor-icons/react"
+import { CaretLineRightIcon, ChatCircleIcon, GithubLogoIcon, GitPullRequestIcon, MagnifyingGlassIcon } from "@phosphor-icons/react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { D, fmtD } from "@/lib/dsa"
@@ -14,7 +14,7 @@ import { anchorKeyOf, type Subject } from "./store"
 /** Whether a published page has anything to show for this subject's thread: a summary, or Discuss on GitHub. */
 export const publishedThreadShown = (subject: Subject): boolean => Boolean((D.threads ?? {})[anchorKeyOf(subject)] || ACTIONS?.thread)
 
-export function PublishedThread({ subject, title, className }: { subject: Subject; title: string; className?: string }) {
+export function PublishedThread({ subject, title, className, onHide }: { subject: Subject; title: string; className?: string; onHide?: () => void }) {
   const key = anchorKeyOf(subject)
   const t = (D.threads ?? {})[key] as any
   const gh = ACTIONS?.thread ?? null
@@ -27,6 +27,8 @@ export function PublishedThread({ subject, title, className }: { subject: Subjec
         <h3 className="font-semibold">Thread</h3>
         {st && <Badge variant="outline" className={st.tone}><st.icon />{st.label}</Badge>}
         {t?.updatedAt && <span className="text-xs text-muted-foreground">as of {fmtD(t.updatedAt)}</span>}
+        {onHide && <span className="ml-auto" />}
+        {onHide && <Button variant="ghost" size="icon-sm" className="hidden @7xl:inline-flex" aria-label="Hide the thread" title="Hide the thread: give the issue the room" onClick={onHide}><CaretLineRightIcon /></Button>}
       </header>
       {t ? (
         <>

@@ -4,9 +4,10 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "@/components/ui/popover"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
-import { EvidenceTimes, Pre } from "@/components/bits"
+import { Pre } from "@/components/bits"
 import { D, SYS, ago, api, copy, fmtD, fmtDT } from "@/lib/dsa"
 import { Inbox } from "@/views/Inbox"
 import { Federation } from "@/views/Federation"
@@ -102,14 +103,8 @@ function AgentButton() {
 export function StaticRescan({ onPost }: { onPost: () => void }) {
   const r = ACTIONS!.rescan
   const { shots } = useScan()
-  const target = (r.url ?? "").replace(/^https?:\/\//, "").replace(/\/$/, "")
   // Nothing can start a scan from here: say when the next one runs and how to enable the button.
-  if (r.kind === "none") return (
-    <div className="flex max-w-sm flex-col items-end gap-1">
-      <NextScan prefix="Next scan" className="text-xs text-muted-foreground" />
-      <p className="text-right text-xs text-muted-foreground">{r.help}</p>
-    </div>
-  )
+  if (r.kind === "none") return null
   const setting = offersShots() && shots !== "normal"
   const href = r.kind === "issue" ? rescanIssueUrl(r, shots) : r.url
   const opens = r.kind === "issue" || r.kind === "link"
@@ -120,39 +115,81 @@ export function StaticRescan({ onPost }: { onPost: () => void }) {
   ) : (
     <Button variant="outline" onClick={onPost} title={r.help}><PaperPlaneTiltIcon data-icon="inline-start" />{r.label}</Button>
   )
+  // Just the button (and the photos choice): when the next scan runs, what the button opens and the
+  // terminal command live in the scan details under the title (design review: the helper lines pushed
+  // the group into the middle of the header, and "Next scan" repeated the line under the title).
+  return (
+    <div className="flex items-center gap-2" data-slot="static-rescan">
+      {offersShots() && <ShotsNote />}
+      {offersShots() && opens ? <ButtonGroup>{button}<ShotsMenu variant="outline" /></ButtonGroup> : button}
+    </div>
+  )
+}
+
+/** What the re-scan button does on a published page, and the terminal command: for the scan details. */
+export function RescanHow() {
+  const { shots } = useScan()
+  const r = ACTIONS?.rescan
+  if (!r || D.serve || !D.published) return null
+  const setting = offersShots() && shots !== "normal"
+  const target = (r.url ?? "").replace(/^https?:\/\//, "").replace(/\/$/, "").split("/")[0]
+  const opens = r.kind === "issue" || r.kind === "link"
   // A link can't fill in GitHub's Run workflow form; the command can, so it carries the setting.
   const command = r.kind === "link" && r.command ? `${r.command}${setting ? ` -f shots=${shots}` : ""}` : null
-  const where = r.kind === "issue" ? "Opens a filled-in GitHub issue: submit it to start the scan." : opens ? `Opens ${target.split("/")[0]} in a new tab.` : `Sends a request to ${target.split("/")[0]}.`
+  const where = r.kind === "none" ? r.help : r.kind === "issue" ? "Re-scan opens a filled-in GitHub issue: submit it to start the scan." : opens ? `Re-scan opens ${target} in a new tab.${setting && r.kind === "link" ? ` On GitHub's page, choose ${shots} under Photos.` : ""}` : `Re-scan sends a request to ${target}.`
   return (
-    <div className="flex max-w-sm flex-col items-end gap-1" data-slot="static-rescan">
-      {offersShots() && opens ? <ButtonGroup>{button}<ShotsMenu variant="outline" /></ButtonGroup> : button}
-      {offersShots() && <ShotsNote />}
-      <p className="flex flex-wrap justify-end gap-x-2 text-right text-xs text-muted-foreground">
-        <NextScan prefix="Next scan" /><span>{where}{setting && r.kind === "link" ? ` On GitHub's page, choose ${shots} under Photos.` : ""}</span>
-      </p>
+    <div className="flex flex-col gap-2 border-t pt-3 text-xs text-muted-foreground">
+      <p>{where}</p>
       {command && (
-        <details className="w-full text-right text-xs text-muted-foreground">
-          <summary className="cursor-pointer select-none hover:text-foreground">Run it from a terminal</summary>
-          <div className="mt-1 flex items-center gap-1 rounded-md border bg-muted/40 py-1 pr-1 pl-2 text-left">
-            <code className="min-w-0 flex-1 font-mono break-all">{command}</code>
-            <Button size="icon-sm" variant="ghost" aria-label="Copy command" title="Copy command" onClick={() => copy(command, "Command copied. Run it in a terminal.")}><CopyIcon /></Button>
-          </div>
-        </details>
+        <div className="flex items-center gap-1 rounded-md border bg-muted/40 py-1 pr-1 pl-2">
+          <code className="min-w-0 flex-1 font-mono break-all">{command}</code>
+          <Button size="icon-sm" variant="ghost" aria-label="Copy command" title="Copy command" onClick={() => copy(command, "Command copied. Run it in a terminal.")}><CopyIcon /></Button>
+        </div>
       )}
     </div>
   )
 }
 
 /** The revision the scan read and when it went live, or that it wasn't checked against production. */
-function LiveRevision() {
+const liveText = () => {
   const l = D.live
   const sha = String(l.head ?? l.revision?.sha ?? "").slice(0, 7)
-  const text = l.state === "live" ? `Live revision ${sha}${l.revision?.liveAt ? `, live since ${fmtD(l.revision.liveAt)}` : ""}` : l.state === "unchecked" ? `${sha ? `Checkout ${sha}` : "This checkout"}, not checked against production` : sha ? `Not live: ${sha}` : "Not live yet"
+  return l.state === "live" ? `Live revision ${sha}${l.revision?.liveAt ? `, live since ${fmtD(l.revision.liveAt)}` : ""}` : l.state === "unchecked" ? `${sha ? `Checkout ${sha}` : "This checkout"}, not checked against production` : sha ? `Not live: ${sha}` : "Not live yet"
+}
+
+/**
+ * The scan line under the title: a short "Scanned 49 minutes ago" that opens the details (design review:
+ * the line listed every source and note). Hover, focus or tap opens it, so it works by keyboard and touch.
+ */
+export function ScanInfo({ figma }: { figma: string | null }) {
+  const [open, setOpen] = React.useState(false)
+  const l = D.live
+  const rows: [string, React.ReactNode][] = [
+    ["Last scan", D.run ? <>{fmtDT(D.run.takenAt)} <span className="text-muted-foreground">· run {D.run.id}</span></> : "No scans yet"],
+    ...(D.elements?.shotsTaken ? [["Photos", <>{ago(D.elements.shotsTaken)} <span className="text-muted-foreground">· {fmtDT(D.elements.shotsTaken)}</span></>] as [string, React.ReactNode]] : []),
+    ...(D.elements?.drawingsTaken ? [["Drawings", <>{ago(D.elements.drawingsTaken)} <span className="text-muted-foreground">· {fmtDT(D.elements.drawingsTaken)}</span></>] as [string, React.ReactNode]] : []),
+    ...(l ? [["Revision", <><span className={cn(l.unreleased && "font-medium text-destructive")}>{liveText()}</span>{l.label ? <span className="block text-xs text-muted-foreground">{l.label}</span> : null}</>] as [string, React.ReactNode]] : []),
+    ...(D.schedule?.length ? [["Next scan", <NextScan prefix="" />] as [string, React.ReactNode]] : []),
+    ...(figma ? [["Figma", figma] as [string, React.ReactNode]] : []),
+    ...(!D.serve ? [["This page", D.published
+      ? `A static copy from ${fmtD(D.generatedAt)}. Review decisions are staged in your browser and ${ACTIONS?.decisions.kind === "issue" ? "filed as an issue" : ACTIONS?.decisions.kind === "post" ? "sent to the team" : "exported"}; the agent needs dsa serve.`
+      : `A snapshot from ${fmtD(D.generatedAt)}.`] as [string, React.ReactNode]] : []),
+  ]
   return (
-    <Tooltip>
-      <TooltipTrigger render={<span className={cn("cursor-default underline decoration-dotted underline-offset-4", l.unreleased && "font-medium text-destructive")} />}>{text}</TooltipTrigger>
-      <TooltipContent>{l.label}{l.revision?.liveAt ? ` · ${fmtDT(l.revision.liveAt)}` : ""}</TooltipContent>
-    </Tooltip>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger openOnHover delay={150} onFocus={() => setOpen(true)}
+        className="cursor-pointer rounded-sm underline decoration-dotted underline-offset-4 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+        {D.run ? `Scanned ${ago(D.run.takenAt)}` : "No scans yet"}{!D.serve ? " · snapshot" : ""}
+        {l?.unreleased && <span className="ml-1 font-medium text-destructive">· not live</span>}
+      </PopoverTrigger>
+      <PopoverContent className="w-96">
+        <PopoverTitle className="mb-2 text-sm">Scan details</PopoverTitle>
+        <dl className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
+          {rows.map(([k, v]) => <React.Fragment key={k}><dt className="text-muted-foreground">{k}</dt><dd className="min-w-0 [overflow-wrap:anywhere]">{v}</dd></React.Fragment>)}
+        </dl>
+        <div className="mt-3"><RescanHow /></div>
+      </PopoverContent>
+    </Popover>
   )
 }
 
@@ -188,37 +225,20 @@ function Shell() {
     <div className={cn("min-h-svh bg-background", agent.open && "xl:pr-[440px]")}>
       {/* Everything from the tabs up stays docked while the page scrolls. */}
       <header className="sticky top-0 z-30 border-b bg-background">
-        <div className="mx-auto flex max-w-[1400px] flex-wrap items-end justify-between gap-4 px-4 pt-5 sm:px-6">
+        <div className="mx-auto flex max-w-[1920px] flex-wrap items-start justify-between gap-4 px-4 pt-5 sm:px-6">
           <div className="min-w-0">
             <h1 className="font-heading text-xl font-semibold tracking-tight">Design System Analytics · {titleCase(title)}</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {D.run ? (
-                <Tooltip>
-                  <TooltipTrigger render={<span className="cursor-default underline decoration-dotted underline-offset-4" />}>Last scan: {ago(D.run.takenAt)}</TooltipTrigger>
-                  <TooltipContent>{fmtDT(D.run.takenAt)} · run {D.run.id}</TooltipContent>
-                </Tooltip>
-              ) : "No scans yet"}
-              <EvidenceTimes photos={D.elements?.shotsTaken} drawings={D.elements?.drawingsTaken} />
-              {D.live && <span> · <LiveRevision /></span>}
-              {D.schedule?.length > 0 && <span> · <NextScan /></span>}
-              {figma && <span> · {figma}</span>}
-              {/* How a static page differs is detail, not a headline: it's on hover and focus. */}
-              {!D.serve && <span> · {D.published ? (
-                <Tooltip>
-                  <TooltipTrigger render={<span tabIndex={0} className="cursor-default underline decoration-dotted underline-offset-4" />}>Snapshot from {fmtD(D.generatedAt)}</TooltipTrigger>
-                  <TooltipContent className="max-w-xs">A static copy. Review decisions are staged in your browser and {ACTIONS?.decisions.kind === "issue" ? "filed as an issue" : ACTIONS?.decisions.kind === "post" ? "sent to the team" : "exported"}; the agent needs dsa serve.</TooltipContent>
-                </Tooltip>
-              ) : <>Snapshot from {fmtD(D.generatedAt)}</>}</span>}
-            </p>
+            <p className="mt-1 text-sm text-muted-foreground"><ScanInfo figma={figma} /></p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          {/* Always at the right edge, top-aligned with the title, even when it wraps under it. */}
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2 self-start">
           <AppSelect />
           {D.serve && <WaitingOnYou />}
           {D.serve && <AgentButton />}
           {canRun() ? <ScanButton /> : !D.serve && D.published && ACTIONS && <StaticRescan onPost={rerun} />}
           </div>
         </div>
-        <div className="mx-auto mt-3 max-w-[1400px] px-4 sm:px-6">
+        <div className="mx-auto mt-3 max-w-[1920px] px-4 sm:px-6">
           {/* Settings leads the tab row as an icon tab, set apart from the views by a divider. No
               overflow wrapper: it clipped the active underline and showed a stray scrollbar. */}
           <Tabs value={HOME[view] ?? view} onValueChange={(v: any) => go(v, v === "settings" ? section : "general")}>
@@ -240,7 +260,8 @@ function Shell() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
+      {/* Up to 1920px: wide screens give the review room to breathe (design review). */}
+      <main className="mx-auto max-w-[1920px] px-4 py-6 sm:px-6">
         {D.live?.unreleased && (
           <Alert variant="destructive" className="mb-6">
             <WarningIcon />

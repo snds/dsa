@@ -1,5 +1,5 @@
 import * as React from "react"
-import { ChatCircleIcon, SparkleIcon, SidebarSimpleIcon } from "@phosphor-icons/react"
+import { CaretLineRightIcon, ChatCircleIcon, SparkleIcon, SidebarSimpleIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ThreadBody } from "./AgentPanel"
@@ -11,7 +11,7 @@ import { anchorKeyOf, canChat, useAgent, type Subject } from "./store"
  * Follows the issue as J / K moves; shows the anchor's thread, or "No thread yet" with a live box that
  * starts one. While the side panel is open it holds the conversation, and this says so.
  */
-export function PinnedThread({ subject, className }: { subject: Subject; className?: string }) {
+export function PinnedThread({ subject, className, onHide }: { subject: Subject; className?: string; onHide?: () => void }) {
   const a = useAgent()
   const key = anchorKeyOf(subject)
   const has = Boolean(a.threads[key])
@@ -32,6 +32,7 @@ export function PinnedThread({ subject, className }: { subject: Subject; classNa
             <TooltipContent>Start over on this issue. This thread is kept under Earlier sessions.</TooltipContent>
           </Tooltip>
         )}
+        {onHide && <Button variant="ghost" size="icon-sm" className="hidden @7xl:inline-flex" aria-label="Hide the thread" title="Hide the thread: give the issue the room" onClick={onHide}><CaretLineRightIcon /></Button>}
       </header>
       {a.open ? (
         <div className="flex flex-1 flex-col items-start gap-2 p-4 text-sm text-muted-foreground">
