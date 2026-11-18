@@ -10,7 +10,7 @@ import { buildBrief, PERSONA, type IssueSource, type Subject } from './context.j
 import { anchorKey, anchorOf, threadIndex, writeThreadIndex } from './threads.js';
 import { evidenceOf, whatTheAgentKnows } from './knows.js';
 import { addFeedback, readFeedback, readProposals, setStatus } from './proposals.js';
-import { addDismissal, readDismissals, undoDismissal } from './dismissals.js';
+import { DISMISS_LABELS, addDismissal, readDismissals, undoDismissal, type DismissLabel } from './dismissals.js';
 import { githubWho, openDraftPr } from './draft-pr.js';
 import { readComponentChecks, setComponentCheck } from './component-checks.js';
 
@@ -200,6 +200,16 @@ export const agentRoutes: ServeRoute = async ({ req, res, url, body, send, conte
       return send(200, { check }), true;
     }
     if (GET && p === '/api/agent/dismissals') return send(200, { dismissals: readDismissals(dataDir) }), true;
+    // A person dismisses an issue directly, with a reason (the agent can only propose one).
+    if (POST && p === '/api/agent/dismissal') {
+      const b = await body();
+      const key = String(b.key ?? '').trim().slice(0, 40), label = String(b.label ?? ''), reason = String(b.reason ?? '').trim().slice(0, 600);
+      if (!key) return send(400, { error: 'Which issue?' }), true;
+      if (!Object.hasOwn(DISMISS_LABELS, label)) return send(400, { error: `Pick a reason: ${Object.values(DISMISS_LABELS).join(', ')}.` }), true;
+      const d = { label: label as DismissLabel, reason, who: String(b.who ?? '').trim() || reviewer(root), date: new Date().toISOString().slice(0, 10), ...(b.title ? { title: String(b.title).slice(0, 200) } : {}) };
+      addDismissal(dataDir, key, d);
+      return send(200, { dismissal: d }), true;
+    }
     if (POST && p === '/api/agent/dismissal/undo') { const ok = undoDismissal(dataDir, String((await body()).key)); return send(ok ? 200 : 404, ok ? { undone: true } : { error: 'Not dismissed.' }), true; }
     if (POST && p === '/api/agent/thread/settle') {
       const b = await body();

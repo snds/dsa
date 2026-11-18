@@ -61,6 +61,8 @@ export async function api(url: string, body?: unknown) {
   const r = await fetch(at(url), { method: body ? "POST" : "GET", headers: { "Content-Type": "application/json", "X-DSA": "1" }, body: body ? JSON.stringify(body) : undefined })
   const j: any = await r.json().catch(() => ({}))
   if (!r.ok) throw Object.assign(new Error(j.error || (j.errors || []).join(" ") || r.statusText), { data: j })
+  // Anything that changed something: views that show derived state (the Inbox's issues) refresh.
+  if (body) window.dispatchEvent(new CustomEvent("dsa:changed", { detail: { url } }))
   return j
 }
 

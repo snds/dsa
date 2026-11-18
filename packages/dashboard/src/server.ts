@@ -7,7 +7,7 @@ import { discoverSources, isShotsMode, NotLiveError, recordScanTime, runAfterHoo
 import { MEASURES, appSettings, badGitRef, badGitUrl, expandSources, isGlob, clearEvents, clearMappingCache, computeFit, decideMany, judgmentFor, effectiveSettings, figmaToken, githubToken, latestEvals, loadCatalog, logEvent, mapInstance, mask, materializeRemotes, openStore, parseFigmaUrl, readRendered, readSource, resolveTargets, runPipeline, setSetting, targetRelative, undecide, withMetrics, writeSecrets, type AppSettings, type Config, type Recommendation } from '@snds/dsa/engine';
 import { toNodeListener } from '@snds/dsa/relay/node';
 import type { RelayHandler } from '@snds/dsa/relay';
-import { renderReport } from './report.js';
+import { renderReport, reportPayload } from './report.js';
 import { buildQueue, createIssues, syncLinks } from './queue.js';
 
 /** An optional add-on, or null when it isn't installed. */
@@ -143,6 +143,13 @@ export async function startServer(opts: ServeOptions): Promise<{ url: string; cl
         const { config, profile } = await loadConfig(root);
         const schedule = opts.deploy ? (await opts.deploy(await loadConfig(root))).schedule() : [];
         return send(200, await renderReport(root, config, dataDir, profile, { serve: true, base, schedule }), 'text/html; charset=utf-8');
+      }
+      // The Inbox's issues as they stand now: after an answer, a check or a dismissal, the page refreshes
+      // them instead of waiting for a reload.
+      if (req.method === 'GET' && url.pathname === '/api/issues') {
+        const { config, profile } = await loadConfig(root);
+        const p = await reportPayload(root, config, dataDir, profile, { serve: true, base });
+        return send(200, { issues: p.issues ?? [], componentChecks: p.componentChecks ?? {} });
       }
       if (req.method === 'GET' && url.pathname === '/api/settings') return send(200, readView(await loadConfig(root)));
       // Add-on routes: the agent workbench's sessions, proposals, handoff and settings.

@@ -10,7 +10,7 @@ import { agentDir } from './snapshot.js';
  */
 export const DISMISS_LABELS = {
   'scanner-misread': 'The scanner read this wrong',
-  intended: 'It is meant to be this way',
+  intended: 'Meant to be this way',
   'not-worth-it': 'Not worth fixing',
   duplicate: 'Another issue covers it',
 } as const;

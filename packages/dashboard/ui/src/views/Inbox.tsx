@@ -5,11 +5,14 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Kbd } from "@/components/ui/kbd"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import { Textarea } from "@/components/ui/textarea"
+import { toast } from "sonner"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Panel } from "@/components/bits"
-import { D } from "@/lib/dsa"
+import { D, api, say } from "@/lib/dsa"
 import { hashFor, replaceRoute, routePath, useApp } from "@/lib/app"
 import { AskAgent } from "@/agent/AskAgent"
 import { ThreadBadge } from "@/agent/ThreadBadge"
@@ -68,8 +71,24 @@ export function subjectOf(i: Issue): Subject {
   return { kind: "issue", key: i.key, title: i.title, source: src }
 }
 
+/**
+ * The issues as they stand: the page's own at first, then (with dsa serve) fresh after anything changes,
+ * so an answered, confirmed or dismissed issue leaves the list without a reload.
+ */
+function useIssues(): Issue[] {
+  const [issues, setIssues] = React.useState<Issue[]>(D.issues ?? [])
+  React.useEffect(() => {
+    if (!D.serve) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const refresh = () => { clearTimeout(timer); timer = setTimeout(() => api("/api/issues").then(j => { if (Array.isArray(j.issues)) setIssues(j.issues) }).catch(() => {}), 250) }
+    window.addEventListener("dsa:changed", refresh)
+    return () => { clearTimeout(timer); window.removeEventListener("dsa:changed", refresh) }
+  }, [])
+  return issues
+}
+
 export function Inbox() {
-  const issues: Issue[] = D.issues ?? []
+  const issues = useIssues()
   const app = useApp()
   const agent = useAgent()
   const { q, creating, create } = useQueue()
@@ -78,6 +97,8 @@ export function Inbox() {
   const [closed, setClosed] = React.useState<Set<string>>(new Set())
   const [ticked, setTicked] = React.useState<Set<string>>(new Set())
   const [current, setCurrent] = React.useState<string | null>(() => { const id = routePath().split("/")[1]; return id ? decodeURIComponent(id) : null })
+  // Whether `current` came from a link (the page's address), not from acting in the list.
+  const fromLink = React.useRef(Boolean(current))
   const list = React.useRef<HTMLDivElement>(null)
 
   const waiting = (i: Issue) => { const t = agent.threads[anchorKeyOf(subjectOf(i))]; return Boolean(t && t.turns > 0 && (t.state === "waiting-on-you" || t.state === "changes-ready")) }
@@ -102,8 +123,42 @@ export function Inbox() {
   const sel = order.find(i => i.key === current) ?? order[0] ?? null
   // A third column only when there is a thread to show in it (a published page may have none).
   const third = sel ? canChat() || publishedThreadShown(subjectOf(sel)) : false
+  // The list as it was shown, so the issue after one that just left it can be found.
+  const lastOrder = React.useRef<Issue[]>(order)
+  React.useEffect(() => { if (current && order.some(i => i.key === current)) lastOrder.current = order })
 
-  const pick = (key: string) => { setCurrent(key); replaceRoute(`inbox/${encodeURIComponent(key)}`) }
+  // A link to an issue the filter hides (done, say) shows that issue, under a filter that has it. One
+  // this scan doesn't have says so, and the address follows what is shown.
+  React.useEffect(() => {
+    if (!current) return
+    // The linked issue is on screen: from here on, acting on it moves on.
+    if (order.some(i => i.key === current)) { fromLink.current = false; return }
+    const it = issues.find(i => i.key === current)
+    // Acting on the open issue (answering, confirming, dismissing) moves on to the one after it.
+    if (!fromLink.current) {
+      const was = lastOrder.current, at = was.findIndex(i => i.key === current)
+      const next = [...was.slice(at + 1), ...was.slice(0, Math.max(0, at)).reverse()].find(i => order.some(o => o.key === i.key))
+      if (next ?? sel) pick((next ?? sel)!.key)
+      return
+    }
+    if (it) {
+      const f = (["open", "needs-person", "measured", "inferred", "done"] as Filter[]).find(f => pass[f](it))
+      if (f && f !== filter) { setFilter(f); setClosed(new Set()); return }
+      if (closed.size) { setClosed(new Set()); return }
+    } else {
+      say("That issue isn't in this scan any more. Showing the first one.", true)
+      if (sel) replaceRoute(`inbox/${encodeURIComponent(sel.key)}`)
+      setCurrent(sel?.key ?? null)
+    }
+  }, [current, issues])
+  // The address can change by hand or by a link; follow it.
+  React.useEffect(() => {
+    const on = () => { const id = routePath().split("/")[1]; if (routePath().startsWith("inbox") && id !== (current ? encodeURIComponent(current) : undefined)) { fromLink.current = true; setCurrent(id ? decodeURIComponent(id) : null) } }
+    addEventListener("hashchange", on)
+    return () => removeEventListener("hashchange", on)
+  }, [])
+
+  const pick = (key: string) => { fromLink.current = false; setCurrent(key); replaceRoute(`inbox/${encodeURIComponent(key)}`) }
   const tick = (key: string) => setTicked(t => { const n = new Set(t); n.has(key) ? n.delete(key) : n.add(key); return n })
 
   // Keys, as in Element Review: J / K move, X ticks, Esc clears the ticks.
@@ -241,7 +296,7 @@ function IssueRow({ i, sel, ticked, onPick, onTick }: { i: Issue; sel: boolean; 
 function IssueDetail({ i, q, creating, create }: { i: Issue; q: any; creating: boolean; create: (ids?: string[]) => Promise<void> }) {
   if (i.source?.type === "queue" && q) {
     const item = q.items.find((x: any) => x.id === i.source.id)
-    if (item) return <Detail i={item} q={q} busy={creating} onCreate={() => create([item.id])} base="inbox" />
+    if (item) return <div className="flex flex-col gap-3"><Detail i={item} q={q} busy={creating} onCreate={() => create([item.id])} base="inbox" /><DismissIssue i={i} /></div>
   }
   const subject = subjectOf(i)
   if (i.kind === "question") {
@@ -253,6 +308,7 @@ function IssueDetail({ i, q, creating, create }: { i: Issue; q: any; creating: b
           <CertaintyWord c={i.certainty} />
           <span className="text-xs text-muted-foreground">{plural(ids.length, "place")}{i.apps.length ? ` in ${i.apps.join(", ")}` : ""} · Shift+J / K for the next issue</span>
         </header>
+        <DismissIssue i={i} />
         <AnswerPlaces ids={ids} />
       </section>
     )
@@ -286,7 +342,54 @@ function IssueDetail({ i, q, creating, create }: { i: Issue; q: any; creating: b
           <AskAgent subject={subject} label="Ask the agent" />
           <ThreadBadge subject={subject} className="self-center" />
         </div>
+        <DismissIssue i={i} />
       </div>
     </Panel>
+  )
+}
+
+/**
+ * Dismiss an issue with a reason, or undo a dismissal (dsa serve). A person can do this directly; the agent
+ * can only propose it. The reason stays with the issue under Done, and "the scanner read this wrong" is
+ * the cue for a scanner hint.
+ */
+function DismissIssue({ i }: { i: Issue }) {
+  const [open, setOpen] = React.useState(false)
+  const [label, setLabel] = React.useState("intended")
+  const [reason, setReason] = React.useState("")
+  const [busy, setBusy] = React.useState(false)
+  if (!D.serve) return null
+  const undo = async () => {
+    try { await api("/api/agent/dismissal/undo", { key: i.key }); say("Dismissal undone: the issue is open again.") } catch (e: any) { say(e.message, true) }
+  }
+  if (i.dismissed) return (
+    <p className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+      <span>Dismissed: {DISMISS_LABEL[i.dismissed.label] ?? i.dismissed.label}{i.dismissed.reason ? ` — ${i.dismissed.reason}` : ""}{i.dismissed.who ? ` · ${i.dismissed.who}, ${i.dismissed.date}` : ""}</span>
+      <Button size="sm" variant="outline" onClick={undo}>Undo the dismissal</Button>
+    </p>
+  )
+  if (i.status === "done") return null
+  if (!open) return <Button size="sm" variant="ghost" className="w-fit text-muted-foreground" onClick={() => setOpen(true)}>Dismiss this issue…</Button>
+  const go = async () => {
+    setBusy(true)
+    try {
+      await api("/api/agent/dismissal", { key: i.key, label, reason: reason.trim(), title: i.title })
+      setOpen(false); setReason("")
+      toast.success(`Dismissed: ${DISMISS_LABEL[label]}`, { duration: 10000, action: { label: "Undo", onClick: () => { void undo() } } })
+    } catch (e: any) { say(e.message, true) }
+    setBusy(false)
+  }
+  return (
+    <form className="flex flex-col gap-2 rounded-lg border p-3" aria-label="Dismiss this issue" onSubmit={e => { e.preventDefault(); void go() }}>
+      <label className="flex flex-col gap-1 text-sm"><span className="font-medium">Why</span>
+        <NativeSelect value={label} onChange={e => setLabel(e.target.value)}>
+          {Object.entries(DISMISS_LABEL).map(([k, v]) => <NativeSelectOption key={k} value={k}>{v}</NativeSelectOption>)}
+        </NativeSelect>
+      </label>
+      <label className="flex flex-col gap-1 text-sm"><span className="font-medium">Note <span className="font-normal text-muted-foreground">(optional, kept with the issue)</span></span>
+        <Textarea value={reason} onChange={e => setReason(e.target.value)} rows={2} />
+      </label>
+      <div className="flex gap-2"><Button size="sm" type="submit" disabled={busy}>Dismiss</Button><Button size="sm" type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button></div>
+    </form>
   )
 }

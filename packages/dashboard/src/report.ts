@@ -48,12 +48,17 @@ export interface ReportOptions {
 }
 
 export async function renderReport(root: string, config: Config, dataDir: string, profile: ResolvedProfile, opts: ReportOptions = {}): Promise<string> {
+  return shell(root, config, await reportPayload(root, config, dataDir, profile, opts));
+}
+
+/** The report's data, as the page embeds it. `dsa serve` also answers parts of it live (GET /api/issues). */
+export async function reportPayload(root: string, config: Config, dataDir: string, profile: ResolvedProfile, opts: ReportOptions = {}): Promise<any> {
   // Built before the store opens below: it opens its own connection, and DuckDB allows one per file.
   const queue = await buildQueue(root, config, dataDir).catch(e => { console.error(`Queue: ${e.message}`); return null; });
   const store = await openStore(dataDir, 'report');
   try {
     const runId = await store.latestRunId();
-    if (!runId) return shell(root, config, { ...emptyPayload(root, config, profile, opts.serve), ...hostOpts(opts, dataDir) });
+    if (!runId) return { ...emptyPayload(root, config, profile, opts.serve), ...hostOpts(opts, dataDir) };
     const catalog = withMetrics(loadCatalog(), profile.metrics);
     const settings = effectiveSettings(catalog, config, dataDir);
     const [run] = await store.all<any>('select * from runs where run_id=$1', [runId]);
@@ -308,7 +313,7 @@ how: e.how ?? null, parent: e.parent ?? null, recipe: e.recipe ?? null,
       coverage: coverageOf(run, targets),
       ...hostOpts(opts, dataDir),
     };
-    return shell(root, config, payload);
+    return payload;
   } finally {
     store.close();
   }

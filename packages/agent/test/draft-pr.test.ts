@@ -99,7 +99,7 @@ test('a dismissal needs an issue, a known label and a reason; accepted, it is re
   const snap = { evals: [], queue: [] } as unknown as Snapshot;
   assert.throws(() => propose(dataDir, snap, [], { kind: 'dismissal', session: 'S-1', rationale: 'r', payload: { issue: 'nope', label: 'meh' } }), /issue key.*label.*reason/s);
   const p = propose(dataDir, snap, [], { kind: 'dismissal', session: 'S-1', rationale: 'The select is a native one on purpose.', payload: { issue: 'F-ABC123', label: 'intended', reason: 'Native select for mobile.' } });
-  assert.equal(p.title, 'Dismiss F-ABC123: It is meant to be this way');
+  assert.equal(p.title, 'Dismiss F-ABC123: Meant to be this way');
   addDismissal(dataDir, 'F-ABC123', { label: 'intended', reason: 'Native select for mobile.', who: 'sample-user', date: '2026-11-16', proposal: p.id });
   assert.equal(readDismissals(dataDir)['F-ABC123']!.label, 'intended');
   assert.equal(fs.existsSync(path.join(dataDir, 'agent', 'dismissals.json')), true, 'where the dashboard reads it');

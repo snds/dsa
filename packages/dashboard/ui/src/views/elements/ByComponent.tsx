@@ -260,7 +260,7 @@ export function ByComponent({ evals, rail = true }: { evals: any[]; rail?: boole
             <div role="status" className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 px-3 py-2 text-sm">
               <span>{done.text}.</span>
               <Button variant="outline" size="sm" onClick={undo} disabled={busy}>Undo</Button>
-              <Button variant="ghost" size="sm" className="ml-auto" onClick={() => setDone(null)}>Dismiss</Button>
+              <Button variant="ghost" size="sm" className="ml-auto" onClick={() => setDone(null)}>Close</Button>
             </div>
           )}
           {g.batches.map(b => <BatchCard key={b.key} b={b} />)}
