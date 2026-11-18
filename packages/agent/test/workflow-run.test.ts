@@ -153,6 +153,8 @@ test('the agent step: no key, a failed agent, or an answer shaped like a secret 
   const settings = JSON.parse(fs.readFileSync(path.join(s.tmp, 'claude-settings.json'), 'utf8'));
   assert.ok(settings.permissions.deny.includes('Read(//proc/**)'), 'no reading the process environment');
   assert.ok(settings.permissions.deny.includes('Read(./.git/**)'));
+  assert.equal(settings.permissions.deny.some((r: string) => /^Write\(/.test(r)), false, 'Edit rules cover writing; Write rules are ignored');
+  assert.equal(settings.permissions.deny.includes('Read(//home/runner/**)'), false, 'the checkout is under the runner\'s home');
 });
 
 test('draft-fix: the agent\'s new files go in the PR; the scan\'s output and .github don\'t; hooks never run', () => {

@@ -86,9 +86,10 @@ const E = (x: string) => '${{ ' + x + ' }}';
 
 /**
  * What the agent may and may not touch, as Claude Code settings. It can't read the process environment
- * (/proc holds the key), the runner's home or git's folder, and can't edit git's folder or the workflows.
+ * (/proc holds the key), the runner's hidden files (the checkout itself lives under its home) or git's
+ * folder, and can't edit git's folder or the workflows (Edit rules cover every editing tool).
  */
-const CLAUDE_SETTINGS = JSON.stringify({ permissions: { deny: ['Read(//proc/**)', 'Read(//sys/**)', 'Read(//home/runner/**)', 'Read(./.git/**)', 'Edit(./.git/**)', 'Edit(./.github/**)', 'Write(./.git/**)', 'Write(./.github/**)'] } });
+const CLAUDE_SETTINGS = JSON.stringify({ permissions: { deny: ['Read(//proc/**)', 'Read(//sys/**)', 'Read(//home/runner/.*)', 'Read(//home/runner/.*/**)', 'Read(./.git/**)', 'Edit(./.git/**)', 'Edit(./.github/**)'] } });
 
 /** The steps both answering jobs share; `fix` adds edit tools, the draft PR, and the write permissions its job holds. */
 function answerSteps(mode: 'reply' | 'fix'): string {
@@ -175,6 +176,8 @@ ${mode === 'fix'
           { cat "$RUNNER_TEMP/brief.md"; echo; echo "## The GitHub thread"; echo; cat "$RUNNER_TEMP/thread.txt"; echo; echo "$ask"; } > "$RUNNER_TEMP/prompt.md"
           if ! claude -p --settings "$RUNNER_TEMP/claude-settings.json" --strict-mcp-config --mcp-config "$RUNNER_TEMP/mcp.json" --allowedTools "$tools" < "$RUNNER_TEMP/prompt.md" > "$RUNNER_TEMP/answer.md" 2> "$RUNNER_TEMP/agent-err.txt"; then
             echo "::error::The agent failed:"; cat "$RUNNER_TEMP/agent-err.txt"
+            # What it wrote, for the log, with anything shaped like a secret blanked out.
+            sed -E 's/(${SECRET_SHAPES})/[redacted]/g' "$RUNNER_TEMP/answer.md" | head -50
             echo "The agent couldn't answer this time. A maintainer can see why in the run log: $RUN_URL" > "$RUNNER_TEMP/answer.md"
             echo "ok=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
