@@ -404,7 +404,7 @@ describe('photos of other looks say what they are', () => {
   });
 
   test('the log line counts the look itself, apart from every other look', () => {
-    assert.equal(photosLine({ cards: 118, sameLook: 60, otherLook: 40, elsewhere: 25, labOnly: 5, none: 13, distinctPhotos: 70, mostShown: 6 }), 'Review cards: 118. Photo in the look proposed, in the product: 60. Only another look in the product: 40 (25 of them just how the app uses it elsewhere). Only from a lab page: 5. No photo: 13. 70 different photos, none on more than 6 cards.');
+    assert.equal(photosLine({ cards: 118, sameLook: 60, otherLook: 40, elsewhere: 25, labOnly: 5, none: 13, distinctPhotos: 70, mostShown: 6 }), 'Review: 118 cards for a person to look at: 60 with a photo of the place as it would look, 40 with a photo of another look the app uses (25 from elsewhere in the app), 5 with a photo from a demo page only, 13 with no photo. 70 different photos in all, the most used on 6 cards.');
   });
 });
 
@@ -457,7 +457,7 @@ describe('a lab page is not the product', () => {
   });
 
   test('the log line keeps them apart, and a named page in another file says where it is', () => {
-    assert.match(photosLine({ cards: 3, sameLook: 1, otherLook: 0, elsewhere: 0, labOnly: 2, none: 0, distinctPhotos: 2, mostShown: 1 }), /in the product: 1\..*Only from a lab page: 2\./);
+    assert.match(photosLine({ cards: 3, sameLook: 1, otherLook: 0, elsewhere: 0, labOnly: 2, none: 0, distinctPhotos: 2, mostShown: 1 }), /1 with a photo of the place as it would look, 2 with a photo from a demo page only\./);
     assert.equal(pageName('http://x.test/labs/token-lab.html#gallery'), 'Labs › Token lab.html › Gallery');
     assert.equal(pageName('http://x.test/#/colours/gallery'), 'Colours › Gallery');
     assert.equal(pageName('http://x.test/index.html#gallery'), 'Gallery');

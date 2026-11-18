@@ -18,9 +18,10 @@ export function gitRead(dir: string, args: string[], maxBuffer = 64 * 1024 * 102
 /** Tracked files whose content differs from HEAD (optionally under some paths), relative to the repo's top. */
 export function trackedChanges(dir: string, paths: string[] = []): string[] | undefined {
   const top = gitRead(dir, ['rev-parse', '--show-toplevel']);
-  const listed = gitRead(dir, ['diff-index', '--name-only', 'HEAD', '--', ...paths]);
+  // -z: names as git stores them, so unusual characters aren't quoted and misread (code review C C-36).
+  const listed = gitRead(dir, ['diff-index', '-z', '--name-only', 'HEAD', '--', ...paths]);
   if (!top.ok || !listed.ok) return undefined;
-  return listed.out.split('\n').map(s => s.trim()).filter(Boolean).filter(f => {
+  return listed.out.split('\0').filter(Boolean).filter(f => {
     const now = gitRead(top.out, ['hash-object', '--', f]);
     const then = gitRead(top.out, ['rev-parse', `HEAD:${f}`]);
     return !now.ok || !then.ok || now.out !== then.out;
@@ -35,6 +36,6 @@ export function isDirty(dir: string, paths: string[] = []): boolean | undefined 
 
 /** Changed tracked files and untracked files git doesn't ignore, relative to the repo's top. */
 export function changedFiles(dir: string): string[] {
-  const untracked = gitRead(dir, ['ls-files', '--others', '--exclude-standard', '--full-name']).out.split('\n');
-  return [...(trackedChanges(dir) ?? []), ...untracked].map(s => s.trim()).filter(Boolean);
+  const untracked = gitRead(dir, ['ls-files', '-z', '--others', '--exclude-standard', '--full-name']).out.split('\0');
+  return [...(trackedChanges(dir) ?? []), ...untracked].filter(Boolean);
 }

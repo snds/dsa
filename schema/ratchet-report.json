@@ -1953,6 +1953,33 @@
         ]
       },
       "description": "Metrics the baseline doesn't have yet (added in a later dsa): reported, not compared, until --update."
+    },
+    "skipped": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "message"
+        ],
+        "additionalProperties": false
+      },
+      "description": "Files the scan couldn't read. Their violations aren't counted, so a compare fails unless --allow-skipped."
+    },
+    "problems": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Why a compare failed for a reason other than growth (unread files, a baseline that tracks nothing)."
     }
   },
   "required": [
@@ -1965,7 +1992,9 @@
     "current",
     "deltas",
     "grew",
-    "untracked"
+    "untracked",
+    "skipped",
+    "problems"
   ],
   "additionalProperties": false,
   "description": "Output of `dsa ratchet`."

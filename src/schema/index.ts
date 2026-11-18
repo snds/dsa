@@ -153,6 +153,10 @@ export const RatchetReportSchema = z
     untracked: z
       .array(z.enum(["classNameOverrides", "styleOverrides", "spreadProps", "lookAlikes", "rawElements"]))
       .describe("Metrics the baseline doesn't have yet (added in a later dsa): reported, not compared, until --update."),
+    skipped: z
+      .array(z.object({ file: z.string(), message: z.string() }))
+      .describe("Files the scan couldn't read. Their violations aren't counted, so a compare fails unless --allow-skipped."),
+    problems: z.array(z.string()).describe("Why a compare failed for a reason other than growth (unread files, a baseline that tracks nothing)."),
   })
   .describe("Output of `dsa ratchet`.");
 

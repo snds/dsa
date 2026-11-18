@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { isSuiteConfig, migrateSuiteConfig } from "./migrate.js";
+import { strippedKeys, isSuiteConfig, migrateSuiteConfig } from "./migrate.js";
 
 export const CONFIG_FILENAME = "dsa.config.json";
 
@@ -437,6 +437,8 @@ export interface LoadedConfig {
   root: string;
   /** Set when the file was an analytics-suite config, converted in memory: what moved and what was left out. */
   migrated?: { moved: string[]; dropped: string[]; notes: string[] };
+  /** Keys in the file dsa doesn't know (a misspelling, say), which it ignores. Reported, never silent. */
+  unknownKeys?: string[];
 }
 
 /** Walk upward from `startDir` until a `dsa.config.json` is found. */
@@ -488,6 +490,9 @@ export function loadConfig(options: LoadConfigOptions = {}): LoadedConfig {
   const config = parseConfig(raw, configPath ?? "default config");
   const out: LoadedConfig = { config, configPath, root: configPath ? path.dirname(configPath) : cwd };
   if (migrated) out.migrated = migrated;
+  // The schema drops keys it doesn't know; a typo like scan.exlude would otherwise do nothing, quietly (code review C C-17).
+  const unknown = configPath && !migrated ? strippedKeys(raw, config).filter((k) => k !== "$schema" && !k.startsWith("$")) : [];
+  if (unknown.length) out.unknownKeys = unknown;
   return out;
 }
 

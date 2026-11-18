@@ -432,9 +432,10 @@ function read(file: string): string | undefined {
 }
 
 export function parseTs(text: string, file: string): any {
-  try {
-    return babelParse(text, { sourceType: "module", errorRecovery: true, plugins: [/\.tsx?$/.test(file) ? "typescript" : "flow", "jsx", "decorators", "classProperties"] as any, sourceFilename: file });
-  } catch {
-    return undefined;
-  }
+  try { return parseTsStrict(text, file); } catch { return undefined; }
+}
+
+/** parseTs, but a file Babel can't parse throws, so the caller can say it was skipped instead of reading it as empty. */
+export function parseTsStrict(text: string, file: string): any {
+  return babelParse(text, { sourceType: "module", errorRecovery: true, plugins: [/\.tsx?$/.test(file) ? "typescript" : "flow", "jsx", "decorators", "classProperties"] as any, sourceFilename: file });
 }

@@ -144,7 +144,7 @@ export function migrateSuiteConfig(raw: unknown, options: MigrateOptions = {}): 
 }
 
 /** Dotted paths present in `input` that parsing removed. Records keep every key, so only schema-unknown keys show up. */
-function strippedKeys(input: unknown, parsed: unknown, prefix = ""): string[] {
+export function strippedKeys(input: unknown, parsed: unknown, prefix = ""): string[] {
   if (Array.isArray(input) && Array.isArray(parsed)) {
     return input.flatMap((v, i) => strippedKeys(v, parsed[i], `${prefix}[${i}]`));
   }

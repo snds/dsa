@@ -347,10 +347,17 @@ describe("history backends", () => {
     fs.writeFileSync(path.join(data, "secrets.json"), '{"githubToken":"x"}');
     fs.writeFileSync(path.join(data, "auth", "site.json"), "{}");
     fs.writeFileSync(path.join(data, "dsa.duckdb.wal"), "wal");
+    // People's records in agent/ travel; what is rebuilt there doesn't (code review A C-04).
+    fs.mkdirSync(path.join(data, "agent", "context"), { recursive: true });
+    fs.writeFileSync(path.join(data, "agent", "dismissals.json"), "{}");
+    fs.writeFileSync(path.join(data, "agent", "component-checks.json"), "{}");
+    fs.writeFileSync(path.join(data, "agent", "snapshot.json"), "{}");
+    fs.writeFileSync(path.join(data, "agent", "context", "scan.md"), "brief");
+    fs.writeFileSync(path.join(data, "agent", "handoff.mcp.json"), "{}");
     const branch = gitBranchHistory.create(hctx({ adapter: "git-branch" }, a));
     expect(await branch.pull(data)).toMatch(/no dsa-data branch/);
     expect(await branch.push(data, "run 1")).toMatch(/saved to origin\/dsa-data/);
-    expect(git(remote, "ls-tree", "-r", "--name-only", "dsa-data").split("\n").sort()).toEqual(["dsa.duckdb", "shots/s.png"]);
+    expect(git(remote, "ls-tree", "-r", "--name-only", "dsa-data").split("\n").sort()).toEqual(["agent/component-checks.json", "agent/dismissals.json", "dsa.duckdb", "shots/s.png"]);
     expect(await branch.push(data, "run 1 again")).toMatch(/already has this data/);
     // The product's branch and working tree are untouched.
     expect(git(a, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
