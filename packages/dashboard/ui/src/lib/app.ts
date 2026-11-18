@@ -21,7 +21,22 @@ function appFrom(hash: string): string | null {
   return a && APPS.includes(a) && APPS.length > 1 ? a : null
 }
 
-let current: string | null = typeof location === "undefined" ? null : appFrom(location.hash)
+// Which app the page opens on, kept in this browser (design review: the picker reset to all apps). "last"
+// returns to the app last chosen; "" is all apps; an app name always opens on that app. A link that names an
+// app still wins.
+const KEY = `dsa.app:${D.title || D.root || ""}`
+const read = (k: string): string | null => { try { return localStorage.getItem(k) } catch { return null } }
+const write = (k: string, v: string) => { try { localStorage.setItem(k, v) } catch { /* private window */ } }
+export const appDefault = (): string => read(`${KEY}:default`) ?? "last"
+export function setAppDefault(v: string) { write(`${KEY}:default`, v) }
+function startApp(): string | null {
+  const d = appDefault()
+  const a = d === "last" ? read(`${KEY}:last`) : d
+  return a && APPS.includes(a) && APPS.length > 1 ? a : null
+}
+
+let current: string | null = typeof location === "undefined" ? null : appFrom(location.hash) ?? startApp()
+if (current && typeof location !== "undefined" && !appFrom(location.hash)) try { history.replaceState(null, "", `#${routePath()}?app=${encodeURIComponent(current)}`) } catch { /* file:// */ }
 const subs = new Set<() => void>()
 const emit = () => { for (const f of subs) f() }
 
@@ -44,6 +59,7 @@ export function setApp(app: string | null) {
   const next = app && APPS.includes(app) ? app : null
   if (next === current) return
   current = next
+  write(`${KEY}:last`, next ?? "")
   replaceRoute(routePath())
   emit()
 }
