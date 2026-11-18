@@ -218,7 +218,7 @@ function Shell() {
           {/* Settings leads the tab row as an icon tab, set apart from the views by a divider. No
               overflow wrapper: it clipped the active underline and showed a stray scrollbar. */}
           <Tabs value={HOME[view] ?? view} onValueChange={(v: any) => go(v, v === "settings" ? section : "general")}>
-            <TabsList variant="line" className="h-10 flex-wrap">
+            <TabsList variant="line" className="h-10 flex-nowrap">
               <Tooltip>
                 <TooltipTrigger render={<TabsTrigger value="settings" aria-label="Settings" className="flex-none px-2" />}>
                   <GearSixIcon weight={view === "settings" ? "fill" : "regular"} />
@@ -227,7 +227,7 @@ function Shell() {
               </Tooltip>
               <Separator orientation="vertical" className="mx-1.5 h-5! self-center" />
               {VIEWS.map(v => (
-                <TabsTrigger key={v.id} value={v.id} title={v.hint} className="px-2.5">{v.label}</TabsTrigger>
+                <TabsTrigger key={v.id} value={v.id} title={v.hint} className="px-1.5 sm:px-2.5">{v.label}</TabsTrigger>
               ))}
             </TabsList>
           </Tabs>

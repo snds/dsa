@@ -18,7 +18,7 @@ import { Detail, useQueue } from "./Queue"
 import { AnswerPlaces } from "./elements/Elements"
 import { PinnedThread } from "@/agent/PinnedThread"
 import { CheckAnswer } from "./ComponentCase"
-import { PublishedThread } from "@/agent/PublishedThread"
+import { PublishedThread, publishedThreadShown } from "@/agent/PublishedThread"
 
 /**
  * The Inbox: every issue in one list (the report's `issues`, redesign stage 4). One problem is one row,
@@ -100,6 +100,8 @@ export function Inbox() {
   const groupLabel = (g: string) => g === "" ? (by === "component" ? "Not about one component" : "Every app") : by === "kind" ? KIND[g as Issue["kind"]] : g
   const order = groups.flatMap(([g, items]) => (closed.has(g) ? [] : items))
   const sel = order.find(i => i.key === current) ?? order[0] ?? null
+  // A third column only when there is a thread to show in it (a published page may have none).
+  const third = sel ? canChat() || publishedThreadShown(subjectOf(sel)) : false
 
   const pick = (key: string) => { setCurrent(key); replaceRoute(`inbox/${encodeURIComponent(key)}`) }
   const tick = (key: string) => setTicked(t => { const n = new Set(t); n.has(key) ? n.delete(key) : n.add(key); return n })
@@ -171,9 +173,12 @@ export function Inbox() {
         </div>
       )}
 
-      {/* Wide: the list, the issue, and its pinned thread. Narrower: the thread opens as the side sheet. */}
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] xl:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)_minmax(22rem,26rem)]">
-        <div ref={list} className="flex min-w-0 flex-col overflow-hidden rounded-lg border lg:max-h-[calc(100vh-12rem)] lg:overflow-y-auto" role="list" aria-label="Issues">
+      {/* Columns follow the room the Inbox has, not the window: the agent's side panel takes some of it.
+          Wide: the list, the issue, and its thread (when there is one to show). Narrower: the thread opens
+          as the side sheet. One column: the chosen issue comes first. */}
+      <div className="@container">
+      <div className={cn("grid items-start gap-6 @4xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]", third && "@7xl:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)_minmax(22rem,26rem)]")}>
+        <div ref={list} className="order-2 flex min-w-0 flex-col overflow-hidden rounded-lg border @4xl:order-none @4xl:max-h-[calc(100vh-12rem)] @4xl:overflow-y-auto" role="list" aria-label="Issues">
           {!shown.length && <Empty><EmptyHeader><EmptyTitle>{filter === "waiting" ? "Nothing is waiting on you" : filter === "done" ? "Nothing done yet" : "Nothing here"}</EmptyTitle><EmptyDescription>{plural(count("open"), "issue")} open in all.</EmptyDescription></EmptyHeader></Empty>}
           {groups.map(([g, items]) => {
             const open = !closed.has(g)
@@ -196,13 +201,14 @@ export function Inbox() {
             )
           })}
         </div>
-        <div className="flex min-w-0 flex-col gap-3">
-          {sel && canChat() && <Button variant="outline" size="sm" className="w-fit xl:hidden" onClick={() => agent.start(subjectOf(sel))}><SparkleIcon data-icon="inline-start" />Open this issue's thread</Button>}
+        <div className="order-1 flex min-w-0 flex-col gap-3 @4xl:order-none">
+          {sel && canChat() && <Button variant="outline" size="sm" className="w-fit @7xl:hidden" onClick={() => agent.start(subjectOf(sel))}><SparkleIcon data-icon="inline-start" />Open this issue's thread</Button>}
           {sel ? <IssueDetail i={sel} q={q} creating={!!creating} create={create} /> : <Panel><p className="text-sm text-muted-foreground">Select an issue.</p></Panel>}
         </div>
-        {sel && <PinnedThread subject={subjectOf(sel)} className="hidden xl:sticky xl:top-36 xl:flex xl:max-h-[calc(100vh-10rem)]" />}
+        {sel && canChat() && <PinnedThread subject={subjectOf(sel)} className="hidden @7xl:sticky @7xl:top-36 @7xl:flex @7xl:max-h-[calc(100vh-10rem)]" />}
         {/* A published page: the thread as of publishing, and Discuss on GitHub (stage 9). */}
-        {sel && !canChat() && <PublishedThread subject={subjectOf(sel)} title={sel.title} className="lg:col-start-2 xl:col-start-auto xl:sticky xl:top-36" />}
+        {sel && !canChat() && <PublishedThread subject={subjectOf(sel)} title={sel.title} className="order-3 @4xl:order-none @4xl:col-start-2 @7xl:col-start-auto @7xl:sticky @7xl:top-36" />}
+      </div>
       </div>
     </div>
   )
@@ -265,7 +271,7 @@ function IssueDetail({ i, q, creating, create }: { i: Issue; q: any; creating: b
     readiness: "An agent working in this repo is missing something it needs. The check says what to add.",
   }
   return (
-    <Panel title={i.title} action={<CertaintyWord c={i.certainty} />} className="lg:sticky lg:top-36">
+    <Panel title={i.title} action={<CertaintyWord c={i.certainty} />} className="@4xl:sticky @4xl:top-36">
       <div className="flex flex-col gap-4 text-sm">
         <p className="text-muted-foreground">{say[i.kind]}</p>
         <dl className="grid grid-cols-[8rem_1fr] gap-x-4 gap-y-1.5">

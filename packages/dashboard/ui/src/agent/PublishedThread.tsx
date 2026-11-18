@@ -11,6 +11,9 @@ import { anchorKeyOf, type Subject } from "./store"
  * it shows what the thread was about as of publishing: the question, the last answer, the proposals
  * and what people decided. To go on, Discuss on GitHub opens an issue the dsa-thread workflow answers.
  */
+/** Whether a published page has anything to show for this subject's thread: a summary, or Discuss on GitHub. */
+export const publishedThreadShown = (subject: Subject): boolean => Boolean((D.threads ?? {})[anchorKeyOf(subject)] || ACTIONS?.thread)
+
 export function PublishedThread({ subject, title, className }: { subject: Subject; title: string; className?: string }) {
   const key = anchorKeyOf(subject)
   const t = (D.threads ?? {})[key] as any

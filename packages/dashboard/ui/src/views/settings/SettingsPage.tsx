@@ -24,7 +24,7 @@ export function SettingsPage({ section, onSection, onTitle }: { section: Section
   const cur = SECTIONS.find(s => s.id === section)!
   return (
     <div className="grid gap-6 md:grid-cols-[200px_minmax(0,1fr)]">
-      <nav aria-label="Settings sections" className="md:sticky md:top-36 md:self-start">
+      <nav aria-label="Settings sections" className="min-w-0 md:sticky md:top-36 md:self-start">
         <ul className="flex gap-1 overflow-x-auto md:flex-col">
           {SECTIONS.map(s => (
             <li key={s.id}>
