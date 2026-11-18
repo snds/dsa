@@ -17,6 +17,11 @@ export const fmtWhen = (v: any) => T(v).toLocaleString(undefined, { timeZone: zo
 /** A finite number, or null for anything that isn't one (missing, "", NaN, text). */
 export const num = (x: unknown): number | null => (x == null || x === "" || !Number.isFinite(Number(x)) ? null : Number(x))
 export const fmt = (n: any) => (n == null ? "—" : Number(n).toLocaleString("en-US"))
+/** "3 parts and 1 icon", naming only what there is; "" when there are neither (visual review A V-13, V-23). */
+export const partsAndIcons = (c: { parts?: number; icons?: number }) => {
+  const one = (n: number, w: string) => `${fmt(n)} ${w}${n === 1 ? "" : "s"}`
+  return [c.parts ? one(c.parts, "part") : "", c.icons ? one(c.icons, "icon") : ""].filter(Boolean).join(" and ")
+}
 export const pct = (n: any) => (n == null ? "—" : `${Math.round(n * 10) / 10}%`)
 export const pct100 = (n: number) => `${Math.round(n * 100)}%`
 /**

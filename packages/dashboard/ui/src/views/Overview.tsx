@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Code, Disclosure, Facts, Note, Panel, StatusDot } from "@/components/bits"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { D, SYS, band, fmt, fmtDT, num, ratio, threshold, type Band } from "@/lib/dsa"
+import { D, SYS, band, fmt, fmtDT, num, partsAndIcons, ratio, threshold, type Band } from "@/lib/dsa"
 import { CERTAINTY, classify, type Certainty } from "@/lib/insight"
 import { hashFor, inApp, openRoute, useApp } from "@/lib/app"
 import { AllAppsNote } from "@/components/app-select"
@@ -207,7 +207,7 @@ function ScanConfidence({ go }: { go: (v: string) => void }) {
   const rows: { ok: boolean; title: string; body: React.ReactNode; act?: [string, () => void] }[] = [
     { ok, title: "Where the system's code is", body: <>{howText}. {m.sources.read.length ? `${fmt(m.sources.read.length)} folder${m.sources.read.length === 1 ? "" : "s"} read.` : "Nothing is read yet."}</>,
       act: ["Check sources", () => openRoute("settings/general")] },
-    { ok: true, title: `${fmt(m.counts.components)} components`, body: <>Plus {fmt(m.counts.parts)} parts (DialogTitle, MenuItem) and {fmt(m.counts.icons)} icons, counted apart.</>, act: ["See inventory", () => go("system")] },
+    { ok: true, title: `${fmt(m.counts.components)} components`, body: <>{partsAndIcons(m.counts) ? `Plus ${partsAndIcons(m.counts)}, counted apart.` : "No parts or icons counted apart."}</>, act: ["See inventory", () => go("system")] },
     { ok: check === 0, title: `${fmt(check)} need a check`, body: "Known only from how apps write them, found by naming alone, or of an unclear kind. Confirm or correct them.", act: ["Review", () => { openRoute("system/check"); go("system") }] },
     { ok: unused === 0, title: `${fmt(unused)} not used by any app`, body: "Candidates to promote, document, or retire. Some are building blocks used only inside the system.", act: ["Review", () => { openRoute("system/unused"); go("system") }] },
   ]

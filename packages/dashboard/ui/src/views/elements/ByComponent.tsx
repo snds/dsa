@@ -92,10 +92,11 @@ interface Done { text: string; parts: { ids: string[]; labelsAt?: string | undef
 function Bar({ c }: { c: Counts }) {
   const w = (n: number) => `${c.total ? (n / c.total) * 100 : 0}%`
   return (
-    <span className="flex h-1 w-full overflow-hidden rounded-full bg-muted" aria-hidden>
-      <i className="block bg-emerald-500" style={{ width: w(c.decided) }} />
-      <i className="block bg-primary/70" style={{ width: w(c.proposed) }} />
-      <i className="block bg-amber-500" style={{ width: w(c.todo) }} />
+    // Labelled, and in the same status colours as the destinations (visual review A V-27, B V-24).
+    <span role="img" aria-label={`${c.decided} decided, ${c.proposed} staged, ${c.todo} to do`} title={`${c.decided} decided · ${c.proposed} staged · ${c.todo} to do`} className="flex h-1 w-full overflow-hidden rounded-full bg-muted">
+      <i className="block bg-success-soft-foreground/60" style={{ width: w(c.decided) }} />
+      <i className="block bg-primary/60" style={{ width: w(c.proposed) }} />
+      <i className="block bg-warning-soft-foreground/70" style={{ width: w(c.todo) }} />
     </span>
   )
 }
@@ -369,7 +370,7 @@ function Neighbours({ b }: { b: Batch }) {
                 <b className="font-medium">{pickText(n.pick)}</b>
                 <span className="block text-muted-foreground">{n.mine ? "dsa's pick for this batch" : `weighed for ${plural(n.places, "place")}`}</span>
                 {/* Say whose words a drawing shows: this place's own, or the component's example. */}
-                {drawn?.url && <span className="block text-[11px] text-muted-foreground">{ownWords(drawn, rep) ? `with “${rep.label ?? nameOf(rep)}”'s own words` : "example content, not this place's"}</span>}
+                {drawn?.url && <span className="block text-[11px] text-muted-foreground">{ownWords(drawn, rep) ? `with this element's own words (“${rep.label ?? nameOf(rep)}”)` : "example content, not this place's"}</span>}
               </figcaption>
               {!n.mine && (
                 <Button variant="outline" size="sm" disabled={busy || !ticked.length} onClick={() => useFor(n.pick, ticked)} title={ticked.length ? undefined : "Tick places in this batch first"}>

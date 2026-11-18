@@ -122,7 +122,7 @@ export function whatTheAgentKnows(snap: Snapshot, s: Subject): Source[] {
 
   // Repo
   const age = snap.run ? (Date.now() - new Date(snap.run.takenAt).getTime()) / 86_400_000 : Infinity;
-  out.push({ layer: 'repo', name: 'The code', status: !snap.run ? 'missing' : age > STALE_DAYS ? 'stale' : 'included', detail: snap.run ? `Read by scan ${snap.run.id}, ${Math.max(0, Math.round(age))} day(s) ago` : 'No scan yet.' });
+  out.push({ layer: 'repo', name: 'The code', status: !snap.run ? 'missing' : age > STALE_DAYS ? 'stale' : 'included', detail: snap.run ? `Read by scan ${snap.run.id}, ${((d) => (d === 0 ? 'today' : d === 1 ? 'a day ago' : `${d} days ago`))(Math.max(0, Math.round(age)))}` : 'No scan yet.' });
   return out;
 }
 

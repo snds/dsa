@@ -287,7 +287,8 @@ export function Inbox() {
         </div>
         <div className="order-1 flex min-w-0 flex-col gap-3 @4xl:order-none">
           {sel && canChat() && <Button variant="outline" size="sm" className="w-fit @7xl:hidden" onClick={() => agent.start(subjectOf(sel))}><SparkleIcon data-icon="inline-start" />Open this issue's thread</Button>}
-          {sel ? <IssueDetail i={sel} q={q} creating={!!creating} create={create} /> : <Panel><p className="text-sm text-muted-foreground">Select an issue.</p></Panel>}
+          {/* With nothing in the list, the empty state says it all; no second "Select an issue" card (visual review B V-13). */}
+          {sel ? <IssueDetail i={sel} q={q} creating={!!creating} create={create} /> : shown.length > 0 && <Panel><p className="text-sm text-muted-foreground">Select an issue to see it here.</p></Panel>}
         </div>
         {sel && canChat() && <PinnedThread subject={subjectOf(sel)} className="hidden @7xl:sticky @7xl:top-36 @7xl:flex @7xl:h-[calc(100vh-10rem)]" />}
         {/* A published page: the thread as of publishing, and Discuss on GitHub (stage 9). */}

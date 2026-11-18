@@ -221,8 +221,8 @@ export async function startServer(opts: ServeOptions): Promise<{ url: string; cl
           let iconModule: string | null = null;
           try { const sigs: any[] = JSON.parse(fs.readFileSync(path.join(dataDir, 'signatures.json'), 'utf8')); const ic = sigs.find(c => c.component === 'Icon'); if (ic?.file) iconModule = `${sbk.url.replace(/\/$/, '')}/@fs${path.resolve(ic.file)}`; } catch { /* no signatures */ }
           return send(200, { url: sbk.url, stories, iconModule, harness: sbk.harness, fsBase: sbk.harness ? `${sbk.url.replace(/\/$/, '')}/@fs` : null });
-        } catch (e: any) { console.error(`Request failed: ${errText(e)}`);
-      return send(500, { error: 'The server hit an unexpected error; the terminal running dsa serve has the details.' }); }
+        // Storybook not starting is a state, not a crash: say why, so the picker can show it (visual review B V-18).
+        } catch (e: any) { console.error(`Storybook didn't start: ${errText(e)}`); return send(503, { error: errText(e) }); }
       }
       // How well each variant / size / axis option fits the elements being replaced.
       if (req.method === 'POST' && url.pathname === '/api/fit') {
