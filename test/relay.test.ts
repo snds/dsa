@@ -116,6 +116,9 @@ describe("the relay's settings", () => {
     ]));
     expect(problems.join(" ")).not.toContain("short-secret-value");
     expect(relayEnvProblems(ENV)).toEqual([]);
+    // Settings that would break sign-in or the rate limit quietly are refused at start (code review A, B).
+    expect(relayEnvProblems({ ...ENV, DSA_RELAY_SESSION_HOURS: "eight" })).toEqual(["DSA_RELAY_SESSION_HOURS must be a number of hours above 0."]);
+    expect(relayEnvProblems({ ...ENV, DSA_RELAY_RATE: "0/600" })).toHaveLength(1);
     expect(relayEnvProblems({ ...ENV, DSA_RELAY_RUNNER: "webhook", DSA_RELAY_RUNNER_TOKEN: "" })).toEqual(["DSA_RELAY_WEBHOOK_TRIGGER is not set (the webhook runner needs it)."]);
     expect(() => createRelay({ ...relayOptionsFromEnv(ENV), sessionSecret: "short" })).toThrow(/at least 32 characters/);
   });
@@ -280,15 +283,27 @@ describe("progress", () => {
     expect((await get(handler, "scan/active", { Authorization: `Bearer ${session}` })).status).toBe(200);
   });
 
+  it("a malformed cookie on the path is skipped, not a 502 on every call (code review A, B, C)", async () => {
+    const { handler } = relay({}, fakeGithub({ running: true }), () => 0);
+    const r = await get(handler, "scan/active", { cookie: "other=%E0%A4%A; dsa-relay-session=x" });
+    expect(r.status).toBe(200);
+  });
+
   it("reuses answers for a few seconds, so many viewers polling don't spend the relay's API allowance", async () => {
     let t = 0;
     const gh = fakeGithub({ running: true });
     const { handler } = relay({}, gh, () => t);
+    // Without a session, only runs the relay has seen (here, by listing the active ones) can be asked about.
+    const unknown = await get(handler, "scan/status?id=999");
+    expect(unknown.status).toBe(404);
+    expect(gh.calls.filter((c) => c.url.endsWith("/runs/999"))).toHaveLength(0);
+    await get(handler, "scan/active");
+    const before = gh.calls.filter((c) => c.url.endsWith("/runs/50")).length;
     for (let i = 0; i < 5; i++) await get(handler, "scan/status?id=50");
-    expect(gh.calls.filter((c) => c.url.endsWith("/runs/50"))).toHaveLength(1);
+    expect(gh.calls.filter((c) => c.url.endsWith("/runs/50"))).toHaveLength(before + 1);
     t += 5000;
     await get(handler, "scan/status?id=50");
-    expect(gh.calls.filter((c) => c.url.endsWith("/runs/50"))).toHaveLength(2);
+    expect(gh.calls.filter((c) => c.url.endsWith("/runs/50"))).toHaveLength(before + 2);
   });
 });
 

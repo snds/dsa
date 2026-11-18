@@ -78,7 +78,8 @@ export async function startServer(opts: ServeOptions): Promise<{ url: string; cl
   const bind = opts.host ?? '127.0.0.1';
   const base = opts.base ?? '/';
   if (!LOOPBACK.has(bind) && !(opts.allowHosts ?? []).length) throw new Error(`Listening on ${bind} needs --allow-host <public name>: the Host check is what stops other sites from reaching this server through DNS tricks.`);
-  const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`, ...(opts.allowHosts ?? []).flatMap(h => [h, `${h}:${port}`])]);
+  // ::1 is loopback too: --host ::1 is accepted, so its Host header must be (code review B C-16).
+  const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`, ...(opts.allowHosts ?? []).flatMap(h => [h, `${h}:${port}`])]);
   // A server that keeps history elsewhere (a git branch) starts from it.
   if (opts.deploy) {
     try { const d = await opts.deploy(first); if (d.history.id !== 'local') say(await d.history.pull(dataDir)); } catch (e) { say(`History not restored: ${errText(e)}`); }
@@ -227,7 +228,7 @@ export async function startServer(opts: ServeOptions): Promise<{ url: string; cl
       if (req.method === 'POST' && url.pathname === '/api/fit') {
         const body = await readBody(req);
         const { evals } = await latestEvals(dataDir);
-        const items = evals.filter(e => (body.ids ?? []).includes(e.id));
+        const items = evals.filter(e => idSet(body.ids).has(e.id));
         const fit = computeFit(dataDir, items, String(body.component ?? ''), body.current ?? {});
         return fit ? send(200, fit) : send(404, { error: 'No signature for that component yet. Run a scan.' });
       }
@@ -236,7 +237,7 @@ export async function startServer(opts: ServeOptions): Promise<{ url: string; cl
         const body = await readBody(req);
         const { config } = await loadConfig(root);
         const { evals } = await latestEvals(dataDir);
-        const items = evals.filter(e => (body.ids ?? []).includes(e.id)).slice(0, 300);
+        const items = evals.filter(e => idSet(body.ids).has(e.id)).slice(0, 300);
         const { config: cfg } = materializeRemotes(config, root, dataDir, false, () => {});
         const targets = resolveTargets(root, cfg);
         let comp: any;
@@ -253,6 +254,9 @@ export async function startServer(opts: ServeOptions): Promise<{ url: string; cl
       if (req.method === 'GET' && url.pathname === '/api/queue') {
         const { config } = await loadConfig(root);
         let syncError: string | undefined;
+        // Syncing calls GitHub with the saved token, so it needs the page's header like a write does:
+        // another site's <img src=…?sync=force> can't send it (code review B C-21, C C-34).
+        if (url.searchParams.get('sync') && req.headers['x-dsa'] !== '1') return send(403, { error: 'Missing X-DSA header.' });
         if (url.searchParams.get('sync')) {
           const r: { synced: boolean; error?: string } = await syncLinks(root, config, dataDir, { force: url.searchParams.get('sync') === 'force' }).catch((e: any) => ({ synced: false, error: errText(e) }));
           syncError = r.error && r.error !== 'No GitHub token.' ? r.error : undefined;
@@ -405,10 +409,14 @@ export async function serve(opts: ServeOptions): Promise<void> {
   await new Promise(() => {});
 }
 
+/** Element ids from a request: a list, never a string (whose .includes would match substrings: code review B C-18). */
+const idSet = (ids: unknown) => new Set(Array.isArray(ids) ? ids.map(String) : []);
+
 function readBody(req: http.IncomingMessage): Promise<any> {
   return new Promise((ok, fail) => {
     let data = '';
-    req.on('data', c => { data += c; if (data.length > 1_000_000) req.destroy(); });
+    // Too big: stop reading and settle, so the request gets an answer instead of hanging (code review B, C).
+    req.on('data', c => { data += c; if (data.length > 1_000_000) { req.removeAllListeners('data'); req.resume(); data = ''; fail(new Error('The request is too large (over 1 MB).')); } });
     req.on('end', () => { try { ok(data ? JSON.parse(data) : {}); } catch { fail(new Error('Body is not JSON.')); } });
     req.on('error', fail);
   });
