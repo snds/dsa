@@ -438,8 +438,9 @@ export function preloadIconFont() {
   if (fontState === "loading" || fontState === "ok" || !D.serve) return
   fontState = "loading"
   const done = (s: FontState) => { fontState = s; fontSubs.forEach(f => f(s)) }
-  const local = new FontFace("DSA Icons", `url(${at("/fonts/icons.woff2")})`, { display: "block" })
-  local.load().then(f => { (document.fonts as any).add(f); done("ok") }, () => {
+  // The server's own font only when it has one (the profile names it); else straight to Google Fonts.
+  const local = D.iconFont ? new FontFace("DSA Icons", `url(${at("/fonts/icons.woff2")})`, { display: "block" }).load() : Promise.reject(new Error("no local icon font"))
+  local.then(f => { (document.fonts as any).add(f); done("ok") }, () => {
     // Google Fonts: the same Material Symbols font, by its own family name.
     const fallback = () => document.fonts.load('24px "Material Symbols Outlined"', "home").then(f => done(f.length ? "ok" : "fail"), () => done("fail"))
     if (document.getElementById("dsa-icon-font")) return fallback()

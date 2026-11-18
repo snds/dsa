@@ -147,7 +147,7 @@ export function StaticRescan({ onPost }: { onPost: () => void }) {
 function LiveRevision() {
   const l = D.live
   const sha = String(l.head ?? l.revision?.sha ?? "").slice(0, 7)
-  const text = l.state === "live" ? `Live revision ${sha}${l.revision?.liveAt ? `, live since ${fmtD(l.revision.liveAt)}` : ""}` : l.state === "unchecked" ? `Checkout ${sha || "?"}, not checked against production` : `Not live: ${sha || "?"}`
+  const text = l.state === "live" ? `Live revision ${sha}${l.revision?.liveAt ? `, live since ${fmtD(l.revision.liveAt)}` : ""}` : l.state === "unchecked" ? `${sha ? `Checkout ${sha}` : "This checkout"}, not checked against production` : sha ? `Not live: ${sha}` : "Not live yet"
   return (
     <Tooltip>
       <TooltipTrigger render={<span className={cn("cursor-default underline decoration-dotted underline-offset-4", l.unreleased && "font-medium text-destructive")} />}>{text}</TooltipTrigger>

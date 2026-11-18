@@ -8,7 +8,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Facts, Note, Panel, StatusDot } from "@/components/bits"
 import { CodeReader, shortPath, type Place } from "@/components/code-reader"
-import { D, SYS, band, fmt, pct, threshold } from "@/lib/dsa"
+import { D, SYS, band, fmt, partsAndIcons, pct, threshold } from "@/lib/dsa"
 import { FOUND_BY } from "@/lib/insight"
 import { replaceRoute, routePath, useApp } from "@/lib/app"
 import { AllAppsNote } from "@/components/app-select"
@@ -28,6 +28,18 @@ const FILTERS: { id: Filter; label: string; hint: string }[] = [
  * What the scan believes the system is: each component with its kind, variants, parts and tokens, how much
  * apps use it and how faithfully, and how it was found. "Needs a check" is the list to confirm by hand.
  */
+/** The "Found by" legend, naming only the shapes the table shows (visual review B V-21: it explained a diamond that never appeared). */
+function foundLegend(rows: any[]): string {
+  const trustOf = (c: any) => (c.inferred ? "low" : FOUND_BY[c.evidence?.tier]?.trust ?? "medium")
+  const shown = new Set(rows.map(trustOf))
+  const parts = [
+    shown.has("high") && "a circle is reliable (declared or exported)",
+    shown.has("medium") && "a diamond is a stylesheet class",
+    shown.has("low") && "a square is naming alone or app code alone and should be confirmed",
+  ].filter(Boolean)
+  return parts.join(", ")
+}
+
 export function System() {
   const m = D.model
   const [, initial, linked] = routePath().split("/") as [string, Filter | undefined, string | undefined]
@@ -77,7 +89,7 @@ export function System() {
         <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter by name or kind" className="w-full sm:w-64" aria-label="Filter components" />
       </div>
 
-      <Panel title={`${fmt(rows.length)} of ${fmt(m.counts.components)} components`} description={`${fmt(m.counts.parts)} parts and ${fmt(m.counts.icons)} icons are counted with their components, not listed here`} contentClassName="px-0">
+      <Panel title={`${fmt(rows.length)} of ${fmt(m.counts.components)} components`} description={partsAndIcons(m.counts) ? `${partsAndIcons(m.counts)} ${m.counts.parts + m.counts.icons === 1 ? "is" : "are"} counted with their components, not listed here` : undefined} contentClassName="px-0">
         <Table>
           <TableHeader><TableRow>
             <TableHead className="pl-4">Component</TableHead>
@@ -132,7 +144,8 @@ export function System() {
                           ["Parts", c.parts.length ? c.parts.join(", ") : "None"],
                           ["Tokens", c.tokens ? fmt(c.tokens) : "None"],
                           ["Kind", c.kind ? `${c.kind.kind}, inferred (${Math.round(c.kind.confidence * 100)}% match)${c.kind.ambiguous ? ", close to another kind" : ""}` : "Not recognised"],
-                          ["Declared in", <><button type="button" className="rounded-sm font-mono text-xs text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring outline-none" onClick={() => setReading({ file: c.evidence.file, line: c.evidence.line || 1, kind: c.name })}>{shortPath(c.evidence.file)}{c.evidence.line ? `:${c.evidence.line}` : ""}</button> <span className="text-muted-foreground">({c.evidence.extractor})</span></>],
+                          // A placeholder file ("(consumer imports)") means no declaration was read: say how it was found instead (visual review B V-22).
+                          /^\(.*\)$/.test(c.evidence.file) ? ["Declared in", <span className="text-muted-foreground">No declaration read: found {c.evidence.file === "(consumer tags)" ? "by its tag prefix in app code" : "by apps importing it from the system package"}</span>] : ["Declared in", <><button type="button" className="rounded-sm font-mono text-xs text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring outline-none" onClick={() => setReading({ file: c.evidence.file, line: c.evidence.line || 1, kind: c.name })}>{shortPath(c.evidence.file)}{c.evidence.line ? `:${c.evidence.line}` : ""}</button> <span className="text-muted-foreground">(read by {c.evidence.extractor})</span></>],
                         ]} />
                         <ComponentCase c={c} />
                       </div>
@@ -145,7 +158,7 @@ export function System() {
           </TableBody>
         </Table>
         {reading && <CodeReader places={[reading]} index={0} onIndex={() => {}} onClose={() => setReading(null)} />}
-        <Note className="mt-3 px-4">Open a component for its variants, parts, tokens and where it is declared. "Found by" is how {SYS}'s source declares each component: a circle is reliable (declared or exported), a diamond is a stylesheet class, a square is naming alone or app code alone and should be confirmed. Kind is the component type the scan recognises (button, dialog, tabs…); a question mark means it was close to another kind.</Note>
+        <Note className="mt-3 px-4">Open a component for its variants, parts, tokens and where it is declared. "Found by" is how {SYS}'s source declares each component: {foundLegend(rows)}. Kind is the component type the scan recognises (button, dialog, tabs…); a question mark means it was close to another kind.</Note>
       </Panel>
     </div>
   )

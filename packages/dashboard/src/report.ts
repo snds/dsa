@@ -370,8 +370,14 @@ function hostOpts(opts: ReportOptions, dataDir: string) {
   return { base: opts.serve ? opts.base ?? '/' : null, actions, scanEstimate: estimate, schedule: opts.schedule ?? opts.actions?.schedule ?? [] };
 }
 
+function hasIconFont(root: string, profile: ResolvedProfile): boolean {
+  try { const f = (profile as any).iconFont?.(root); return Boolean(f && fs.existsSync(f)); } catch { return false; }
+}
+
 function displayOpts(root: string, config: Config, profile: ResolvedProfile, serve?: boolean) {
-  return { label: profile.label, modules: { figma: figmaEnabled(config) }, timeZone: config.report?.timeZone ?? null, title: config.report?.title || config.designSystem?.core?.name || path.basename(root), serve: Boolean(serve) };
+  return { label: profile.label, modules: { figma: figmaEnabled(config) }, timeZone: config.report?.timeZone ?? null, title: config.report?.title || config.designSystem?.core?.name || path.basename(root), serve: Boolean(serve),
+    // Whether the server has an icon font to send, so the page doesn't ask for one that 404s (visual review A V-21).
+    iconFont: serve ? hasIconFont(root, profile) : false };
 }
 
 function emptyPayload(root: string, config: Config, profile: ResolvedProfile, serve?: boolean) {
