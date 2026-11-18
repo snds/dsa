@@ -99,13 +99,14 @@ function componentBlock(name: string): string {
 }
 
 export function subjectKey(s: Subject): string {
-  const slug = (x: string) => x.replace(/[^\w.-]+/g, '-');
+  // Every part is cleaned: a key becomes a file name, and ids and names can come from a request.
+  const slug = (x: unknown) => String(x ?? '').replace(/[^\w-]+/g, '-').replace(/^-+/, '').slice(0, 80) || 'x';
   if (s.kind === 'issue') return `issue-${slug(s.key)}`;
   if (s.kind === 'component') return `component-${slug(s.name)}`;
   if (s.kind === 'group') return `group-${s.by}-${slug(s.value)}`;
-  if (s.kind === 'review') return `review-${s.ids.length === 1 ? s.ids[0] : `${s.ids[0]}+${s.ids.length - 1}`}`;
-  if (s.kind === 'queue') return `queue-${s.id}`;
-  if (s.kind === 'readiness') return `readiness-${s.subject.replace(/[^\w.-]+/g, '-')}`;
+  if (s.kind === 'review') return `review-${s.ids.length === 1 ? slug(s.ids[0]) : `${slug(s.ids[0])}+${s.ids.length - 1}`}`;
+  if (s.kind === 'queue') return `queue-${slug(s.id)}`;
+  if (s.kind === 'readiness') return `readiness-${slug(s.subject)}`;
   return 'scan';
 }
 
@@ -131,6 +132,7 @@ export function buildBrief(snap: Snapshot, s: Subject): Brief {
   const dir = path.join(agentDir(snap.dataDir), 'context');
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `${key}.md`);
+  if (!path.resolve(file).startsWith(path.resolve(dir) + path.sep)) throw new Error(`Refusing to write a brief outside ${dir}.`);
   fs.writeFileSync(file, markdown);
   return { key, title: titleOf(snap, s), markdown, file, starters: body.starters, repo, ids: body.ids };
 }

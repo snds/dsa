@@ -45,7 +45,7 @@ export const gitBranchHistory: HistoryFactory = {
     const git = gitIn(c.root);
     const { branch, remote, keep } = { branch: c.history.branch ?? "dsa-data", remote: c.history.remote ?? "origin", keep: c.history.keep ?? "all" };
     const local = `refs/dsa/${branch}`;
-    const fetchBranch = (): boolean => git(["fetch", "--quiet", "--no-tags", "--depth", "1", remote, `+refs/heads/${branch}:${local}`]).ok;
+    const fetchBranch = (): boolean => git(["fetch", "--quiet", "--no-tags", "--depth", "1", "--end-of-options", remote, `+refs/heads/${branch}:${local}`]).ok;
     const tmpIndex = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), "dsa-index-")), "index");
     const cleanup = (idx: string) => fs.rmSync(path.dirname(idx), { recursive: true, force: true });
 
@@ -80,7 +80,7 @@ export const gitBranchHistory: HistoryFactory = {
           if (had && git(["rev-parse", `${local}^{tree}`]).out === tree) return `History: ${remote}/${branch} already has this data.`;
           const commit = git(["commit-tree", tree, ...(parent ? ["-p", parent] : []), "-m", message], author(git));
           if (!commit.ok) throw new Error(`Couldn't commit the data folder: ${commit.err}`);
-          const push = git(["push", "--quiet", ...(keep === "latest" ? ["--force"] : []), remote, `${commit.out}:refs/heads/${branch}`]);
+          const push = git(["push", "--quiet", ...(keep === "latest" ? ["--force"] : []), "--end-of-options", remote, `${commit.out}:refs/heads/${branch}`]);
           if (!push.ok) throw new Error(`Couldn't push ${branch} to ${remote}${/rejected|non-fast-forward|fetch first/.test(push.err) ? " (another run pushed first; run again)" : ""}: ${push.err.split("\n")[0]}`);
           git(["update-ref", local, commit.out]);
           return `History: saved to ${remote}/${branch} (${commit.out.slice(0, 7)}).`;
