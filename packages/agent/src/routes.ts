@@ -182,7 +182,8 @@ export const agentRoutes: ServeRoute = async ({ req, res, url, body, send, conte
     }
     // What the agent knows for a subject: the drawer beside a thread (stage 6).
     if (POST && p === '/api/agent/context') {
-      const snap = await snapshot(ctx);
+      // Fresh: a decision made a minute ago is a past decision now (UX review C U-22).
+      const snap = await snapshot(ctx, true);
       return send(200, { sources: whatTheAgentKnows(snap, subjectFrom(await body())) }), true;
     }
     if (GET && p === '/api/agent/threads') return send(200, { threads: threads(dataDir) }), true;

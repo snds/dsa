@@ -16,7 +16,12 @@ import { tools } from './system.js';
  * tools all read this one list.
  */
 export type Layer = 'rules' | 'system' | 'evidence' | 'memory' | 'repo';
-export interface Source { layer: Layer; name: string; status: 'included' | 'missing' | 'stale'; detail: string }
+/**
+ * included: given. missing: something the agent should have and doesn't (a gap to fix). stale: old.
+ * none-yet: empty, as expected on a new system (no past decisions, no hints yet): said, not a warning
+ * (UX review A, B, C: every new thread warned "missing" for these).
+ */
+export interface Source { layer: Layer; name: string; status: 'included' | 'missing' | 'stale' | 'none-yet'; detail: string }
 
 const STALE_DAYS = 7;
 
@@ -26,7 +31,8 @@ export function componentOf(snap: Snapshot, s: Subject): string | null {
   if (s.kind === 'group' && s.by === 'component') return s.value;
   if (s.kind === 'issue' && s.source?.type === 'component') return s.source.name;
   const l = legacyOf(s);
-  if (l?.kind === 'queue') { const q = snap.queue.find((x: any) => x.id === l.id); return q?.decision?.use ?? q?.subject ?? null; }
+  // A finding's subject can be a key like "DataTable|className": the component is the part before "|" (UX review A U-10).
+  if (l?.kind === 'queue') { const q = snap.queue.find((x: any) => x.id === l.id); return q?.decision?.use ?? (q?.subject ? String(q.subject).split('|')[0] : null) ?? null; }
   if (l?.kind === 'review') { const e = snap.evals.find((x: any) => x.id === l.ids[0]); return e?.decided?.decision?.use ?? e?.use ?? null; }
   return null;
 }
@@ -78,7 +84,7 @@ export function whatTheAgentKnows(snap: Snapshot, s: Subject): Source[] {
 
   // Rules
   out.push({ layer: 'rules', name: 'How the agent works', status: 'included', detail: 'Plain words, evidence first, propose and never decide.' });
-  out.push({ layer: 'rules', name: 'Scanner hints', status: snap.hints.length ? 'included' : 'missing', detail: snap.hints.length ? `${snap.hints.length} from dsa.hints.json` : 'None yet: accepted hints land in dsa.hints.json.' });
+  out.push({ layer: 'rules', name: 'Scanner hints', status: snap.hints.length ? 'included' : 'none-yet', detail: snap.hints.length ? `${snap.hints.length} from dsa.hints.json` : 'None yet: accepted hints land in dsa.hints.json.' });
 
   // System
   if (comp) {
@@ -88,7 +94,7 @@ export function whatTheAgentKnows(snap: Snapshot, s: Subject): Source[] {
     out.push({ layer: 'system', name: 'Usage guidelines', status: g.text || g.description ? 'included' : 'missing', detail: g.text ? `From ${g.path}` : g.description ? 'The entry\'s description only.' : `No guidelines found for ${comp}.` });
     const t = tokensFor(snap, comp);
     out.push({ layer: 'system', name: 'Tokens in play', status: t.boundTokens != null || t.axes ? 'included' : 'missing', detail: t.boundTokens != null ? `${t.boundTokens} bound to ${comp}` : t.axes ? 'Its measured variants and defaults.' : 'The scan has no tokens for it.' });
-  } else out.push({ layer: 'system', name: 'The component', status: 'missing', detail: 'This is not about one component.' });
+  } else out.push({ layer: 'system', name: 'The component', status: 'none-yet', detail: 'This is not about one component.' });
 
   // Evidence
   if (l?.kind === 'queue') {
@@ -108,11 +114,11 @@ export function whatTheAgentKnows(snap: Snapshot, s: Subject): Source[] {
 
   // Memory
   const past = pastDecisions(snap, comp);
-  out.push({ layer: 'memory', name: 'Past decisions', status: past.length ? 'included' : 'missing', detail: past.length ? `${past.length} decided by people${comp ? ` about ${comp}` : ''}` : 'None yet.' });
+  out.push({ layer: 'memory', name: 'Past decisions', status: past.length ? 'included' : 'none-yet', detail: past.length ? `${past.length} decided by people${comp ? ` about ${comp}` : ''}` : 'None yet.' });
   const rejected = readProposals(snap.dataDir).filter(p => p.status === 'rejected' && (!comp || JSON.stringify(p.payload ?? {}).toLowerCase().includes(comp.toLowerCase())));
-  out.push({ layer: 'memory', name: 'Rejected proposals', status: rejected.length ? 'included' : 'missing', detail: rejected.length ? `${rejected.length}, with the reasons given` : 'None rejected yet.' });
+  out.push({ layer: 'memory', name: 'Rejected proposals', status: rejected.length ? 'included' : 'none-yet', detail: rejected.length ? `${rejected.length}, with the reasons given` : 'None rejected yet.' });
   const related = relatedThreads(snap, s);
-  out.push({ layer: 'memory', name: 'Related threads', status: related.length ? 'included' : 'missing', detail: related.length ? related.slice(0, 3).map(t => t.title).join('; ') : 'No other thread on this.' });
+  out.push({ layer: 'memory', name: 'Related threads', status: related.length ? 'included' : 'none-yet', detail: related.length ? related.slice(0, 3).map(t => t.title).join('; ') : 'No other thread on this.' });
 
   // Repo
   const age = snap.run ? (Date.now() - new Date(snap.run.takenAt).getTime()) / 86_400_000 : Infinity;

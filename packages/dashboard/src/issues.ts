@@ -96,7 +96,7 @@ export function buildIssues(p: IssueInputs): Issue[] {
     out.push({
       key: i.id, kind: approval ? 'approval' : 'finding', rule: i.rule, title: i.title,
       certainty: certaintyOfRule(i.rule),
-      component: approval ? componentOf(i.decision?.use) ?? i.decision?.use ?? null : componentOf(i.subject) ?? componentOf(i.family),
+      component: approval ? componentOf(i.decision?.use) ?? i.decision?.use ?? null : componentOf(String(i.subject ?? '').split('|')[0]) ?? componentOf(i.family),
       apps: i.affected ?? (i.target ? [i.target] : []), owner: i.owner ?? null,
       status: i.status === 'done' ? 'done' : 'open',
       source: { type: 'queue', id: i.id },
