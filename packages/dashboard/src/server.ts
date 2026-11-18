@@ -4,7 +4,7 @@ import { LabelSchema, labelsJsonl, type Label } from '@snds/dsa';
 import { decisionForLabel, labelsForDecision } from './answers.js';
 import path from 'node:path';
 import { discoverSources, isShotsMode, NotLiveError, recordScanTime, runAfterHooks, type Deploy, type DsaAddon, type EngineContext, type ServeRequest } from '@snds/dsa';
-import { MEASURES, appSettings, expandSources, isGlob, clearEvents, clearMappingCache, computeFit, decideMany, judgmentFor, effectiveSettings, figmaToken, githubToken, latestEvals, loadCatalog, logEvent, mapInstance, mask, materializeRemotes, openStore, parseFigmaUrl, readRendered, readSource, resolveTargets, runPipeline, setSetting, targetRelative, undecide, withMetrics, writeSecrets, type AppSettings, type Config, type Recommendation } from '@snds/dsa/engine';
+import { MEASURES, appSettings, badGitRef, badGitUrl, expandSources, isGlob, clearEvents, clearMappingCache, computeFit, decideMany, judgmentFor, effectiveSettings, figmaToken, githubToken, latestEvals, loadCatalog, logEvent, mapInstance, mask, materializeRemotes, openStore, parseFigmaUrl, readRendered, readSource, resolveTargets, runPipeline, setSetting, targetRelative, undecide, withMetrics, writeSecrets, type AppSettings, type Config, type Recommendation } from '@snds/dsa/engine';
 import { toNodeListener } from '@snds/dsa/relay/node';
 import type { RelayHandler } from '@snds/dsa/relay';
 import { renderReport } from './report.js';
@@ -520,7 +520,11 @@ export async function saveView(ctx: EngineContext, body: any): Promise<{ saved: 
       const k = kids.find(x => x.name === c.name);
       if (!k) continue;
       k.path = String(c.path ?? '').trim() || undefined;
-      k.git = String(c.gitUrl ?? '').trim() ? { url: String(c.gitUrl).trim(), ref: String(c.gitRef ?? '').trim() || 'main' } : undefined;
+      const url = String(c.gitUrl ?? '').trim(), ref = String(c.gitRef ?? '').trim() || 'main';
+      // A ref or URL starting with "-" would reach git as an option and could run a command.
+      const bad = url ? badGitUrl(url) ?? badGitRef(ref) : null;
+      if (bad) { errors.push(`${c.name}: ${bad}`); continue; }
+      k.git = url ? { url, ref } : undefined;
       k.exclude = list(c.exclude);
     }
     raw.internalConsumers = list(body.sources.internalConsumers);

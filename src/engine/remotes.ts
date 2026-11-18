@@ -13,6 +13,22 @@ import type { Config } from './config.js';
  */
 export interface SkippedRepo { name: string; url: string; why: string }
 
+/**
+ * A git ref and URL are values, never options: one that starts with "-" (say `--upload-pack=…`) would run
+ * a command. Settings can write both, so they are checked here and again where the form is saved.
+ * Returns why one isn't acceptable, or null.
+ */
+export function badGitRef(ref: string): string | null {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._\/-]*$/.test(ref) || ref.includes('..') || ref.endsWith('.lock') || ref.endsWith('/') || ref.length > 200)
+    return `"${ref}" isn't a branch, tag or commit name.`;
+  return null;
+}
+export function badGitUrl(url: string): string | null {
+  if (!url || url.startsWith('-') || /\s/.test(url) || url.length > 500) return `"${url}" isn't a git URL.`;
+  if (/^ext::/i.test(url)) return 'The ext:: transport runs a command, so it isn\'t allowed.';
+  return null;
+}
+
 export function materializeRemotes(config: Config, root: string, dataDir: string, force = false, log: (m: string) => void = () => {}): { config: Config; notes: string[]; skipped: SkippedRepo[] } {
   const notes: string[] = [];
   const skipped: SkippedRepo[] = [];
@@ -25,12 +41,14 @@ export function materializeRemotes(config: Config, root: string, dataDir: string
     const dest = path.join(dataDir, 'remotes', d.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
     const ref = d.git.ref ?? 'main';
     try {
+      const bad = badGitRef(String(ref)) ?? badGitUrl(String(d.git.url));
+      if (bad) throw Object.assign(new Error(bad), { stderr: bad });
       if (fs.existsSync(path.join(dest, '.git'))) {
-        execFileSync('git', ['-C', dest, 'fetch', '--quiet', '--depth', '500', 'origin', ref], { stdio: 'pipe' });
+        execFileSync('git', ['-C', dest, 'fetch', '--quiet', '--depth', '500', '--end-of-options', 'origin', ref], { stdio: 'pipe' });
         execFileSync('git', ['-C', dest, 'checkout', '--quiet', '--detach', 'FETCH_HEAD'], { stdio: 'pipe' });
       } else {
         fs.mkdirSync(path.dirname(dest), { recursive: true });
-        execFileSync('git', ['clone', '--quiet', '--depth', '500', '--branch', ref, d.git.url, dest], { stdio: 'pipe' });
+        execFileSync('git', ['clone', '--quiet', '--depth', '500', '--branch', ref, '--', d.git.url, dest], { stdio: 'pipe' });
       }
       const sha = execFileSync('git', ['-C', dest, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
       log(`Remote ${d.name}: ${d.git.url}@${ref} (${sha})`);

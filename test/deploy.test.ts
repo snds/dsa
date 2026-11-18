@@ -291,11 +291,12 @@ describe("host adapters", () => {
     const { fetch: f } = fakeFetch({
       "https://api.github.com/repos/acme/site/issues/7/comments": (init) => {
         if (init?.method === "POST") { writes.push({ url: "comment", method: "POST", body: JSON.parse(String(init.body)) }); return { status: 201, body: {} }; }
-        return { body: [{ body: file(2) }, { body: "thanks" }, { body: file(3) }] };
+        // An outsider's newer comment never counts: only the author or the repo's own people (code review C C-06).
+        return { body: [{ body: file(2), user: { login: "dev" }, author_association: "MEMBER" }, { body: "thanks", user: { login: "x" } }, { body: file(3), user: { login: "filer" }, author_association: "NONE" }, { body: file(9), user: { login: "outsider" }, author_association: "NONE" }] };
       },
       "https://api.github.com/repos/acme/site/issues/7": (init) => {
         if (init?.method === "PATCH") { writes.push({ url: "issue", method: "PATCH", body: JSON.parse(String(init.body)) }); return { body: {} }; }
-        return { body: { body: file(1), comments: 3 } };
+        return { body: { body: file(1), comments: 4, user: { login: "filer" } } };
       },
     });
     const c = hostCtx({ adapter: "github", github: { repo: "acme/site" } }, { fetch: f, env: { GITHUB_TOKEN: "t" } });
@@ -390,6 +391,11 @@ describe("history backends", () => {
     expect(fs.readFileSync(path.join(root, "saved", "dsa.duckdb"), "utf8")).toBe("from-store");
     await expect(commandHistory.create(hctx({ adapter: "command", pull: `${node} -e "process.exit(3)"` }, root)).pull(data)).rejects.toThrow(/exit 3/);
     await expect(commandHistory.create(hctx({ adapter: "command" }, root)).push(data, "x")).rejects.toThrow(/history.push is not set/);
+    // A data folder named with $( ) or backticks is a path, never a command (code review B C-12, C C-22).
+    const odd = path.join(root, "d$(touch PWNED)`touch PWNED2`");
+    await commandHistory.create(hctx({ adapter: "command", pull: cp(JSON.stringify(store), "{dir}") }, root)).pull(odd);
+    expect(fs.readFileSync(path.join(odd, "dsa.duckdb"), "utf8")).toBe("from-store");
+    expect(fs.existsSync(path.join(root, "PWNED")) || fs.existsSync(path.join(root, "PWNED2"))).toBe(false);
   });
 });
 

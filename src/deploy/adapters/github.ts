@@ -148,9 +148,11 @@ export const githubHost: HostAdapter = {
     if (!s.repo) throw new Error("The github adapter needs host.github.repo (or github.defaultRepo, or GITHUB_REPOSITORY) to read an issue.");
     const n = issueNumber(ref);
     const issue = await gh(c, "GET", `/repos/${s.repo}/issues/${n}`);
-    // The newest comment wins: someone may have corrected the decisions after filing.
+    // The newest comment wins: someone may have corrected the decisions after filing. Only the issue's
+    // author or the repo's own people count; on a public repo anyone else can comment.
     const comments: any[] = issue.comments ? await gh(c, "GET", `/repos/${s.repo}/issues/${n}/comments?per_page=100`) : [];
-    for (const text of [...comments.map((x) => String(x.body ?? "")).reverse(), String(issue.body ?? "")]) {
+    const trusted = (x: any) => x?.user?.login === issue.user?.login || ["OWNER", "MEMBER", "COLLABORATOR"].includes(String(x?.author_association ?? ""));
+    for (const text of [...comments.filter(trusted).map((x) => String(x.body ?? "")).reverse(), String(issue.body ?? "")]) {
       const d = decisionsIn(text);
       if (d) return d;
     }
