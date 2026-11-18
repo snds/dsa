@@ -87,7 +87,7 @@ signed-in pages load their data. Set `readApi: false` to block that too.
 Run this once, on a machine with a screen:
 
 ```bash
-npx dsa login https://example.com/app/ --out .dsa/auth/example.com.json
+npx --no dsa login https://example.com/app/ --out .dsa/auth/example.com.json
 ```
 
 A browser opens. Sign in, then press Enter in the terminal or close the window. Point `auth` at
@@ -327,7 +327,7 @@ There are two hosting modes, sharing one dashboard.
 straight to the repo. To mount it at `<site>/dsa/` behind your reverse proxy:
 
 ```bash
-npx dsa serve --host 0.0.0.0 --port 4319 --base /dsa/ --allow-host example.com
+npx --no dsa serve --host 0.0.0.0 --port 4319 --base /dsa/ --allow-host example.com
 ```
 
 - `--base` (or `host.base`) is the sub-path. Requests outside it get a 404.
@@ -495,7 +495,7 @@ on:
         default: normal
 # …
       - env: { SHOTS_MODE: "${{ inputs.shots || 'normal' }}" }
-        run: npx dsa run --shots --shots-mode "$SHOTS_MODE"
+        run: npx --no dsa run --shots --shots-mode "$SHOTS_MODE"
 ```
 
 Through the relay, the setting goes with the scan. A plain link can't fill in GitHub's Run workflow form, so
@@ -571,8 +571,8 @@ dsa runs on a machine that has a checkout of the product, behind the company's s
 ```
 
 ```bash
-npx dsa login https://example.com/ --out .dsa/auth/example.com.json
-npx dsa serve --host 0.0.0.0 --base /dsa/ --allow-host example.com
+npx --no dsa login https://example.com/ --out .dsa/auth/example.com.json
+npx --no dsa serve --host 0.0.0.0 --base /dsa/ --allow-host example.com
 ```
 
 Proxy `/dsa/` to `127.0.0.1:4319`, behind your sign-in. The Run button refuses while the checkout
@@ -608,17 +608,44 @@ The deploy job, in any CI (shown as shell steps):
 npm ci
 npm run build                      # → dist/, what gets deployed
 npm run build-storybook            # → packages/ui/storybook-static
-npx dsa setup                      # the headless browser (cache it between runs)
-npx dsa run --shots                # checks CI_COMMIT_SHA, pulls and pushes history
-npx dsa publish --out dist/dsa     # the dashboard, inside the site
+npx --no dsa setup                      # the headless browser (cache it between runs)
+npx --no dsa run --shots                # checks CI_COMMIT_SHA, pulls and pushes history
+npx --no dsa publish --out dist/dsa     # the dashboard, inside the site
 # …then deploy dist/ as you already do
 ```
 
-Point the webhook at a small job that runs `npx dsa apply-decisions --file -` with the request
+Point the webhook at a small job that runs `npx --no dsa apply-decisions --file -` with the request
 body on stdin, then commits the decisions file. Or leave out `decisions` to download the file
 instead.
 
 ## Example 3: GitHub Pages (private or public)
+
+### Setup checklist
+
+Everything a GitHub repo needs, in one place. Each item links to where it is explained.
+
+1. **Install dsa in the repo** (`devDependencies`, from the release tarballs: README, *Install*). Workflows
+   run it as `npx --no dsa` (or `pnpm exec dsa`). Never a bare `npx dsa`: dsa isn't on npm, and an
+   unrelated package called `dsa` is, so npx could fetch and run that one.
+2. **Create the labels** the workflows listen for. A new-issue link drops a label the repo doesn't have,
+   and the re-scan and decisions workflows then never start:
+   ```sh
+   gh label create dsa-rescan --description "Re-scan the dsa dashboard"
+   gh label create dsa-decisions --description "Review decisions from the dsa dashboard"
+   gh label create dsa-thread --description "A dsa dashboard thread"
+   ```
+   (`host.github.rescanLabel` and `host.github.label` change the first two names.)
+3. **Copy the workflows:** the Pages workflow and the decisions workflow below, the re-scan workflow
+   ([Re-scan by issue](#re-scan-by-issue-github-no-service)), and the thread workflow
+   (`npx --no dsa agent workflow > .github/workflows/dsa-thread.yml`,
+   [Threads on a published page](#threads-on-a-published-page)).
+4. **Repository secrets and variables:** `ANTHROPIC_API_KEY` for threads (and `ANTHROPIC_WORKSPACE_ID` for
+   a key not scoped to a workspace); the relay's own secrets if you use it ([relay.md](relay.md)).
+5. **Repository settings:** Pages from GitHub Actions; and *Settings → Actions → General → Allow GitHub
+   Actions to create and approve pull requests*, for decisions with `mode: "pr"` and for `/dsa draft-fix`.
+
+Without a label or a secret, nothing errors where you can see it: a request just isn't answered. Check
+the Actions tab after the first one.
 
 The product deploys to GitHub Pages from a workflow. CI can't load a private Pages site, so the
 built folder is the live source. The dashboard goes into the same Pages artifact at `/dsa/`.
@@ -665,9 +692,9 @@ jobs:
       - run: npm run build && npm run build-storybook
       - uses: actions/cache@v4
         with: { path: ~/.cache/ms-playwright, key: playwright-${{ runner.os }} }
-      - run: npx dsa setup
-      - run: npx dsa run --shots           # live revision: GITHUB_SHA, this deploy
-      - run: npx dsa publish --out dist/dsa
+      - run: npx --no dsa setup
+      - run: npx --no dsa run --shots           # live revision: GITHUB_SHA, this deploy
+      - run: npx --no dsa publish --out dist/dsa
       - uses: actions/upload-pages-artifact@v3
         with: { path: dist }
       - uses: actions/deploy-pages@v4
@@ -702,7 +729,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
-      - run: npx dsa apply-decisions --issue "$ISSUE" --who "$WHO" --close
+      - run: npx --no dsa apply-decisions --issue "$ISSUE" --who "$WHO" --close
       - name: Open a pull request with the decisions
         run: |
           git switch -c "dsa/decisions-$ISSUE"

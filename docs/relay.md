@@ -139,7 +139,7 @@ Then set these in the relay's environment. Use your host's encrypted secrets for
 Check the settings without starting anything:
 
 ```bash
-npx dsa relay --check
+npx --no dsa relay --check
 ```
 
 Finally, publish the dashboard with the relay's address. You can put it in the config:
@@ -152,7 +152,7 @@ Finally, publish the dashboard with the relay's address. You can put it in the c
 Or pass it on the command line:
 
 ```bash
-npx dsa publish --out dist/dsa --relay https://relay.example.com/
+npx --no dsa publish --out dist/dsa --relay https://relay.example.com/
 ```
 
 Without a relay, the published page has no Re-scan button. It says that scans run on their schedule
