@@ -1,3 +1,4 @@
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import * as React from "react"
 import { saveAnswer } from "@/lib/answer"
 import { cn } from "cn"
@@ -311,7 +312,9 @@ export function Picker({ target, onClose }: { target: PickerTarget; onClose: () 
                       custom={content[k] === "custom" ? <IconPicker value={custom[k]} icons={G.icons ?? []} onChange={v => setCustom(c => ({ ...c, [k]: v }))} /> : null}
                       preview={content[k] === "source" && maps ? sourceIcons(k) : null} />
                   ))}
-                  <ContentField label="Icon size" value={content.iconSize} onChange={v => setContent(c => ({ ...c, iconSize: v }))} options={[["component", `${comp.component} sizes icons (drops each icon's size)`], ["source", "Keep each icon's own size"]]} />
+                  <ContentField label="Icon size" value={content.iconSize} onChange={v => setContent(c => ({ ...c, iconSize: v }))} options={[["component", `${comp.component}'s sizes`], ["source", "Each icon's own size"]]}
+                    // Short options that fit; the consequence goes underneath (visual review C V-18: the value cut off mid-word).
+                    preview={content.iconSize === "component" ? <p className="text-xs text-muted-foreground">Each icon takes {comp.component}'s size, not its own.</p> : undefined} />
                 </Section>
               )}
               {stories.length > 0 && (
@@ -353,7 +356,7 @@ export function Picker({ target, onClose }: { target: PickerTarget; onClose: () 
                     </div>
                   ) : <Note>No measured renderings for this component.</Note>}
                   {!D.serve ? <Note className="text-xs">Live previews need <code className="font-mono">dsa serve</code>.</Note>
-                    : sbErr ? <div className="flex flex-col gap-2"><Note role="alert" className="text-xs text-destructive">Storybook didn't start: {sbErr}</Note><Button variant="outline" className="w-fit" onClick={startSb}>Try again</Button></div>
+                    : sbErr ? <Alert variant="destructive"><WarningIcon /><AlertTitle>Storybook didn't start</AlertTitle><AlertDescription className="flex flex-col items-start gap-2"><span>{sbErr}</span><Button variant="outline" size="sm" onClick={startSb}>Try again</Button></AlertDescription></Alert>
                     : <Note className="text-xs">{sbBusy ? "Storybook is still starting in the background (the first start can take a minute). The live preview appears here when it's ready." : "Connecting to Storybook…"}</Note>}
                 </div>
               ) : null}
@@ -410,7 +413,7 @@ function ContentField({ label, value, onChange, options, custom, preview }: { la
   return (
     <Field>
       <FieldLabel>{label}</FieldLabel>
-      <NativeSelect className="w-full" value={value} onChange={e => onChange(e.target.value)}>{options.map(([v, t]) => <NativeSelectOption key={v} value={v}>{t}</NativeSelectOption>)}</NativeSelect>
+      <NativeSelect className="w-full" value={value} title={options.find(([v]) => v === value)?.[1]} onChange={e => onChange(e.target.value)}>{options.map(([v, t]) => <NativeSelectOption key={v} value={v}>{t}</NativeSelectOption>)}</NativeSelect>
       {preview}
       {custom}
     </Field>

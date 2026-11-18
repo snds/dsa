@@ -188,3 +188,8 @@
 @keyframes dsa-ellipsis {
     to { width: 1.1em; }
 }
+
+/* A table that scrolls sideways shades the side with more columns (visual review A V-20). */
+[data-slot="table-container"][data-more~="right"] { box-shadow: inset -18px 0 14px -14px color-mix(in oklab, var(--foreground) 25%, transparent); }
+[data-slot="table-container"][data-more~="left"] { box-shadow: inset 18px 0 14px -14px color-mix(in oklab, var(--foreground) 25%, transparent); }
+[data-slot="table-container"][data-more~="left"][data-more~="right"] { box-shadow: inset 18px 0 14px -14px color-mix(in oklab, var(--foreground) 25%, transparent), inset -18px 0 14px -14px color-mix(in oklab, var(--foreground) 25%, transparent); }
