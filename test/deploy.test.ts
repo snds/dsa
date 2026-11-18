@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import zlib from "node:zlib";
 import { parseConfig } from "../src/config.js";
 import {
   BUILTIN_HISTORIES,
@@ -15,6 +16,7 @@ import {
   deployFor,
   genericHost,
   gitBranchHistory,
+  pushError,
   githubHost,
   historyBackend,
   hostAdapter,
@@ -357,7 +359,7 @@ describe("history backends", () => {
     const branch = gitBranchHistory.create(hctx({ adapter: "git-branch" }, a));
     expect(await branch.pull(data)).toMatch(/no dsa-data branch/);
     expect(await branch.push(data, "run 1")).toMatch(/saved to origin\/dsa-data/);
-    expect(git(remote, "ls-tree", "-r", "--name-only", "dsa-data").split("\n").sort()).toEqual(["agent/component-checks.json", "agent/dismissals.json", "dsa.duckdb", "shots/s.png"]);
+    expect(git(remote, "ls-tree", "-r", "--name-only", "dsa-data").split("\n").sort()).toEqual(["agent/component-checks.json", "agent/dismissals.json", "dsa.duckdb.gz", "shots/s.png"]);
     expect(await branch.push(data, "run 1 again")).toMatch(/already has this data/);
     // The product's branch and working tree are untouched.
     expect(git(a, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
@@ -369,7 +371,9 @@ describe("history backends", () => {
     const dataB = path.join(b, ".dsa");
     const fresh = gitBranchHistory.create(hctx({ adapter: "git-branch" }, b));
     expect(await fresh.pull(dataB)).toMatch(/restored/);
+    // The database travels gzipped (GitHub refuses files over 100 MB) and comes back as the file the run opens.
     expect(fs.readFileSync(path.join(dataB, "dsa.duckdb"), "utf8")).toBe("db-1");
+    expect(fs.existsSync(path.join(dataB, "dsa.duckdb.gz"))).toBe(false);
     expect(fs.existsSync(path.join(dataB, "secrets.json"))).toBe(false);
     fs.writeFileSync(path.join(dataB, "dsa.duckdb"), "db-2");
     await fresh.push(dataB, "run 2");
@@ -380,8 +384,35 @@ describe("history backends", () => {
     fs.writeFileSync(path.join(dataB, "dsa.duckdb"), "db-3");
     await gitBranchHistory.create(hctx({ adapter: "git-branch", keep: "latest" }, b)).push(dataB, "run 3");
     expect(git(remote, "rev-list", "--count", "dsa-data")).toBe("1");
-    expect(git(remote, "show", "dsa-data:dsa.duckdb")).toBe("db-3");
+    expect(zlib.gunzipSync(execFileSync("git", ["-C", remote, "show", "dsa-data:dsa.duckdb.gz"])).toString()).toBe("db-3");
   }, GIT_TIMEOUT);
+
+  it("git-branch: still pulls a branch saved before databases were gzipped", async () => {
+    const remote = tmp();
+    git(remote, "init", "-q", "--bare", "-b", "main");
+    const { dir: a } = repo();
+    git(a, "remote", "add", "origin", remote);
+    git(a, "checkout", "-q", "--orphan", "dsa-data");
+    git(a, "rm", "-rq", "--cached", ".");
+    fs.writeFileSync(path.join(a, "dsa.duckdb"), "old-raw");
+    git(a, "add", "dsa.duckdb");
+    git(a, "commit", "-q", "-m", "old");
+    git(a, "push", "-q", "origin", "dsa-data");
+    const b = tmp();
+    git(b, "clone", "-q", remote, ".");
+    const data = path.join(b, ".dsa");
+    expect(await gitBranchHistory.create(hctx({ adapter: "git-branch" }, b)).pull(data)).toMatch(/restored/);
+    expect(fs.readFileSync(path.join(data, "dsa.duckdb"), "utf8")).toBe("old-raw");
+  }, GIT_TIMEOUT);
+
+  it("git-branch: a refused push says why, in GitHub's words, not that another run pushed first", () => {
+    const tooBig = "remote: error: Trace: 9281c\nremote: error: See https://gh.io/lfs for more information.\nremote: error: File dsa.duckdb is 104.20 MB; this exceeds GitHub's file size limit of 100.00 MB\nremote: error: GH001: Large files detected.\nTo https://github.com/o/r.git\n ! [remote rejected] abc -> dsa-data (pre-receive hook declined)";
+    const m = pushError("dsa-data", "origin", tooBig);
+    expect(m).toMatch(/over GitHub's 100 MB limit/);
+    expect(m).toMatch(/File dsa.duckdb is 104.20 MB/);
+    expect(m).not.toMatch(/another run|Trace/);
+    expect(pushError("dsa-data", "origin", " ! [rejected] abc -> dsa-data (fetch first)")).toMatch(/another run pushed first/);
+  });
 
   it("command: runs your pull and push commands with the folder filled in, and fails loudly", async () => {
     const root = tmp();

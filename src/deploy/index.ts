@@ -15,7 +15,7 @@ export { NEVER_PERSIST, excluded, historyBackend, localHistory } from "./history
 export { githubHost, issueNumber, workflowCrons, workflowTakesShots } from "./adapters/github.js";
 export { SHOTS_MODES, isShotsMode, type ShotsMode } from "../relay/runners.js";
 export { readTimes, recordScanTime, scanEstimate } from "./timing.js";
-export { gitBranchHistory } from "./adapters/git-branch.js";
+export { gitBranchHistory, pushError } from "./adapters/git-branch.js";
 export { commandHistory } from "./adapters/command.js";
 
 /** Adapters that ship with dsa. Add-ons add theirs (DsaAddon.hosts / .histories); a later one with the same id wins. */

@@ -538,7 +538,7 @@ folder before the run and pushes it after.
 | `history.adapter` | What it does |
 |---|---|
 | `local` (default) | Nothing: the folder stays where it is. |
-| `git-branch` | Keeps the folder on a branch of the measured repo (`history.branch`, default `dsa-data`), separate from the product's code. It uses the repo's own git and credentials, through a throwaway index, so the working tree and current branch are never touched. `keep: "latest"` holds the branch at one commit, which force-pushes that branch. |
+| `git-branch` | Keeps the folder on a branch of the measured repo (`history.branch`, default `dsa-data`), separate from the product's code. It uses the repo's own git and credentials, through a throwaway index, so the working tree and current branch are never touched. `keep: "latest"` holds the branch at one commit, which force-pushes that branch. Databases are kept gzipped (`dsa.duckdb.gz`), since GitHub refuses a file over 100 MB. |
 | `command` | Runs your `history.pull` and `history.push` shell commands, with `{dir}` filled in. Use it for an object store or an artifact store. |
 
 `dsa run` and `dsa apply-decisions` pull before and push after (`--no-history` skips both). For a

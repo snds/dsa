@@ -6,6 +6,16 @@ All notable changes to `@snds/dsa` are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **History on a git branch kept failing once the database passed 100 MB.** GitHub refuses a pushed
+  file over 100 MB, and `dsa.duckdb` grows by tens of MB a week. The `git-branch` history now keeps each
+  database gzipped (`dsa.duckdb.gz`, about a tenth of the size) and unpacks it on pull. A branch saved
+  before this still pulls.
+- **A refused history push said "another run pushed first" whatever the reason.** It now gives
+  GitHub's own reason (a file too large, a branch rule), and blames another run only when that's
+  what happened.
+
 ## [0.4.0] - 2026-11-17
 
 The dashboard redesign: issues are the unit of work, each with a pinned agent thread, in five tabs
