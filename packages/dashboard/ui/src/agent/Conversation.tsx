@@ -2,6 +2,7 @@ import * as React from "react"
 import { XIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { PinnedThread } from "./PinnedThread"
+import { History } from "./history"
 import { anchorKeyOf, useAgent, type SetItem, type Subject } from "./store"
 
 /** An issue as the conversation needs it: key, title, where its detail lives, its apps. */
@@ -58,6 +59,7 @@ export function Conversation({ scope, fromTicks, one, appOf, onUntick, onHide, c
       <div className="flex flex-col gap-2 border-b px-4 py-2.5">
         <div className="flex flex-wrap items-center gap-1.5 text-xs">
           <span className="text-muted-foreground">About:</span>
+          <span className="order-last ml-auto"><History keys={items.map(i => i.key)} anchor={convKey} /></span>
           {items.length ? items.map(i => (
             <span key={i.key} className="inline-flex max-w-full items-center gap-1 rounded-full border bg-muted/50 py-0.5 pr-1 pl-2">
               <span className="truncate" title={i.title ?? i.key}>{i.title ?? i.key}</span>

@@ -7,7 +7,7 @@ import { DSA_CLI, contextArgs, tools, useProfile } from './system.js';
 
 import { readSnapshot, writeSnapshot, agentDir } from './snapshot.js';
 import { buildBrief, PERSONA, type IssueSource, type Subject } from './context.js';
-import { anchorKey, anchorOf, threadIndex, writeThreadIndex } from './threads.js';
+import { anchorKey, anchorOf, threadIndex, threadState, writeThreadIndex } from './threads.js';
 import { evidenceOf, whatTheAgentKnows } from './knows.js';
 import { addFeedback, readFeedback, readProposals, setStatus } from './proposals.js';
 import { DISMISS_LABELS, addDismissal, readDismissals, undoDismissal, type DismissLabel } from './dismissals.js';
@@ -230,7 +230,22 @@ export const agentRoutes: ServeRoute = async ({ req, res, url, body, send, conte
       writeSession(dataDir, s);
       return send(200, { settledAt: s.settledAt }), true;
     }
-    if (GET && p === '/api/agent/sessions') return send(200, { sessions: listSessions(dataDir).map(s => ({ ...s, running: isRunning(s.id) })) }), true;
+    // Every conversation, newest first, with its state (agentic Inbox: the Conversations tab).
+    if (GET && p === '/api/agent/sessions') {
+      const proposals = readProposals(dataDir);
+      return send(200, { sessions: listSessions(dataDir).map(s => ({ ...s, running: isRunning(s.id), anchor: anchorKey(s.anchor ?? anchorOf(s.subject)),
+        state: threadState({ ...s, messages: undefined, turns: (s as any).turns } as any, { running: isRunning(s.id), proposals }), openProposals: proposals.filter(x => x.session === s.id && x.status === 'open').length })) }), true;
+    }
+    // Rename or star a conversation.
+    if (POST && p === '/api/agent/session/meta') {
+      const b = await body();
+      const s = readSession(dataDir, String(b.id));
+      if (!s) return send(404, { error: 'No such session.' }), true;
+      if (typeof b.name === 'string') s.name = b.name.replace(/\s+/g, ' ').trim().slice(0, 120) || null;
+      if (typeof b.starred === 'boolean') s.starred = b.starred;
+      writeSession(dataDir, s);
+      return send(200, { session: { id: s.id, name: s.name ?? null, starred: Boolean(s.starred) } }), true;
+    }
     if (GET && p === '/api/agent/session') {
       const s = readSession(dataDir, String(url.searchParams.get('id')));
       if (!s) return send(404, { error: 'No such session.' }), true;

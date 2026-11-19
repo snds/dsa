@@ -10,6 +10,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 import { Pre } from "@/components/bits"
 import { D, SYS, ago, api, copy, fmtD, fmtDT } from "@/lib/dsa"
 import { Inbox } from "@/views/Inbox"
+import { Conversations } from "@/views/Conversations"
 import { Federation } from "@/views/Federation"
 import { Design } from "@/views/Design"
 import { Elements } from "@/views/elements/Elements"
@@ -31,13 +32,15 @@ import { hashFor, replaceRoute, routePath, useApp } from "@/lib/app"
 import { AppSelect } from "@/components/app-select"
 import { Shortcuts } from "@/components/shortcuts"
 
-type ViewId = "inbox" | "system" | "federation" | "health" | "elements" | "review" | "usage" | "design" | "settings"
+type ViewId = "inbox" | "conversations" | "system" | "federation" | "health" | "elements" | "review" | "usage" | "design" | "settings"
 
 // Five pages (redesign stage 8, decision D1): what needs doing, what the system is, how each app is
 // doing, and whether we are getting better; Settings is the gear. Element Review, System Usage and
 // Design Files are still pages, reached from the Inbox and Components, and old links still open them.
 const VIEWS: { id: ViewId; label: string; hint: string }[] = [
   { id: "inbox", label: "Inbox", hint: "Every issue in one list: what needs whom, grouped by component" },
+  // Conversations with the agent need dsa serve (agentic Inbox).
+  ...(D.serve ? [{ id: "conversations" as ViewId, label: "Conversations", hint: "Every conversation with the agent: what it's about, where it stands" }] : []),
   { id: "system", label: "Components", hint: "What the system is, and how each part is used" },
   { id: "federation", label: "Apps", hint: "Child libraries and the apps that use the system" },
   { id: "health", label: "Health", hint: "Measures over time, how sure this scan is, agent readiness and bench runs" },
@@ -285,6 +288,7 @@ function Shell() {
           <Empty className="border"><EmptyHeader><EmptyTitle>Nothing scanned yet</EmptyTitle><EmptyDescription>Open Settings to check sources and tokens, then run the first scan.</EmptyDescription></EmptyHeader></Empty>
         ) : view === "health" ? <Health go={(v: string) => go((v === "queue" ? "inbox" : v) as ViewId)} section={part} />
           : view === "inbox" ? <Inbox key={routePath().split("/")[0]} />
+          : view === "conversations" ? <Conversations />
           : view === "system" ? <><ComponentsNav view={view} /><System /></>
           : view === "federation" ? <Federation />
           : view === "elements" ? <Elements key={app ?? ""} />
