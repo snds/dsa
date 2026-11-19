@@ -47,10 +47,19 @@ the component they could become, with a photo of each in the running app when th
 
 Each answer becomes a decision in the app's decisions file and a label the scanner learns from.
 
-## The agent thread
+## The conversation
 
-Every issue has a thread pinned beside it (or behind **Open this issue's thread** on a narrower screen).
+The Inbox's right column is a conversation with the agent (on a narrower screen, **Open the
+conversation** opens it in the side panel).
 
+- **What it's about** shows as chips under *About:*. It's the issues you've ticked, or the open issue
+  when none are ticked. Each chip names the issue's app. ✕ leaves one out.
+- **Sending fixes the scope.** Tick more afterwards and the column asks: **Add to this** widens the same
+  conversation (the agent re-reads its brief), **Start new** begins another.
+- **Every conversation is kept.** The **Conversations** tab lists them: what each is about, where it
+  stands (waiting on you, changes ready, in a PR, settled), and when it last moved. Filter by state or
+  star, find one by issue, component or app, rename it, and **Open** it to carry on. **History** in the
+  column lists the conversations about the issues in view.
 - **Ask** in plain words. The agent reads the scan's evidence first and answers with it.
 - **What the agent knows** lists every source it was given, and says which are missing or stale: an
   answer resting on a missing source says so.
@@ -80,8 +89,10 @@ repo instead:
   when the new scan lands.
 - **Answers** wait in your browser; the bar at the bottom sends them as one issue that a workflow
   applies, or as a file to download.
-- **Discuss on GitHub** opens an issue for a thread; a workflow answers people with write access there.
-  **Find the discussion** searches for one already open. The thread's state as of publishing shows on
-  the page.
+- **Discuss on GitHub** opens an issue for the conversation: the open issue, or every ticked issue in
+  one. A workflow answers people with write access there. **Find the discussion** searches for one
+  already open.
+- **Conversations** lists each conversation as of publishing: what it was about, the question, the last
+  answer and its state, with **Show in Inbox** and a link to it on GitHub.
 
 Setting these up: [deploy.md](deploy.md), *Setup checklist*.

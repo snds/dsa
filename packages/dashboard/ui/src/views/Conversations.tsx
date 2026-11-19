@@ -1,11 +1,12 @@
 import * as React from "react"
-import { ChatCircleDotsIcon, MagnifyingGlassIcon, PencilSimpleIcon, StarIcon } from "@phosphor-icons/react"
+import { ChatCircleDotsIcon, GithubLogoIcon, MagnifyingGlassIcon, PencilSimpleIcon, StarIcon } from "@phosphor-icons/react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Input } from "@/components/ui/input"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { ago, api, fmtDT, say } from "@/lib/dsa"
+import { D, ago, api, fmtD, fmtDT, say } from "@/lib/dsa"
+import { ACTIONS, allThreadsUrl, threadSearchUrl } from "@/lib/host"
 import { openRoute } from "@/lib/app"
 import { THREAD_STATE } from "@/agent/ThreadBadge"
 import { aboutOf, keysOf, listConversations, nameOf, type ConvSummary } from "@/agent/history"
@@ -119,5 +120,74 @@ function Row({ c, onOpen, onMeta }: { c: ConvSummary; onOpen: () => void; onMeta
         <Button size="sm" variant="outline" onClick={onOpen}><ChatCircleDotsIcon data-icon="inline-start" />Open</Button>
       </div>
     </li>
+  )
+}
+
+/**
+ * The Conversations tab on a published page (agentic Inbox, PR C): no live agent here, so each
+ * conversation as of publishing (what it's about, the question, the last answer, its proposals), with
+ * links to carry on in GitHub through the dsa-thread workflow.
+ */
+export function PublishedConversations() {
+  const gh = ACTIONS?.thread ?? null
+  const [q, setQ] = React.useState("")
+  const all = Object.values<any>(D.threads ?? {}).filter(t => t.turns > 0).sort((x, y) => String(y.updatedAt).localeCompare(String(x.updatedAt)))
+  const needle = q.trim().toLowerCase()
+  const shown = all.filter(t => !needle || [t.title, t.asked ?? "", ...(t.about ?? []).flatMap((x: any) => [x.label, x.key ?? "", x.app ?? ""])].some((s: string) => s.toLowerCase().includes(needle)))
+  const open = (t: any) => {
+    const keys: string[] = (t.about ?? []).flatMap((x: any) => (x.key ? [x.key] : []))
+    if (!keys.length) return
+    inboxHandoff.ticks = keys.length > 1 ? keys : null
+    try { localStorage.setItem("dsa.inbox.threadShut", "0") } catch { /* private window */ }
+    openRoute(`inbox/${encodeURIComponent(keys[0]!)}`)
+  }
+  const discuss = (t: any) => { const keys = (t.about ?? []).flatMap((x: any) => (x.key ? [x.key] : [])); return keys.length > 1 ? `set:${[...new Set(keys)].sort().join(",")}` : t.anchor }
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="max-w-prose text-sm text-muted-foreground">Conversations as of publishing. The agent runs under <code>dsa serve</code>{gh ? ", or in GitHub through the dsa-thread workflow" : ""}.</p>
+        {gh && <a href={allThreadsUrl(gh)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-sm underline underline-offset-4"><GithubLogoIcon />All discussions on GitHub</a>}
+      </div>
+      {all.length > 0 && (
+        <div className="relative w-full max-w-xs">
+          <MagnifyingGlassIcon className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input className="pl-8" placeholder="Find by issue, component or app" aria-label="Find a conversation" value={q} onChange={e => setQ(e.target.value)} />
+        </div>
+      )}
+      {!shown.length ? (
+        <Empty className="border"><EmptyHeader><EmptyTitle>{all.length ? "Nothing matches" : "No conversations in this copy"}</EmptyTitle>
+          <EmptyDescription>{all.length ? "Try another word." : gh ? "Tick issues in the Inbox and use Discuss on GitHub to start one." : "Conversations happen under dsa serve; a published copy shows their summaries."}</EmptyDescription></EmptyHeader></Empty>
+      ) : (
+        <ul className="flex flex-col divide-y rounded-lg border" aria-label="Conversations">
+          {shown.map(t => {
+            const st = THREAD_STATE[t.state as keyof typeof THREAD_STATE] ?? THREAD_STATE.settled
+            const about: any[] = t.about ?? []
+            return (
+              <li key={t.anchor} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start">
+                <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                  <p className="truncate text-sm font-medium">{t.title}</p>
+                  {!(about.length === 1 && about[0].label === t.title) && about.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                      {about.slice(0, 4).map((x, i) => <span key={i} className="max-w-[18rem] truncate rounded-full border bg-muted/50 px-2 py-0.5" title={x.label}>{x.label}{x.app ? ` · ${x.app}` : ""}</span>)}
+                      {about.length > 4 && <span className="text-muted-foreground">and {about.length - 4} more</span>}
+                    </div>
+                  )}
+                  {t.asked && <p className="line-clamp-1 text-xs text-muted-foreground">Asked: {t.asked}</p>}
+                  {t.answer && <p className="line-clamp-2 text-xs">{t.answer}</p>}
+                </div>
+                <div className="flex shrink-0 flex-wrap items-center gap-2 sm:flex-col sm:items-end">
+                  <Badge variant="outline" className={st.tone} title={`${st.hint} As of publishing.`}><st.icon />{st.label}</Badge>
+                  <span className="text-xs text-muted-foreground">{t.turns} message{t.turns === 1 ? "" : "s"} · as of {fmtD(t.updatedAt)}</span>
+                  <div className="flex gap-2">
+                    {about.some(x => x.key) && <Button size="sm" variant="outline" onClick={() => open(t)}>Show in Inbox</Button>}
+                    {gh && <Button size="sm" variant="ghost" nativeButton={false} render={<a href={threadSearchUrl(gh, discuss(t))} target="_blank" rel="noreferrer" />}><GithubLogoIcon data-icon="inline-start" />On GitHub</Button>}
+                  </div>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
   )
 }

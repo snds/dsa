@@ -323,7 +323,7 @@ export function Inbox() {
           one={x => subjectOf(issues.find(i => i.key === x.key)!)} appOf={k => issues.find(i => i.key === k)?.apps[0]} onUntick={tick}
           onHide={() => shutThread(true)} className="hidden @7xl:sticky @7xl:top-36 @7xl:flex @7xl:h-[calc(100vh-10rem)]" />}
         {/* A published page: the thread as of publishing, and Discuss on GitHub (stage 9). */}
-        {sel && !canChat() && <PublishedThread subject={subjectOf(sel)} title={sel.title} onHide={() => shutThread(true)} className={cn("order-3 @4xl:order-none @4xl:col-start-2 @7xl:col-start-auto @7xl:sticky @7xl:top-36", threadShut && "@7xl:hidden")} />}
+        {sel && !canChat() && <PublishedThread subject={tickedIssues.length ? tickedSubject(tickedIssues) : subjectOf(sel)} title={tickedIssues.length > 1 ? `${tickedIssues.length} issues: ${tickedIssues[0]!.title} and ${tickedIssues.length - 1} more` : sel.title} onHide={() => shutThread(true)} className={cn("order-3 @4xl:order-none @4xl:col-start-2 @7xl:col-start-auto @7xl:sticky @7xl:top-36", threadShut && "@7xl:hidden")} />}
       </div>
       </div>
     </div>

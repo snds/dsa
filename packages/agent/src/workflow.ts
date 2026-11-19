@@ -3,7 +3,7 @@ import { readSession } from './sessions.js';
 import { READ_TOOLS } from './mcp.js';
 import { readSnapshot, type Snapshot } from './snapshot.js';
 import { idsKey, readThreadIndex } from './threads.js';
-import type { Subject } from './context.js';
+import type { SetItem, Subject } from './context.js';
 
 /**
  * The GitHub route for a published page (redesign stage 9). A thread continues as a GitHub issue
@@ -53,8 +53,19 @@ export function subjectForAnchor(dataDir: string, key: string, snap: Pick<Snapsh
     if (b) return { kind: 'review', ids: b.ids, ...(b.title ? { title: b.title } : {}) };
     throw new Error(`No review group in this scan has the key ${a}: the scan changed since the page was published, or the data is missing. Give the ids instead: elements:E-1,E-2.`);
   }
+  // Issues discussed together (the published page's Discuss on GitHub for ticked issues): set:F-1,Q-2.
+  if (kind === 'set' && a && !/^S-[0-9A-F]{8}$/.test(a)) {
+    const items: SetItem[] = [...new Set(a.split(',').map(k => k.trim()).filter(Boolean))].slice(0, 50).map((k): SetItem => {
+      const i = snap?.issues?.find(x => x.key === k);
+      return i ? { key: k, title: i.title, source: i.source } : /^[FA]-/.test(k) ? { key: k, source: { type: 'queue', id: k } } : { key: k };
+    });
+    const [first] = items;
+    if (items.length === 1 && first) return { kind: 'issue', key: first.key, title: first.title, source: first.source };
+    if (items.length) return { kind: 'set', items };
+  }
+  if (kind === 'set') throw new Error(`No conversation has the key ${a} here. Give the issues instead: set:F-1,F-2.`);
   if (key === 'scan') return { kind: 'scan' };
-  throw new Error(`Not an anchor: ${key}. Use issue:<key>, component:<name>, group:component:<name>, group:app:<name>, elements:<ids> or scan.`);
+  throw new Error(`Not an anchor: ${key}. Use issue:<key>, set:<keys>, component:<name>, group:component:<name>, group:app:<name>, elements:<ids> or scan.`);
 }
 
 /**
@@ -311,11 +322,11 @@ jobs:
           anchor=$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/.*<!-- dsa:thread \(.*\) -->.*/\1/p' | head -1)
           [ -n "$anchor" ] || anchor=scan
           case "$anchor" in
-            issue:*|component:*|group:component:*|group:app:*|elements:*|scan) ;;
+            issue:*|set:*|component:*|group:component:*|group:app:*|elements:*|scan) ;;
             *) echo "Not a dsa anchor: $anchor"; anchor=scan ;;
           esac
-          # One line, a sane length, no leading dash, no control characters.
-          anchor=$(printf '%s' "$anchor" | tr -d '\000-\037' | cut -c1-200)
+          # One line, a sane length (a set lists up to 50 issue keys), no leading dash, no control characters.
+          anchor=$(printf '%s' "$anchor" | tr -d '\000-\037' | cut -c1-600)
           echo "anchor=$anchor" >> "$GITHUB_OUTPUT"
           if printf '%s' "$TEXT" | grep -q '^/dsa draft-fix'; then echo "mode=fix" >> "$GITHUB_OUTPUT"; else echo "mode=reply" >> "$GITHUB_OUTPUT"; fi
           echo "ok=true" >> "$GITHUB_OUTPUT"

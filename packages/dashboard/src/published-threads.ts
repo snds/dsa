@@ -18,6 +18,16 @@ export interface PublishedThread {
   asked: string | null;
   answer: string | null;
   proposals: { id: string; kind: string; title: string; status: string }[];
+  /** What the conversation is about: its issues (with their apps), for chips and for finding it. */
+  about?: { key?: string; label: string; app?: string }[];
+}
+
+/** The chips for a conversation's subject (the dashboard's agent/history.tsx aboutOf, for what a summary needs). */
+function aboutOf(s: any): { key?: string; label: string; app?: string }[] | undefined {
+  if (s?.kind === 'set') return (s.items ?? []).map((i: any) => ({ key: String(i.key), label: String(i.title ?? i.key), ...(i.app ? { app: String(i.app) } : {}) }));
+  if (s?.kind === 'issue') return [{ key: String(s.key), label: String(s.title ?? s.key) }];
+  if (s?.kind === 'queue') return [{ key: String(s.id), label: String(s.id) }];
+  return undefined;
 }
 
 const firstPara = (t: unknown) => String(t ?? '').trim().split(/\n\s*\n/)[0] ?? '';
@@ -47,6 +57,7 @@ export function readPublishedThreads(dataDir: string): Record<string, PublishedT
       asked: clip(firstPara(msgs.find(m => m.role === 'user')?.text), 240),
       answer: clip(firstPara([...msgs].reverse().find(m => m.role === 'assistant' && m.text)?.text), 280),
       proposals: [...proposals.values()].filter(p => p.session === t.session).map(p => ({ id: p.id, kind: p.kind, title: clip(p.title, 160) ?? '', status: p.status ?? 'open' })),
+      ...(aboutOf(s?.subject) ? { about: aboutOf(s?.subject) } : {}),
     };
   }
   return out;

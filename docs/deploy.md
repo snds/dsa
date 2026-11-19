@@ -408,6 +408,8 @@ one was opened. Only those summaries are published; full transcripts stay where 
 
 With the github adapter, each issue also offers **Discuss on GitHub**. It opens a new issue labelled
 `dsa-thread`, with the thread's anchor in a hidden marker (`<!-- dsa:thread issue:F-1A2B3C -->`).
+Ticked issues are discussed together in one issue, listed by their keys (`<!-- dsa:thread set:F-1A2B3C,Q-2D4E6F -->`),
+and the workflow briefs the agent on all of them.
 *Find the discussion* searches for an issue already open on that anchor, by its marker. The workflow
 acts on the label or the marker: a new-issue link drops a label the repo doesn't have, so the marker
 alone is enough.

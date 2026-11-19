@@ -128,6 +128,19 @@ export function pageLink(href = location.href): string | undefined {
 }
 
 /**
+ * The anchor a Discuss-on-GitHub issue carries. Issues discussed together are written out by their keys
+ * (set:F-1,Q-2), not their hash, so the workflow can brief them without the dashboard's index.
+ */
+export function discussAnchor(s: { kind: string; items?: { key: string }[] }, key: string): string {
+  return s.kind === "set" && (s.items?.length ?? 0) > 1 ? `set:${[...new Set(s.items!.map(i => i.key))].sort().join(",")}` : key
+}
+
+/** Every Discuss-on-GitHub issue, for the published Conversations tab. */
+export function allThreadsUrl(t: { search: string }): string {
+  return `${t.search}?${new URLSearchParams({ q: `is:issue in:body "dsa:thread"` }).toString()}`
+}
+
+/**
  * The search that finds the open GitHub issue already discussing an anchor. It looks for the hidden
  * marker, not the label: a new-issue link drops a label the repo doesn't have.
  */
