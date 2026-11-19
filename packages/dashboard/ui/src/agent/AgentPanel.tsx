@@ -1,3 +1,4 @@
+import { History } from "./history"
 import * as React from "react"
 import { safeHref } from "@/lib/host"
 import { cn } from "cn"
@@ -54,7 +55,7 @@ export function AgentPanel() {
           <TooltipTrigger render={<Button variant="ghost" size="sm" onClick={() => a.start(s.subject, { fresh: true })} disabled={a.busy || a.starting} />}><SparkleIcon data-icon="inline-start" />New thread</TooltipTrigger>
           <TooltipContent>Start over on the same subject. This thread is kept under Earlier sessions.</TooltipContent>
         </Tooltip>}
-        <Sessions />
+        <History />
         <Tooltip>
           <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Close the agent" onClick={a.close} />}><XIcon /></TooltipTrigger>
           <TooltipContent>Close (the session is kept)</TooltipContent>
@@ -265,30 +266,3 @@ function ChangesCard() {
   )
 }
 
-/** Earlier sessions, newest first. */
-function Sessions() {
-  const a = useAgent()
-  const [list, setList] = React.useState<any[]>([])
-  return (
-    <DropdownMenu onOpenChange={(o: boolean) => { if (o) api("/api/agent/sessions").then(r => setList(r.sessions)).catch(() => {}) }}>
-      <Tooltip>
-        <TooltipTrigger render={<DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Earlier sessions" />} />}><ClockCounterClockwiseIcon /></TooltipTrigger>
-        <TooltipContent>Earlier sessions</TooltipContent>
-      </Tooltip>
-      <DropdownMenuContent align="end" className="w-80">
-        {/* A group label must sit inside a group (Base UI throws, and the whole page goes blank, otherwise). */}
-        <DropdownMenuGroup>
-          <DropdownMenuLabel>Sessions</DropdownMenuLabel>
-          <DropdownMenuItem onClick={() => a.start({ kind: "scan" })}><ChatCircleDotsIcon />New: talk about the whole scan</DropdownMenuItem>
-        </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        {list.length ? list.slice(0, 15).map(x => (
-          <DropdownMenuItem key={x.id} onClick={() => a.resume(x.id)} className="flex-col items-start gap-0">
-            <span className="w-full truncate">{x.title}</span>
-            <span className="text-xs text-muted-foreground">{PROVIDER[x.provider]} · {x.turns} message{x.turns === 1 ? "" : "s"} · {ago(x.updatedAt)}</span>
-          </DropdownMenuItem>
-        )) : <p className="px-2 py-1.5 text-xs text-muted-foreground">None yet.</p>}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
-}

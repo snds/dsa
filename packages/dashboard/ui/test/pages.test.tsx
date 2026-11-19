@@ -45,11 +45,12 @@ const text = () => document.body.textContent ?? ""
 const tabs = () => [...document.querySelectorAll('[role="tab"]')].map(t => (t.textContent || t.getAttribute("aria-label") || "").replace(/\d+$/, ""))
 const selected = () => document.querySelector('[role="tab"][aria-selected="true"]')?.textContent?.replace(/\d+$/, "")
 
-test("five pages: Settings, Inbox, Components, Apps, Health", async () => {
+test("the pages: Settings, Inbox, Conversations (live view), Components, Apps, Health", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ threads: {} }))))
   history.replaceState(null, "", "#inbox")
   await mount(<m.App />)
-  expect(tabs()).toEqual(["Settings", "Inbox", "Components", "Apps", "Health"])
+  // Conversations with the agent: a tab of their own under dsa serve (agentic Inbox).
+  expect(tabs()).toEqual(["Settings", "Inbox", "Conversations", "Components", "Apps", "Health"])
   // Settings is named on screen, and the Inbox tab carries its open count (visual A, UX B).
   expect([...document.querySelectorAll('[role="tab"]')].map(t => t.textContent)).toContain("Inbox1")
 })

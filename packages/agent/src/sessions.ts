@@ -46,6 +46,9 @@ export interface Session {
   pr?: { url: string; number?: number } | null;
   /** The person marked the thread done. */
   settledAt?: string | null;
+  /** A name the person gave the conversation (shown instead of the title), and whether they starred it. */
+  name?: string | null;
+  starred?: boolean;
   /** The person widened what the conversation is about; the next turn tells the agent to read the brief again. */
   rescoped?: string | null;
   /** The last before/after screenshot run (visual.ts). */
@@ -66,7 +69,7 @@ export function writeSession(dataDir: string, s: Session) {
 }
 export function listSessions(dataDir: string): Omit<Session, 'messages' | 'brief'>[] {
   try {
-    return fs.readdirSync(dir(dataDir)).filter(f => f.endsWith('.json') && !f.endsWith('.mcp.json')).map(f => { try { const { messages, brief, ...rest } = JSON.parse(fs.readFileSync(path.join(dir(dataDir), f), 'utf8')); return { ...rest, turns: messages.length }; } catch { return null; } })
+    return fs.readdirSync(dir(dataDir)).filter(f => f.endsWith('.json') && !f.endsWith('.mcp.json')).map(f => { try { const { messages, brief, ...rest } = JSON.parse(fs.readFileSync(path.join(dir(dataDir), f), 'utf8')); return { ...rest, turns: messages.length, asked: messages.find((m: any) => m.role === 'user')?.text?.slice(0, 200) ?? null }; } catch { return null; } })
       .filter(Boolean).sort((a: any, b: any) => String(b.updatedAt).localeCompare(String(a.updatedAt))) as any;
   } catch { return []; }
 }

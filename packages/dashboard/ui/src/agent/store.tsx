@@ -83,7 +83,8 @@ interface Api extends State {
   pin: (subject: Subject) => Promise<void>
   /** "Add to this": the open conversation keeps its messages and is now about these issues. */
   rescope: (subject: Subject) => Promise<void>
-  resume: (id: string) => Promise<void>
+  /** Opens a conversation: in the side panel, or in place (`panel: false`). */
+  resume: (id: string, opts?: { panel?: boolean }) => Promise<void>
   /** Resolves false when the message didn't go through; the error is in `error`. */
   send: (text: string, mode?: "advise" | "try") => Promise<boolean>
   cancel: () => Promise<void>
@@ -213,7 +214,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       catch (e: any) { patch({ error: e.message }) }
     },
     send: (t, m) => send(t, m),
-    resume: async id => { patch({ open: true, error: null, visual: NO_VISUAL }); try { await load(id) } catch (e: any) { patch({ error: e.message }) } },
+    resume: async (id, opts) => { patch({ open: opts?.panel === false ? s.open : true, pending: null, error: null, visual: NO_VISUAL }); try { await load(id) } catch (e: any) { patch({ error: e.message }) } },
     cancel: async () => { if (sid) await api("/api/agent/cancel", { id: sid }).catch(() => {}) },
     close: () => patch({ open: false }),
     setOpen: o => patch({ open: o }),

@@ -122,6 +122,9 @@ function CheckEvidence({ name }: { name: string }) {
 
 const THREAD_SHUT = "dsa.inbox.threadShut"
 
+/** Set by the Conversations tab before it opens the Inbox: the issues to tick again. */
+export const inboxHandoff: { ticks: string[] | null } = { ticks: null }
+
 export function Inbox() {
   const issues = useIssues()
   const app = useApp()
@@ -130,7 +133,8 @@ export function Inbox() {
   const [filter, setFilter] = React.useState<Filter>("open")
   const [by, setBy] = React.useState<GroupBy>("component")
   const [closed, setClosed] = React.useState<Set<string>>(new Set())
-  const [ticked, setTicked] = React.useState<Set<string>>(new Set())
+  // A conversation reopened from the Conversations tab ticks its issues again.
+  const [ticked, setTicked] = React.useState<Set<string>>(() => { const t = new Set(inboxHandoff.ticks ?? []); inboxHandoff.ticks = null; return t })
   const [current, setCurrent] = React.useState<string | null>(() => { const id = routePath().split("/")[1]; return id ? decodeURIComponent(id) : null })
   // Whether `current` came from a link (the page's address), not from acting in the list.
   const fromLink = React.useRef(Boolean(current))
