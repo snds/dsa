@@ -19,6 +19,8 @@ export type Anchor =
   | { kind: 'component'; name: string }
   /** An Element Review batch before it is an issue: the same ids always make the same anchor. */
   | { kind: 'elements'; key: string }
+  /** Issues discussed together: the same issues always make the same anchor, whatever the order. */
+  | { kind: 'set'; key: string }
   | { kind: 'scan' };
 
 export type ThreadState =
@@ -46,6 +48,11 @@ export function idsKey(ids: string[]): string {
   return 'E-' + h.toString(16).toUpperCase().padStart(8, '0');
 }
 
+/** A set's key: the same FNV-1a as idsKey, over issue keys, with an S- prefix. */
+export function setKey(keys: string[]): string {
+  return 'S-' + idsKey(keys).slice(2);
+}
+
 /** The anchor a subject belongs to. Today's subjects map onto it: a queue item is its issue, a review batch its elements. */
 export function anchorOf(s: Subject): Anchor {
   switch (s.kind) {
@@ -55,6 +62,7 @@ export function anchorOf(s: Subject): Anchor {
     case 'readiness': return { kind: 'group', by: 'app', value: s.subject };
     case 'component': return { kind: 'component', name: s.name };
     case 'group': return { kind: 'group', by: s.by, value: s.value };
+    case 'set': return s.items.length === 1 ? { kind: 'issue', key: s.items[0]!.key } : { kind: 'set', key: setKey(s.items.map(i => i.key)) };
     default: return { kind: 'scan' };
   }
 }
@@ -66,6 +74,7 @@ export function anchorKey(a: Anchor): string {
     case 'group': return `group:${a.by}:${lower(a.value)}`;
     case 'component': return `component:${lower(a.name)}`;
     case 'elements': return `elements:${a.key}`;
+    case 'set': return `set:${a.key}`;
     default: return 'scan';
   }
 }
@@ -118,6 +127,8 @@ export interface ThreadEntry {
   turns: number;
   /** Older sessions on the same anchor, newest first (New thread keeps them). */
   previous: string[];
+  /** For a set: the issues it is about, so each one's row can show it. */
+  members?: string[];
 }
 
 /**
@@ -137,6 +148,7 @@ export function threadIndex(sessions: (ThreadFacts & { title: string })[], propo
     out[k] = {
       anchor: k, session: t.id, title: t.title, state: threadState(t, { ...facts(t.id), proposals }), updatedAt: t.updatedAt,
       scanId: t.scanId ?? null, pr: t.pr ?? null, openProposals: proposals.filter(p => p.session === t.id && p.status === 'open').length, turns: t.turns ?? t.messages?.length ?? 0, previous: list.slice(1).map(s => s.id),
+      ...(t.subject.kind === 'set' ? { members: t.subject.items.map(i => i.key) } : {}),
     };
   }
   return out;

@@ -57,6 +57,12 @@ function subjectFrom(b: any): Subject {
   if (k === 'readiness' && b.subject.subject) return { kind: 'readiness', subject: String(b.subject.subject) };
   if (k === 'issue' && b.subject.key) return { kind: 'issue', key: String(b.subject.key), title: b.subject.title ? String(b.subject.title) : undefined, source: issueSource(b.subject.source) };
   if (k === 'component' && b.subject.name) return { kind: 'component', name: String(b.subject.name) };
+  if (k === 'set' && Array.isArray(b.subject.items) && b.subject.items.length) {
+    const items = b.subject.items.slice(0, 50).filter((i: any) => i?.key).map((i: any) => ({ key: String(i.key), title: i.title ? String(i.title) : undefined, source: issueSource(i.source), app: i.app ? String(i.app) : undefined }));
+    // One issue is that issue's own conversation.
+    if (items.length === 1) return { kind: 'issue', key: items[0].key, title: items[0].title, source: items[0].source };
+    if (items.length) return { kind: 'set', items, title: b.subject.title ? String(b.subject.title) : undefined };
+  }
   if (k === 'group' && b.subject.value && (b.subject.by === 'component' || b.subject.by === 'app')) return { kind: 'group', by: b.subject.by, value: String(b.subject.value), title: b.subject.title ? String(b.subject.title) : undefined };
   return { kind: 'scan' };
 }
@@ -273,6 +279,22 @@ export const agentRoutes: ServeRoute = async ({ req, res, url, body, send, conte
     }
     if (POST && p === '/api/agent/cancel') { cancelTurn(String((await body()).id)); return send(200, { cancelled: true }), true; }
     if (POST && p === '/api/agent/session/delete') { deleteSession(dataDir, String((await body()).id)); return send(200, { deleted: true }), true; }
+    // "Add to this": the conversation keeps its messages and repo, and is now about more issues (agentic Inbox).
+    if (POST && p === '/api/agent/scope') {
+      const b = await body();
+      const s = readSession(dataDir, String(b.id));
+      if (!s) return send(404, { error: 'No such session.' }), true;
+      if (isRunning(s.id)) return send(409, { error: 'Wait for the agent to finish.' }), true;
+      const subject = subjectFrom(b);
+      if (subject.kind !== 'set' && subject.kind !== 'issue') return send(400, { error: 'A conversation can be scoped to issues only.' }), true;
+      const snap = await snapshot(ctx, true);
+      const brief = buildBrief(snap, subject);
+      Object.assign(s, { subject, anchor: anchorOf(subject), title: brief.title, brief: brief.file, starters: brief.starters, evidence: evidenceOf(snap, subject), scanId: snap.run?.id ?? null, updatedAt: new Date().toISOString(),
+        rescoped: s.messages.length ? (subject.kind === 'set' ? `${subject.items.length} issues (${subject.items.map(i => i.key).join(', ')})` : `issue ${subject.key}`) : null });
+      writeSession(dataDir, s);
+      threads(dataDir);
+      return send(200, { session: s }), true;
+    }
     if (POST && p === '/api/agent/changes') {
       const b = await body();
       const s = readSession(dataDir, String(b.id));

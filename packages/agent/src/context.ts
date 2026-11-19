@@ -1,3 +1,4 @@
+import { setKey } from './threads.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { label, profile, tools } from './system.js';
@@ -21,7 +22,15 @@ export type Subject =
   /** A system component as a whole. */
   | { kind: 'component'; name: string }
   /** Several issues together: all of one component's, or all of one app's. */
-  | { kind: 'group'; by: 'component' | 'app'; value: string; title?: string };
+  | { kind: 'group'; by: 'component' | 'app'; value: string; title?: string }
+  /**
+   * Issues chosen together (ticked in the Inbox): one conversation about all of them. The scope is frozen
+   * when the conversation starts; the dashboard offers "Add to this" or "Start new" when the ticks change.
+   */
+  | { kind: 'set'; items: SetItem[]; title?: string };
+
+/** One issue in a set: its key, title, where its detail lives, and the app it is in. */
+export interface SetItem { key: string; title?: string; source?: IssueSource; app?: string }
 
 /** Where an issue's detail lives in the scan (mirrors the dashboard's Issue.source; questions carry their element ids). */
 export type IssueSource =
@@ -31,7 +40,8 @@ export type IssueSource =
   | { type: 'component'; name: string };
 
 /** The subject today's brief bodies understand, for an issue, component or group subject. */
-export function legacyOf(s: Subject): Exclude<Subject, { kind: 'issue' } | { kind: 'component' } | { kind: 'group' }> | null {
+export function legacyOf(s: Subject): Exclude<Subject, { kind: 'issue' } | { kind: 'component' } | { kind: 'group' } | { kind: 'set' }> | null {
+  if (s.kind === 'set') return null;
   if (s.kind === 'issue') {
     const src = s.source;
     if (src?.type === 'queue') return { kind: 'queue', id: src.id };
@@ -104,6 +114,7 @@ export function subjectKey(s: Subject): string {
   if (s.kind === 'issue') return `issue-${slug(s.key)}`;
   if (s.kind === 'component') return `component-${slug(s.name)}`;
   if (s.kind === 'group') return `group-${s.by}-${slug(s.value)}`;
+  if (s.kind === 'set') return `set-${setKey(s.items.map(i => i.key))}`;
   if (s.kind === 'review') return `review-${s.ids.length === 1 ? slug(s.ids[0]) : `${slug(s.ids[0])}+${s.ids.length - 1}`}`;
   if (s.kind === 'queue') return `queue-${slug(s.id)}`;
   if (s.kind === 'readiness') return `readiness-${slug(s.subject)}`;
@@ -112,8 +123,13 @@ export function subjectKey(s: Subject): string {
 
 /** The repo a session's sandbox copies: the app the elements live in, the finding's owner, or the core. */
 export function repoFor(snap: Snapshot, s0: Subject): { name: string; dir: string } {
-  const s = legacyOf(s0) ?? { kind: 'scan' as const };
   const core = { name: snap.targets.find(t => t.role === 'core')?.name ?? path.basename(snap.root), dir: snap.root };
+  // A set works in its issues' repo when they share one; issues across repos are worked on in the system's.
+  if (s0.kind === 'set') {
+    const repos = new Map(s0.items.map(i => { const r = repoFor(snap, { kind: 'issue', key: i.key, title: i.title, source: i.source }); return [r.dir, r] as const; }));
+    return repos.size === 1 ? [...repos.values()][0]! : core;
+  }
+  const s = legacyOf(s0) ?? { kind: 'scan' as const };
   const byName = (n?: string) => { const t = snap.targets.find(x => x.name === n); return t ? { name: t.name, dir: t.dir } : null; };
   if (s.kind === 'review') return byName(snap.evals.find(e => e.id === s.ids[0])?.target) ?? core;
   // The issue's owner before the first app it affects: a system-owned gap across apps is worked on in
@@ -127,9 +143,7 @@ export function buildBrief(snap: Snapshot, s: Subject): Brief {
   const key = subjectKey(s);
   const repo = repoFor(snap, s);
   const head = [`# Brief: ${titleOf(snap, s)}`, '', `Scan of **${snap.title}**${snap.run ? `, run ${snap.run.id} (${snap.run.takenAt})` : ''}. Review threshold ${pct(snap.threshold)}: below it, a human decides.`, `Repo for this session: ${repo.name} (${repo.dir}).`, ''];
-  const comp = componentOfSubject(s);
-  const l = legacyOf(s);
-  const body = comp ? componentBody(snap, comp) : !l ? scanBody(snap) : l.kind === 'review' ? reviewBody(snap, l) : l.kind === 'queue' ? queueBody(snap, l) : l.kind === 'readiness' ? readinessBody(snap, l) : scanBody(snap);
+  const body = s.kind === 'set' ? setBody(snap, s) : bodyOf(snap, s);
   const markdown = [...head, ...body.lines, '', ...knowsSection(snap, s), '', ...intent(snap, repo), '', toolsSection()].join('\n');
   const dir = path.join(agentDir(snap.dataDir), 'context');
   fs.mkdirSync(dir, { recursive: true });
@@ -139,7 +153,33 @@ export function buildBrief(snap: Snapshot, s: Subject): Brief {
   return { key, title: titleOf(snap, s), markdown, file, starters: body.starters, repo, ids: body.ids };
 }
 
+function bodyOf(snap: Snapshot, s: Subject): { lines: string[]; starters: Starter[]; ids: string[] } {
+  const comp = componentOfSubject(s);
+  const l = legacyOf(s);
+  return comp ? componentBody(snap, comp) : !l ? scanBody(snap) : l.kind === 'review' ? reviewBody(snap, l) : l.kind === 'queue' ? queueBody(snap, l) : l.kind === 'readiness' ? readinessBody(snap, l) : scanBody(snap);
+}
+
+/** A set's brief: each issue's own evidence, one section each, then what to look for across them. */
+function setBody(snap: Snapshot, s: Extract<Subject, { kind: 'set' }>) {
+  const lines: string[] = ['## The issues in this conversation', '', `The person chose ${s.items.length} issue${s.items.length === 1 ? '' : 's'} to discuss together:`, ''];
+  for (const [n, i] of s.items.entries()) lines.push(`${n + 1}. ${i.title ?? i.key} (${i.key}${i.app ? ` · ${i.app}` : ''})`);
+  const ids = new Set<string>();
+  for (const [n, i] of s.items.entries()) {
+    const sub: Subject = { kind: 'issue', key: i.key, title: i.title, source: i.source };
+    const b = componentOfSubject(sub) || legacyOf(sub) ? bodyOf(snap, sub) : { lines: ['No detail for this issue in the latest scan.'], starters: [], ids: [] };
+    for (const id of b.ids) ids.add(id);
+    // Each issue's own headings drop a level, under its numbered heading.
+    lines.push('', `## ${n + 1}. ${i.title ?? i.key}`, '', ...b.lines.map(x => x.replace(/^(#{2,5}) /, '#$1 ')));
+  }
+  const starters: Starter[] = s.items.length > 1
+    ? [{ label: 'What do these share?', prompt: 'Look at these issues together. What do they have in common, and is one fix behind more than one of them?' },
+       { label: 'Which first?', prompt: 'Which of these issues should be fixed first, and why? Say what each fix touches.' }]
+    : [];
+  return { lines, starters, ids: [...ids] };
+}
+
 export function titleOf(snap: Snapshot, s0: Subject): string {
+  if (s0.kind === 'set') return s0.title ?? (s0.items.length === 1 ? s0.items[0]!.title ?? s0.items[0]!.key : `${s0.items.length} issues: ${s0.items[0]!.title ?? s0.items[0]!.key} and ${s0.items.length - 1} more`);
   if (s0.kind === 'issue' && s0.title) return s0.title;
   if (s0.kind === 'group' && s0.title) return s0.title;
   if (s0.kind === 'component') return `Component: ${s0.name}`;
