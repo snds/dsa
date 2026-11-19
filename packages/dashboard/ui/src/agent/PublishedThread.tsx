@@ -2,7 +2,7 @@ import { CaretLineRightIcon, ChatCircleIcon, GithubLogoIcon, GitPullRequestIcon,
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { D, fmtD } from "@/lib/dsa"
-import { pageLink, safeHref, ACTIONS, threadIssueUrl, threadSearchUrl } from "@/lib/host"
+import { pageLink, safeHref, ACTIONS, discussAnchor, threadIssueUrl, threadSearchUrl } from "@/lib/host"
 import { THREAD_STATE } from "./ThreadBadge"
 import { anchorKeyOf, type Subject } from "./store"
 
@@ -17,6 +17,8 @@ export const publishedThreadShown = (subject: Subject): boolean => Boolean((D.th
 export function PublishedThread({ subject, title, className, onHide }: { subject: Subject; title: string; className?: string; onHide?: () => void }) {
   const key = anchorKeyOf(subject)
   const t = (D.threads ?? {})[key] as any
+  // What Discuss on GitHub writes: a set by its issue keys, so the workflow can brief it.
+  const discuss = discussAnchor(subject as any, key)
   const gh = ACTIONS?.thread ?? null
   if (!t && !gh) return null
   const st = t ? THREAD_STATE[t.state as keyof typeof THREAD_STATE] : null
@@ -24,12 +26,19 @@ export function PublishedThread({ subject, title, className, onHide }: { subject
     <section aria-label="Thread for this issue" className={`flex flex-col gap-3 rounded-lg border bg-background p-4 text-sm ${className ?? ""}`}>
       <header className="flex flex-wrap items-center gap-2">
         <ChatCircleIcon className="size-4" />
-        <h3 className="font-semibold">Thread</h3>
+        <h3 className="font-semibold">{subject.kind === "set" ? "Conversation" : "Thread"}</h3>
         {st && <Badge variant="outline" className={st.tone}><st.icon />{st.label}</Badge>}
         {t?.updatedAt && <span className="text-xs text-muted-foreground">as of {fmtD(t.updatedAt)}</span>}
         {onHide && <span className="ml-auto" />}
         {onHide && <Button variant="ghost" size="icon-sm" className="hidden @7xl:inline-flex" aria-label="Hide the thread" title="Hide the thread: give the issue the room" onClick={onHide}><CaretLineRightIcon /></Button>}
       </header>
+      {/* Issues discussed together: say which (agentic Inbox). */}
+      {subject.kind === "set" && (
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="text-muted-foreground">About:</span>
+          {subject.items.map(i => <span key={i.key} className="max-w-full truncate rounded-full border bg-muted/50 px-2 py-0.5" title={i.title ?? i.key}>{i.title ?? i.key}{i.app ? ` · ${i.app}` : ""}</span>)}
+        </div>
+      )}
       {t ? (
         <>
           {t.asked && <div><p className="text-xs font-medium text-muted-foreground">Asked</p><p className="mt-0.5">{t.asked}</p></div>}
@@ -49,8 +58,8 @@ export function PublishedThread({ subject, title, className, onHide }: { subject
       {gh && (
         <div className="flex flex-wrap items-center gap-2 border-t pt-3">
           {/* Look first, so one issue gets one discussion (UX review B U-06): a new one is the second step. */}
-          <Button size="sm" variant="outline" nativeButton={false} render={<a href={threadSearchUrl(gh, key)} target="_blank" rel="noreferrer" />}><MagnifyingGlassIcon data-icon="inline-start" />Find the discussion</Button>
-          <a href={threadIssueUrl(gh, key, t?.title || title, pageLink())} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs underline underline-offset-4"><GithubLogoIcon />Start a new one on GitHub</a>
+          <Button size="sm" variant="outline" nativeButton={false} render={<a href={threadSearchUrl(gh, discuss)} target="_blank" rel="noreferrer" />}><MagnifyingGlassIcon data-icon="inline-start" />Find the discussion</Button>
+          <a href={threadIssueUrl(gh, discuss, t?.title || title, pageLink())} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs underline underline-offset-4"><GithubLogoIcon />Start a new one on GitHub</a>
           <p className="w-full text-xs text-muted-foreground">Look for an open discussion first: one per issue. {gh.help}</p>
         </div>
       )}

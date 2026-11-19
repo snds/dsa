@@ -66,6 +66,9 @@ test('the anchor: names with spaces, @ and / survive; anything else becomes the 
   assert.equal(anchorOf('About: x\n\n<!-- dsa:thread group:app:Commerce kit -->\n').anchor, 'group:app:Commerce kit');
   assert.equal(anchorOf('<!-- dsa:thread component:@acme/ds-react -->').anchor, 'component:@acme/ds-react');
   assert.equal(anchorOf('<!-- dsa:thread elements:E-ABCD1234 -->').anchor, 'elements:E-ABCD1234');
+  // Issues discussed together (agentic Inbox): the keys survive, and a long list isn't cut at 200.
+  const keys = Array.from({ length: 30 }, (_, n) => `F-${String(n).padStart(6, '0')}`).join(',');
+  assert.equal(anchorOf(`<!-- dsa:thread set:${keys} -->`).anchor, `set:${keys}`);
   assert.equal(anchorOf('no marker here').anchor, 'scan');
   assert.equal(anchorOf('<!-- dsa:thread --version -->').anchor, 'scan', 'not an anchor kind');
   assert.equal(anchorOf('<!-- dsa:thread issue:F-1; rm -rf / -->').anchor, 'issue:F-1; rm -rf /', 'kept as text: it only ever goes in quotes');

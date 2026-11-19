@@ -118,7 +118,7 @@ test("views don't override a control's height, padding or font size", () => {
 
 // Button labels: a verb and at most one object, sentence case. Explanations belong in tooltips or
 // descriptions (packages/dashboard/ui/README.md, Writing rules). Proper nouns keep their capitals.
-const PROPER = new Set(["GitHub", "Settings", "Figma", "Cursor", "Claude", "Code", "Storybook", "PR", "URL", "JSX", "CSS"])
+const PROPER = new Set(["GitHub", "Settings", "Inbox", "Figma", "Cursor", "Claude", "Code", "Storybook", "PR", "URL", "JSX", "CSS"])
 test("button labels are short and in sentence case", () => {
   const src = path.resolve(import.meta.dirname, "../src")
   const files = fs.readdirSync(src, { recursive: true }).map(String).filter(f => f.endsWith(".tsx") && !f.startsWith(`components${path.sep}ui`))
