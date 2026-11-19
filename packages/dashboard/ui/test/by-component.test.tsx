@@ -249,7 +249,9 @@ test("J moves through the places on screen, X ticks, C confirms what's ticked; k
   const key = (k: string, target: EventTarget = window) => act(async () => { target.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true })) })
   try {
     const host = await mount()
-    expect(host.querySelector('[data-slot="keys"]')!.textContent).toContain("J next place")
+    // The keys are listed in the shortcuts dialog now; the review points to it.
+    expect(host.querySelector('[data-slot="keys"]')).toBeNull()
+    expect(host.textContent).toContain("for keyboard shortcuts")
     const cur = () => host.querySelector('[data-slot="place"][aria-current="true"]')?.getAttribute("data-place")
     const order = [...host.querySelectorAll('[data-slot="place"]')].map(p => p.getAttribute("data-place"))
     await key("j")

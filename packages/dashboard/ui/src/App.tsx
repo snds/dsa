@@ -29,6 +29,7 @@ import { ButtonGroup } from "@/components/ui/button-group"
 import { canRun, detectRunning, offersShots, useScan } from "@/lib/useScan"
 import { hashFor, replaceRoute, routePath, useApp } from "@/lib/app"
 import { AppSelect } from "@/components/app-select"
+import { Shortcuts } from "@/components/shortcuts"
 
 type ViewId = "inbox" | "system" | "federation" | "health" | "elements" | "review" | "usage" | "design" | "settings"
 
@@ -235,6 +236,7 @@ function Shell() {
           <AppSelect />
           {D.serve && <WaitingOnYou />}
           {D.serve && <AgentButton />}
+          <Shortcuts />
           {canRun() ? <ScanButton /> : !D.serve && D.published && ACTIONS && <StaticRescan onPost={rerun} />}
           </div>
         </div>

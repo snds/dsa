@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Skeleton } from "@/components/ui/skeleton"
 import { Code, Disclosure, Note, Panel, Pre } from "@/components/bits"
 import { D, SCOPES, api, say } from "@/lib/dsa"
+import { APPS, appDefault, setAppDefault } from "@/lib/app"
 
 const RULES: [string, string, string][] = [
   ["misuse_cluster_threshold", "Misuse cluster threshold", "Outside consumers doing the same thing before a finding routes to the core team."],
@@ -75,6 +76,25 @@ const CHILD_FIELD = {
   exclude: { label: "folders to leave out", placeholder: "stories, tests" },
 } as const
 
+/** Choices kept in this browser only, not in the config: which app the page opens on. */
+function ThisBrowser() {
+  const [d, setD] = React.useState(appDefault)
+  if (APPS.length < 2) return null
+  return (
+    <Panel title="In this browser" description="Kept on this device only, not in the config">
+      <Field className="max-w-sm">
+        <FieldLabel htmlFor="app-default">Open the page on</FieldLabel>
+        <NativeSelect id="app-default" className="w-full" value={d} onChange={e => { setD(e.target.value); setAppDefault(e.target.value) }}>
+          <NativeSelectOption value="last">The app I chose last</NativeSelectOption>
+          <NativeSelectOption value="">All apps</NativeSelectOption>
+          {APPS.map(a => <NativeSelectOption key={a} value={a}>{a}</NativeSelectOption>)}
+        </NativeSelect>
+        <FieldDescription>A link that names an app still opens on that app.</FieldDescription>
+      </Field>
+    </Panel>
+  )
+}
+
 export function General({ onTitle }: { onTitle: (t: string) => void }) {
   const [v, setV] = React.useState<any>(null)
   const [err, setErr] = React.useState<string | null>(null)
@@ -84,6 +104,7 @@ export function General({ onTitle }: { onTitle: (t: string) => void }) {
 
   if (!D.serve) return (
     <div className="flex flex-col gap-6">
+    <ThisBrowser />
     <RelaySignIn />
     <Panel title="Settings are edited in the live view">
       <Note>This file is a snapshot. To change tokens, Figma links, the time zone, sources, or rule settings, start the live view and open it in your browser:</Note>
@@ -135,6 +156,7 @@ export function General({ onTitle }: { onTitle: (t: string) => void }) {
 
   return (
     <div className="flex flex-col gap-6">
+      <ThisBrowser />
       <Panel title="Report" description={st("report") ?? "How this page shows things"}>
         <FieldGroup className="grid gap-4 sm:grid-cols-2">
           <Field><FieldLabel htmlFor="s-title">Title</FieldLabel><Input id="s-title" value={v.report.title} placeholder={D.root} onChange={e => set(["report", "title"], e.target.value)} onBlur={() => commit("report")} /></Field>

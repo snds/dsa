@@ -2,7 +2,7 @@ import * as React from "react"
 import { cn } from "cn"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Note } from "@/components/bits"
 import { D, say, short, SYS } from "@/lib/dsa"
 import { saveAnswer, takeBack } from "@/lib/answer"
@@ -10,7 +10,7 @@ import { Crop, Natural } from "./SameScale"
 import { Conf, decidable, decideNow, nameOf, ownWords, pickText, proposalFor, useEl } from "./shared"
 import { KEEP, NO_HOME } from "./units"
 import { Focus } from "./Focus"
-import { KEYS, keyAction } from "./keys"
+import { keyAction } from "./keys"
 import { Kbd } from "@/components/ui/kbd"
 import { Checkbox } from "@/components/ui/checkbox"
 import { AskAgent } from "@/agent/AskAgent"
@@ -254,9 +254,20 @@ export function ByComponent({ evals, rail = true }: { evals: any[]; rail?: boole
         </nav>}
 
         <section className="flex min-w-0 flex-col gap-4" aria-labelledby="bc-title">
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <h2 id="bc-title" className="font-heading text-lg font-semibold">{g.kind === "component" ? `${SYS} ${g.name}` : g.name}</h2>
-            <span className="text-sm text-muted-foreground">{plural(g.counts.total, "place")} · {plural(g.batches.length, "batch", "batches")} · {g.counts.todo} to decide</span>
+          {/* One line: what's shown, its counts, and which places. Inside an issue it's a sub-heading under the
+              issue's own title, not a second title (design review: three headings stacked). The filter is a
+              menu, not a second row of chips like the Inbox's (design review). */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            {rail
+              ? <h2 id="bc-title" className="font-heading text-lg font-semibold">{g.kind === "component" ? `${SYS} ${g.name}` : g.name}</h2>
+              : <h3 id="bc-title" className="text-sm font-semibold">{g.kind === "component" ? `${SYS} ${g.name}` : g.name}</h3>}
+            <span className="text-sm text-muted-foreground">{plural(g.counts.total, "place")}{g.batches.length > 1 ? ` · ${plural(g.batches.length, "batch", "batches")}` : ""} · {g.counts.todo} to decide</span>
+            <label className="ml-auto inline-flex items-center gap-2 text-sm">
+              <span className="text-muted-foreground">Show</span>
+              <NativeSelect size="sm" aria-label="Show places" value={show} onChange={e => filter(e.target.value as any)}>
+                {FILTERS.map(([v, l]) => <NativeSelectOption key={v} value={v}>{l} ({v === "all" ? g.counts.total : g.counts[v]})</NativeSelectOption>)}
+              </NativeSelect>
+            </label>
           </div>
           {/* Nothing to decide yet, but places waiting: say how to get going (UX review A U-05, C U-06). */}
           {g.counts.todo === 0 && g.counts.evidence > 0 && (
@@ -264,17 +275,8 @@ export function ByComponent({ evals, rail = true }: { evals: any[]; rail?: boole
               {g.counts.evidence === g.counts.total ? "Every place here" : `${plural(g.counts.evidence, "place")} here`} {g.counts.evidence === 1 ? "has" : "have"} no photo or drawn proposal yet, so {g.counts.evidence === 1 ? "it" : "they"} can't be answered in a batch. Open one on its own (<kbd>O</kbd>) and answer it there, or re-scan with photos (the Re-scan menu: retake photos).
             </p>
           )}
-          <ToggleGroup aria-label="Show" value={[show]} onValueChange={(v: string[]) => v[0] && filter(v[0] as any)} variant="outline" size="sm" className="flex-wrap">
-            {FILTERS.map(([v, l]) => <ToggleGroupItem key={v} value={v}>{l} <span className="tabular-nums text-muted-foreground">{v === "all" ? g.counts.total : g.counts[v]}</span></ToggleGroupItem>)}
-          </ToggleGroup>
-          {(
-            <div className="flex flex-col gap-1.5 text-xs text-muted-foreground">
-              <p>Tick places to answer them together; shift-click ticks a range. A note on a row stays with that place.{D.serve ? "" : " Answers wait in the bar at the bottom until you send them."}</p>
-              <p className="flex flex-wrap items-center gap-x-3 gap-y-1" aria-label="Keyboard shortcuts" data-slot="keys">
-                {KEYS.map(k => <span key={k.action} className="flex items-center gap-1">{k.keys.map(x => <Kbd key={x}>{x}</Kbd>)} {k.says}</span>)}
-              </p>
-            </div>
-          )}
+          {/* The keys are in the shortcuts dialog (the keyboard button in the header, or ?). */}
+          <p className="text-xs text-muted-foreground">Tick places to answer them together; shift-click ticks a range.{D.serve ? "" : " Answers wait in the bar at the bottom until you send them."} Press <Kbd>?</Kbd> for keyboard shortcuts.</p>
           {done && (
             <div role="status" className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 px-3 py-2 text-sm">
               <span>{done.text}.</span>
@@ -282,7 +284,7 @@ export function ByComponent({ evals, rail = true }: { evals: any[]; rail?: boole
               <Button variant="ghost" size="sm" className="ml-auto" onClick={() => setDone(null)}>Close</Button>
             </div>
           )}
-          {g.batches.map(b => <BatchCard key={b.key} b={b} />)}
+          {g.batches.map(b => <BatchCard key={b.key} b={b} alone={g.batches.length === 1} />)}
           {!g.batches.some(b => b.items.some(see)) && <Note>Nothing here matches this filter.</Note>}
         </section>
       </div>
@@ -385,7 +387,8 @@ function Neighbours({ b }: { b: Batch }) {
   )
 }
 
-function BatchCard({ b }: { b: Batch }) {
+/** `alone`: the only batch, so its name and counts are the line above; its header keeps just the actions. */
+function BatchCard({ b, alone }: { b: Batch; alone?: boolean }) {
   const { see, apart } = React.useContext(SelCtx)
   const grouped = withApart(b.looks, apart, decideNow)
   const looks = grouped.map(l => ({ l, items: l.items.filter(see) })).filter(x => x.items.length)
@@ -393,8 +396,10 @@ function BatchCard({ b }: { b: Batch }) {
   return (
     <article className="rounded-lg border bg-card" data-slot="batch">
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-2.5">
-        <h3 className="text-sm font-semibold">{pickText(b.pick)}</h3>
-        <span className="text-xs text-muted-foreground">{plural(b.items.length, "place")} · {b.counts.todo} to decide{b.counts.decided ? ` · ${b.counts.decided} decided` : ""}</span>
+        {alone
+          ? <span className="text-xs text-muted-foreground">dsa's pick: <b className="font-medium text-foreground">{pickText(b.pick)}</b>{b.counts.decided ? ` · ${b.counts.decided} decided` : ""}</span>
+          : <><h4 className="text-sm font-semibold">{pickText(b.pick)}</h4>
+            <span className="text-xs text-muted-foreground">{plural(b.items.length, "place")} · {b.counts.todo} to decide{b.counts.decided ? ` · ${b.counts.decided} decided` : ""}</span></>}
         <span className="ml-auto flex items-center gap-2">
           {D.serve && <><ThreadBadge subject={{ kind: "review", ids: b.items.map((e: any) => e.id), title: pickText(b.pick) }} /><AskAgent subject={{ kind: "review", ids: b.items.map((e: any) => e.id), title: pickText(b.pick) }} label="Ask the agent" size="xs" variant="ghost" /></>}
           <TickAll items={b.items} label="Select all {n}" />

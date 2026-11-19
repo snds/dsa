@@ -1,7 +1,8 @@
 import * as React from "react"
 import { cn } from "cn"
-import { ArrowSquareOutIcon, CaretDownIcon, CaretRightIcon, CheckCircleIcon, CubeIcon, InfoIcon, QuestionIcon, SparkleIcon, CaretLineLeftIcon } from "@phosphor-icons/react"
+import { ArrowSquareOutIcon, CaretDownIcon, CaretRightIcon, CheckCircleIcon, CubeIcon, InfoIcon, QuestionIcon, SparkleIcon, CaretLineLeftIcon, ArrowsInLineVerticalIcon, ArrowsOutLineVerticalIcon } from "@phosphor-icons/react"
 import { Badge } from "@/components/ui/badge"
+import { Separator } from "@/components/ui/separator"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Kbd } from "@/components/ui/kbd"
@@ -251,6 +252,12 @@ export function Inbox() {
             <ToggleGroupItem value="app">App</ToggleGroupItem>
             <ToggleGroupItem value="kind">Kind</ToggleGroupItem>
           </ToggleGroup>
+          {/* With the list's own controls, set apart from the filters by a divider (design review). */}
+          <Separator orientation="vertical" className="mx-1 h-5! self-center" />
+          <span className="flex items-center gap-1" role="group" aria-label="Sections">
+            <Tooltip><TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Expand all sections" disabled={closed.size === 0} onClick={() => setClosed(new Set())} />}><ArrowsOutLineVerticalIcon /></TooltipTrigger><TooltipContent>Expand all</TooltipContent></Tooltip>
+            <Tooltip><TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Collapse all sections" disabled={groups.every(([g]) => closed.has(g))} onClick={() => setClosed(new Set(groups.map(([g]) => g)))} />}><ArrowsInLineVerticalIcon /></TooltipTrigger><TooltipContent>Collapse all</TooltipContent></Tooltip>
+          </span>
         </div>
       </div>
 
@@ -349,7 +356,7 @@ function IssueDetail({ i, q, creating, create }: { i: Issue; q: any; creating: b
         <header className="flex flex-wrap items-center gap-2">
           <h2 className="font-heading text-lg font-semibold">{i.title}</h2>
           <CertaintyWord c={i.certainty} />
-          <span className="text-xs text-muted-foreground">{plural(ids.length, "place")}{i.apps.length ? ` in ${i.apps.join(", ")}` : ""} · Shift+J / K for the next issue</span>
+          <span className="text-xs text-muted-foreground">{plural(ids.length, "place")}{i.apps.length ? ` in ${i.apps.join(", ")}` : ""}</span>
         </header>
         <DismissIssue i={i} />
         <AnswerPlaces ids={ids} />
