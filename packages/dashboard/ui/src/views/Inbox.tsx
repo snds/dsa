@@ -17,10 +17,10 @@ import { D, api, say } from "@/lib/dsa"
 import { hashFor, replaceRoute, routePath, useApp } from "@/lib/app"
 import { AskAgent } from "@/agent/AskAgent"
 import { ThreadBadge } from "@/agent/ThreadBadge"
-import { anchorKeyOf, canChat, useAgent, type Subject } from "@/agent/store"
+import { anchorKeyOf, canChat, useAgent, useAgentMaybe, type Subject, type Thread } from "@/agent/store"
 import { Detail, useQueue } from "./Queue"
 import { AnswerPlaces } from "./elements/Elements"
-import { PinnedThread } from "@/agent/PinnedThread"
+import { Conversation, scopeSubject, type ScopeIssue } from "@/agent/Conversation"
 import { CheckAnswer } from "./ComponentCase"
 import { PublishedThread, publishedThreadShown } from "@/agent/PublishedThread"
 
@@ -93,9 +93,14 @@ function useIssues(): Issue[] {
  * whole scan, with the issues named in the question (UX review A U-14, C U-18: it used the first one's).
  */
 export function tickedSubject(list: Issue[]): Subject {
-  const comps = new Set(list.map(i => i.component ?? ""))
-  const only = comps.size === 1 ? [...comps][0] : ""
-  return only ? { kind: "group", by: "component", value: only, title: `${list.length} ticked issues about ${only}` } : { kind: "scan" }
+  // The ticked issues themselves, as one set (agentic Inbox): not their component or the whole scan.
+  return scopeSubject(list.map(toScope), i => subjectOf(list.find(x => x.key === i.key)!))
+}
+
+/** An issue as the conversation scope carries it; a question brings its element ids. */
+export function toScope(i: Issue): ScopeIssue {
+  const src = i.source?.type === "question" ? { type: "question", ids: (D.elements?.questions ?? []).find((q: any) => q.key === i.source.key)?.ids ?? [] } : i.source
+  return { key: i.key, title: i.title, source: src, apps: i.apps }
 }
 
 /** Why the scan doubts a component, with what it found (UX review B U-14, C U-07: the check asked with no evidence). */
@@ -304,12 +309,15 @@ export function Inbox() {
           })}
         </div>
         <div className="order-1 flex min-w-0 flex-col gap-3 @4xl:order-none">
-          {sel && canChat() && <Button variant="outline" size="sm" className="w-fit @7xl:hidden" onClick={() => agent.start(subjectOf(sel))}><SparkleIcon data-icon="inline-start" />Open this issue's thread</Button>}
+          {sel && canChat() && <Button variant="outline" size="sm" className="w-fit @7xl:hidden" onClick={() => agent.start(tickedIssues.length ? tickedSubject(tickedIssues) : subjectOf(sel))}><SparkleIcon data-icon="inline-start" />{tickedIssues.length > 1 ? `Talk about these ${tickedIssues.length}` : "Open the conversation"}</Button>}
           {hasThread && threadShut && <Button variant="outline" size="sm" className="hidden w-fit self-end @7xl:inline-flex" onClick={() => shutThread(false)}><CaretLineLeftIcon data-icon="inline-start" />Show the thread</Button>}
           {/* With nothing in the list, the empty state says it all; no second "Select an issue" card (visual review B V-13). */}
           {sel ? <IssueDetail i={sel} q={q} creating={!!creating} create={create} /> : shown.length > 0 && <Panel><p className="text-sm text-muted-foreground">Select an issue to see it here.</p></Panel>}
         </div>
-        {sel && canChat() && !threadShut && <PinnedThread subject={subjectOf(sel)} onHide={() => shutThread(true)} className="hidden @7xl:sticky @7xl:top-36 @7xl:flex @7xl:h-[calc(100vh-10rem)]" />}
+        {/* The conversation: about the ticked issues, or the open one (agentic Inbox). */}
+        {sel && canChat() && !threadShut && <Conversation scope={(tickedIssues.length ? tickedIssues : [sel]).map(toScope)} fromTicks={tickedIssues.length > 0}
+          one={x => subjectOf(issues.find(i => i.key === x.key)!)} appOf={k => issues.find(i => i.key === k)?.apps[0]} onUntick={tick}
+          onHide={() => shutThread(true)} className="hidden @7xl:sticky @7xl:top-36 @7xl:flex @7xl:h-[calc(100vh-10rem)]" />}
         {/* A published page: the thread as of publishing, and Discuss on GitHub (stage 9). */}
         {sel && !canChat() && <PublishedThread subject={subjectOf(sel)} title={sel.title} onHide={() => shutThread(true)} className={cn("order-3 @4xl:order-none @4xl:col-start-2 @7xl:col-start-auto @7xl:sticky @7xl:top-36", threadShut && "@7xl:hidden")} />}
       </div>
@@ -324,7 +332,16 @@ export function CertaintyWord({ c }: { c: Issue["certainty"] }) {
   return <Badge variant="outline" className={w.tone} title={w.hint}><Icon />{w.label}</Badge>
 }
 
+/** The thread a row shows: its own, else a conversation about several issues it is part of. */
+function rowThread(i: Issue, threads: Record<string, Thread>): Subject {
+  const own = subjectOf(i)
+  if (threads[anchorKeyOf(own)]) return own
+  const set = Object.values(threads).filter(t => t.members?.includes(i.key)).sort((x, y) => y.updatedAt.localeCompare(x.updatedAt))[0]
+  return set?.members ? { kind: "set", items: set.members.map(key => ({ key })) } : own
+}
+
 function IssueRow({ i, sel, ticked, onPick, onTick }: { i: Issue; sel: boolean; ticked: boolean; onPick: () => void; onTick: () => void }) {
+  const threadsHere = useAgentMaybe()?.threads ?? {}
   return (
     <div role="listitem" data-key={i.key} className={cn("flex items-start gap-3 border-b px-3 py-2.5 last:border-b-0", sel && "bg-muted/60", ticked && "bg-primary/5")}>
       <Checkbox checked={ticked} onCheckedChange={onTick} aria-label={`Tick ${i.title}`} className="mt-1" />
@@ -336,7 +353,7 @@ function IssueRow({ i, sel, ticked, onPick, onTick }: { i: Issue; sel: boolean; 
       </button>
       <span className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
         <CertaintyWord c={i.certainty} />
-        <ThreadBadge subject={subjectOf(i)} />
+        <ThreadBadge subject={rowThread(i, threadsHere)} />
       </span>
     </div>
   )

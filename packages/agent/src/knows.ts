@@ -145,6 +145,8 @@ export function knowsSection(snap: Snapshot, s: Subject): string[] {
  * thread Out of date (stage 6); one that leaves it alone does not.
  */
 export function evidenceOf(snap: Snapshot, s: Subject): string {
+  // A set rests on each of its issues' evidence.
+  if (s.kind === 'set') return crypto.createHash('sha1').update(s.items.map(i => evidenceOf(snap, { kind: 'issue', key: i.key, source: i.source })).join(',')).digest('hex').slice(0, 12);
   const l = legacyOf(s);
   const comp = componentOf(snap, s);
   let basis: unknown;

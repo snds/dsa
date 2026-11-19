@@ -13,10 +13,15 @@ export type Subject =
   | { kind: "issue"; key: string; title?: string; source?: any }
   | { kind: "component"; name: string }
   | { kind: "group"; by: "component" | "app"; value: string; title?: string }
+  /** Issues chosen together (the ticked ones): one conversation about all of them. */
+  | { kind: "set"; items: SetItem[]; title?: string }
+
+/** One issue in a set: its key, title, where its detail lives, and its app. */
+export interface SetItem { key: string; title?: string; source?: any; app?: string }
 
 /** A thread's state (agent package threads.ts). */
 export type ThreadState = "working" | "waiting-on-you" | "changes-ready" | "on-a-branch" | "in-pr" | "settled" | "out-of-date"
-export interface Thread { anchor: string; session: string; title: string; state: ThreadState; updatedAt: string; openProposals: number; turns: number; pr: { url: string } | null; previous: string[] }
+export interface Thread { anchor: string; session: string; title: string; state: ThreadState; updatedAt: string; openProposals: number; turns: number; pr: { url: string } | null; previous: string[]; members?: string[] }
 
 /** The same batch key the server makes (threads.ts idsKey): FNV-1a of the sorted, unique ids. */
 export function idsKey(ids: string[]): string {
@@ -24,6 +29,9 @@ export function idsKey(ids: string[]): string {
   for (const ch of [...new Set(ids)].sort().join("\n")) { h ^= ch.charCodeAt(0); h = Math.imul(h, 0x01000193) >>> 0 }
   return "E-" + h.toString(16).toUpperCase().padStart(8, "0")
 }
+
+/** A set's key, as the server makes it (threads.ts setKey). */
+export const setKey = (keys: string[]) => "S-" + idsKey(keys).slice(2)
 
 /** The anchor a subject's thread is pinned to, as the server keys it (threads.ts anchorKey). */
 export function anchorKeyOf(s: Subject): string {
@@ -35,6 +43,7 @@ export function anchorKeyOf(s: Subject): string {
     case "readiness": return `group:app:${low(s.subject)}`
     case "component": return `component:${low(s.name)}`
     case "group": return `group:${s.by}:${low(s.value)}`
+    case "set": return s.items.length === 1 ? `issue:${s.items[0]!.key}` : `set:${setKey(s.items.map(i => i.key))}`
     default: return "scan"
   }
 }
@@ -72,6 +81,8 @@ interface Api extends State {
   refreshThreads: () => Promise<void>
   /** Shows a subject's thread in place without opening the side panel; no session is made until the first message. */
   pin: (subject: Subject) => Promise<void>
+  /** "Add to this": the open conversation keeps its messages and is now about these issues. */
+  rescope: (subject: Subject) => Promise<void>
   resume: (id: string) => Promise<void>
   /** Resolves false when the message didn't go through; the error is in `error`. */
   send: (text: string, mode?: "advise" | "try") => Promise<boolean>
@@ -195,6 +206,11 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       const t = s.threads[anchorKeyOf(subject)]
       if (t) { patch({ pending: null, error: null, visual: NO_VISUAL }); try { await load(t.session) } catch (e: any) { patch({ error: e.message }) } }
       else patch({ session: null, pending: subject, proposals: [], changes: null, error: null, visual: NO_VISUAL })
+    },
+    rescope: async subject => {
+      if (!sid) return
+      try { const r = await api("/api/agent/scope", { id: sid, subject }); set(x => ({ ...x, session: r.session, pending: null })); await refreshThreads() }
+      catch (e: any) { patch({ error: e.message }) }
     },
     send: (t, m) => send(t, m),
     resume: async id => { patch({ open: true, error: null, visual: NO_VISUAL }); try { await load(id) } catch (e: any) { patch({ error: e.message }) } },

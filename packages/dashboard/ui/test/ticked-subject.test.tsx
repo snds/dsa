@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import { beforeAll, expect, test } from "vitest"
 
-// Ticked issues share one thread: their component when they all have one, else the whole scan
-// (UX review A U-14, C U-18: it used the first ticked issue's subject).
+// Ticked issues are one conversation about exactly those issues (agentic Inbox). Before, it was their
+// component's thread or the whole scan (UX review A U-14, C U-18).
 
 let tickedSubject: (list: any[]) => any
 beforeAll(async () => {
@@ -13,13 +13,15 @@ beforeAll(async () => {
   ;({ tickedSubject } = await import("@/views/Inbox"))
 })
 
-const issue = (key: string, component: string | null) => ({ key, component, apps: [], kind: "finding", title: key })
+const issue = (key: string, component: string | null, app = "app-a") => ({ key, component, apps: [app], kind: "finding", title: key, source: { type: "queue", id: key } })
 
-test("all about one component: a thread about that component", () => {
-  expect(tickedSubject([issue("F-1", "Select"), issue("F-2", "Select")])).toMatchObject({ kind: "group", by: "component", value: "Select" })
+test("several ticked issues: one set, each with its app", () => {
+  expect(tickedSubject([issue("F-1", "Select"), issue("F-2", "Button", "app-b")])).toEqual({ kind: "set", items: [
+    { key: "F-1", title: "F-1", source: { type: "queue", id: "F-1" }, app: "app-a" },
+    { key: "F-2", title: "F-2", source: { type: "queue", id: "F-2" }, app: "app-b" },
+  ] })
 })
 
-test("mixed components, or none: one thread about the scan", () => {
-  expect(tickedSubject([issue("F-1", "Select"), issue("F-2", "Button")])).toEqual({ kind: "scan" })
-  expect(tickedSubject([issue("F-1", null), issue("F-2", null)])).toEqual({ kind: "scan" })
+test("one ticked issue: that issue's own conversation", () => {
+  expect(tickedSubject([issue("F-1", null)])).toMatchObject({ kind: "issue", key: "F-1" })
 })

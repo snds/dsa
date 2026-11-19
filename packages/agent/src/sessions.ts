@@ -46,6 +46,8 @@ export interface Session {
   pr?: { url: string; number?: number } | null;
   /** The person marked the thread done. */
   settledAt?: string | null;
+  /** The person widened what the conversation is about; the next turn tells the agent to read the brief again. */
+  rescoped?: string | null;
   /** The last before/after screenshot run (visual.ts). */
   visual?: import('./visual.js').VisualRun;
 }
@@ -258,7 +260,9 @@ export async function runTurn(opts: { dataDir: string; args: string[]; id: strin
   const readOnly = [...links, ...links.flatMap(l => { try { return [fs.realpathSync(l)]; } catch { return []; } }), ...addDirs];
   const first = !s.providerSession;
   const kind = s.mode === 'try' ? 'a sandbox session: you may edit files in this copy of the repo' : 'a review session: read and advise, do not edit files';
-  const prompt = (first ? `Start by reading the brief (the get_subject tool; the same text is in ${s.brief}). This is ${kind}.\n\n` : switched ? `(The designer switched modes. This is now ${kind}.)\n\n` : '') + opts.text;
+  const rescoped = !first && s.rescoped ? `(The designer widened this conversation: it is now about ${s.rescoped}. Read the updated brief with get_subject before answering.)\n\n` : '';
+  s.rescoped = null;
+  const prompt = (first ? `Start by reading the brief (the get_subject tool; the same text is in ${s.brief}). This is ${kind}.\n\n` : switched ? `(The designer switched modes. This is now ${kind}.)\n\n` : '') + rescoped + opts.text;
   s.messages.push({ role: 'user', text: opts.text, at: new Date().toISOString() });
   writeSession(opts.dataDir, s);
   const before = new Set(readProposals(opts.dataDir).map(p => p.id));

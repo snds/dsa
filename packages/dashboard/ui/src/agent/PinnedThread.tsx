@@ -11,7 +11,7 @@ import { anchorKeyOf, canChat, useAgent, type Subject } from "./store"
  * Follows the issue as J / K moves; shows the anchor's thread, or "No thread yet" with a live box that
  * starts one. While the side panel is open it holds the conversation, and this says so.
  */
-export function PinnedThread({ subject, className, onHide }: { subject: Subject; className?: string; onHide?: () => void }) {
+export function PinnedThread({ subject, className, onHide, heading = "Thread", children }: { subject: Subject; className?: string; onHide?: () => void; heading?: string; children?: React.ReactNode }) {
   const a = useAgent()
   const key = anchorKeyOf(subject)
   const has = Boolean(a.threads[key])
@@ -23,7 +23,7 @@ export function PinnedThread({ subject, className, onHide }: { subject: Subject;
     <section aria-label="Thread for this issue" className={`flex min-h-[28rem] flex-col overflow-hidden rounded-lg border bg-background ${className ?? ""}`}>
       <header className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5">
         <ChatCircleIcon className="size-4" />
-        <h3 className="text-sm font-semibold">Thread</h3>
+        <h3 className="text-sm font-semibold">{heading}</h3>
         <ThreadBadge subject={subject} />
         <span className="ml-auto" />
         {a.session && here && (
@@ -34,6 +34,7 @@ export function PinnedThread({ subject, className, onHide }: { subject: Subject;
         )}
         {onHide && <Button variant="ghost" size="icon-sm" className="hidden @7xl:inline-flex" aria-label="Hide the thread" title="Hide the thread: give the issue the room" onClick={onHide}><CaretLineRightIcon /></Button>}
       </header>
+      {children}
       {a.open ? (
         <div className="flex flex-1 flex-col items-start gap-2 p-4 text-sm text-muted-foreground">
           <p>The side panel is open on another conversation.</p>

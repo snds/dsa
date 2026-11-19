@@ -133,7 +133,7 @@ export function ThreadBody({ className }: { className?: string }) {
         </div>
       )}
       <form className="flex flex-col gap-2 px-4 py-3" onSubmit={e => { e.preventDefault(); send(draft) }}>
-        <Textarea value={draft} onChange={e => setDraft(e.target.value)} placeholder={live ? "Ask about this, or tell it what to try…" : "Start from a card, a queue item, or Agent Readiness."} disabled={!live}
+        <Textarea value={draft} onChange={e => setDraft(e.target.value)} placeholder={live ? ((x => x?.kind === "set" ? `Ask about these ${x.items.length} issues…` : "Ask about this, or tell it what to try…")(a.session?.subject ?? a.pending)) : "Start from a card, a queue item, or Agent Readiness."} disabled={!live}
           rows={2} className="max-h-40 min-h-16 resize-none" onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(draft) } }} aria-label="Message the agent" />
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs text-muted-foreground">{open.length ? `${open.length} proposal${open.length === 1 ? "" : "s"} waiting for you` : "Enter sends · Shift+Enter for a new line"}</span>
